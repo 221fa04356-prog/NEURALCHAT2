@@ -99,6 +99,97 @@ html {
     color: var(--wa-active-icon);
 }
 
+/* --- Unread Messages Banner Field --- */
+.wa-unread-banner-field {
+    margin: 8px 12px 6px 12px;
+    background: #ffffff;
+    border: 1px solid #bae6fd;
+    border-radius: 10px;
+    overflow: hidden;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.wa-unread-banner-header {
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #f0f9ff;
+    border-bottom: 1px solid #bae6fd;
+}
+
+.wa-unread-header-badge {
+    position: absolute;
+    top: -6px;
+    right: -8px;
+    background: #027eb5;
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    min-width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 3px;
+    border: 1px solid white;
+}
+
+.wa-unread-banner-list {
+    max-height: 200px;
+    overflow-y: auto;
+    background: white;
+}
+
+.wa-unread-banner-item {
+    padding: 8px 12px;
+    border-bottom: 1px solid #f0f7ff;
+    transition: background 0.2s;
+    cursor: pointer;
+}
+
+.wa-unread-banner-item:hover {
+    background: #f8fafc;
+}
+
+.wa-unread-banner-item:last-child {
+    border-bottom: none;
+}
+
+.wa-unread-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0;
+}
+
+.wa-unread-item-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: #111b21;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.wa-unread-chat-type-icon {
+    display: flex;
+    align-items: center;
+    color: #8696a0;
+    margin-right: 6px;
+}
+
+.wa-unread-item-count {
+    font-size: 12px;
+    font-weight: 700;
+    color: #027eb5;
+}
+
 .wa-profile-btn img {
     width: 24px;
     height: 24px;
