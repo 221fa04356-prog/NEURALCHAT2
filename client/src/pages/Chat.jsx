@@ -93,6 +93,7 @@ export default function Chat() {
     const [isArchivedChatsOpen, setIsArchivedChatsOpen] = useState(false);
     const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
     const attachmentMenuRef = useRef(null);
+    const attachmentTypeRef = useRef('all');
 
 
     const [userData, setUserData] = useState(user); // For Profile Display
@@ -2369,8 +2370,16 @@ export default function Chat() {
     const handleFileSelect = (e) => {
         if (e.target.files && e.target.files[0]) {
             const selectedFile = e.target.files[0];
-            const allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
             const extension = selectedFile.name.split('.').pop().toLowerCase();
+
+            let allowedExtensions;
+            if (attachmentTypeRef.current === 'document') {
+                allowedExtensions = ['doc', 'docx', 'pdf', 'xls', 'xlsx'];
+            } else if (attachmentTypeRef.current === 'media') {
+                allowedExtensions = ['jpg', 'jpeg', 'png', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
+            } else {
+                allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
+            }
 
             if (allowedExtensions.includes(extension)) {
                 if (selectedFile.size > 1073741824) { // 1GB
@@ -2380,8 +2389,14 @@ export default function Chat() {
                     setFile(selectedFile);
                 }
             } else {
-                setSnackbar({ message: 'Only JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, and Video files are allowed.', type: 'error', variant: 'system' });
+                setSnackbar({ message: 'Unsupported file format.', type: 'error', variant: 'system' });
                 e.target.value = ''; // Reset input
+            }
+
+            // reset to all after selection attempt
+            attachmentTypeRef.current = 'all';
+            if (fileInputRef.current) {
+                fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*";
             }
         }
     };
@@ -3521,18 +3536,27 @@ export default function Chat() {
 
     const renderAttachmentMenu = () => {
         if (!isAttachmentMenuOpen) return null;
-
         const items = [
-            { icon: FileText, label: t('chat_window.document'), color: '#7f66ff', onClick: () => { fileInputRef.current.click(); setIsAttachmentMenuOpen(false); } },
-            { icon: Image, label: t('chat_window.photos_videos'), color: '#007bfc', onClick: () => { fileInputRef.current.click(); setIsAttachmentMenuOpen(false); } },
+            { icon: FileText, label: t('chat_window.document'), color: '#7f66ff', onClick: () => { 
+                attachmentTypeRef.current = 'document';
+                if (fileInputRef.current) {
+                    fileInputRef.current.accept = ".doc,.docx,.pdf,.xls,.xlsx";
+                    fileInputRef.current.click(); 
+                }
+                setIsAttachmentMenuOpen(false); 
+            } },
+            { icon: Image, label: t('chat_window.photos_videos'), color: '#007bfc', onClick: () => { 
+                attachmentTypeRef.current = 'media';
+                if (fileInputRef.current) {
+                    fileInputRef.current.accept = ".jpg,.jpeg,.png,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*";
+                    fileInputRef.current.click(); 
+                }
+                setIsAttachmentMenuOpen(false); 
+            } },
             { icon: Camera, label: t('chat_window.camera'), color: '#ff2e74', onClick: () => { setIsAttachmentMenuOpen(false); } },
-            { icon: Mic, label: t('chat_window.audio'), color: '#ff8a00', onClick: () => { setIsAttachmentMenuOpen(false); } },
-            { icon: MapPin, label: t('chat_window.location'), color: '#00a356', onClick: () => { setIsAttachmentMenuOpen(false); } },
             { icon: User, label: t('chat_window.contact'), color: '#009de2', onClick: () => { setIsAttachmentMenuOpen(false); } },
             { icon: List, label: t('chat_window.poll'), color: '#ffbc38', onClick: () => { setIsAttachmentMenuOpen(false); } },
             { icon: Calendar, label: t('chat_window.event'), color: '#ef0b33', onClick: () => { setIsAttachmentMenuOpen(false); } },
-            { icon: Sticker, label: t('chat_window.sticker'), color: '#02a698', onClick: () => { setIsAttachmentMenuOpen(false); } },
-            { icon: IndianRupee, label: t('chat_window.payment'), color: '#019484', onClick: () => { setIsAttachmentMenuOpen(false); } },
         ];
 
         return (
@@ -6473,8 +6497,16 @@ export default function Chat() {
 
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             const droppedFile = e.dataTransfer.files[0];
-            const allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
             const extension = droppedFile.name.split('.').pop().toLowerCase();
+
+            let allowedExtensions;
+            if (attachmentTypeRef.current === 'document') {
+                allowedExtensions = ['doc', 'docx', 'pdf', 'xls', 'xlsx'];
+            } else if (attachmentTypeRef.current === 'media') {
+                allowedExtensions = ['jpg', 'jpeg', 'png', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
+            } else {
+                allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
+            }
 
             if (allowedExtensions.includes(extension)) {
                 if (droppedFile.size > 1073741824) {
@@ -6483,7 +6515,13 @@ export default function Chat() {
                     setFile(droppedFile);
                 }
             } else {
-                setSnackbar({ message: 'Only JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, and Video files are allowed.', type: 'error', variant: 'system' });
+                setSnackbar({ message: 'Unsupported file format.', type: 'error', variant: 'system' });
+            }
+
+            // reset to all after drop attempt
+            attachmentTypeRef.current = 'all';
+            if (fileInputRef.current) {
+                fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*";
             }
         }
     };
