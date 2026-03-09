@@ -1978,7 +1978,9 @@ html {
     border-radius: 8px;
     padding: 6px 0;
     z-index: 3000;
-    min-width: 250px;
+    min-width: 180px;
+    width: fit-content;
+    max-width: 85vw;
     max-height: 85vh;
     overflow-y: auto;
     animation: dropdownPop 0.2s cubic-bezier(0, 0, 0.2, 1);
@@ -2009,6 +2011,79 @@ html {
 
 .wa-dropdown-item:hover {
     background: #f5f6f6;
+}
+
+/* Notification Dropdown */
+.wa-notification-dropdown {
+    position: absolute;
+    top: 45px;
+    right: 0;
+    width: 280px;
+    background: var(--wa-sidebar-bg, #ffffff);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--wa-border, #e9edef);
+    border-radius: 8px;
+    z-index: 4000;
+    padding: 8px 0;
+    animation: dropdownPop 0.2s ease-out;
+}
+
+.wa-notification-header {
+    padding: 10px 16px;
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--wa-text-primary, #111b21);
+    border-bottom: 1px solid var(--wa-border, #f0f2f5);
+}
+
+.wa-notification-list {
+    max-height: 350px;
+    overflow-y: auto;
+}
+
+.wa-notification-item {
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: background 0.2s;
+    border-bottom: 1px solid var(--wa-border, #f0f2f5);
+}
+
+.wa-notification-item:last-child {
+    border-bottom: none;
+}
+
+.wa-notification-item:hover {
+    background: var(--wa-header-bg, #f5f6f6);
+}
+
+.wa-notification-item-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.wa-notification-name {
+    font-weight: 500;
+    font-size: 14px;
+    color: var(--wa-text-primary, #111b21);
+}
+
+.wa-notification-count {
+    background: var(--wa-active-icon, #027eb5);
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 10px;
+}
+
+.wa-notification-msg {
+    font-size: 13px;
+    color: var(--wa-text-secondary, #667781);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .wa-dropdown-item svg {
