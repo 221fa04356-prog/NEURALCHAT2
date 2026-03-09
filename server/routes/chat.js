@@ -7,6 +7,7 @@ const Message = require('../models/Message');
 const GroupMessage = require('../models/GroupMessage');
 const ChatDeletion = require('../models/ChatDeletion');
 const User = require('../models/User'); // Import User model
+const Group = require('../models/Group'); // Import Group model
 const Groq = require('groq-sdk');
 const pdfParse = require('pdf-parse'); // Renamed to avoid confusion
 const mammoth = require('mammoth');
@@ -851,17 +852,23 @@ router.post('/message/:id/toggle', authenticateToken, async (req, res) => {
                         : duration === '30 days' ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
                             : null;
 
-                const user1 = msg.user_id;
-                const user2 = msg.receiver_id;
+                const isGroupMsg = !!msg.group_id;
+                const user1 = isGroupMsg ? null : msg.user_id;
+                const user2 = isGroupMsg ? null : msg.receiver_id;
 
-                if (user2) {
-                    const pinnedMsgs = await Message.find({
-                        $or: [
-                            { user_id: user1, receiver_id: user2 },
-                            { user_id: user2, receiver_id: user1 }
-                        ],
-                        is_pinned: true
-                    }).sort({ pinned_at: 1 });
+                if (isGroupMsg || user2) {
+                    const findQuery = isGroupMsg
+                        ? { group_id: msg.group_id, is_pinned: true }
+                        : {
+                            $or: [
+                                { user_id: user1, receiver_id: user2 },
+                                { user_id: user2, receiver_id: user1 }
+                            ],
+                            is_pinned: true
+                        };
+
+                    const Model = isGroupMsg ? GroupMessage : Message;
+                    const pinnedMsgs = await Model.find(findQuery).sort({ pinned_at: 1 });
 
                     const now = new Date();
                     const activePinned = [];
@@ -872,9 +879,19 @@ router.post('/message/:id/toggle', authenticateToken, async (req, res) => {
                             p.pin_expires_at = null;
                             await p.save();
                             if (req.io) {
-                                [user1.toString(), user2.toString()].forEach(pId => {
-                                    req.io.to(pId).emit('message_pinned', { messageId: p._id, is_pinned: false });
-                                });
+                                if (isGroupMsg) {
+                                    const Group = require('../models/Group');
+                                    const group = await Group.findById(msg.group_id);
+                                    if (group) {
+                                        group.members.forEach(mId => {
+                                            req.io.to(mId.toString()).emit('message_pinned', { messageId: p._id, is_pinned: false });
+                                        });
+                                    }
+                                } else {
+                                    [user1.toString(), user2.toString()].forEach(pId => {
+                                        req.io.to(pId).emit('message_pinned', { messageId: p._id, is_pinned: false });
+                                    });
+                                }
                             }
                         } else {
                             activePinned.push(p);
@@ -888,9 +905,19 @@ router.post('/message/:id/toggle', authenticateToken, async (req, res) => {
                         oldest.pin_expires_at = null;
                         await oldest.save();
                         if (req.io) {
-                            [user1.toString(), user2.toString()].forEach(pId => {
-                                req.io.to(pId).emit('message_pinned', { messageId: oldest._id, is_pinned: false });
-                            });
+                            if (isGroupMsg) {
+                                const Group = require('../models/Group');
+                                const group = await Group.findById(msg.group_id);
+                                if (group) {
+                                    group.members.forEach(mId => {
+                                        req.io.to(mId.toString()).emit('message_pinned', { messageId: oldest._id, is_pinned: false });
+                                    });
+                                }
+                            } else {
+                                [user1.toString(), user2.toString()].forEach(pId => {
+                                    req.io.to(pId).emit('message_pinned', { messageId: oldest._id, is_pinned: false });
+                                });
+                            }
                         }
                     }
                 }
@@ -917,18 +944,34 @@ router.post('/message/:id/toggle', authenticateToken, async (req, res) => {
         await msg.save();
 
         if (req.io && action === 'pin') {
-            const participants = [msg.user_id.toString()];
-            if (msg.receiver_id) participants.push(msg.receiver_id.toString());
+            if (msg.group_id) {
+                const Group = require('../models/Group');
+                const group = await Group.findById(msg.group_id);
+                if (group) {
+                    group.members.forEach(mId => {
+                        req.io.to(mId.toString()).emit('message_pinned', {
+                            messageId: msg._id,
+                            is_pinned: msg.is_pinned,
+                            pinned_at: msg.pinned_at,
+                            pin_expires_at: msg.pin_expires_at,
+                            pinned_by: msg.pinned_by
+                        });
+                    });
+                }
+            } else {
+                const participants = [msg.user_id.toString()];
+                if (msg.receiver_id) participants.push(msg.receiver_id.toString());
 
-            participants.forEach(pId => {
-                req.io.to(pId).emit('message_pinned', {
-                    messageId: msg._id,
-                    is_pinned: msg.is_pinned,
-                    pinned_at: msg.pinned_at,
-                    pin_expires_at: msg.pin_expires_at,
-                    pinned_by: msg.pinned_by
+                participants.forEach(pId => {
+                    req.io.to(pId).emit('message_pinned', {
+                        messageId: msg._id,
+                        is_pinned: msg.is_pinned,
+                        pinned_at: msg.pinned_at,
+                        pin_expires_at: msg.pin_expires_at,
+                        pinned_by: msg.pinned_by
+                    });
                 });
-            });
+            }
         }
 
         const msgObj = msg.toObject();
@@ -993,14 +1036,41 @@ router.post('/message/:id/delete', authenticateToken, async (req, res) => {
                     is_deleted_by_user: msg.is_deleted_by_user
                 });
             });
-            // Also notify admins for review sync
-            req.io.to('admins').emit('message_deleted', {
-                messageId: msg._id,
-                is_deleted_by_admin: msg.is_deleted_by_admin,
-                is_deleted_by_user: msg.is_deleted_by_user,
-                userId: msg.user_id,
-                receiverId: msg.receiver_id
-            });
+
+            // Also notify admins with enriched data for the Review Box
+            (async () => {
+                try {
+                    const deleterName = req.user.name || (userRole === 'admin' ? 'Admin' : 'User');
+                    let partnerName = 'Unknown';
+                    const isGroup = !!msg.group_id;
+                    const contentSnippet = (msg.content || '').substring(0, 50);
+
+                    if (isGroup) {
+                        const group = await Group.findById(msg.group_id);
+                        partnerName = group ? group.name : 'Group Chat';
+                    } else {
+                        const otherUserId = msg.user_id.toString() === userId ? msg.receiver_id : msg.user_id;
+                        const otherUser = await User.findById(otherUserId);
+                        partnerName = otherUser ? (otherUser.name || `${otherUser.firstName || ''} ${otherUser.lastName || ''}`.trim()) : 'User';
+                    }
+
+                    req.io.to('admins').emit('message_deleted_admin', {
+                        messageId: msg._id,
+                        deletedBy: deleterName,
+                        partnerName,
+                        contentSnippet,
+                        isGroup,
+                        is_deleted_by_admin: msg.is_deleted_by_admin,
+                        is_deleted_by_user: msg.is_deleted_by_user,
+                        timestamp: new Date(),
+                        userId: msg.user_id,
+                        receiverId: msg.receiver_id,
+                        groupId: msg.group_id
+                    });
+                } catch (err) {
+                    console.error('[SOCKET ADMIN NOTIFY ERROR]', err);
+                }
+            })();
         }
 
         res.json({
@@ -1101,16 +1171,58 @@ router.post('/messages/bulk-delete', authenticateToken, async (req, res) => {
 
                     // Notify via socket for each message
                     if (req.io) {
-                        const participants = [msg.user_id.toString()];
-                        if (msg.receiver_id) participants.push(msg.receiver_id.toString());
+                        const participants = isGroup ? [] : [msg.user_id.toString()];
+                        if (!isGroup && msg.receiver_id) participants.push(msg.receiver_id.toString());
 
-                        participants.forEach(pId => {
+                        if (isGroup) {
+                            const group = await Group.findById(msg.group_id);
+                            if (group) {
+                                group.members.forEach(mId => participants.push(mId.toString()));
+                            }
+                        }
+
+                        [...new Set(participants)].forEach(pId => {
                             req.io.to(pId).emit('message_deleted', {
                                 messageId: msg._id,
                                 is_deleted_by_admin: msg.is_deleted_by_admin,
                                 is_deleted_by_user: msg.is_deleted_by_user
                             });
                         });
+
+                        // Also notify admins with enriched data
+                        (async () => {
+                            try {
+                                const deleterName = req.user.name || (userRole === 'admin' ? 'Admin' : 'User');
+                                let partnerName = 'Unknown';
+                                const contentSnippet = (msg.content || '').substring(0, 50);
+
+                                if (isGroup) {
+                                    const group = await Group.findById(msg.group_id);
+                                    partnerName = group ? group.name : 'Group Chat';
+                                } else {
+                                    const otherUserId = ownerId === userId ? msg.receiver_id : msg.user_id;
+                                    const otherUser = await User.findById(otherUserId);
+                                    partnerName = otherUser ? (otherUser.name || `${otherUser.firstName || ''} ${otherUser.lastName || ''}`.trim()) : 'User';
+                                }
+
+                                req.io.to('admins').emit('message_deleted_admin', {
+                                    messageId: msg._id,
+                                    deletedBy: deleterName,
+                                    partnerName,
+                                    contentSnippet,
+                                    isGroup,
+                                    is_deleted_by_admin: msg.is_deleted_by_admin,
+                                    is_deleted_by_user: msg.is_deleted_by_user,
+                                    recordType: 'deletion',
+                                    timestamp: new Date(),
+                                    userId: isGroup ? msg.sender_id : msg.user_id,
+                                    receiverId: isGroup ? null : msg.receiver_id,
+                                    groupId: isGroup ? msg.group_id : null
+                                });
+                            } catch (err) {
+                                console.error('[BULK SOCKET ADMIN NOTIFY ERROR]', err);
+                            }
+                        })();
                     }
                 }
             } catch (innerErr) {

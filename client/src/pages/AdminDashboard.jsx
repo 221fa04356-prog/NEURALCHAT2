@@ -169,6 +169,8 @@ export default function AdminDashboard() {
     const [showFlagAlert, setShowFlagAlert] = useState(false);
     const [highRiskUsers, setHighRiskUsers] = useState([]);
     const [unethicalAlerts, setUnethicalAlerts] = useState([]); // Array of { userId, userName, messageId, content, reason }
+    const [adminNotifications, setAdminNotifications] = useState([]); // Combined alerts
+    const [showNotifications, setShowNotifications] = useState(false);
 
     const chatEndRef = useRef(null);
     const chartScrollRef = useRef(null);
@@ -308,27 +310,34 @@ export default function AdminDashboard() {
         }
     }, [viewChat?.messages, chatStep, highlightMessageId]);
 
-    const handleViewUnethicalMessage = async (alert) => {
-        // 1. Find User
-        const user = users.find(u => u.id === alert.userId || u._id === alert.userId) || { id: alert.userId, name: alert.userName, email: 'N/A' };
+    const handleViewAlert = async (alert) => {
+        // 1. Find User (Sender/Actor)
+        const actorId = alert.userId || alert.sender_id;
+        const user = users.find(u => u.id === actorId || u._id === actorId) || { id: actorId, name: alert.userName || alert.deletedBy || 'User', email: 'N/A' };
 
-        // 2. Identify Contact (Receiver)
+        // 2. Identify Contact (Receiver or Group)
         let contact = null;
-        if (alert.receiverId) {
-            contact = users.find(u => u.id === alert.receiverId || u._id === alert.receiverId);
-            if (!contact) contact = { id: alert.receiverId, name: 'Unknown User' };
+        if (alert.isGroup) {
+            contact = { id: alert.groupId, name: alert.partnerName || 'Group Chat', type: 'group' };
         } else {
-            contact = { id: 'ai', name: 'AI Assistant', type: 'ai' };
+            const otherId = alert.receiverId || alert.otherUserId;
+            if (otherId) {
+                contact = users.find(u => u.id === otherId || u._id === otherId);
+                if (!contact) contact = { id: otherId, name: alert.partnerName || 'Unknown User', type: 'user' };
+            } else {
+                contact = { id: 'ai', name: 'AI Assistant', type: 'ai' };
+            }
         }
 
         // 3. Date Handling
-        const dateObj = new Date(alert.createdAt);
+        const dateObj = new Date(alert.timestamp || alert.createdAt);
         const year = dateObj.getFullYear().toString();
         const month = (dateObj.getMonth() + 1).toString().padStart(2, '0');
         const day = dateObj.getDate().toString().padStart(2, '0');
         const dateString = `${year}-${month}-${day}`;
 
         // 4. Update State & Fetch
+        setShowNotifications(false);
         setShowUnethicalModal(false);
         setUnethicalModalUser(null);
         setChatStep('messages');
@@ -343,7 +352,12 @@ export default function AdminDashboard() {
             // Updated Logic: Fetch context data for "Back" navigation
             const [historyRes, contactsRes, datesRes] = await Promise.all([
                 axios.get(`/api/admin/chat/history-filtered`, {
-                    params: { userId: user.id || user._id, otherUserId: contact.id || contact._id, date: dateString }
+                    params: {
+                        userId: user.id || user._id,
+                        otherUserId: contact.id || contact._id,
+                        date: dateString,
+                        isGroup: alert.isGroup
+                    }
                 }),
                 axios.get(`/api/admin/chat/contacts/${user.id || user._id}`),
                 axios.get(`/api/admin/chat/dates/${user.id || user._id}/${contact.id || contact._id}`)
@@ -353,10 +367,10 @@ export default function AdminDashboard() {
             setChatDates(datesRes.data.sort((a, b) => new Date(a) - new Date(b))); // Sort for consistency
 
             setViewChat({ user, messages: historyRes.data });
-            setHighlightMessageId(alert.messageId);
+            setHighlightMessageId(alert.messageId || alert.id);
         } catch (err) {
             console.error(err);
-            showSnackbar('Failed to load message context', 'error');
+            showSnackbar('Failed to load alert context', 'error');
         } finally {
             setLoadingChat(false);
         }
@@ -416,13 +430,39 @@ export default function AdminDashboard() {
 
         socket.on('unethical_message_detected', (data) => {
             console.log("Unethical Alert:", data);
+            const newAlert = {
+                ...data,
+                id: data.messageId,
+                type: 'unethical',
+                timestamp: new Date()
+            };
+            setAdminNotifications(prev => {
+                if (prev.some(a => a.id === data.messageId)) return prev;
+                return [newAlert, ...prev];
+            });
+            // Also keep original state for now if needed by other components
             setUnethicalAlerts(prev => {
-                // Avoid duplicates
                 if (prev.some(a => a.messageId === data.messageId)) return prev;
                 return [...prev, data];
             });
             // Optional: Audio alert
-            const audio = new Audio('/assets/notification.mp3'); // Path might need adjustment or feature disabled if no asset
+            const audio = new Audio('/assets/notification.mp3');
+            audio.play().catch(e => console.log("Audio play failed", e));
+        });
+
+        socket.on('message_deleted_admin', (data) => {
+            console.log("Deletion Alert (Admin):", data);
+            const newAlert = {
+                ...data,
+                id: data.messageId,
+                type: 'deletion',
+                timestamp: data.timestamp ? new Date(data.timestamp) : new Date()
+            };
+            setAdminNotifications(prev => {
+                if (prev.some(a => a.id === data.messageId)) return prev;
+                return [newAlert, ...prev];
+            });
+            const audio = new Audio('/assets/notification.mp3');
             audio.play().catch(e => console.log("Audio play failed", e));
         });
 
@@ -635,10 +675,11 @@ export default function AdminDashboard() {
         const handleClick = () => {
             if (contextMenu.visible) setContextMenu({ ...contextMenu, visible: false });
             if (msgDropdown) setMsgDropdown(null);
+            if (showNotifications) setShowNotifications(false);
         };
         window.addEventListener('click', handleClick);
         return () => window.removeEventListener('click', handleClick);
-    }, [contextMenu, msgDropdown]);
+    }, [contextMenu, msgDropdown, showNotifications]);
 
     const handleSelectDate = async (date) => {
         setSelectedDate(date);
@@ -774,6 +815,103 @@ export default function AdminDashboard() {
     // --------------------------------------------------------------------------------
 
     const COLORS = ['#0A7C8F', '#0FB5D0', '#2BC9E4', '#0098B0', '#CCFAFF'];
+
+    const renderNotificationDropdown = () => {
+        if (!showNotifications) return null;
+        return (
+            <div className="admin-notification-dropdown" style={{
+                position: 'absolute', top: '55px', right: isMobile ? '10px' : '60px',
+                width: isMobile ? '280px' : '340px', background: 'white',
+                borderRadius: '12px', boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
+                zIndex: 3000, overflow: 'hidden', border: '1px solid #e9ecef',
+                animation: 'slideUp 0.3s ease-out'
+            }}>
+                <div style={{
+                    padding: '16px', borderBottom: '1px solid #e9ecef',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    background: '#f8f9fe'
+                }}>
+                    <span style={{ fontWeight: '700', color: '#111b21', fontSize: '0.95rem' }}>Review Box</span>
+                    <span style={{
+                        background: '#0FB5D0', color: 'white', padding: '2px 8px',
+                        borderRadius: '10px', fontSize: '0.7rem', fontWeight: '700'
+                    }}>
+                        {adminNotifications.length}
+                    </span>
+                </div>
+                <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                    {adminNotifications.length === 0 ? (
+                        <div style={{ padding: '40px 20px', textAlign: 'center', color: '#8898aa', fontSize: '0.85rem' }}>
+                            <Bell size={30} style={{ margin: '0 auto 10px', opacity: 0.3, display: 'block' }} />
+                            No recent actions to review
+                        </div>
+                    ) : (
+                        adminNotifications.map((alert, idx) => (
+                            <div
+                                key={idx}
+                                onClick={() => handleViewAlert(alert)}
+                                style={{
+                                    padding: '12px 16px', borderBottom: '1px solid #f1f3f5',
+                                    cursor: 'pointer', transition: 'background 0.2s',
+                                    display: 'flex', gap: '12px', alignItems: 'flex-start'
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = '#f8f9fe'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'white'}
+                            >
+                                <div style={{
+                                    width: '36px', height: '36px', borderRadius: '50%',
+                                    background: alert.type === 'unethical' ? '#feebee' : '#e0f7fa',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    flexShrink: 0
+                                }}>
+                                    {alert.type === 'unethical' ? (
+                                        <AlertTriangle size={18} color="#f5365c" />
+                                    ) : (
+                                        <Trash2 size={18} color="#0A7C8F" />
+                                    )}
+                                </div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+                                        <span style={{ fontWeight: '700', fontSize: '0.825rem', color: '#32325d' }}>
+                                            {alert.type === 'unethical' ? 'Unethical Content' : 'Message Deleted'}
+                                        </span>
+                                        <span style={{ fontSize: '0.65rem', color: '#adb5bd' }}>
+                                            {new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                    </div>
+                                    <div style={{ fontSize: '0.75rem', color: '#525f7f', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
+                                        {alert.isGroup ? <Users size={12} /> : <UserIcon size={12} />}
+                                        <span style={{ fontWeight: '600' }}>{alert.deletedBy || alert.userName}</span>
+                                        <span style={{ color: '#adb5bd' }}>in</span>
+                                        <span style={{ fontWeight: '600', color: '#0A7C8F' }}>{alert.partnerName}</span>
+                                    </div>
+                                    <div style={{
+                                        fontSize: '0.75rem', color: '#8898aa',
+                                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                                        fontStyle: 'italic'
+                                    }}>
+                                        "{alert.contentSnippet || alert.content}"
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+                {adminNotifications.length > 0 && (
+                    <div
+                        onClick={(e) => { e.stopPropagation(); setAdminNotifications([]); }}
+                        style={{
+                            padding: '10px', textAlign: 'center', fontSize: '0.75rem',
+                            color: '#fb6340', fontWeight: '700', cursor: 'pointer',
+                            borderTop: '1px solid #e9ecef', background: '#fff'
+                        }}
+                    >
+                        Clear all notifications
+                    </div>
+                )}
+            </div>
+        );
+    };
 
     const renderMsgDropdown = () => {
         if (!msgDropdown) return null;
@@ -1764,6 +1902,30 @@ export default function AdminDashboard() {
                                 }}
                             />
                         </div>
+                        <div style={{ position: 'relative' }}>
+                            <div
+                                onClick={(e) => { e.stopPropagation(); setShowNotifications(!showNotifications); }}
+                                style={{
+                                    cursor: 'pointer', padding: '8px', borderRadius: '50%',
+                                    background: showNotifications ? '#f0f2f5' : 'transparent',
+                                    transition: 'background 0.2s', position: 'relative'
+                                }}
+                            >
+                                <Bell size={20} color={showNotifications ? '#0FB5D0' : '#525f7f'} />
+                                {adminNotifications.length > 0 && (
+                                    <span style={{
+                                        position: 'absolute', top: '4px', right: '4px',
+                                        background: '#f5365c', color: 'white', fontSize: '0.65rem',
+                                        minWidth: '16px', height: '16px', borderRadius: '50%',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontWeight: '700', border: '2px solid white'
+                                    }}>
+                                        {adminNotifications.length}
+                                    </span>
+                                )}
+                            </div>
+                            {renderNotificationDropdown()}
+                        </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '4px' : '0.75rem', cursor: 'pointer', padding: isMobile ? '5px' : '10px', borderRadius: '10px', transition: 'background 0.2s' }}>
                             <div style={{ width: '32px', height: '32px', borderRadius: '50%', overflow: 'hidden' }}>
                                 <div style={{ width: '100%', height: '100%', background: 'linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', fontSize: '0.8rem' }}>
@@ -2244,7 +2406,7 @@ export default function AdminDashboard() {
                                             return (
                                                 <div
                                                     key={idx}
-                                                    onClick={() => handleViewUnethicalMessage(alert)}
+                                                    onClick={() => handleViewAlert(alert)}
                                                     style={{
                                                         padding: '12px', margin: '8px 4px',
                                                         background: 'white', border: '1px solid #e9ecef',

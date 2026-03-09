@@ -1344,12 +1344,13 @@ export default function Chat() {
         };
 
         const onMessagePinned = (data) => {
-            setMessages(prev => prev.map(msg =>
-                (msg._id === data.messageId || msg.id === data.messageId)
+            const updateMsgs = prev => prev.map(msg =>
+                (String(msg._id) === String(data.messageId) || String(msg.id) === String(data.messageId))
                     ? { ...msg, is_pinned: data.is_pinned, pinned_at: data.pinned_at, pin_expires_at: data.pin_expires_at, pinned_by: data.pinned_by }
                     : msg
-            ));
-            fetchP2PRequest(selectedUserRef.current?._id);
+            );
+            setMessages(updateMsgs);
+            setGroupMessages(updateMsgs);
         };
 
         const onMessageDeleted = (data) => {
@@ -6279,7 +6280,6 @@ export default function Chat() {
                             <Bell size={20} />
                             {totalUnread > 0 && <span className="wa-bell-badge">{totalUnread}</span>}
                         </button>
-                        {showNotificationDetails && renderNotificationDetails()}
                     </div>
                     <button className="wa-nav-icon-btn" title="New Chat" onClick={(e) => { e.stopPropagation(); setIsNewChatOpen(true); }}><Plus size={20} /></button>
                     <button
@@ -6307,6 +6307,57 @@ export default function Chat() {
             </div>
 
 
+            {/* Unread Messages Banner - Moved above Search Box */}
+            {(totalUnread > 0 && showNotificationDetails) && (
+                <div className="wa-unread-banner-field">
+                    <div className="wa-unread-banner-header">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                                <Bell size={18} color="#027EB5" />
+                                <span className="wa-unread-header-badge">{totalUnread}</span>
+                            </div>
+                            <span style={{ color: '#027EB5', fontWeight: 600 }}>{t('notifications.unread_title', 'Unread Messages')}</span>
+                        </div>
+                    </div>
+                    <div className="wa-unread-banner-list">
+                        {[
+                            ...users.filter(u => u.unreadCount > 0).map(u => ({ ...u, is_group: false })),
+                            ...groups.filter(g => g.unreadCount > 0).map(g => ({ ...g, is_group: true }))
+                        ].sort((a, b) => new Date(b.lastMessage?.created_at || 0) - new Date(a.lastMessage?.created_at || 0))
+                            .map(chat => (
+                                <div
+                                    key={chat._id}
+                                    className="wa-unread-banner-item"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (chat.is_group) {
+                                            setSelectedGroup(chat);
+                                            setSelectedUser(null);
+                                            if (selectedUserRef) selectedUserRef.current = null;
+                                            if (selectedGroupRef) selectedGroupRef.current = chat;
+                                            fetchGroupMessages(chat._id);
+                                            setGroups(prev => prev.map(g => g._id === chat._id ? { ...g, unreadCount: 0 } : g));
+                                        } else {
+                                            handleUserSelect(chat);
+                                            setSelectedGroup(null);
+                                        }
+                                    }}
+                                >
+                                    <div className="wa-unread-item-header">
+                                        <span className="wa-unread-item-name">
+                                            <span className="wa-unread-chat-type-icon">
+                                                {chat.is_group ? <Users size={14} /> : <User size={14} />}
+                                            </span>
+                                            {chat.name}
+                                        </span>
+                                        <span className="wa-unread-item-count">{chat.unreadCount}</span>
+                                    </div>
+                                </div>
+                            ))}
+                    </div>
+                </div>
+            )}
+
             {/* Search */}
             <div className="wa-search-section">
                 <div className="wa-search-bar">
@@ -6326,39 +6377,7 @@ export default function Chat() {
 
             </div>
 
-            {/* Unread Notifications Banner */}
-            {totalUnread > 0 && showUnreadBanner && (
-                <div style={{
-                    margin: '10px 12px 10px',
-                    padding: '10px 12px',
-                    background: '#e7f5ff',
-                    borderRadius: 8,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: 14,
-                    color: '#027EB5'
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center' }}>
-                        <span
-                            style={{ marginRight: 8, cursor: 'pointer', fontWeight: 'bold' }}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setShowUnreadBanner(false);
-                            }}
-                        >
-                            ×
-                        </span>
-                        {t('chat_list.unread_notifications', { count: totalUnread })}
-                    </div>
-                    {/* Close button implementation if needed, but request implies the 'x' is at the start */}
-                    {/* Based on drawing: "x You have {3} new notifications" */}
-                    {/* I will implement it as clickable X icon at the start to dismiss, or just static text if that's what the drawing means.
-                        Drawing shows 'x' at the start. It usually implies dismissal.
-                        Let's make the whole banner dismissible or just the 'x'.
-                     */}
-                </div>
-            )}
+
 
             {/* Filters */}
             <div className={`wa-filters ${leftPanelWidth < 380 ? 'compact' : ''}`} ref={filtersRef}>
@@ -7464,6 +7483,7 @@ export default function Chat() {
                                                             )}
 
                                                             <div className="wa-msg-meta">
+                                                                {msg.is_pinned && <Pin size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3, transform: 'rotate(45deg)' }} />}
                                                                 {msg.is_starred && <Star size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3 }} />}
                                                                 <span>{formatTime(msg.created_at)}</span>
                                                                 {isMe && (
@@ -8129,6 +8149,7 @@ export default function Chat() {
                                                             )}
 
                                                             <div className="wa-msg-meta">
+                                                                {msg.is_pinned && <Pin size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3, transform: 'rotate(45deg)' }} />}
                                                                 {msg.is_starred && <Star size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3 }} />}
                                                                 <span className="wa-timestamp">
                                                                     {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
