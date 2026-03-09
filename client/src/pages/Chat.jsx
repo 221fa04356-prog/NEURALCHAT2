@@ -120,6 +120,7 @@ export default function Chat() {
     const [adminConfirmModal, setAdminConfirmModal] = useState(null); // { type: 'add'|'remove', member: Object }
     const selectedUserRef = useRef(null);
     const userRef = useRef(user);
+    const groupsRef = useRef([]);
     const searchSource = useRef('chat_header'); // 'chat_header' | 'contact_info'
     const isInitialFetchDone = useRef(false);
     const usersRef = useRef([]);
@@ -164,6 +165,7 @@ export default function Chat() {
     const [isNotificationSettingsOpen, setIsNotificationSettingsOpen] = useState(false);
     const [showUnreadBanner, setShowUnreadBanner] = useState(true);
     const [showGroupMenu, setShowGroupMenu] = useState(false);
+    const [showNotificationDetails, setShowNotificationDetails] = useState(false);
     const starredMenuRef = useRef(null);
     const globalStarredMenuRef = useRef(null);
     const filtersRef = useRef(null);
@@ -331,6 +333,7 @@ export default function Chat() {
                 setIsSharedMediaOpen(false);
                 setIsEditContactOpen(false);
                 setIsNotificationSettingsOpen(false);
+                setShowNotificationDetails(false);
                 setFile(null);
                 setReplyingTo(null);
                 setIsAttachmentMenuOpen(false);
@@ -344,6 +347,10 @@ export default function Chat() {
                 if (!triggerBtn || (!triggerBtn.innerHTML.includes('Paperclip') && !triggerBtn.innerHTML.includes('Plus'))) {
                     setIsAttachmentMenuOpen(false);
                 }
+            }
+            // Close notification details if clicking outside the bell or dropdown
+            if (!e.target.closest('.wa-notification-dropdown') && !e.target.closest('.wa-nav-icon-btn[title="Notifications"]')) {
+                setShowNotificationDetails(false);
             }
         };
         window.addEventListener('mousedown', handleClickOutside);
@@ -371,6 +378,13 @@ export default function Chat() {
     // Derive translator from the currently selected language (re-computed on every render,
     // so after a reload the correct translations are immediately active).
     const t = getTranslator(getLangCode(selectedLanguage));
+
+    const getAppZoom = () => {
+        if (window.innerWidth <= 768) return 1;
+        const targetScale = parseInt(selectedFontSize) / 100;
+        const zoom = targetScale / browserScale;
+        return (zoom >= 0.25 && zoom <= 5.0) ? zoom : 1;
+    };
 
     // --- Grammar Suggestion State ---
     const [grammarSuggestions, setGrammarSuggestions] = useState(null);
@@ -467,6 +481,15 @@ export default function Chat() {
     const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
     const [isPhoneNumberPanelOpen, setIsPhoneNumberPanelOpen] = useState(false);
     const [phoneNumberInput, setPhoneNumberInput] = useState('');
+
+    // Synchronize refs with state
+    useEffect(() => {
+        groupsRef.current = groups;
+    }, [groups]);
+
+    useEffect(() => {
+        userRef.current = userData;
+    }, [userData]);
 
     const videoRef = useRef(null);
     const imageRef = useRef(null);
@@ -1415,8 +1438,7 @@ export default function Chat() {
             const { group, createdBy } = data;
             const myId = userRef.current?.id || userRef.current?._id;
             setGroups(prev => {
-                const exists = prev.find(g => g._id === group._id);
-                if (exists) return prev;
+                if (prev.find(g => g._id === group._id)) return prev;
                 return [{ ...group, isGroup: true }, ...prev];
             });
             // Show snackbar to members who did NOT create the group
@@ -1468,7 +1490,8 @@ export default function Chat() {
 
                 if (!mutedMap[data.groupId] && !isMyOwnMessage) {
                     const senderName = data.message.sender_id?.name || 'Group Member';
-                    const groupName = groupsRef.current?.find(g => String(g._id) === String(data.groupId))?.name || 'Group';
+                    const groupInfo = (groupsRef.current || []).find(g => String(g._id) === String(data.groupId));
+                    const groupName = groupInfo?.name || 'Group';
 
                     let previewText = data.message.content || 'Sent a message';
                     if (data.message.type === 'image') previewText = '📷 Image';
@@ -1477,6 +1500,7 @@ export default function Chat() {
                     setSnackbar({
                         senderName: `${senderName} @ ${groupName}`,
                         message: previewText,
+                        senderAvatar: groupInfo?.icon || null, // Added icon to snackbar
                         type: 'info',
                         duration: 5000,
                         onReply: (text) => handleGroupNotificationReply(text, data.groupId)
@@ -3539,22 +3563,26 @@ export default function Chat() {
     const renderAttachmentMenu = () => {
         if (!isAttachmentMenuOpen) return null;
         const items = [
-            { icon: FileText, label: t('chat_window.document'), color: '#7f66ff', onClick: () => { 
-                attachmentTypeRef.current = 'document';
-                if (fileInputRef.current) {
-                    fileInputRef.current.accept = ".doc,.docx,.pdf,.xls,.xlsx";
-                    fileInputRef.current.click(); 
+            {
+                icon: FileText, label: t('chat_window.document'), color: '#7f66ff', onClick: () => {
+                    attachmentTypeRef.current = 'document';
+                    if (fileInputRef.current) {
+                        fileInputRef.current.accept = ".doc,.docx,.pdf,.xls,.xlsx";
+                        fileInputRef.current.click();
+                    }
+                    setIsAttachmentMenuOpen(false);
                 }
-                setIsAttachmentMenuOpen(false); 
-            } },
-            { icon: Image, label: t('chat_window.photos_videos'), color: '#007bfc', onClick: () => { 
-                attachmentTypeRef.current = 'media';
-                if (fileInputRef.current) {
-                    fileInputRef.current.accept = ".jpg,.jpeg,.png,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*";
-                    fileInputRef.current.click(); 
+            },
+            {
+                icon: Image, label: t('chat_window.photos_videos'), color: '#007bfc', onClick: () => {
+                    attachmentTypeRef.current = 'media';
+                    if (fileInputRef.current) {
+                        fileInputRef.current.accept = ".jpg,.jpeg,.png,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*";
+                        fileInputRef.current.click();
+                    }
+                    setIsAttachmentMenuOpen(false);
                 }
-                setIsAttachmentMenuOpen(false); 
-            } },
+            },
             { icon: Camera, label: t('chat_window.camera'), color: '#ff2e74', onClick: () => { setIsAttachmentMenuOpen(false); } },
             { icon: User, label: t('chat_window.contact'), color: '#009de2', onClick: () => { setIsAttachmentMenuOpen(false); } },
             { icon: List, label: t('chat_window.poll'), color: '#ffbc38', onClick: () => { setIsAttachmentMenuOpen(false); } },
@@ -5409,26 +5437,40 @@ export default function Chat() {
         const myId = user.id || user._id;
         const isMe = String(data.sender_id?._id || data.sender_id || data.user_id) === String(myId);
 
-        // Calculate positioning logic for fixed menu (centered horizontally in viewport)
-        const menuWidth = 250;
-        const menuHeight = 420; // Increased approximation to prevent clipping for full menus
+        // Calculate positioning logic for fixed menu with zoom awareness
+        const zoom = getAppZoom();
+        // Use fit-content approximations for boundary checks
+        const estMenuWidth = 260;
+        const estMenuHeight = 400;
 
-        // Center the menu horizontally on the entire viewport
-        let left = (window.innerWidth / 2) - (menuWidth / 2);
-        let top = dropdownPos.y;
+        // Scale viewport dimensions for coordinate math
+        const vWidth = window.innerWidth / zoom;
+        const vHeight = window.innerHeight / zoom;
 
-        // Ensure menu stays within vertical bounds
-        // If it would go off the bottom, flip it to show above the click point
-        if (top + menuHeight > window.innerHeight - 60) {
-            top = top - menuHeight;
+        // Mouse coordinates adjusted for zoom
+        const mouseX = dropdownPos.x / zoom;
+        const mouseY = dropdownPos.y / zoom;
+
+        // Center the menu horizontally on the click point for a more fluid feel
+        let left = mouseX - (estMenuWidth / 2);
+        let top = mouseY;
+
+        // Larger padding from edges (20px) to prevent cutting off or "stuck" feeling
+        const padding = 85;
+
+        // Vertical overflow check: flip if it would go off bottom
+        if (top + estMenuHeight > vHeight - padding) {
+            top = top - estMenuHeight;
         }
 
-        // Final safety clamp to ensure it doesn't go off the top (header) or bottom (footer)
-        // Header is roughly 60px, Footer is roughly 60px
-        top = Math.max(70, Math.min(top, window.innerHeight - menuHeight - 70));
+        // Horizontal overflow safety: clamp to viewport edges with padding
+        if (left < padding) left = padding;
+        if (left + estMenuWidth > vWidth - padding) {
+            left = vWidth - estMenuWidth - padding;
+        }
 
-        // Ensure menu stays within horizontal bounds with 10px margin
-        left = Math.max(10, Math.min(left, window.innerWidth - menuWidth - 10));
+        // Final safety clamps
+        top = Math.max(padding, Math.min(top, vHeight - estMenuHeight - padding));
 
         const menuStyle = {
             position: 'fixed',
@@ -5442,7 +5484,11 @@ export default function Chat() {
             const currentUserId = user.id || user._id;
             const isDeleted = data.is_deleted_by_user || data.is_deleted_by_admin || (data.deleted_for && data.deleted_for.some(id => String(id) === String(currentUserId)));
             return (
-                <div className="wa-dropdown-menu msg-dropdown active-fixed" style={menuStyle} onClick={(e) => e.stopPropagation()}>
+                <div
+                    className="wa-dropdown-menu msg-dropdown active-fixed"
+                    style={menuStyle}
+                    onClick={(e) => e.stopPropagation()}
+                >
                     {!isDeleted && (
                         <>
                             <div className="wa-reactions-row">
@@ -6136,6 +6182,54 @@ export default function Chat() {
     const totalFavorites = users.filter(u => u.isFavorite && !archivedChatIds.includes(u._id)).length + groups.filter(g => g.isFavorite && !archivedChatIds.includes(g._id)).length;
 
 
+    const renderNotificationDetails = () => {
+        const unreadChats = [
+            ...users.filter(u => u.unreadCount > 0).map(u => ({ ...u, is_group: false })),
+            ...groups.filter(g => g.unreadCount > 0).map(g => ({ ...g, is_group: true }))
+        ].sort((a, b) => new Date(b.lastMessage?.created_at || 0) - new Date(a.lastMessage?.created_at || 0));
+
+        if (unreadChats.length === 0) return null;
+
+        return (
+            <div className="wa-notification-dropdown" onClick={(e) => e.stopPropagation()}>
+                <div className="wa-notification-header">
+                    {t('notifications.unread_title', 'Unread Messages')}
+                </div>
+                <div className="wa-notification-list">
+                    {unreadChats.map(chat => (
+                        <div
+                            key={chat._id}
+                            className="wa-notification-item"
+                            onClick={() => {
+                                if (chat.is_group) {
+                                    setSelectedGroup(chat);
+                                    setSelectedUser(null);
+                                    if (selectedUserRef) selectedUserRef.current = null;
+                                    if (selectedGroupRef) selectedGroupRef.current = chat;
+                                } else {
+                                    setSelectedUser(chat);
+                                    setSelectedGroup(null);
+                                    if (selectedUserRef) selectedUserRef.current = chat;
+                                    if (selectedGroupRef) selectedGroupRef.current = null;
+                                }
+                                setShowNotificationDetails(false);
+                            }}
+                        >
+                            <div className="wa-notification-item-main">
+                                <span className="wa-notification-name">{chat.name || (chat.firstName ? `${chat.firstName} ${chat.lastName || ''}` : 'User')}</span>
+                                <span className="wa-notification-count">{chat.unreadCount}</span>
+                            </div>
+                            <div className="wa-notification-msg">
+                                {chat.lastMessage?.content || 'New message'}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    };
+
+
     const handleMouseDownResize = (e) => {
         e.preventDefault();
         const startX = e.clientX;
@@ -6173,10 +6267,20 @@ export default function Chat() {
             <div className="wa-header" style={{ background: 'white' }}>
                 <span className="wa-header-title">{t('chat_list.title')}</span>
                 <div className="wa-header-icons">
-                    <button className="wa-nav-icon-btn" title="Notifications">
-                        <Bell size={20} />
-                        {totalUnread > 0 && <span className="wa-bell-badge">{totalUnread}</span>}
-                    </button>
+                    <div style={{ position: 'relative' }}>
+                        <button
+                            className={`wa-nav-icon-btn ${showNotificationDetails ? 'active' : ''}`}
+                            title="Notifications"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowNotificationDetails(!showNotificationDetails);
+                            }}
+                        >
+                            <Bell size={20} />
+                            {totalUnread > 0 && <span className="wa-bell-badge">{totalUnread}</span>}
+                        </button>
+                        {showNotificationDetails && renderNotificationDetails()}
+                    </div>
                     <button className="wa-nav-icon-btn" title="New Chat" onClick={(e) => { e.stopPropagation(); setIsNewChatOpen(true); }}><Plus size={20} /></button>
                     <button
                         className="wa-nav-icon-btn"
@@ -6236,7 +6340,15 @@ export default function Chat() {
                     color: '#027EB5'
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center' }}>
-                        <span style={{ marginRight: 8 }}>×</span> {/* Or use an icon like X from lucide-react if preferred, using text x as per request 'x You have {n}...' */}
+                        <span
+                            style={{ marginRight: 8, cursor: 'pointer', fontWeight: 'bold' }}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowUnreadBanner(false);
+                            }}
+                        >
+                            ×
+                        </span>
                         {t('chat_list.unread_notifications', { count: totalUnread })}
                     </div>
                     {/* Close button implementation if needed, but request implies the 'x' is at the start */}

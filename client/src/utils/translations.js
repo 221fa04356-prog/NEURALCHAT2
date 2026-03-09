@@ -89,6 +89,9 @@ const translations = {
                 status_available: 'Available',
             }
         },
+        notifications: {
+            unread_title: 'Unread Messages',
+        },
         sidebar: {
             chats: 'Chats',
             status: 'Status',
