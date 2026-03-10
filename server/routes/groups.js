@@ -157,6 +157,8 @@ router.get('/:groupId/messages', authenticateToken, async (req, res) => {
             deleted_for: { $ne: userId }
         })
             .populate('sender_id', 'name _id')
+            .populate('read_by', 'name image _id')
+            .populate('read_details.user_id', 'name image _id')
             .sort({ created_at: 1 });
 
         res.json(messages);
@@ -282,8 +284,7 @@ router.post('/:groupId/messages/mark-read', authenticateToken, async (req, res) 
         const messagesToUpdate = await GroupMessage.find({
             group_id: groupId,
             sender_id: { $ne: userIdObj },
-            read_by: { $ne: userIdObj },
-            is_read: false
+            read_by: { $ne: userIdObj }
         });
 
         if (messagesToUpdate.length > 0) {
@@ -291,8 +292,25 @@ router.post('/:groupId/messages/mark-read', authenticateToken, async (req, res) 
 
             await GroupMessage.updateMany(
                 { _id: { $in: messageIds } },
-                { $addToSet: { read_by: userId } }
+                { 
+                    $addToSet: { read_by: userIdObj },
+                    $push: { read_details: { user_id: userIdObj, read_at: new Date() } }
+                }
             );
+
+            // Emit partial read to all members
+            // IMPORTANT: Convert ObjectIds to plain strings so client-side String() comparison works
+            const messageIdStrings = messageIds.map(id => id.toString());
+            if (req.io) {
+                group.members.forEach(memberId => {
+                    req.io.to(memberId.toString()).emit('group_message_partial_read', {
+                        groupId: groupId.toString(),
+                        messageIds: messageIdStrings,
+                        readerId: userId.toString(),
+                        readAt: new Date().toISOString()
+                    });
+                });
+            }
 
             // Now check if any of these messages have been read by ALL members (except the sender)
             // Group members length minus 1 (the sender)
