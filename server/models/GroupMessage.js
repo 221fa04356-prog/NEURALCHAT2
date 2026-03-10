@@ -5,7 +5,7 @@ const groupMessageSchema = new mongoose.Schema({
     sender_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     role: { type: String, default: 'user' },
     content: { type: String, default: '' },
-    type: { type: String, enum: ['text', 'image', 'file', 'system', 'audio'], default: 'text' },
+    type: { type: String, enum: ['text', 'image', 'file', 'system', 'audio', 'video'], default: 'text' },
     file_path: { type: String },
     fileName: { type: String },
     fileSize: { type: Number },

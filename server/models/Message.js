@@ -5,7 +5,7 @@ const messageSchema = new mongoose.Schema({
     receiver_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // Added for P2P
     role: { type: String, required: true }, // 'user', 'ai' (model)
     content: { type: String },
-    type: { type: String, enum: ['text', 'image', 'file', 'audio'], default: 'text' },
+    type: { type: String, enum: ['text', 'image', 'file', 'audio', 'video'], default: 'text' },
     file_path: { type: String },
     fileName: { type: String },
     fileSize: { type: Number }, // in bytes
