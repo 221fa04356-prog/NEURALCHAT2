@@ -21,6 +21,10 @@ const groupMessageSchema = new mongoose.Schema({
     is_deleted_by_user: { type: Boolean, default: false },
     deleted_for: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // Array of user IDs who deleted this message for themselves
     read_by: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    read_details: [{
+        user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        read_at: { type: Date, default: Date.now }
+    }],
     is_forwarded: { type: Boolean, default: false },
     forward_count: { type: Number, default: 0 },
     is_read: { type: Boolean, default: false },

@@ -6756,3 +6756,8 @@ html {
         height: 24px;
     }
 }
+/* Community Info Styles */
+.wa-community-row-item { transition: background-color 0.2s; }
+.wa-community-row-item:hover { background-color: #f5f6f6; }
+.wa-community-info-action { flex: 1; padding: 12px 0; border: 1px solid #e9edef; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; transition: all 0.2s; }
+.wa-community-info-action:hover { background-color: #f8f9fa; border-color: #d1d7db; }
