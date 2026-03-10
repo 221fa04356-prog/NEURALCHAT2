@@ -1283,8 +1283,8 @@ export default function Chat() {
                     let previewText = 'Sent a message';
                     if (data.type === 'text') previewText = data.content;
                     else if (data.type === 'image') previewText = '📷 Sent an image';
-                    else if (data.type === 'video') previewText = '🎥 Sent a video';
-                    else if (data.type === 'audio') previewText = '🎤 Sent an audio message';
+                    else if (data.type === 'video') previewText = '🎥 Video';
+                    else if (data.type === 'audio') previewText = '🎤 Voice message';
                     else if (data.type === 'file') previewText = '📄 Sent a file';
 
                     if (previewText.length > 50) previewText = previewText.substring(0, 50) + '...';
@@ -1330,7 +1330,7 @@ export default function Chat() {
                         lastMessage: {
                             content: data.content,
                             created_at: new Date().toISOString(),
-                            type: data.type
+                            type: data.type || 'text'
                         }
                     };
                 }
@@ -1550,6 +1550,7 @@ export default function Chat() {
             if (isCurrentGroup) {
                 setGroupMessages(prev => {
                     if (prev.find(m => m._id === data.message?._id)) return prev;
+                    if (isMyOwnMessage) return prev; // Avoid duplicating optimistic message
                     return [...prev, data.message];
                 });
                 setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
@@ -1572,7 +1573,8 @@ export default function Chat() {
                     const groupName = groupInfo?.name || 'Group';
 
                     let previewText = data.message.content || 'Sent a message';
-                    if (data.message.type === 'image') previewText = '📷 Image';
+                    if (data.message.type === 'image') previewText = isGroup ? '📷 Photo' : '📷 Image';
+                    else if (data.message.type === 'video') previewText = '🎥 Video';
                     else if (data.message.type === 'file') previewText = '📄 File';
 
                     setSnackbar({
@@ -2867,7 +2869,8 @@ export default function Chat() {
                     id: tempId,
                     _id: tempId,
                     sender_id: user.id || user._id,
-                    receiver_id: selectedUser._id,
+                    receiver_id: selectedUser ? selectedUser._id : null,
+                    group_id: selectedGroup ? selectedGroup._id : null,
                     role: 'user',
                     content: '',
                     type: 'audio',
@@ -2880,7 +2883,11 @@ export default function Chat() {
                     is_read: false
                 };
 
-                setMessages(prev => [...prev, tempMsg]);
+                if (selectedGroup) {
+                    setGroupMessages(prev => [...prev, tempMsg]);
+                } else {
+                    setMessages(prev => [...prev, tempMsg]);
+                }
 
                 setIsRecording(false);
                 setRecordingPaused(false); recordingPausedRef.current = false;
@@ -2897,7 +2904,7 @@ export default function Chat() {
                 try {
                     const formData = new FormData();
                     formData.append('userId', user.id || user._id);
-                    formData.append('toUserId', selectedUser._id);
+                    if (selectedUser) formData.append('toUserId', selectedUser._id);
                     formData.append('type', 'audio');
                     formData.append('file', audioFile);
                     formData.append('duration', tempMsg.duration); // optional duration
@@ -2906,27 +2913,46 @@ export default function Chat() {
                     if (!socket.connected) socket.connect();
 
                     const token = localStorage.getItem('token');
-                    const res = await axios.post('/api/chat/send', formData, {
+                    const endpoint = selectedGroup ? `/api/groups/${selectedGroup._id}/send` : '/api/chat/send';
+
+                    const res = await axios.post(endpoint, formData, {
                         headers: {
                             'Authorization': `Bearer ${token}`
                         }
                     });
 
                     const sentMsg = res.data.message;
-                    setMessages(prev => prev.map(m => m.id === tempId ? { ...sentMsg, is_sent: true } : m));
 
-                    if (socket.connected && sentMsg) {
-                        socket.emit('send_message', {
-                            _id: sentMsg._id, // Pass server ID
-                            sender_id: user.id || user._id,
-                            receiverId: selectedUser._id,
-                            content: sentMsg.content || '',
-                            type: sentMsg.type,
-                            file_path: sentMsg.file_path,
-                            duration: sentMsg.duration,
-                            is_view_once: sentMsg.is_view_once,
-                            created_at: sentMsg.created_at
-                        });
+                    if (selectedGroup) {
+                        setGroupMessages(prev => prev.map(m => m._id === tempId ? { ...sentMsg, is_sent: true } : m));
+
+                        if (socket.connected && sentMsg) {
+                            socket.emit('group_message', {
+                                groupId: selectedGroup._id,
+                                message: {
+                                    ...sentMsg,
+                                    sender_id: { _id: user.id || user._id, name: user.name }
+                                }
+                            });
+                        }
+                        fetchGroups();
+                    } else {
+                        setMessages(prev => prev.map(m => m.id === tempId ? { ...sentMsg, is_sent: true } : m));
+
+                        if (socket.connected && sentMsg) {
+                            socket.emit('send_message', {
+                                _id: sentMsg._id, // Pass server ID
+                                sender_id: user.id || user._id,
+                                receiverId: selectedUser._id,
+                                content: sentMsg.content || '',
+                                type: sentMsg.type,
+                                file_path: sentMsg.file_path,
+                                duration: sentMsg.duration,
+                                is_view_once: sentMsg.is_view_once,
+                                created_at: sentMsg.created_at
+                            });
+                        }
+                        fetchUsers();
                     }
                 } catch (error) {
                     console.error('Failed to send voice message:', error);
@@ -2934,26 +2960,34 @@ export default function Chat() {
                         console.error('Server responded with:', error.response.status, error.response.data);
                     }
                     setSnackbar({ message: 'Failed to send voice message', type: 'error', variant: 'system' });
-                    setMessages(prev => prev.filter(m => m.id !== tempId));
+                    if (selectedGroup) {
+                        setGroupMessages(prev => prev.filter(m => m._id !== tempId));
+                    } else {
+                        setMessages(prev => prev.filter(m => m.id !== tempId));
+                    }
                 }
             };
             mediaRecorderRef.current.stop();
         }
     };
 
-    const handleSend = async (e) => {
+    const handleSend = async (e, contentOverride = null) => {
         if (e) e.preventDefault();
-        if ((!input.trim() && !file) || !selectedUser) return;
+
+        const textToSend = contentOverride !== null ? contentOverride : input;
+        if ((!textToSend.trim() && !file) || (!selectedUser && !selectedGroup)) return;
 
         // Optimistic UI Update (Temporary)
         const tempId = Date.now();
+
         const tempMsg = {
             id: tempId,
             sender_id: user.id || user._id,
-            receiver_id: selectedUser._id,
+            receiver_id: selectedUser ? selectedUser._id : null,
+            group_id: selectedGroup ? selectedGroup._id : null,
             role: 'user',
-            content: input,
-            type: file ? (file.type.startsWith('image/') ? 'image' : 'file') : 'text',
+            content: textToSend,
+            type: file ? (file.type.startsWith('image/') ? 'image' : (file.type.startsWith('video/') ? 'video' : 'file')) : 'text',
             file_path: file ? URL.createObjectURL(file) : null, // Local preview
             fileName: file ? file.name : null,
             fileSize: file ? file.size : null,
@@ -2963,8 +2997,17 @@ export default function Chat() {
             reply_to: replyingTo // Store full object for rendering preview
         };
 
-        setMessages(prev => [...prev, tempMsg]);
-        setInput('');
+        if (selectedGroup) {
+            setGroupMessages(prev => [...prev, { ...tempMsg, _id: tempId }]);
+        } else {
+            setMessages(prev => [...prev, tempMsg]);
+        }
+
+        if (contentOverride !== null) {
+            setGroupInput('');
+        } else {
+            setInput('');
+        }
         setFile(null); // Clear file immediately from UI
         setReplyingTo(null); // Clear reply context immediately
         setTypingLinkPreview(null); // Clear typing preview immediately
@@ -2972,8 +3015,8 @@ export default function Chat() {
         try {
             const formData = new FormData();
             formData.append('userId', user.id || user._id);
-            formData.append('toUserId', selectedUser._id);
-            formData.append('content', input);
+            if (selectedUser) formData.append('toUserId', selectedUser._id);
+            formData.append('content', textToSend);
             if (file) formData.append('file', file);
             if (tempMsg.reply_to) {
                 formData.append('reply_to', tempMsg.reply_to._id);
@@ -2987,7 +3030,9 @@ export default function Chat() {
 
             // Upload to Server
             const token = localStorage.getItem('token');
-            const res = await axios.post('/api/chat/send', formData, {
+            const endpoint = selectedGroup ? `/api/groups/${selectedGroup._id}/send` : '/api/chat/send';
+
+            const res = await axios.post(endpoint, formData, {
                 headers: {
                     'Authorization': `Bearer ${token}`
                 }
@@ -2995,24 +3040,40 @@ export default function Chat() {
 
             const sentMsg = res.data.message;
 
-            // UPDATE LOCAL STATE WITH REAL MESSAGE (including link_preview)
-            setMessages(prev => prev.map(msg =>
-                msg.id === tempId ? { ...sentMsg, reply_to: tempMsg.reply_to } : msg
-            ));
+            // UPDATE LOCAL STATE WITH REAL MESSAGE
+            if (selectedGroup) {
+                setGroupMessages(prev => prev.map(msg =>
+                    msg._id === tempId ? { ...sentMsg, reply_to: tempMsg.reply_to } : msg
+                ));
 
-            // critically: EMIT SOCKET NOW with the REAL server file_path and reply context
-            socket.emit('send_message', {
-                _id: sentMsg._id, // Pass server ID
-                sender_id: user.id || user._id,
-                receiverId: selectedUser._id,
-                content: sentMsg.content,
-                type: sentMsg.type,
-                file_path: sentMsg.file_path,
-                reply_to: tempMsg.reply_to // Pass full reply object if needed by client, or just ID
-            });
+                // EMIT SOCKET FOR GROUP
+                socket.emit('group_message', {
+                    groupId: selectedGroup._id,
+                    message: {
+                        ...sentMsg,
+                        sender_id: { _id: user.id || user._id, name: user.name }
+                    }
+                });
 
-            // Update Contact List (Move to top, update last message)
-            fetchUsers(); // Force refresh contact list from server
+                fetchGroups(); // Refresh group lists for last message sync
+            } else {
+                setMessages(prev => prev.map(msg =>
+                    msg.id === tempId ? { ...sentMsg, reply_to: tempMsg.reply_to } : msg
+                ));
+
+                // critically: EMIT SOCKET NOW with the REAL server file_path and reply context
+                socket.emit('send_message', {
+                    _id: sentMsg._id, // Pass server ID
+                    sender_id: user.id || user._id,
+                    receiverId: selectedUser._id,
+                    content: sentMsg.content,
+                    type: sentMsg.type,
+                    file_path: sentMsg.file_path,
+                    reply_to: tempMsg.reply_to // Pass full reply object if needed by client, or just ID
+                });
+
+                fetchUsers(); // Force refresh contact list from server
+            }
 
         } catch (err) {
             console.error("Failed to send msg", err);
@@ -4398,51 +4459,162 @@ export default function Chat() {
                 </div>
             </div>
         );
-    }; const renderFilePreview = () => (
-        <div className="wa-file-preview-overlay" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#e9edef', position: 'relative' }}>
+    };
+
+    const renderFilePreview = () => (
+        <div className="wa-file-preview-overlay" style={{
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            background: '#0b141a', // WhatsApp Dark Preview Style
+            position: 'relative',
+            zIndex: 1000
+        }}>
             {/* Header */}
-            <div style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#3b6e9e', color: 'white', flexShrink: 0 }}>
-                <button onClick={() => setFile(null)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex' }}>
-                    <ArrowLeft size={24} />
-                </button>
+            <div style={{
+                padding: '16px 20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'rgba(11, 20, 26, 0.8)',
+                backdropFilter: 'blur(10px)',
+                color: 'white',
+                flexShrink: 0,
+                borderBottom: '1px solid rgba(255,255,255,0.1)'
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <button
+                        onClick={() => {
+                            setFile(null);
+                            // Cleanup object URL if needed, though browsers usually handle it
+                        }}
+                        style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', padding: 4 }}
+                        title="Close preview"
+                    >
+                        <X size={24} />
+                    </button>
+                    <span style={{ fontSize: 16, fontWeight: 500 }}>Preview</span>
+                </div>
             </div>
 
-            {/* Content */}
-            <div style={{ flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', padding: 20 }}>
+            {/* Content Area */}
+            <div style={{
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                overflow: 'hidden',
+                padding: '20px 40px',
+                position: 'relative'
+            }}>
                 {file && file.type.startsWith('image/') ? (
-                    <img src={URL.createObjectURL(file)} alt="Preview" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }} />
+                    <img
+                        src={URL.createObjectURL(file)}
+                        alt="Preview"
+                        style={{
+                            maxWidth: '100%',
+                            maxHeight: '100%',
+                            objectFit: 'contain',
+                            boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                            borderRadius: 4
+                        }}
+                    />
+                ) : file && file.type.startsWith('video/') ? (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                        <video
+                            src={URL.createObjectURL(file)}
+                            controls
+                            autoPlay
+                            muted
+                            controlsList="nodownload"
+                            style={{
+                                maxWidth: '100%',
+                                maxHeight: '100%',
+                                borderRadius: 8,
+                                boxShadow: '0 8px 30px rgba(0,0,0,0.6)',
+                                background: 'black'
+                            }}
+                        />
+                    </div>
                 ) : (
-                    <div style={{ textAlign: 'center', padding: 40, background: 'white', borderRadius: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                        <div style={{ fontSize: 40, marginBottom: 10 }}>📄</div>
-                        <div style={{ fontSize: 16, fontWeight: 500 }}>{file?.name}</div>
-                        <div style={{ fontSize: 14, color: '#667781', marginTop: 5 }}>
-                            {file?.size ? Math.ceil(file.size / 1024) + ' kB' : ''} • {file?.type?.split('/').pop().toUpperCase()}
+                    <div style={{
+                        textAlign: 'center',
+                        padding: 60,
+                        background: '#111b21',
+                        borderRadius: 12,
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+                        color: 'white',
+                        border: '1px solid rgba(255,255,255,0.05)'
+                    }}>
+                        <div style={{ fontSize: 48, marginBottom: 16 }}>📄</div>
+                        <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8 }}>{file?.name}</div>
+                        <div style={{ fontSize: 14, color: '#8696a0' }}>
+                            {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} • {file?.type?.split('/').pop().toUpperCase()}
                         </div>
                     </div>
                 )}
             </div>
 
             {/* Footer / Caption Input */}
-            <div style={{ padding: '10px 15px', background: '#f0f2f5', display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div className="wa-input-pill" style={{ flex: 1, background: 'white' }}>
-                    <input
-                        type="text"
-                        id="caption-input"
-                        name="caption"
-                        aria-label="Add a caption"
-                        className="wa-input-box"
-                        placeholder="Add a caption..."
-                        value={input}
-                        onChange={e => setInput(e.target.value)}
-                        onKeyDown={e => {
-                            if (e.key === 'Enter') handleSend(e);
+            <div style={{
+                padding: '12px 24px 32px',
+                background: 'rgba(11, 20, 26, 0.9)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+                borderTop: '1px solid rgba(255,255,255,0.1)'
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div className="wa-input-pill" style={{
+                        flex: 1,
+                        background: '#2a3942',
+                        borderRadius: 8,
+                        padding: '4px 12px',
+                        border: 'none'
+                    }}>
+                        <input
+                            type="text"
+                            id="caption-input"
+                            name="caption"
+                            aria-label="Add a caption"
+                            style={{
+                                width: '100%',
+                                background: 'transparent',
+                                border: 'none',
+                                outline: 'none',
+                                color: 'white',
+                                padding: '10px 0',
+                                fontSize: 15
+                            }}
+                            placeholder="Add a caption..."
+                            value={input}
+                            onChange={e => setInput(e.target.value)}
+                            onKeyDown={e => {
+                                if (e.key === 'Enter') handleSend(e);
+                            }}
+                            autoFocus
+                        />
+                    </div>
+                    <button
+                        onClick={handleSend}
+                        style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: '50%',
+                            background: '#00a884',
+                            border: 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+                            flexShrink: 0
                         }}
-                        autoFocus
-                    />
+                    >
+                        <Send size={22} color="white" />
+                    </button>
                 </div>
-                <button onClick={handleSend} className="wa-nav-icon-btn wa-send-btn">
-                    <Send size={20} color="white" />
-                </button>
             </div>
         </div>
     );
@@ -7774,8 +7946,9 @@ export default function Chat() {
                                                             </span>
                                                         ) :
                                                             item.lastMessage?.type === 'image' ? (isGroup ? '📷 Photo' : '📷 Image') :
-                                                                item.lastMessage?.type === 'file' ? '📄 File' :
-                                                                    renderHighlightedContent(item.lastMessage?.content || (item.lastMessage?.is_system ? `${item.lastMessage.sender_id?.name || 'Someone'} ${item.lastMessage.content}` : ''))
+                                                                item.lastMessage?.type === 'video' ? '🎥 Video' :
+                                                                    item.lastMessage?.type === 'file' ? '📄 File' :
+                                                                        renderHighlightedContent(item.lastMessage?.content || (item.lastMessage?.is_system ? `${item.lastMessage.sender_id?.name || 'Someone'} ${item.lastMessage.content}` : ''))
                                                     )}
                                                 </span>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -9594,22 +9767,7 @@ export default function Chat() {
                                                     onKeyDown={async (e) => {
                                                         if (e.key === 'Enter' && !e.shiftKey) {
                                                             e.preventDefault();
-                                                            if (!groupInput.trim()) return;
-                                                            const text = groupInput;
-                                                            setGroupInput('');
-                                                            const replyId = replyingTo?._id || replyingTo?.id;
-                                                            setReplyingTo(null);
-                                                            try {
-                                                                const token = localStorage.getItem('token');
-                                                                const res = await axios.post(`/api/groups/${selectedGroup._id}/send`, { content: text, reply_to: replyId }, {
-                                                                    headers: { 'Authorization': `Bearer ${token}` }
-                                                                });
-                                                                setGroupMessages(prev => {
-                                                                    if (prev.find(m => m._id === res.data.message?._id)) return prev;
-                                                                    return [...prev, res.data.message];
-                                                                });
-                                                                setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-                                                            } catch (err) { console.error('Group send failed', err); }
+                                                            handleSend(null, groupInput);
                                                         }
                                                     }}
                                                     rows={1}
@@ -9620,28 +9778,14 @@ export default function Chat() {
 
                                             <div className="wa-footer-right-icons">
                                                 {groupInput.trim() ? (
-                                                    <button className="wa-send-btn-circle-inner" onClick={async () => {
-                                                        if (!groupInput.trim()) return;
-                                                        const text = groupInput;
-                                                        setGroupInput('');
-                                                        const replyId = replyingTo?._id || replyingTo?.id;
-                                                        setReplyingTo(null);
-                                                        try {
-                                                            const token = localStorage.getItem('token');
-                                                            const res = await axios.post(`/api/groups/${selectedGroup._id}/send`, { content: text, reply_to: replyId }, {
-                                                                headers: { 'Authorization': `Bearer ${token}` }
-                                                            });
-                                                            setGroupMessages(prev => {
-                                                                if (prev.find(m => m._id === res.data.message?._id)) return prev;
-                                                                return [...prev, res.data.message];
-                                                            });
-                                                            setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-                                                        } catch (err) { console.error('Group send failed', err); }
-                                                    }}>
+                                                    <button className="wa-send-btn-circle-inner" onClick={() => handleSend(null, groupInput)}>
                                                         <Send size={24} color="white" strokeWidth={2.5} />
                                                     </button>
                                                 ) : (
-                                                    <button className="wa-nav-icon-btn-pill">
+                                                    <button className="wa-nav-icon-btn-pill" onClick={() => {
+                                                        setIsRecording(true);
+                                                        startRecording();
+                                                    }}>
                                                         <Mic size={22} color="#54656f" />
                                                     </button>
                                                 )}

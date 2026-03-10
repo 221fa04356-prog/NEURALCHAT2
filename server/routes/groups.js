@@ -5,8 +5,52 @@ const Group = require('../models/Group');
 const GroupMessage = require('../models/GroupMessage');
 const User = require('../models/User');
 const mongoose = require('mongoose');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'neural_secret_77';
+
+// --- Multer Configuration (Sync with chat.js) ---
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const uploadPath = path.join(__dirname, '../uploads');
+        if (!fs.existsSync(uploadPath)) {
+            fs.mkdirSync(uploadPath, { recursive: true });
+        }
+        cb(null, uploadPath);
+    },
+    filename: (req, file, cb) => {
+        cb(null, Date.now() + '-' + file.originalname);
+    }
+});
+
+const upload = multer({
+    storage,
+    fileFilter: (req, file, cb) => {
+        const allowedTypes = [
+            'image/jpeg', 'image/png', // Images
+            'application/pdf',         // PDF
+            'application/msword',      // .doc
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+            'audio/webm', 'audio/mp4', 'audio/mp3', 'audio/mpeg', 'audio/ogg', // Audio
+            'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm' // Videos
+        ];
+        const ext = path.extname(file.originalname).toLowerCase();
+        const allowedExts = ['.jpg', '.jpeg', '.png', '.doc', '.docx', '.pdf', '.webm', '.mp3', '.m4a', '.ogg', '.mp4', '.avi', '.mkv', '.mov'];
+
+        const isAllowedType = allowedTypes.includes(file.mimetype) ||
+            file.mimetype.startsWith('audio/') ||
+            file.mimetype.startsWith('video/') ||
+            file.mimetype.startsWith('image/');
+
+        if (isAllowedType && allowedExts.includes(ext)) {
+            cb(null, true);
+        } else {
+            cb(new Error(`Invalid file type (${file.mimetype}, ext: ${ext}). Only Images, PDFs, Word, Audio, and Video files are allowed.`));
+        }
+    }
+});
 
 // Middleware to verify JWT
 const authenticateToken = (req, res, next) => {
@@ -168,16 +212,41 @@ router.get('/:groupId/messages', authenticateToken, async (req, res) => {
 });
 
 // POST /api/groups/:groupId/send - Send a message to a group
-router.post('/:groupId/send', authenticateToken, async (req, res) => {
+router.post('/:groupId/send', authenticateToken, (req, res, next) => {
+    upload.single('file')(req, res, (err) => {
+        if (err) {
+            return res.status(400).json({ error: err.message });
+        }
+        next();
+    });
+}, async (req, res) => {
     try {
-        const { content, type, file_path, fileName, fileSize, duration, isForwarded, forward_count } = req.body;
+        let { content, type, file_path, fileName, fileSize, duration, isForwarded, forward_count } = req.body;
         const senderId = req.user.id;
         const groupId = req.params.groupId;
+        const file = req.file;
 
         const group = await Group.findById(groupId);
         if (!group) return res.status(404).json({ error: 'Group not found' });
         if (!group.members.map(m => m.toString()).includes(senderId)) {
             return res.status(403).json({ error: 'Not a group member' });
+        }
+
+        // Handle physical file upload
+        if (file) {
+            file_path = '/uploads/' + file.filename;
+            fileName = file.originalname;
+            fileSize = file.size;
+
+            if (req.body.type === 'audio' || file.mimetype.startsWith('audio/')) {
+                type = 'audio';
+            } else if (file.mimetype.startsWith('video/')) {
+                type = 'video';
+            } else if (file.mimetype.startsWith('image/')) {
+                type = 'image';
+            } else {
+                type = 'file';
+            }
         }
 
         const msg = await GroupMessage.create({
@@ -292,7 +361,7 @@ router.post('/:groupId/messages/mark-read', authenticateToken, async (req, res) 
 
             await GroupMessage.updateMany(
                 { _id: { $in: messageIds } },
-                { 
+                {
                     $addToSet: { read_by: userIdObj },
                     $push: { read_details: { user_id: userIdObj, read_at: new Date() } }
                 }

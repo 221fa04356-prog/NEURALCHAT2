@@ -554,6 +554,8 @@ router.post('/send', authenticateToken, (req, res, next) => {
     if (file) {
         if (req.body.type === 'audio' || file.mimetype.startsWith('audio/')) {
             type = 'audio';
+        } else if (file.mimetype.startsWith('video/')) {
+            type = 'video';
         } else {
             type = file.mimetype.startsWith('image/') ? 'image' : 'file';
         }
