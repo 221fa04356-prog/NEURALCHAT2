@@ -346,6 +346,8 @@ export default function Chat() {
                 setIsSharedMediaOpen(false);
                 setIsEditContactOpen(false);
                 setIsNotificationSettingsOpen(false);
+                setIsCommunitySettingsOpen(false);
+                setIsWhoCanAddGroupsModalOpen(false);
                 setShowNotificationDetails(false);
                 setFile(null);
                 setReplyingTo(null);
@@ -512,6 +514,10 @@ export default function Chat() {
     const [isCommunityIconMenuOpen, setIsCommunityIconMenuOpen] = useState(false);
     const communityIconMenuRef = useRef(null);
     const communityCreatorRef = useRef(null);
+    const [isCommunityAddMemberOpen, setIsCommunityAddMemberOpen] = useState(false);
+    const [communityAddMemberSearchQuery, setCommunityAddMemberSearchQuery] = useState('');
+    const [selectedCommunityMembersToAdd, setSelectedCommunityMembersToAdd] = useState([]);
+    const [isConfirmCommunityAddMembersOpen, setIsConfirmCommunityAddMembersOpen] = useState(false);
     const [communities, setCommunities] = useState(() => {
         const userId = user.id || user._id;
         const saved = localStorage.getItem(`communities_${userId}`);
@@ -533,6 +539,9 @@ export default function Chat() {
     });
     const [isCommunityHomeOpen, setIsCommunityHomeOpen] = useState(false);
     const [isCommunityInfoOpen, setIsCommunityInfoOpen] = useState(false);
+    const [isCommunitySettingsOpen, setIsCommunitySettingsOpen] = useState(false);
+    const [isWhoCanAddGroupsModalOpen, setIsWhoCanAddGroupsModalOpen] = useState(false);
+    const [pendingWhoCanAddGroups, setPendingWhoCanAddGroups] = useState('everyone');
     const [selectedCommunity, setSelectedCommunity] = useState(null);
     const [isCommunityDescDismissed, setIsCommunityDescDismissed] = useState(false);
 
@@ -1964,12 +1973,33 @@ export default function Chat() {
 
             // Add to community if needed
             if (selectedCommunity) {
+                const sysMsg = {
+                    _id: 'sys_' + Date.now(),
+                    type: 'system',
+                    is_system: true,
+                    content: `Group "${newGroup.name}" was added`,
+                    created_at: new Date().toISOString(),
+                    sender_id: user.id || user._id,
+                    group_id: selectedCommunity.announcements?._id || selectedCommunity.groups?.find(g => g.isAnnouncement)?._id || (selectedGroup?._id)
+                };
+
                 const updatedCommunity = {
                     ...selectedCommunity,
                     groups: [...(selectedCommunity.groups || []), newGroup]
                 };
-                setCommunities(prev => prev.map(c => c.id === selectedCommunity.id ? updatedCommunity : c));
+
+                if (!updatedCommunity.announcements) updatedCommunity.announcements = {};
+                const prevAnnMessages = updatedCommunity.announcements.messages || [];
+                updatedCommunity.announcements = {
+                    ...updatedCommunity.announcements,
+                    messages: [...prevAnnMessages, sysMsg]
+                };
+
+                setCommunities(prev => prev.map(c => String(c.id || c._id) === String(selectedCommunity.id || selectedCommunity._id) ? updatedCommunity : c));
                 setSelectedCommunity(updatedCommunity);
+                if (String(selectedGroup?._id) === String(sysMsg.group_id)) {
+                    setGroupMessages(prev => [...prev, sysMsg]);
+                }
             }
 
             // Close drawer and reset all state
@@ -4962,6 +4992,12 @@ export default function Chat() {
                                         icon: null,
                                         isAnnouncement: true,
                                         members: [],
+                                        messages: [{
+                                            _id: 'sys_' + Date.now(),
+                                            content: 'Welcome to your community!',
+                                            type: 'system',
+                                            created_at: new Date().toISOString()
+                                        }],
                                         lastMessage: {
                                             content: 'Welcome to your community!',
                                             created_at: new Date().toISOString()
@@ -5040,7 +5076,7 @@ export default function Chat() {
                                 communityDescription: selectedCommunity.description
                             });
                             setSelectedUser(null);
-                            setGroupMessages([]);
+                            setGroupMessages([...(selectedCommunity.announcements?.messages || [])]);
                             setIsCommunityHomeOpen(true); // Keep it open
                             if (window.innerWidth <= 768) setIsNewChatOpen(false);
                         }}
@@ -5091,7 +5127,12 @@ export default function Chat() {
                         </div>
                     ))}
 
-                    <div className="wa-chat-item" style={{ padding: '12px 16px', cursor: 'pointer' }} onClick={() => setIsManageGroupsOpen(true)}>
+                    <div className="wa-chat-item" style={{ padding: '12px 16px', cursor: 'pointer' }} onClick={() => {
+                        if (checkAddGroupPermission(selectedCommunity)) {
+                            setIsManageGroupsOpen(true);
+                            setIsCommunityHomeOpen(false);
+                        }
+                    }}>
                         <div style={{ display: 'flex', gap: 15, alignItems: 'center' }}>
                             <div style={{ width: 44, height: 44, background: '#f0f2f5', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                 <Plus size={24} color="#667781" />
@@ -6602,7 +6643,10 @@ export default function Chat() {
                     <div className="wa-dropdown-item" onClick={() => { setOpenDropdown(null); }}>
                         <Users size={18} style={{ marginRight: 12, color: '#54656f' }} /> View members
                     </div>
-                    <div className="wa-dropdown-item" onClick={() => { setOpenDropdown(null); }}>
+                    <div className="wa-dropdown-item" onClick={() => { 
+                        setIsCommunitySettingsOpen(true);
+                        setOpenDropdown(null); 
+                    }}>
                         <Settings size={18} style={{ marginRight: 12, color: '#54656f' }} /> Community settings
                     </div>
                 </div>
@@ -6881,14 +6925,40 @@ export default function Chat() {
                         <button 
                             style={{ width: '100%', background: '#027EB5', color: 'white', border: 'none', padding: '12px', borderRadius: '24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
                                 onClick={() => {
+                                    const groupMessagesToSource = selectedGroupsToAdd.map((g, idx) => ({
+                                        _id: 'sys_' + (Date.now() + idx),
+                                        type: 'system',
+                                        is_system: true,
+                                        content: `Group "${g.name}" was added`,
+                                        created_at: new Date().toISOString(),
+                                        sender_id: user.id || user._id,
+                                        group_id: community.announcements?._id || community.groups?.find(g => g.isAnnouncement)?._id || (selectedGroup?._id)
+                                    }));
+
                                     const updatedCommunity = {
                                         ...community,
                                         groups: [...(community.groups || []), ...selectedGroupsToAdd]
                                     };
+
+                                    if (!updatedCommunity.announcements) updatedCommunity.announcements = {};
+                                    const prevAnnMessages = updatedCommunity.announcements.messages || [];
+                                    updatedCommunity.announcements = {
+                                        ...updatedCommunity.announcements,
+                                        messages: [...prevAnnMessages, ...groupMessagesToSource]
+                                    };
+
                                     const comId = (c) => String(c.id || c._id);
                                     const targetId = comId(community);
                                     setCommunities(prev => prev.map(c => comId(c) === targetId ? updatedCommunity : c));
                                     setSelectedCommunity(updatedCommunity);
+                                    
+                                    // Also update local groupMessages if we are in the announcement/relevant group
+                                    groupMessagesToSource.forEach(sysMsg => {
+                                        if (String(selectedGroup?._id) === String(sysMsg.group_id)) {
+                                            setGroupMessages(prev => [...prev, sysMsg]);
+                                        }
+                                    });
+
                                     setIsConfirmAddGroupsOpen(false);
                                     setIsAddExistingGroupsOpen(false);
                                     setIsManageGroupsOpen(false);
@@ -6899,6 +6969,171 @@ export default function Chat() {
                             Add to community
                         </button>
                     </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderConfirmCommunityAddMembersPanel = () => {
+        const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
+        if (!community || !isConfirmCommunityAddMembersOpen) return null;
+
+        return (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ background: '#202c33', borderRadius: '16px', padding: '24px', width: '400px', maxWidth: '90%', color: '#e9edef' }}>
+                    <div style={{ fontSize: '16px', color: '#e9edef', marginBottom: '32px' }}>
+                        Add {selectedCommunityMembersToAdd.map(m => m.name).join(', ')} to "{community.name}" community?
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '16px', alignItems: 'center' }}>
+                        <span 
+                            onClick={() => setIsConfirmCommunityAddMembersOpen(false)}
+                            style={{ color: '#00a884', fontSize: 14, fontWeight: '500', cursor: 'pointer' }}
+                        >
+                            Cancel
+                        </span>
+                        <div 
+                            onClick={() => {
+                                setIsConfirmCommunityAddMembersOpen(false);
+                                setIsCommunityAddMemberOpen(false);
+                                
+                                const memberNames = selectedCommunityMembersToAdd.map(m => m.name);
+                                let addedText = "";
+                                if (memberNames.length === 1) addedText = `You added ${memberNames[0]}`;
+                                else if (memberNames.length === 2) addedText = `You added ${memberNames[0]} & ${memberNames[1]}`;
+                                else if (memberNames.length > 2) {
+                                    const last = memberNames.pop();
+                                    addedText = `You added ${memberNames.join(', ')} & ${last}`;
+                                }
+
+                                const sysMsg = {
+                                    _id: 'sys_' + Date.now(),
+                                    type: 'system',
+                                    is_system: true,
+                                    content: addedText,
+                                    created_at: new Date().toISOString(),
+                                    sender_id: user.id || user._id,
+                                    group_id: community.announcements?._id || community.groups?.find(g=>g.isAnnouncement)?._id || (selectedGroup?._id)
+                                };
+
+                                const updatedCommunity = {
+                                    ...community,
+                                    members: [...(community.members || []), ...selectedCommunityMembersToAdd]
+                                };
+
+                                if (!updatedCommunity.announcements) updatedCommunity.announcements = {};
+                                const prevAnnMessages = updatedCommunity.announcements.messages || [];
+                                updatedCommunity.announcements = {
+                                    ...updatedCommunity.announcements,
+                                    messages: [...prevAnnMessages, sysMsg]
+                                };
+
+                                const comId = (c) => String(c.id || c._id);
+                                const targetId = comId(community);
+                                setCommunities(prev => prev.map(c => comId(c) === targetId ? updatedCommunity : c));
+                                setSelectedCommunity(updatedCommunity);
+
+                                setGroupMessages(prev => [...prev, sysMsg]);
+                                setSelectedCommunityMembersToAdd([]);
+                            }}
+                            style={{ padding: '10px 24px', background: '#25D366', color: '#111b21', borderRadius: '24px', fontSize: 14, fontWeight: '500', cursor: 'pointer' }}
+                        >
+                            Add member
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderCommunityAddMemberPanel = () => {
+        if (!isCommunityAddMemberOpen) return null;
+        const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
+        if (!community) return null;
+
+        const communityMemberIds = (community.members || []).map(m => String(m._id || m.id));
+        const availableContacts = users.filter(u => 
+            String(u._id) !== String(user.id || user._id) && 
+            !communityMemberIds.includes(String(u._id))
+        );
+        const filteredContacts = availableContacts.filter(u => 
+            (u.name || '').toLowerCase().includes(communityAddMemberSearchQuery.toLowerCase()) || 
+            (u.mobile || '').includes(communityAddMemberSearchQuery)
+        );
+
+        return (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ background: '#202c33', borderRadius: '24px', width: '380px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', color: '#e9edef', overflow: 'hidden', boxShadow: '0 17px 50px 0 rgba(11,20,26,.19)' }}>
+                    <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16 }}>
+                        <X size={24} color="#8696a0" style={{ cursor: 'pointer' }} onClick={() => { setIsCommunityAddMemberOpen(false); setCommunityAddMemberSearchQuery(''); setSelectedCommunityMembersToAdd([]); }} />
+                        <span style={{ fontSize: 16, fontWeight: 500 }}>Add member</span>
+                    </div>
+
+                    <div style={{ padding: '0 16px 12px 16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', background: '#111b21', borderRadius: '12px', padding: '8px 12px', border: '1px solid #2a3942' }}>
+                            <Search size={18} color="#00a884" style={{ marginRight: 12 }} />
+                            <input
+                                autoFocus
+                                type="text"
+                                placeholder="Search name or number"
+                                value={communityAddMemberSearchQuery}
+                                onChange={(e) => setCommunityAddMemberSearchQuery(e.target.value)}
+                                style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: 14, color: '#d1d7db' }}
+                            />
+                        </div>
+                    </div>
+
+                    <div style={{ padding: '8px 24px', fontSize: '13px', color: '#8696a0', fontWeight: '500' }}>Contacts</div>
+
+                    <div style={{ flex: 1, overflowY: 'auto' }}>
+                        {filteredContacts.map(u => {
+                            const isSelected = selectedCommunityMembersToAdd.find(item => item._id === u._id);
+                            return (
+                                <div 
+                                    key={u._id} 
+                                    style={{ padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', transition: 'background 0.2s' }}
+                                    onClick={() => {
+                                        if (isSelected) {
+                                            setSelectedCommunityMembersToAdd(selectedCommunityMembersToAdd.filter(item => item._id !== u._id));
+                                        } else {
+                                            setSelectedCommunityMembersToAdd([...selectedCommunityMembersToAdd, u]);
+                                        }
+                                    }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#111b21'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <div style={{
+                                        width: 20, 
+                                        height: 20, 
+                                        borderRadius: '4px', 
+                                        border: `2px solid ${isSelected ? '#00a884' : '#8696a0'}`,
+                                        background: isSelected ? '#00a884' : 'transparent',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                    }}>
+                                        {isSelected && <Check size={14} color="#111b21" />}
+                                    </div>
+                                    <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                        {u.profile_photo || u.image ? <img src={u.profile_photo || u.image} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={20} color="#8696a0" />}
+                                    </div>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 16, color: '#e9edef', fontWeight: 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name}</div>
+                                        <div style={{ fontSize: 13, color: '#8696a0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.about || 'Available'}</div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                    {selectedCommunityMembersToAdd.length > 0 && (
+                        <div style={{ padding: '16px', background: '#202c33', display: 'flex', justifyContent: 'center' }}>
+                            <div 
+                                onClick={() => { setIsConfirmCommunityAddMembersOpen(true); }}
+                                style={{ width: 44, height: 44, borderRadius: '50%', background: '#00a884', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}
+                            >
+                                <ArrowRight size={24} color="#111b21" />
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
         );
@@ -6968,11 +7203,15 @@ export default function Chat() {
                                 <LinkIcon size={24} color="#00a884" />
                                 <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Invite</span>
                             </div>
-                            <div className="wa-community-info-action" onClick={() => { /* add members handler */ }}>
+                            <div className="wa-community-info-action" onClick={() => setIsCommunityAddMemberOpen(true)}>
                                 <UserPlus size={24} color="#00a884" />
                                 <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Add members</span>
                             </div>
-                            <div className="wa-community-info-action" onClick={() => { /* add groups handler */ }}>
+                            <div className="wa-community-info-action" onClick={() => {
+                                if (checkAddGroupPermission(community)) {
+                                    setIsManageGroupsOpen(true);
+                                }
+                            }}>
                                 <Users size={24} color="#00a884" />
                                 <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Add groups</span>
                             </div>
@@ -7001,9 +7240,9 @@ export default function Chat() {
 
                     <div style={{ borderBottom: thickDivider }}>
                         {[
-                            { icon: <Users size={20} />, label: 'Manage groups', onClick: () => setIsManageGroupsOpen(true) },
-                            { icon: <Settings size={20} />, label: 'Community settings' },
-                            { icon: <Users size={20} />, label: 'View groups (1)' }
+                            { icon: <Users size={20} />, label: 'Manage groups', onClick: () => { if (checkAddGroupPermission(community)) setIsManageGroupsOpen(true); } },
+                            { icon: <Settings size={20} />, label: 'Community settings', onClick: () => setIsCommunitySettingsOpen(true) },
+                            { icon: <Users size={20} />, label: 'View groups (' + (community.groups?.length || 0) + ')' }
                         ].map((item, idx) => (
                             <div
                                 key={idx}
@@ -7026,18 +7265,18 @@ export default function Chat() {
 
                     <div style={{ padding: '20px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                            <span style={{ fontSize: 14, color: subTextColor }}>1 community member</span>
+                            <span style={{ fontSize: 14, color: subTextColor }}>{(community.members?.length || 0) + 1} community member{(community.members?.length || 0) > 0 ? 's' : ''}</span>
                             <Search size={18} color="#54656f" />
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 20, cursor: 'pointer' }}>
+                        <div onClick={() => setIsCommunityAddMemberOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 20, cursor: 'pointer' }}>
                             <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#00a884', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <UserPlus size={20} color="white" />
                             </div>
                             <span style={{ color: textColor, fontSize: 16 }}>Add member</span>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 15 }}>
                             <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                {user.profile_photo ? <img src={user.profile_photo} alt="me" /> : <Users size={20} color="#8696a0" />}
+                                {user.profile_photo ? <img src={user.profile_photo} alt="me" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Users size={20} color="#8696a0" />}
                             </div>
                             <div style={{ flex: 1 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -7047,6 +7286,54 @@ export default function Chat() {
                                 <div style={{ fontSize: 13, color: subTextColor }}>{user.mobile || '+91 8074 084 038'}</div>
                             </div>
                         </div>
+                        {community.members && community.members.filter(m => String(m._id || m.id) !== String(user.id || user._id)).map(member => (
+                            <div key={member._id} style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 15 }}>
+                                <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    {member.profile_photo || member.image ? <img style={{ width: '100%', height: '100%', objectFit: 'cover' }} src={member.profile_photo || member.image} alt={member.name} /> : <Users size={20} color="#8696a0" />}
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ color: textColor, fontWeight: 500 }}>{member.name}</span>
+                                        <button 
+                                            onClick={() => {
+                                                const sysMsg = {
+                                                    _id: 'sys_' + Date.now(),
+                                                    type: 'system',
+                                                    is_system: true,
+                                                    content: `You removed ${member.name}`,
+                                                    created_at: new Date().toISOString(),
+                                                    sender_id: user.id || user._id,
+                                                    group_id: community.announcements?._id || community.groups?.find(g=>g.isAnnouncement)?._id || (selectedGroup?._id)
+                                                };
+
+                                                const updatedCommunity = {
+                                                    ...community,
+                                                    members: community.members.filter(m => m._id !== member._id)
+                                                };
+
+                                                if (!updatedCommunity.announcements) updatedCommunity.announcements = {};
+                                                const prevAnnMessages = updatedCommunity.announcements.messages || [];
+                                                updatedCommunity.announcements = {
+                                                    ...updatedCommunity.announcements,
+                                                    messages: [...prevAnnMessages, sysMsg]
+                                                };
+
+                                                const comId = (c) => String(c.id || c._id);
+                                                const targetId = comId(community);
+                                                setCommunities(prev => prev.map(c => comId(c) === targetId ? updatedCommunity : c));
+                                                setSelectedCommunity(updatedCommunity);
+                                                
+                                                setGroupMessages(prev => [...prev, sysMsg]);
+                                            }}
+                                            style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#ea0038', padding: '4px' }}
+                                        >
+                                            <X size={16} />
+                                        </button>
+                                    </div>
+                                    <div style={{ fontSize: 13, color: subTextColor }}>{member.about || 'Available'}</div>
+                                </div>
+                            </div>
+                        ))}
                     </div>
 
                     <div style={{ background: bgColor, padding: '10px 0 40px 0', borderTop: thickDivider }}>
@@ -9566,10 +9853,19 @@ export default function Chat() {
                                                 const senderName = msg.sender_id?.name || 'User';
 
                                                 if (msg.is_system || msg.type === 'system') {
+                                                    const content = msg.content || '';
+                                                    let displayContent = content;
+                                                    const prefixMe = 'You ';
+                                                    const prefixSender = `${senderName} `;
+                                                    if (!content.toLowerCase().startsWith(prefixMe.toLowerCase()) && 
+                                                        !content.toLowerCase().startsWith(prefixSender.toLowerCase()) &&
+                                                        !content.startsWith('Group ')) {
+                                                        displayContent = `${isMe ? 'You' : senderName} ${content}`;
+                                                    }
                                                     return (
                                                         <div key={msg._id} style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
                                                             <div className="wa-system-message">
-                                                                {isMe ? 'You' : senderName} {msg.content}
+                                                                {displayContent}
                                                             </div>
                                                         </div>
                                                     );
@@ -10018,13 +10314,138 @@ export default function Chat() {
             {renderManageGroupsPanel()}
             {renderAddExistingGroupsPanel()}
             {renderConfirmAddGroupsPanel()}
+            {renderCommunityAddMemberPanel()}
+            {renderConfirmCommunityAddMembersPanel()}
             {isCommunityNewGroupOpen && renderNewGroupDrawer(true)}
             {renderSharedMediaPanel()}
             {renderStarredMessagesPanel()}
             {renderEditContactPanel()}
             {renderNotificationSettingsPanel()}
+            {renderCommunitySettingsPanel()}
+            {renderWhoCanAddGroupsModal()}
         </div >
     );
+
+    const checkAddGroupPermission = (community) => {
+        if (!community) return true;
+        if (community.whoCanAddGroups === 'admins') {
+            const myId = user.id || user._id;
+            // A community is identified by creator field or if current user is the "Community info" owner
+            const isAdmin = community.creator === myId || String(community.id || community._id) === String(myId);
+            
+            if (!isAdmin) {
+                setSnackbar({ 
+                    message: "You don't have permission to add new groups into the community", 
+                    type: 'info',
+                    duration: 5000 
+                });
+                return false;
+            }
+        }
+        return true;
+    };
+
+    const renderCommunitySettingsPanel = () => {
+        const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
+        if (!community || !isCommunitySettingsOpen) return null;
+        const textColor = '#3b4a54';
+        const thickDivider = '12px solid #f0f2f5';
+
+        return (
+            <div className={`wa-contact-info-panel wa-community-settings-drawer ${isCommunitySettingsOpen ? 'active' : ''}`} style={{ background: '#f0f2f5', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef' }}>
+                    <button onClick={() => setIsCommunitySettingsOpen(false)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
+                        <ArrowLeft size={24} />
+                    </button>
+                    <div style={{ flex: 1, display: 'flex', justifyContent: 'center', paddingRight: '40px' }}>
+                        <span style={{ fontSize: 19, fontWeight: 500, color: '#3b4a54', whiteSpace: 'nowrap' }}>Community settings</span>
+                    </div>
+                </div>
+
+                <div className="wa-drawer-content" style={{ padding: 0, display: 'flex', flexDirection: 'column', background: '#f0f2f5' }}>
+                    <div style={{ padding: '30px 20px 10px', color: '#00a884', fontSize: '14px', fontWeight: '500', background: 'white' }}>Community permissions</div>
+                    
+                    <div 
+                        style={{ background: 'white', padding: '15px 20px', cursor: 'pointer', borderBottom: thickDivider }}
+                        onClick={() => {
+                            setPendingWhoCanAddGroups(community.whoCanAddGroups || 'everyone');
+                            setIsWhoCanAddGroupsModalOpen(true);
+                        }}
+                    >
+                        <div style={{ fontSize: 16, color: '#111b21', marginBottom: 4 }}>Who can add new groups</div>
+                        <div style={{ fontSize: 14, color: '#667781' }}>
+                            {community.whoCanAddGroups === 'admins' ? 'Only community admins' : 'Everyone'}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderWhoCanAddGroupsModal = () => {
+        if (!isWhoCanAddGroupsModalOpen) return null;
+        
+        return (
+            <div className="wa-mute-modal-overlay" onClick={() => setIsWhoCanAddGroupsModalOpen(false)} style={{ zIndex: 20000 }}>
+                <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ background: '#111b21', color: 'white', padding: '24px', borderRadius: '16px', width: '400px', maxWidth: '90%' }}>
+                    <h2 style={{ fontSize: 20, fontWeight: 500, marginBottom: 16 }}>Who can add new groups</h2>
+                    <p style={{ fontSize: 14, color: '#8696a0', marginBottom: 24, lineHeight: '1.5' }}>
+                        Members can always suggest groups for admin approval. Community admins can remove any group. <span style={{ color: '#00a884', cursor: 'pointer' }}>Learn more</span>
+                    </p>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginBottom: 32 }}>
+                        {[
+                            { value: 'everyone', label: 'Everyone', desc: 'All community members can add new groups directly.' },
+                            { value: 'admins', label: 'Only community admins', desc: 'Only community admins can add new groups directly.' }
+                        ].map(opt => (
+                            <div key={opt.value} style={{ display: 'flex', gap: 16, cursor: 'pointer' }} onClick={() => setPendingWhoCanAddGroups(opt.value)}>
+                                <div style={{ 
+                                    width: 20, 
+                                    height: 20, 
+                                    borderRadius: '50%', 
+                                    border: `2px solid ${pendingWhoCanAddGroups === opt.value ? '#00a884' : '#8696a0'}`,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    marginTop: 2
+                                }}>
+                                    {pendingWhoCanAddGroups === opt.value && <div style={{ width: 10, height: 10, background: '#00a884', borderRadius: '50%' }} />}
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: 16, color: '#e9edef' }}>{opt.label}</div>
+                                    <div style={{ fontSize: 14, color: '#8696a0' }}>{opt.desc}</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, alignItems: 'center' }}>
+                        <button 
+                            onClick={() => setIsWhoCanAddGroupsModalOpen(false)}
+                            style={{ background: 'none', border: 'none', color: '#00a884', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}
+                        >
+                            Cancel
+                        </button>
+                        <button 
+                            onClick={() => {
+                                const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
+                                if (community) {
+                                    const updatedCommunity = { ...community, whoCanAddGroups: pendingWhoCanAddGroups };
+                                    const comId = (c) => String(c.id || c._id);
+                                    setCommunities(prev => prev.map(c => comId(c) === comId(community) ? updatedCommunity : c));
+                                    setSelectedCommunity(updatedCommunity);
+                                }
+                                setIsWhoCanAddGroupsModalOpen(false);
+                            }}
+                            style={{ background: '#00a884', border: 'none', color: '#111b21', padding: '10px 24px', borderRadius: '24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                        >
+                            Confirm
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
 
     const renderSettingsPanel = () => {
         if (!isSettingsOpen) return null;
@@ -11116,6 +11537,17 @@ export default function Chat() {
                                 onClick={() => {
                                     const gId = groupToRemove?._id || groupToRemove?.id;
                                     const community = communityForRemoval;
+
+                                    const sysMsg = {
+                                        _id: 'sys_' + Date.now(),
+                                        type: 'system',
+                                        is_system: true,
+                                        content: `Group "${groupToRemove?.name}" was removed`,
+                                        created_at: new Date().toISOString(),
+                                        sender_id: user.id || user._id,
+                                        group_id: community.announcements?._id || community.groups?.find(g => g.isAnnouncement)?._id || (selectedGroup?._id)
+                                    };
+
                                     const updatedCommunity = {
                                         ...community,
                                         groups: (community.groups || []).filter(cg => {
@@ -11123,12 +11555,25 @@ export default function Chat() {
                                             return String(cgId) !== String(gId);
                                         })
                                     };
+
+                                    if (!updatedCommunity.announcements) updatedCommunity.announcements = {};
+                                    const prevAnnMessages = updatedCommunity.announcements.messages || [];
+                                    updatedCommunity.announcements = {
+                                        ...updatedCommunity.announcements,
+                                        messages: [...prevAnnMessages, sysMsg]
+                                    };
+
                                     const comId = (c) => String(c.id || c._id);
                                     const targetId = comId(community);
                                     setCommunities(prev => prev.map(c => comId(c) === targetId ? updatedCommunity : c));
                                     if (selectedCommunity && comId(selectedCommunity) === targetId) {
                                         setSelectedCommunity(updatedCommunity);
                                     }
+
+                                    if (String(selectedGroup?._id) === String(sysMsg.group_id)) {
+                                        setGroupMessages(prev => [...prev, sysMsg]);
+                                    }
+
                                     setIsRemoveGroupConfirmOpen(false);
                                     setSnackbar({ message: 'Group removed from community.', type: 'success', variant: 'system' });
                                 }}
