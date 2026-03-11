@@ -11,6 +11,7 @@ const groupMessageSchema = new mongoose.Schema({
     fileSize: { type: Number },
     duration: { type: Number }, // Optional, for Audio
     is_view_once: { type: Boolean, default: false },
+    is_opened: { type: Boolean, default: false },
     is_system: { type: Boolean, default: false }, // For "You created this group" type messages
     is_pinned: { type: Boolean, default: false },
     pinned_at: { type: Date, default: null },

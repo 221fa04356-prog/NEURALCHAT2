@@ -561,10 +561,10 @@ router.put('/update-profile', async (req, res) => {
         if (about !== undefined) updateData.about = about;
         if (countryCode !== undefined) updateData.countryCode = countryCode;
         if (mobile !== undefined) {
-            // Basic mobile validation match register logic: 10-15 digits
-            if (!/^\d{10,15}$/.test(mobile)) {
+            // Basic mobile validation match register logic: strictly 10 digits
+            if (!/^\d{10}$/.test(mobile)) {
                 console.error('[PROFILE UPDATE] Invalid mobile format:', mobile);
-                return res.status(400).json({ error: 'Mobile number must be between 10 and 15 digits.' });
+                return res.status(400).json({ error: 'Mobile number must be exactly 10 digits.' });
             }
             // Check if mobile matches someone else
             const existing = await User.findOne({ mobile, _id: { $ne: userId } });

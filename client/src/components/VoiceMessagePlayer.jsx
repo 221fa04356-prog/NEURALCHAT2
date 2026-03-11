@@ -109,6 +109,9 @@ const VoiceMessagePlayer = ({ src, duration, isMe, userDataImage, selectedUserIm
                     style={{
                         width: '40px',
                         height: '40px',
+                        minWidth: '40px',
+                        minHeight: '40px',
+                        flexShrink: 0,
                         borderRadius: '20px',
                         background: isMe ? 'rgba(0,0,0,0.1)' : 'rgba(0,0,0,0.05)',
                         color: isMe ? '#667781' : '#54656f',
@@ -123,8 +126,21 @@ const VoiceMessagePlayer = ({ src, duration, isMe, userDataImage, selectedUserIm
                     {playbackSpeed}x
                 </div>
             ) : (
-                <div className="wa-audio-avatar" style={{ position: 'relative' }}>
-                    <img src={isMe ? (userDataImage || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256&h=256") : (selectedUserImage || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256&h=256")} alt="" style={{ width: 40, height: 40, borderRadius: '50%', objectFit: 'cover' }} />
+                <div className="wa-audio-avatar" style={{ position: 'relative', width: 40, height: 40, minWidth: 40, minHeight: 40, flexShrink: 0 }}>
+                    {(isMe ? userDataImage : selectedUserImage) ? (
+                        <img 
+                            src={isMe ? userDataImage : selectedUserImage} 
+                            alt="" 
+                            style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} 
+                        />
+                    ) : (
+                        <div style={{ width: '100%', height: '100%', borderRadius: '50%', backgroundColor: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="12" cy="7" r="4"></circle>
+                            </svg>
+                        </div>
+                    )}
                     <div style={{ position: 'absolute', bottom: -2, right: -2, background: 'white', borderRadius: '50%', padding: 2 }}>
                         <Mic size={12} color={isMe ? "#53bdeb" : "var(--primary, #23D2EF)"} />
                     </div>

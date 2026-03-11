@@ -97,6 +97,11 @@
     border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
+.login-card.compact {
+    zoom: 0.95;
+    /* Applies an 80% scale natively matching browser zoom */
+}
+
 /* Back Button */
 .back-button {
     text-decoration: none;
@@ -468,9 +473,9 @@
 
 /* Compact Login Card for Register Page */
 .login-card.compact {
-    padding: 2.5rem 2.5rem;
+    padding: 2.8rem 2.8rem;
     /* Increased vertical padding */
-    max-width: 420px;
+    max-width: 460px;
     /* Expanded width for larger text */
 }
 

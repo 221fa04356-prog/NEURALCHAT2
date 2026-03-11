@@ -2290,9 +2290,35 @@ export default function AdminDashboard() {
 
                                                                         {renderLinkPreview(msg)}
 
-                                                                        <div style={{ opacity: isDeleted ? 0.6 : 1, marginTop: msg.link_preview ? '10px' : '0', whiteSpace: 'pre-wrap' }}>
-                                                                            {renderContent(msg.content)}
-                                                                        </div>
+                                                                        {msg.type === 'image' && msg.file_path && (
+                                                                            <div style={{ marginTop: '8px', position: 'relative' }}>
+                                                                                <img src={msg.file_path} alt="media" style={{ maxWidth: '100%', borderRadius: '8px', maxHeight: '200px', objectFit: 'contain' }} />
+                                                                                {msg.is_view_once && <div style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>View Once {msg.is_opened ? '(Opened)' : ''}</div>}
+                                                                            </div>
+                                                                        )}
+                                                                        {msg.type === 'video' && msg.file_path && (
+                                                                            <div style={{ marginTop: '8px', position: 'relative' }}>
+                                                                                <video src={msg.file_path} controls style={{ maxWidth: '100%', borderRadius: '8px', maxHeight: '200px' }} />
+                                                                                {msg.is_view_once && <div style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>View Once {msg.is_opened ? '(Opened)' : ''}</div>}
+                                                                            </div>
+                                                                        )}
+                                                                        {msg.type === 'audio' && msg.file_path && (
+                                                                            <div style={{ marginTop: '8px', background: 'rgba(0,0,0,0.05)', padding: '8px 12px', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                                                <audio controls src={msg.file_path} style={{ width: '100%', height: '35px' }} />
+                                                                                {msg.is_view_once && <span style={{ fontSize: 10, alignSelf: 'flex-end', background: '#e9ecef', color: '#525f7f', padding: '2px 6px', borderRadius: 4 }}>View Once Voice {msg.is_opened ? '(Opened)' : ''}</span>}
+                                                                            </div>
+                                                                        )}
+                                                                        {msg.type === 'file' && msg.file_path && (
+                                                                            <div style={{ marginTop: '8px', background: 'rgba(0,0,0,0.05)', padding: '8px 12px', borderRadius: '8px' }}>
+                                                                                <a href={msg.file_path} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#0A7C8F', textDecoration: 'none', fontWeight: 'bold' }}>📄 {msg.fileName || 'Download File'}</a>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {msg.content && (
+                                                                            <div style={{ opacity: isDeleted ? 0.6 : 1, marginTop: (msg.link_preview || msg.type !== 'text') ? '8px' : '0', whiteSpace: 'pre-wrap' }}>
+                                                                                {renderContent(msg.content)}
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                     <div style={{ fontSize: '0.7rem', color: '#8898aa', marginTop: '4px', textAlign: isMe ? 'right' : 'left' }}>
                                                                         {isMe ? 'You' : (selectedContact.name)} • {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

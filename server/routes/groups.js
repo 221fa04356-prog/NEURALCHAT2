@@ -221,7 +221,7 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
     });
 }, async (req, res) => {
     try {
-        let { content, type, file_path, fileName, fileSize, duration, isForwarded, forward_count } = req.body;
+        let { content, type, file_path, fileName, fileSize, duration, isForwarded, forward_count, is_view_once } = req.body;
         const senderId = req.user.id;
         const groupId = req.params.groupId;
         const file = req.file;
@@ -258,6 +258,7 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             fileName: fileName || null,
             fileSize: fileSize || 0,
             duration: duration || 0,
+            is_view_once: is_view_once === 'true' || is_view_once === true,
             is_forwarded: isForwarded === true || isForwarded === 'true',
             forward_count: forward_count || 0
         });
