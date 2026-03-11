@@ -329,7 +329,7 @@ export default function Home() {
                                             value={isAdmin ? adminEmail : userLoginId}
                                             onChange={(e) => {
                                                 if (isAdmin) {
-                                                    setAdminEmail(e.target.value);
+                                                    setAdminEmail(e.target.value.replace(/\s/g, ''));
                                                 } else {
                                                     const val = e.target.value;
                                                     if (/^\d*$/.test(val)) {

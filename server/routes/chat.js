@@ -176,7 +176,17 @@ router.get('/me', authenticateToken, async (req, res) => {
 router.get('/users', authenticateToken, async (req, res) => {
     try {
         const currentUserId = req.user.id;
-        const users = await User.find({ status: 'approved' }).select('name email mobile _id role about isOnline lastSeen');
+        const currentUserRole = req.user.role;
+
+        // Base query: only approved users
+        let query = { status: 'approved' };
+
+        // If requester is a regular user, hide all admins
+        if (currentUserRole !== 'admin') {
+            query.role = { $ne: 'admin' };
+        }
+
+        const users = await User.find(query).select('name email mobile _id role about isOnline lastSeen');
 
         if (!currentUserId) {
             return res.json(users);
@@ -662,7 +672,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
             content: content || '',
             type,
             file_path: filePath,
-            fileName, fileSize, pageCount, duration, // Metadata
+            fileName, fileSize, pageCount, duration, is_view_once, // Metadata
             reply_to: reply_to || null,
 
             is_flagged: !!isFlagged,
@@ -979,6 +989,50 @@ router.post('/message/:id/toggle', authenticateToken, async (req, res) => {
         const msgObj = msg.toObject();
         msgObj.is_starred = (msg.starred_by || []).some(id => String(id) === String(userId));
         res.json(msgObj);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Mark Message as Opened - Secured with Auth
+router.post('/message/:id/open', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        
+        let msg = await Message.findById(req.params.id);
+        let isGroupMsg = false;
+        
+        if (!msg) {
+            const GroupMessage = require('../models/GroupMessage');
+            msg = await GroupMessage.findById(req.params.id);
+            if (msg) isGroupMsg = true;
+        }
+        
+        if (!msg) return res.status(404).json({ error: 'Message not found' });
+        
+        msg.is_opened = true;
+        await msg.save();
+        
+        if (req.io) {
+            if (isGroupMsg) {
+                const Group = require('../models/Group');
+                const group = await Group.findById(msg.group_id);
+                if (group) {
+                    group.members.forEach(mId => {
+                        req.io.to(mId.toString()).emit('message_opened', { messageId: msg._id, is_opened: true });
+                    });
+                }
+            } else {
+                const participants = [msg.user_id.toString()];
+                if (msg.receiver_id) participants.push(msg.receiver_id.toString());
+                
+                participants.forEach(pId => {
+                    req.io.to(pId).emit('message_opened', { messageId: msg._id, is_opened: true });
+                });
+            }
+        }
+        
+        res.json({ status: 'success', messageId: msg._id, is_opened: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

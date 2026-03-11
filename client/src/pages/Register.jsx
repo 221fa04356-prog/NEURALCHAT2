@@ -4,6 +4,7 @@ import axios from 'axios';
 import { UserPlus, Mail, Phone, User, Briefcase, ArrowLeft, Shield } from 'lucide-react';
 import LandingBackground from '../components/LandingBackground';
 import HumanVerification from '../components/HumanVerification';
+import CountryCodeSelect from '../components/CountryCodeSelect';
 import { countryCodes } from '../utils/countryCodes';
 import '../styles/Home.css';
 
@@ -25,7 +26,7 @@ export default function Register() {
 
         // Validations
         const nameRegex = /^[A-Za-z\s]+$/;
-        const mobileRegex = /^\d{10,15}$/;
+        const mobileRegex = /^\d{10}$/;
         const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
         if (!nameRegex.test(formData.name)) {
@@ -33,7 +34,7 @@ export default function Register() {
             return;
         }
         if (!mobileRegex.test(formData.mobile)) {
-            setError('Mobile number must be between 10 and 15 digits.');
+            setError('Mobile number must be exactly 10 digits.');
             return;
         }
         if (!emailRegex.test(formData.email)) {
@@ -131,7 +132,7 @@ export default function Register() {
                                     <input
                                         type="email"
                                         value={formData.email}
-                                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                        onChange={(e) => setFormData({ ...formData, email: e.target.value.replace(/\s/g, '') })}
                                         placeholder="john@example.com"
                                         required
                                         className="input-neural"
@@ -144,22 +145,12 @@ export default function Register() {
                                     Mobile Number
                                 </label>
                                 <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
-                                    <div style={{ position: 'relative', width: '120px', flexShrink: 0 }}>
-                                        <select
+                                    <div style={{ position: 'relative', width: '140px', flexShrink: 0, zIndex: 100 }}>
+                                        <CountryCodeSelect
                                             value={formData.countryCode}
-                                            onChange={(e) => setFormData({ ...formData, countryCode: e.target.value })}
+                                            onChange={(code) => setFormData({ ...formData, countryCode: code })}
                                             className="input-neural"
-                                            style={{ paddingLeft: '10px', appearance: 'none', cursor: 'pointer' }}
-                                        >
-                                            {countryCodes.sort((a, b) => a.name.localeCompare(b.name)).map((c) => (
-                                                <option key={`${c.isoCode}-${c.dialCode}`} value={c.dialCode}>
-                                                    {c.isoCode} ({c.dialCode})
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <div style={{ position: 'absolute', top: '50%', right: '10px', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#94A3B8' }}>
-                                            ▼
-                                        </div>
+                                        />
                                     </div>
                                     <div style={{ position: 'relative', flex: 1 }}>
                                         <Phone size={18} style={{ position: 'absolute', top: '14px', left: '14px', color: '#94A3B8', zIndex: 10, pointerEvents: 'none' }} />
@@ -168,7 +159,7 @@ export default function Register() {
                                             value={formData.mobile}
                                             onChange={(e) => {
                                                 const val = e.target.value;
-                                                if (/^\d*$/.test(val) && val.length <= 15) {
+                                                if (/^\d*$/.test(val) && val.length <= 10) {
                                                     setFormData({ ...formData, mobile: val });
                                                 }
                                             }}

@@ -82,7 +82,7 @@ export default function AdminReset() {
                                         type="email"
                                         placeholder="Enter Registered Email"
                                         value={formData.email}
-                                        onChange={e => setFormData({ ...formData, email: e.target.value })}
+                                        onChange={e => setFormData({ ...formData, email: e.target.value.replace(/\s/g, '') })}
                                         required
                                         className="input-neural"
                                         style={{ paddingLeft: '38px', backgroundColor: 'white', color: 'inherit' }}

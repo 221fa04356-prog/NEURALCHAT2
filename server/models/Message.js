@@ -12,6 +12,7 @@ const messageSchema = new mongoose.Schema({
     pageCount: { type: Number }, // optional, for PDFs
     duration: { type: Number }, // optional, for Audio
     is_view_once: { type: Boolean, default: false },
+    is_opened: { type: Boolean, default: false },
     reply_to: { type: mongoose.Schema.Types.ObjectId, ref: 'Message', default: null },
     link_preview: {
         title: { type: String },

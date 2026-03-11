@@ -65,15 +65,20 @@ const Snackbar = ({ message, senderName, senderAvatar, type = 'info', onClose, d
                             ) : (
                                 <div className="snackbar-initial-avatar">
                                     {(() => {
-                                        if (!senderName) return 'A';
-                                        // Handle "Admin (Name)" format
-                                        const match = senderName.match(/\((.*?)\)/);
-                                        const nameToUse = match ? match[1] : senderName;
-                                        // Skip "Admin" part if it's the only thing
-                                        const finalName = nameToUse.toLowerCase().startsWith('admin') && nameToUse.length > 5
-                                            ? nameToUse.substring(5).trim()
-                                            : nameToUse;
-                                        return finalName.charAt(0).toUpperCase() || 'A';
+                                        let finalName = 'U';
+                                        if (!senderName) {
+                                            const user = JSON.parse(localStorage.getItem('user') || '{}');
+                                            finalName = user.name || 'You';
+                                        } else {
+                                            // Handle "Admin (Name)" format
+                                            const match = senderName.match(/\((.*?)\)/);
+                                            const nameToUse = match ? match[1] : senderName;
+                                            // Skip "Admin" part if it's the only thing
+                                            finalName = nameToUse.toLowerCase().startsWith('admin') && nameToUse.length > 5
+                                                ? nameToUse.substring(5).trim()
+                                                : nameToUse;
+                                        }
+                                        return finalName.charAt(0).toUpperCase() || 'U';
                                     })()}
                                 </div>
                             )}
@@ -82,7 +87,7 @@ const Snackbar = ({ message, senderName, senderAvatar, type = 'info', onClose, d
 
                     <div className="snackbar-content-text">
                         <div className="snackbar-sender-name">
-                            {senderName || 'Admin'}
+                            {senderName || JSON.parse(localStorage.getItem('user') || '{}').name || 'You'}
                         </div>
                         <div className="snackbar-message-preview">{message}</div>
                     </div>

@@ -5,6 +5,7 @@ import { Shield, Lock, Mail, User, Key, Eye, EyeOff, ArrowLeft, Phone } from 'lu
 import LandingBackground from '../components/LandingBackground';
 import HumanVerification from '../components/HumanVerification';
 import Snackbar from '../components/Snackbar';
+import CountryCodeSelect from '../components/CountryCodeSelect';
 import { countryCodes } from '../utils/countryCodes';
 import '../styles/Home.css';
 
@@ -26,9 +27,9 @@ export default function AdminRegister() {
 
         // Validations
         const nameRegex = /^[a-zA-Z\s]+$/;
-        const emailRegex = /^[a-zA-Z0-9._%+-]+@(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/;
+        const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
         const passwordRegex = /^[A-Z][a-z]*(?=.*\d)(?=.*[@#$&*])[a-z\d@#$&*]{7,19}$/;
-        const mobileRegex = /^\d{10,15}$/;
+        const mobileRegex = /^\d{10}$/;
 
         if (!nameRegex.test(formData.name)) {
             setSnackbar({ open: true, message: 'Full Name must contain only alphabets', type: 'warning' });
@@ -41,7 +42,7 @@ export default function AdminRegister() {
         }
 
         if (!formData.mobile || !mobileRegex.test(formData.mobile)) {
-            setSnackbar({ open: true, message: 'Mobile number must be between 10 and 15 digits', type: 'warning' });
+            setSnackbar({ open: true, message: 'Mobile number must be exactly 10 digits.', type: 'warning' });
             return;
         }
 
@@ -129,7 +130,7 @@ export default function AdminRegister() {
                                         type="email"
                                         placeholder="Enter Email"
                                         value={formData.email}
-                                        onChange={e => setFormData({ ...formData, email: e.target.value })}
+                                        onChange={e => setFormData({ ...formData, email: e.target.value.replace(/\s/g, '') })}
                                         required
                                         className="input-neural"
                                     />
@@ -139,22 +140,13 @@ export default function AdminRegister() {
                             <div className="form-group-custom">
                                 <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>Mobile Number</label>
                                 <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
-                                    <div style={{ position: 'relative', width: '100px', flexShrink: 0 }}>
-                                        <select
+                                    <div style={{ position: 'relative', width: '140px', flexShrink: 0, zIndex: 100 }}>
+                                        <CountryCodeSelect
                                             value={formData.countryCode}
-                                            onChange={(e) => setFormData({ ...formData, countryCode: e.target.value })}
+                                            onChange={(code) => setFormData({ ...formData, countryCode: code })}
                                             className="input-neural"
-                                            style={{ paddingLeft: '8px', paddingRight: '20px', fontSize: '0.85rem', appearance: 'none', cursor: 'pointer', height: '42px' }}
-                                        >
-                                            {countryCodes.sort((a, b) => a.name.localeCompare(b.name)).map((c) => (
-                                                <option key={`${c.isoCode}-${c.dialCode}`} value={c.dialCode}>
-                                                    {c.isoCode} ({c.dialCode})
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <div style={{ position: 'absolute', top: '50%', right: '8px', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#94A3B8', fontSize: '0.7rem' }}>
-                                            ▼
-                                        </div>
+                                            style={{ height: '42px' }}
+                                        />
                                     </div>
                                     <div style={{ position: 'relative', flex: 1 }}>
                                         <Phone size={16} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: '10px', color: '#94A3B8', zIndex: 10, pointerEvents: 'none' }} />
@@ -162,9 +154,9 @@ export default function AdminRegister() {
                                             type="text"
                                             placeholder="Enter Mobile"
                                             value={formData.mobile}
-                                            onChange={e => {
+                                            onChange={(e) => {
                                                 const val = e.target.value;
-                                                if (/^\d*$/.test(val) && val.length <= 15) {
+                                                if (/^\d*$/.test(val) && val.length <= 10) {
                                                     setFormData({ ...formData, mobile: val });
                                                 }
                                             }}
