@@ -518,25 +518,7 @@ export default function Chat() {
     const [communityAddMemberSearchQuery, setCommunityAddMemberSearchQuery] = useState('');
     const [selectedCommunityMembersToAdd, setSelectedCommunityMembersToAdd] = useState([]);
     const [isConfirmCommunityAddMembersOpen, setIsConfirmCommunityAddMembersOpen] = useState(false);
-    const [communities, setCommunities] = useState(() => {
-        const userId = user.id || user._id;
-        const saved = localStorage.getItem(`communities_${userId}`);
-        let initialCommunities = saved ? JSON.parse(saved) : [];
-
-        if (userId) {
-            const pinnedKey = `pinnedCommunities_${userId}`;
-            const mutedKey = `mutedChats_${userId}`;
-            const pinnedIds = JSON.parse(localStorage.getItem(pinnedKey)) || [];
-            const mutedMap = JSON.parse(localStorage.getItem(mutedKey)) || {};
-
-            initialCommunities = initialCommunities.map(c => ({
-                ...c,
-                isPinned: pinnedIds.includes(String(c.id)),
-                isMuted: !!mutedMap[String(c.id)]
-            }));
-        }
-        return initialCommunities;
-    });
+    const [communities, setCommunities] = useState([]);
     const [isCommunityHomeOpen, setIsCommunityHomeOpen] = useState(false);
     const [isCommunityInfoOpen, setIsCommunityInfoOpen] = useState(false);
     const [isCommunitySettingsOpen, setIsCommunitySettingsOpen] = useState(false);
@@ -545,9 +527,7 @@ export default function Chat() {
     const [selectedCommunity, setSelectedCommunity] = useState(null);
     const [isCommunityDescDismissed, setIsCommunityDescDismissed] = useState(false);
 
-    useEffect(() => {
-        localStorage.setItem(`communities_${user.id || user._id}`, JSON.stringify(communities));
-    }, [communities, user.id, user._id]);
+    // Communities are persisted in MongoDB; only pin/mute preferences remain in localStorage.
 
     // Synchronize refs with state
     useEffect(() => {
@@ -1527,8 +1507,8 @@ export default function Chat() {
             onConnect();
         }
 
-        // Fetch users & groups, then set loaded state to prevent flicker
-        Promise.all([fetchUsers(), fetchGroups()]).finally(() => {
+        // Fetch users, groups, and communities, then set loaded state to prevent flicker
+        Promise.all([fetchUsers(), fetchGroups(), fetchCommunities()]).finally(() => {
             setIsDataLoaded(true);
         });
 
@@ -1922,6 +1902,39 @@ export default function Chat() {
             setGroups(processedGroups);
         } catch (err) {
             console.error('fetchGroups error:', err);
+        }
+    };
+
+    const fetchCommunities = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.get('/api/communities/my-communities', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            const userId = user.id || user._id;
+            const pinnedKey = `pinnedCommunities_${userId}`;
+            const mutedKey = `mutedChats_${userId}`;
+            const pinnedIds = JSON.parse(localStorage.getItem(pinnedKey)) || [];
+            const mutedMap = JSON.parse(localStorage.getItem(mutedKey)) || {};
+
+            const processed = (res.data || []).map(c => {
+                const id = String(c.id || c._id);
+                return {
+                    ...c,
+                    id,
+                    isPinned: pinnedIds.includes(id),
+                    isMuted: !!mutedMap[id]
+                };
+            }).sort((a, b) => {
+                if (a.isPinned && !b.isPinned) return -1;
+                if (!a.isPinned && b.isPinned) return 1;
+                return 0;
+            });
+
+            setCommunities(processed);
+        } catch (err) {
+            console.error('fetchCommunities error:', err);
         }
     };
 
@@ -4980,40 +4993,46 @@ export default function Chat() {
                                 cursor: communityName.trim() ? 'pointer' : 'default',
                                 transition: 'all 0.2s'
                             }}
-                            onClick={() => {
-                                const newCommunity = {
-                                    id: Date.now(),
-                                    name: communityName,
-                                    description: communityDescription,
-                                    icon: communityIcon,
-                                    announcements: {
-                                        _id: 'ann_' + Date.now(),
-                                        name: 'Announcements',
-                                        icon: null,
-                                        isAnnouncement: true,
-                                        members: [],
-                                        messages: [{
-                                            _id: 'sys_' + Date.now(),
-                                            content: 'Welcome to your community!',
-                                            type: 'system',
-                                            created_at: new Date().toISOString()
-                                        }],
-                                        lastMessage: {
-                                            content: 'Welcome to your community!',
-                                            created_at: new Date().toISOString()
-                                        }
-                                    },
-                                    groups: []
+                            onClick={async () => {
+                                const communityOwner = {
+                                    id: userData.id || userData._id || user.id || user._id,
+                                    name: userData.name || userData.full_name || userData.username || userData.mobile || userData.phone || 'You',
+                                    mobile: userData.mobile || userData.phone,
+                                    profile_photo: userData.profile_photo || userData.image || user.profile_photo
                                 };
-                                setCommunities([...communities, newCommunity]);
-                                setSelectedCommunity(newCommunity);
-                                setIsNewCommunityOpen(false);
-                                setCommunityStep(0);
-                                setCommunityName('');
-                                setCommunityDescription('');
-                                setCommunityIcon(null);
-                                setIsCommunityHomeOpen(true);
-                                setSnackbar({ message: 'Community created successfully!', type: 'success', variant: 'system' });
+
+                                try {
+                                    const token = localStorage.getItem('token');
+                                    const res = await axios.post('/api/communities/create', {
+                                        name: communityName,
+                                        description: communityDescription,
+                                        icon: communityIcon
+                                    }, {
+                                        headers: { 'Authorization': `Bearer ${token}` }
+                                    });
+
+                                    const created = res.data?.community;
+                                    if (!created) throw new Error('Community create response missing community');
+
+                                    // Keep UI-only owner shape for the info panel
+                                    const processed = {
+                                        ...created,
+                                        owner: communityOwner
+                                    };
+
+                                    setCommunities(prev => [processed, ...prev]);
+                                    setSelectedCommunity(processed);
+                                    setIsNewCommunityOpen(false);
+                                    setCommunityStep(0);
+                                    setCommunityName('');
+                                    setCommunityDescription('');
+                                    setCommunityIcon(null);
+                                    setIsCommunityHomeOpen(true);
+                                    setSnackbar({ message: 'Community created successfully!', type: 'success', variant: 'system' });
+                                } catch (err) {
+                                    console.error('Community create failed:', err);
+                                    setSnackbar({ message: 'Failed to create community', type: 'error', variant: 'system' });
+                                }
                             }}
                         >
                             Create
@@ -6992,7 +7011,7 @@ export default function Chat() {
                             Cancel
                         </span>
                         <div 
-                            onClick={() => {
+                            onClick={async () => {
                                 setIsConfirmCommunityAddMembersOpen(false);
                                 setIsCommunityAddMemberOpen(false);
                                 
@@ -7015,25 +7034,36 @@ export default function Chat() {
                                     group_id: community.announcements?._id || community.groups?.find(g=>g.isAnnouncement)?._id || (selectedGroup?._id)
                                 };
 
-                                const updatedCommunity = {
-                                    ...community,
-                                    members: [...(community.members || []), ...selectedCommunityMembersToAdd]
-                                };
+                                try {
+                                    const token = localStorage.getItem('token');
+                                    const memberIds = selectedCommunityMembersToAdd.map(m => m._id || m.id).filter(Boolean);
+                                    const res = await axios.patch(`/api/communities/${community.id || community._id}/members`, {
+                                        memberIds
+                                    }, {
+                                        headers: { 'Authorization': `Bearer ${token}` }
+                                    });
 
-                                if (!updatedCommunity.announcements) updatedCommunity.announcements = {};
-                                const prevAnnMessages = updatedCommunity.announcements.messages || [];
-                                updatedCommunity.announcements = {
-                                    ...updatedCommunity.announcements,
-                                    messages: [...prevAnnMessages, sysMsg]
-                                };
+                                    const updatedFromServer = res.data?.community;
+                                    const updatedCommunity = updatedFromServer ? {
+                                        ...updatedFromServer,
+                                        // keep any UI-only owner field if present
+                                        owner: community.owner
+                                    } : {
+                                        ...community,
+                                        members: [...(community.members || []), ...selectedCommunityMembersToAdd]
+                                    };
 
-                                const comId = (c) => String(c.id || c._id);
-                                const targetId = comId(community);
-                                setCommunities(prev => prev.map(c => comId(c) === targetId ? updatedCommunity : c));
-                                setSelectedCommunity(updatedCommunity);
-
-                                setGroupMessages(prev => [...prev, sysMsg]);
-                                setSelectedCommunityMembersToAdd([]);
+                                    const comId = (c) => String(c.id || c._id);
+                                    const targetId = comId(community);
+                                    setCommunities(prev => prev.map(c => comId(c) === targetId ? updatedCommunity : c));
+                                    setSelectedCommunity(updatedCommunity);
+                                    setGroupMessages(prev => [...prev, sysMsg]);
+                                    setSelectedCommunityMembersToAdd([]);
+                                    fetchCommunities(); // ensure newly-added users see it after login
+                                } catch (err) {
+                                    console.error('Add community members failed:', err);
+                                    setSnackbar({ message: 'Failed to add members', type: 'error', variant: 'system' });
+                                }
                             }}
                             style={{ padding: '10px 24px', background: '#25D366', color: '#111b21', borderRadius: '24px', fontSize: 14, fontWeight: '500', cursor: 'pointer' }}
                         >
@@ -7264,37 +7294,84 @@ export default function Chat() {
                     </div>
 
                     <div style={{ padding: '20px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                            <span style={{ fontSize: 14, color: subTextColor }}>{(community.members?.length || 0) + 1} community member{(community.members?.length || 0) > 0 ? 's' : ''}</span>
-                            <Search size={18} color="#54656f" />
-                        </div>
+                        {(() => {
+                            const communityOwner = community.owner || {
+                                id: userData.id || userData._id || user.id || user._id,
+                                name: userData.name || userData.full_name || userData.username || userData.mobile || userData.phone || 'You',
+                                mobile: userData.mobile || userData.phone,
+                                profile_photo: userData.profile_photo || userData.image || user.profile_photo
+                            };
+                            const totalMembers = (community.members?.length || 0) + (communityOwner ? 1 : 0);
+                            return (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                                    <span style={{ fontSize: 14, color: subTextColor }}>{totalMembers} community member{totalMembers !== 1 ? 's' : ''}</span>
+                                    <Search size={18} color="#54656f" />
+                                </div>
+                            );
+                        })()}
                         <div onClick={() => setIsCommunityAddMemberOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 20, cursor: 'pointer' }}>
                             <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#00a884', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <UserPlus size={20} color="white" />
                             </div>
                             <span style={{ color: textColor, fontSize: 16 }}>Add member</span>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 15 }}>
-                            <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                {user.profile_photo ? <img src={user.profile_photo} alt="me" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Users size={20} color="#8696a0" />}
-                            </div>
-                            <div style={{ flex: 1 }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span style={{ color: textColor, fontWeight: 500 }}>You</span>
-                                    <span style={{ fontSize: 11, color: '#00a884', background: '#e7fce3', padding: '2px 8px', borderRadius: '4px' }}>Community owner</span>
+                        {(() => {
+                            const communityOwner = community.owner || {
+                                id: userData.id || userData._id || user.id || user._id,
+                                name: userData.name || userData.full_name || userData.username || userData.mobile || userData.phone || 'You',
+                                mobile: userData.mobile || userData.phone,
+                                profile_photo: userData.profile_photo || userData.image || user.profile_photo
+                            };
+                            if (!communityOwner) return null;
+                            const currentUserId = userData._id || userData.id || user.id || user._id;
+                            const isCurrentUserOwner = currentUserId && String(communityOwner.id) === String(currentUserId);
+                            const displayMobile = communityOwner.mobile || userData.mobile || userData.phone || '';
+                            return (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 15 }}>
+                                    <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        {communityOwner.profile_photo ? <img src={communityOwner.profile_photo} alt={communityOwner.name || 'owner'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Users size={20} color="#8696a0" />}
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ color: textColor, fontWeight: 500 }}>{communityOwner.name}</span>
+                                            <span style={{ fontSize: 11, color: '#00a884', background: '#e7fce3', padding: '2px 8px', borderRadius: '4px' }}>
+                                                {isCurrentUserOwner ? 'You • Community owner' : 'Community owner'}
+                                            </span>
+                                        </div>
+                                        {displayMobile && (
+                                            <div style={{ fontSize: 13, color: subTextColor }}>{displayMobile}</div>
+                                        )}
+                                    </div>
                                 </div>
-                                <div style={{ fontSize: 13, color: subTextColor }}>{user.mobile || '+91 8074 084 038'}</div>
-                            </div>
-                        </div>
-                        {community.members && community.members.filter(m => String(m._id || m.id) !== String(user.id || user._id)).map(member => (
-                            <div key={member._id} style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 15 }}>
-                                <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    {member.profile_photo || member.image ? <img style={{ width: '100%', height: '100%', objectFit: 'cover' }} src={member.profile_photo || member.image} alt={member.name} /> : <Users size={20} color="#8696a0" />}
-                                </div>
-                                <div style={{ flex: 1 }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <span style={{ color: textColor, fontWeight: 500 }}>{member.name}</span>
-                                        <button 
+                            );
+                        })()}
+                        {community.members && community.members
+                            .filter(m => {
+                                const ownerId =
+                                    (community.owner && community.owner.id) ||
+                                    userData.id || userData._id ||
+                                    user.id || user._id;
+                                return String(m._id || m.id) !== String(ownerId);
+                            })
+                            .map(member => {
+                                const memberMobile = member.mobile || member.phone || '';
+                                return (
+                                    <div key={member._id || member.id} style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 15 }}>
+                                        <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            {member.profile_photo || member.image ? (
+                                                <img
+                                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                    src={member.profile_photo || member.image}
+                                                    alt={member.name}
+                                                />
+                                            ) : (
+                                                <Users size={20} color="#8696a0" />
+                                            )}
+                                        </div>
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <span style={{ color: textColor, fontWeight: 500 }}>{member.name}</span>
+                                                <button 
                                             onClick={() => {
                                                 const sysMsg = {
                                                     _id: 'sys_' + Date.now(),
@@ -7307,8 +7384,8 @@ export default function Chat() {
                                                 };
 
                                                 const updatedCommunity = {
-                                                    ...community,
-                                                    members: community.members.filter(m => m._id !== member._id)
+                                                ...community,
+                                                members: community.members.filter(m => m._id !== member._id)
                                                 };
 
                                                 if (!updatedCommunity.announcements) updatedCommunity.announcements = {};
@@ -7330,10 +7407,14 @@ export default function Chat() {
                                             <X size={16} />
                                         </button>
                                     </div>
+                                    {memberMobile && (
+                                        <div style={{ fontSize: 13, color: subTextColor }}>{memberMobile}</div>
+                                    )}
                                     <div style={{ fontSize: 13, color: subTextColor }}>{member.about || 'Available'}</div>
                                 </div>
                             </div>
-                        ))}
+                        );
+                    })}
                     </div>
 
                     <div style={{ background: bgColor, padding: '10px 0 40px 0', borderTop: thickDivider }}>
