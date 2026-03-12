@@ -53,6 +53,7 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/chat', require('./routes/chat'));
 app.use('/api/groups', require('./routes/groups'));
+app.use('/api/communities', require('./routes/communities'));
 
 // Socket.io Logic
 io.use((socket, next) => {
