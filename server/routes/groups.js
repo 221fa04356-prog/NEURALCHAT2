@@ -143,7 +143,9 @@ router.get('/my-groups', authenticateToken, async (req, res) => {
         const currentUserObj = await User.findById(userId).select('favorites');
         const userFavorites = currentUserObj?.favorites || [];
 
-        const groups = await Group.find({ members: userId })
+        const groups = await Group.find({
+            $or: [{ members: userId }, { removedMembers: userId }]
+        })
             .populate('members', 'name email _id isOnline lastSeen')
             .populate('admin', 'name _id')
             .sort({ created_at: -1 });
@@ -189,10 +191,14 @@ router.get('/:groupId/messages', authenticateToken, async (req, res) => {
         const { groupId } = req.params;
         const userId = req.user.id;
 
-        // Ensure user is a member
+        // Ensure user is a member or was a member
         const group = await Group.findById(groupId);
         if (!group) return res.status(404).json({ error: 'Group not found' });
-        if (!group.members.map(m => m.toString()).includes(userId)) {
+
+        const isMem = (group.members || []).some(m => String(m) === String(userId));
+        const isRem = (group.removedMembers || []).some(m => String(m) === String(userId));
+
+        if (!isMem && !isRem) {
             return res.status(403).json({ error: 'Not a group member' });
         }
 
@@ -228,7 +234,13 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
 
         const group = await Group.findById(groupId);
         if (!group) return res.status(404).json({ error: 'Group not found' });
-        if (!group.members.map(m => m.toString()).includes(senderId)) {
+
+        const isRemoved = (group.removedMembers || []).some(m => String(m) === String(senderId));
+        if (isRemoved) {
+            return res.status(403).json({ error: 'You have been removed from this group and cannot send messages.' });
+        }
+
+        if (!(group.members || []).some(m => String(m) === String(senderId))) {
             return res.status(403).json({ error: 'Not a group member' });
         }
 
@@ -291,7 +303,7 @@ router.patch('/:groupId/name', authenticateToken, async (req, res) => {
 
         const group = await Group.findById(groupId);
         if (!group) return res.status(404).json({ error: 'Group not found' });
-        if (!group.members.map(m => m.toString()).includes(userId)) {
+        if (!(group.members || []).some(m => String(m) === String(userId))) {
             return res.status(403).json({ error: 'Not a group member' });
         }
 
@@ -345,7 +357,11 @@ router.post('/:groupId/messages/mark-read', authenticateToken, async (req, res) 
 
         const group = await Group.findById(groupId);
         if (!group) return res.status(404).json({ error: 'Group not found' });
-        if (!group.members.map(m => m.toString()).includes(userId)) {
+
+        const isMem = (group.members || []).some(m => String(m) === String(userId));
+        const isRem = (group.removedMembers || []).some(m => String(m) === String(userId));
+
+        if (!isMem && !isRem) {
             return res.status(403).json({ error: 'Not a group member' });
         }
 
@@ -369,7 +385,6 @@ router.post('/:groupId/messages/mark-read', authenticateToken, async (req, res) 
             );
 
             // Emit partial read to all members
-            // IMPORTANT: Convert ObjectIds to plain strings so client-side String() comparison works
             const messageIdStrings = messageIds.map(id => id.toString());
             if (req.io) {
                 group.members.forEach(memberId => {
@@ -383,7 +398,6 @@ router.post('/:groupId/messages/mark-read', authenticateToken, async (req, res) 
             }
 
             // Now check if any of these messages have been read by ALL members (except the sender)
-            // Group members length minus 1 (the sender)
             const requiredReads = group.members.length - 1;
 
             if (requiredReads > 0) {
