@@ -37,7 +37,7 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
         if (!userObjId) return res.status(400).json({ error: 'Invalid user id' });
 
         const communities = await Community.find({
-            $or: [{ creator: userObjId }, { members: userObjId }]
+            $or: [{ creator: userObjId }, { members: userObjId }, { removedMembers: userObjId }]
         })
             .populate('creator', 'name mobile countryCode _id')
             .populate('members', 'name mobile countryCode _id about')
@@ -176,6 +176,20 @@ router.patch('/:communityId/members', authenticateToken, async (req, res) => {
                 .lean();
         }
 
+        // Notify all members that they have been added to the community
+        if (req.io) {
+            idsToAdd.forEach(id => {
+                req.io.to(String(id)).emit('community_member_added', {
+                    community: {
+                        ...updated,
+                        id: updated._id,
+                        is_community: true,
+                        announcements: updated.announcements ? { ...updated.announcements, lastMessage: lastMsg } : updated.announcements
+                    }
+                });
+            });
+        }
+
         res.json({
             status: 'updated',
             community: {
@@ -187,6 +201,82 @@ router.patch('/:communityId/members', authenticateToken, async (req, res) => {
         });
     } catch (err) {
         console.error('[COMMUNITY ADD MEMBERS ERROR]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/communities/:communityId/members/:memberId - remove member (move to removedMembers)
+router.delete('/:communityId/members/:memberId', authenticateToken, async (req, res) => {
+    try {
+        const { communityId, memberId } = req.params;
+        const community = await Community.findById(communityId);
+        if (!community) return res.status(404).json({ error: 'Community not found' });
+
+        // Only creator can remove members
+        if (String(community.creator) !== String(req.user.id)) {
+            return res.status(403).json({ error: 'Only community owner can remove members' });
+        }
+
+        const memberObjId = toObjectId(memberId);
+        if (!memberObjId) return res.status(400).json({ error: 'Invalid memberId' });
+
+        // 1. Move member to removedMembers in Community
+        await Community.updateOne(
+            { _id: communityId },
+            {
+                $pull: { members: memberObjId },
+                $addToSet: { removedMembers: memberObjId }
+            }
+        );
+
+        // 2. Add system message to announcements
+        if (community.announcements) {
+            const User = require('../models/User');
+            const targetUser = await User.findById(memberId);
+            const userName = targetUser ? targetUser.name : 'User';
+
+            const sysMsg = await GroupMessage.create({
+                group_id: community.announcements,
+                sender_id: req.user.id, // Admin who removed them
+                type: 'system',
+                is_system: true,
+                content: `You removed ${userName}`
+            });
+
+            // Handle Announcements Group
+            await Group.updateOne(
+                { _id: community.announcements },
+                {
+                    $pull: { members: memberObjId },
+                    $addToSet: { removedMembers: memberObjId }
+                }
+            );
+
+            // Notify everyone in the group including the removed user (so they see the system msg)
+            if (req.io) {
+                // Fetch members to notify. We should also notify the removed user.
+                const group = await Group.findById(community.announcements);
+                const allToNotify = [...(group.members || []), memberObjId];
+
+                allToNotify.forEach(uid => {
+                    req.io.to(String(uid)).emit('group_message', {
+                        ...sysMsg.toObject(),
+                        _id: sysMsg._id,
+                        is_system: true
+                    });
+                });
+
+                // Also emit a specific removal event to trigger UI refresh for the removed user
+                req.io.to(memberId).emit('community_member_removed', {
+                    communityId,
+                    message: `You were removed from ${community.name}`
+                });
+            }
+        }
+
+        res.json({ status: 'removed', memberId });
+    } catch (err) {
+        console.error('[COMMUNITY REMOVE MEMBER ERROR]', err);
         res.status(500).json({ error: err.message });
     }
 });

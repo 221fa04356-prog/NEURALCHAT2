@@ -4922,12 +4922,12 @@ html {
 }
 
 .wa-camera-btn.allow {
-    background: #008069;
+    background: #027EB5;
     color: white;
 }
 
 .wa-camera-btn.got-it {
-    background: #008069;
+    background: #027EB5;
     color: white;
 }
 
@@ -4991,7 +4991,7 @@ html {
     width: 60px;
     height: 60px;
     border-radius: 50%;
-    background: #00a884;
+    background: #027EB5;
     color: white;
     border: none;
     display: flex;
@@ -5151,7 +5151,7 @@ html {
     width: 75px;
     height: 75px;
     border-radius: 50%;
-    background: #00a884;
+    background: #027EB5;
     color: white;
     border: none;
     display: flex;
@@ -5163,7 +5163,7 @@ html {
 }
 
 .wa-crop-confirm-btn-footer:hover {
-    background: #008069;
+    background: #027EB5;
     transform: scale(1.05);
 }
 

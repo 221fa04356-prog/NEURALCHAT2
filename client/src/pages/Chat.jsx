@@ -523,6 +523,7 @@ export default function Chat() {
     const [communities, setCommunities] = useState([]);
     const [isCommunityHomeOpen, setIsCommunityHomeOpen] = useState(false);
     const [isCommunityInfoOpen, setIsCommunityInfoOpen] = useState(false);
+    const [isCommunityGroupsListOpen, setIsCommunityGroupsListOpen] = useState(false);
     const [isCommunitySettingsOpen, setIsCommunitySettingsOpen] = useState(false);
     const [isWhoCanAddGroupsModalOpen, setIsWhoCanAddGroupsModalOpen] = useState(false);
     const [pendingWhoCanAddGroups, setPendingWhoCanAddGroups] = useState('everyone');
@@ -6731,6 +6732,113 @@ export default function Chat() {
         }
     };
 
+    const renderCommunityGroupsListPanel = () => {
+        const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
+        if (!community) return null;
+        const textColor = '#3b4a54';
+        const subTextColor = '#667781';
+
+        return (
+            <div className={`wa-contact-info-panel wa-manage-groups-drawer ${isCommunityGroupsListOpen ? 'active' : ''}`} style={{ background: '#f0f2f5', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', background: 'white', borderBottom: '1px solid #e9edef' }}>
+                    <button onClick={() => setIsCommunityGroupsListOpen(false)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0, width: 24 }}>
+                        <X size={24} />
+                    </button>
+                    <span style={{ fontSize: 19, fontWeight: 500, color: '#3b4a54', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{community.name}</span>
+                    <div style={{ width: 24 }}></div>
+                </div>
+
+                <div className="wa-drawer-content" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ background: 'white', marginBottom: 12 }}>
+                        {checkAddGroupPermission(community) && (
+                            <div
+                                className="wa-manage-groups-item"
+                                style={{ padding: '15px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid #f0f2f5' }}
+                                onClick={() => {
+                                    setIsCommunityGroupsListOpen(false);
+                                    setIsManageGroupsOpen(true);
+                                }}
+                            >
+                                <div style={{ width: 40, height: 40, background: '#00a884', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Plus size={20} color="white" />
+                                </div>
+                                <span style={{ fontSize: 16, color: textColor }}>Add group</span>
+                            </div>
+                        )}
+
+                        <div
+                            className="wa-manage-groups-item"
+                            style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid #f0f2f5' }}
+                            onClick={() => {
+                                setIsCommunityGroupsListOpen(false);
+                                setSelectedGroup({
+                                    ...community.announcements,
+                                    name: community.name,
+                                    isCommunityAnnouncements: true,
+                                    communityName: community.name,
+                                    communityIcon: community.icon,
+                                    communityDescription: community.description
+                                });
+                                setSelectedUser(null);
+                                setGroupMessages([...(community.announcements?.messages || [])]);
+                            }}
+                        >
+                            <div style={{ width: 44, height: 44, background: '#00a884', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                <Megaphone size={22} color="white" />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 16, color: '#111b21', fontWeight: 400 }}>Announcements</div>
+                                <div style={{ fontSize: 13, color: '#667781' }}>Community updates</div>
+                            </div>
+                        </div>
+
+                        {(community.groups || []).map(gItem => {
+                            const gId = typeof gItem === 'object' ? (gItem._id || gItem.id) : gItem;
+                            const fullGroup = groups.find(group => String(group._id) === String(gId));
+                            const g = fullGroup || (typeof gItem === 'object' ? gItem : null);
+                            if (!g) return null;
+                            return (
+                                <div key={String(gId)}
+                                    className="wa-manage-groups-item"
+                                    style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid #f0f2f5', background: 'white' }}
+                                    onClick={() => {
+                                        setIsCommunityGroupsListOpen(false);
+                                        setSelectedGroup(g);
+                                        setSelectedUser(null);
+                                        fetchGroupMessages(g._id);
+                                    }}>
+                                    <div style={{ width: 44, height: 44, borderRadius: '12px', background: '#f0f2f5', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                        {g.icon ? <img src={g.icon} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Users size={22} color="#8696a0" />}
+                                    </div>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 16, color: '#111b21', fontWeight: 400 }}>
+                                            {g.name || 'Group'}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    <div style={{ padding: '0', background: 'white', flex: 1 }}>
+                        <div
+                            className="wa-manage-groups-item"
+                            style={{ padding: '15px 20px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid #f0f2f5' }}
+                            onClick={() => {
+                                setIsCommunityGroupsListOpen(false);
+                                if (!selectedCommunity && community) setSelectedCommunity(community);
+                                setIsCommunityHomeOpen(true);
+                            }}
+                        >
+                            <ChevronRight size={20} color="#8696a0" />
+                            <span style={{ fontSize: 16, color: textColor }}>View community</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     const renderManageGroupsPanel = () => {
         const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
         if (!community) return null;
@@ -7150,27 +7258,27 @@ export default function Chat() {
 
         return (
             <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ background: '#202c33', borderRadius: '24px', width: '380px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', color: '#e9edef', overflow: 'hidden', boxShadow: '0 17px 50px 0 rgba(11,20,26,.19)' }}>
+                <div style={{ background: '#ffffff', borderRadius: '24px', width: '380px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', color: '#111b21', overflow: 'hidden', boxShadow: '0 17px 50px 0 rgba(11,20,26,.19)' }}>
                     <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <X size={24} color="#8696a0" style={{ cursor: 'pointer' }} onClick={() => { setIsCommunityAddMemberOpen(false); setCommunityAddMemberSearchQuery(''); setSelectedCommunityMembersToAdd([]); }} />
+                        <X size={24} color="#54656f" style={{ cursor: 'pointer' }} onClick={() => { setIsCommunityAddMemberOpen(false); setCommunityAddMemberSearchQuery(''); setSelectedCommunityMembersToAdd([]); }} />
                         <span style={{ fontSize: 16, fontWeight: 500 }}>Add member</span>
                     </div>
 
                     <div style={{ padding: '0 16px 12px 16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', background: '#111b21', borderRadius: '12px', padding: '8px 12px', border: '1px solid #2a3942' }}>
-                            <Search size={18} color="#00a884" style={{ marginRight: 12 }} />
+                        <div style={{ display: 'flex', alignItems: 'center', background: '#f0f2f5', borderRadius: '12px', padding: '8px 12px', border: 'none' }}>
+                            <Search size={18} color="#54656f" style={{ marginRight: 12 }} />
                             <input
                                 autoFocus
                                 type="text"
                                 placeholder="Search name or number"
                                 value={communityAddMemberSearchQuery}
                                 onChange={(e) => setCommunityAddMemberSearchQuery(e.target.value)}
-                                style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: 14, color: '#d1d7db' }}
+                                style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: 14, color: '#111b21' }}
                             />
                         </div>
                     </div>
 
-                    <div style={{ padding: '8px 24px', fontSize: '13px', color: '#8696a0', fontWeight: '500' }}>Contacts</div>
+                    <div style={{ padding: '8px 24px', fontSize: '13px', color: '#00a884', fontWeight: '500' }}>Contacts</div>
 
                     <div style={{ flex: 1, overflowY: 'auto' }}>
                         {filteredContacts.map(u => {
@@ -7186,7 +7294,7 @@ export default function Chat() {
                                             setSelectedCommunityMembersToAdd([...selectedCommunityMembersToAdd, u]);
                                         }
                                     }}
-                                    onMouseEnter={(e) => e.currentTarget.style.background = '#111b21'}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#f5f6f6'}
                                     onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                                 >
                                     <div style={{
@@ -7199,26 +7307,26 @@ export default function Chat() {
                                         alignItems: 'center',
                                         justifyContent: 'center'
                                     }}>
-                                        {isSelected && <Check size={14} color="#111b21" />}
+                                        {isSelected && <Check size={14} color="#ffffff" />}
                                     </div>
                                     <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                         {u.profile_photo || u.image ? <img src={u.profile_photo || u.image} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={20} color="#8696a0" />}
                                     </div>
                                     <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontSize: 16, color: '#e9edef', fontWeight: 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name}</div>
-                                        <div style={{ fontSize: 13, color: '#8696a0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.about || 'Available'}</div>
+                                        <div style={{ fontSize: 16, color: '#111b21', fontWeight: 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name}</div>
+                                        <div style={{ fontSize: 13, color: '#667781', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.about || 'Available'}</div>
                                     </div>
                                 </div>
                             );
                         })}
                     </div>
                     {selectedCommunityMembersToAdd.length > 0 && (
-                        <div style={{ padding: '16px', background: '#202c33', display: 'flex', justifyContent: 'center' }}>
+                        <div style={{ padding: '16px', background: '#ffffff', display: 'flex', justifyContent: 'center' }}>
                             <div
                                 onClick={() => { setIsConfirmCommunityAddMembersOpen(true); }}
                                 style={{ width: 44, height: 44, borderRadius: '50%', background: '#00a884', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}
                             >
-                                <ArrowRight size={24} color="#111b21" />
+                                <ArrowRight size={24} color="#ffffff" />
                             </div>
                         </div>
                     )}
@@ -7335,10 +7443,10 @@ export default function Chat() {
                                 {community.description || 'Welcome to our community!'}
                                 <span style={{ color: '#00a884', cursor: 'pointer', marginLeft: 4 }}>Read more</span>
                             </div>
-                            <Pencil size={20} color="#54656f" style={{ cursor: 'pointer' }} />
+                            <div style={{ width: 20 }}></div>
                         </div>
                         <div style={{ fontSize: 13, color: subTextColor, marginTop: 12 }}>
-                            Created by you, today at {new Date(community.id || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            Created by {community.creator && (String(community.creator._id || community.creator) === String(user.id || user._id)) ? 'you' : (community.creator?.name || 'Unknown')}, on {new Date(community.created_at || Date.now()).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
                         </div>
                     </div>
 
@@ -7346,7 +7454,7 @@ export default function Chat() {
                         {[
                             { icon: <Users size={20} />, label: 'Manage groups', onClick: () => { if (checkAddGroupPermission(community)) setIsManageGroupsOpen(true); } },
                             { icon: <Settings size={20} />, label: 'Community settings', onClick: () => setIsCommunitySettingsOpen(true) },
-                            { icon: <Users size={20} />, label: 'View groups (' + (community.groups?.length || 0) + ')' }
+                            { icon: <Users size={20} />, label: 'View groups (' + (community.groups?.length || 0) + ')', onClick: () => setIsCommunityGroupsListOpen(true) }
                         ].map((item, idx) => (
                             <div
                                 key={idx}
@@ -7393,16 +7501,11 @@ export default function Chat() {
                             <span style={{ color: textColor, fontSize: 16 }}>Add member</span>
                         </div>
                         {(() => {
-                            const communityOwner = community.owner || {
-                                id: userData.id || userData._id || user.id || user._id,
-                                name: userData.name || userData.full_name || userData.username || userData.mobile || userData.phone || 'You',
-                                mobile: userData.mobile || userData.phone,
-                                profile_photo: userData.profile_photo || userData.image || user.profile_photo
-                            };
+                            const communityOwner = community.creator;
                             if (!communityOwner) return null;
-                            const currentUserId = userData._id || userData.id || user.id || user._id;
-                            const isCurrentUserOwner = currentUserId && String(communityOwner.id) === String(currentUserId);
-                            const displayMobile = communityOwner.mobile || userData.mobile || userData.phone || '';
+                            const currentUserId = user.id || user._id;
+                            const isCurrentUserOwner = currentUserId && String(communityOwner._id || communityOwner.id || communityOwner) === String(currentUserId);
+                            const displayMobile = communityOwner.mobile || '';
                             return (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 15 }}>
                                     <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -7424,10 +7527,7 @@ export default function Chat() {
                         })()}
                         {community.members && community.members
                             .filter(m => {
-                                const ownerId =
-                                    (community.owner && community.owner.id) ||
-                                    userData.id || userData._id ||
-                                    user.id || user._id;
+                                const ownerId = community.creator?._id || community.creator;
                                 return String(m._id || m.id) !== String(ownerId);
                             })
                             .map(member => {
@@ -7448,14 +7548,16 @@ export default function Chat() {
                                         <div style={{ flex: 1 }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                 <span style={{ color: textColor, fontWeight: 500 }}>{member.name}</span>
-                                                <button
-                                                    onClick={() => {
-                                                        handleRemoveCommunityMember(community, member);
-                                                    }}
-                                                    style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#ea0038', padding: '4px' }}
-                                                >
-                                                    <X size={16} />
-                                                </button>
+                                                {String(community.creator?._id || community.creator) === String(user.id || user._id) && (
+                                                    <button
+                                                        onClick={() => {
+                                                            handleRemoveCommunityMember(community, member);
+                                                        }}
+                                                        style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#ea0038', padding: '4px' }}
+                                                    >
+                                                        <X size={16} />
+                                                    </button>
+                                                )}
                                             </div>
                                             {memberMobile && (
                                                 <div style={{ fontSize: 13, color: subTextColor }}>{memberMobile}</div>
@@ -9022,12 +9124,12 @@ export default function Chat() {
     const renderMainChat = () => (
         <div className="wa-main-chat-wrapper" style={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden' }}>
             <div
-                className={`wa-main-chat ${(isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen) ? 'wa-main-chat-with-panel' : ''}`}
+                className={`wa-main-chat ${(isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen) ? 'wa-main-chat-with-panel' : ''}`}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 style={{
                     flex: 1,
-                    borderRight: (isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen) ? '1px solid #d1d7db' : 'none'
+                    borderRight: (isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen) ? '1px solid #d1d7db' : 'none'
                 }}
             >
                 <NeuralBackground />
@@ -10450,6 +10552,7 @@ export default function Chat() {
             {isMessageSearchOpen && (selectedUser || selectedGroup) && renderSearchSidebar()}
             {renderContactInfoPanel()}
             {renderCommunityInfoPanel()}
+            {renderCommunityGroupsListPanel()}
             {renderManageGroupsPanel()}
             {renderAddExistingGroupsPanel()}
             {renderConfirmAddGroupsPanel()}
