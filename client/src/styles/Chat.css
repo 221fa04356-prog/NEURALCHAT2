@@ -2041,8 +2041,9 @@ html {
 }
 
 .wa-user-item:hover .wa-dropdown-trigger,
-.wa-message-bubble:hover .wa-dropdown-trigger {
-    opacity: 1;
+.wa-message-bubble:hover .wa-dropdown-trigger,
+.wa-dropdown-trigger.active {
+    opacity: 1 !important;
 }
 
 .wa-message-bubble {
@@ -2060,6 +2061,15 @@ html {
 
 .wa-msg-sent .wa-dropdown-trigger {
     background: linear-gradient(225deg, var(--wa-outgoing-msg-bg) 0%, rgba(255, 255, 255, 0) 70%);
+}
+
+.wa-dropdown-trigger.active {
+    border-radius: 50%;
+    transform: scale(1.1);
+}
+
+.wa-message-bubble .wa-dropdown-trigger.active {
+    border-radius: 50%;
 }
 
 .wa-dropdown-menu {
