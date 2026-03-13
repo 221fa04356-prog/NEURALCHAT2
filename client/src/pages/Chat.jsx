@@ -584,6 +584,16 @@ export default function Chat() {
         return String(sId) === String(myId);
     };
 
+    // --- Scroll to Bottom Effect ---
+    useEffect(() => {
+        if (bottomRef.current) {
+            // Use a short timeout to ensure the DOM has finished rendering height changes
+            setTimeout(() => {
+                bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+            }, 100);
+        }
+    }, [messages, groupMessages]);
+
     // Helper to highlight text and make links clickable
     const renderContent = (content) => {
         if (!content) return content;
@@ -3170,7 +3180,7 @@ export default function Chat() {
         if (selectedGroup) {
             setGroupMessages(prev => [...prev, { ...tempMsg, _id: tempId }]);
         } else {
-            setMessages(prev => [...prev, tempMsg]);
+            setMessages(prev => [...prev, { ...tempMsg, _id: tempId }]);
         }
 
         if (contentOverride !== null) {
@@ -3228,7 +3238,7 @@ export default function Chat() {
                 fetchGroups(); // Refresh group lists for last message sync
             } else {
                 setMessages(prev => prev.map(msg =>
-                    msg.id === tempId ? { ...sentMsg, reply_to: tempMsg.reply_to } : msg
+                    msg._id === tempId ? { ...sentMsg, reply_to: tempMsg.reply_to } : msg
                 ));
 
                 // critically: EMIT SOCKET NOW with the REAL server file_path and reply context
@@ -4109,7 +4119,7 @@ export default function Chat() {
                     <span style={{ fontSize: 19, fontWeight: 500, color: '#3b4a54', whiteSpace: 'nowrap', flexShrink: 0 }}>{t('chat_list.archived')}</span>
                 </div>
 
-                <div className="wa-drawer-content wa-user-list" style={{ background: 'white', display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
+                <div className="wa-drawer-content wa-user-list" onScroll={() => setOpenDropdown(null)} style={{ background: 'white', display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
                     {allArchived.length === 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#8696a0', padding: 40, textAlign: 'center' }}>
                             <Archive size={48} style={{ marginBottom: 20, opacity: 0.5 }} />
@@ -4133,7 +4143,7 @@ export default function Chat() {
                                             setSelectedGroup(null);
                                         }
                                     }}
-                                    onContextMenu={(e) => { e.preventDefault(); setOpenDropdown({ type: 'contact', id: item._id }); }}
+                                    onContextMenu={(e) => { e.preventDefault(); setDropdownPos({ x: e.clientX, y: e.clientY }); setOpenDropdown({ type: 'contact', id: item._id, data: item }); }}
                                     onTouchStart={(e) => { e.persist(); longPressTimer.current = setTimeout(() => { setOpenDropdown({ type: 'contact', id: item._id }); }, 600); }}
                                     onTouchEnd={() => clearTimeout(longPressTimer.current)}
                                     onTouchMove={() => clearTimeout(longPressTimer.current)}
@@ -4172,8 +4182,8 @@ export default function Chat() {
                                                     style={{ marginLeft: 4, opacity: 0.6, cursor: 'pointer' }}
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        const pos = e.clientY > window.innerHeight - 300 ? 'up' : 'down';
-                                                        setOpenDropdown({ type: 'contact', id: item._id, pos });
+                                                        setDropdownPos({ x: e.clientX, y: e.clientY });
+                                                        setOpenDropdown({ type: 'contact', id: item._id });
                                                     }}
                                                 />
                                             </div>
@@ -4241,7 +4251,7 @@ export default function Chat() {
                     </div>
                 </div>
 
-                <div className="wa-drawer-content wa-user-list" style={{ background: '#f0f2f5', display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', padding: 0 }}>
+                <div className="wa-drawer-content wa-user-list" onScroll={() => setOpenDropdown(null)} style={{ background: '#f0f2f5', display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', padding: 0 }}>
                     {isGlobalStarredLoading ? (
                         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0' }}>
                             <CircleDashed size={24} className="wa-spinner" style={{ animation: 'waSpinner 1s linear infinite' }} />
@@ -6511,9 +6521,9 @@ export default function Chat() {
 
         // Calculate positioning logic for fixed menu with zoom awareness
         const zoom = getAppZoom();
-        // Use fit-content approximations for boundary checks
-        const estMenuWidth = 260;
-        const estMenuHeight = 400;
+        // Use accurate size approximations to prevent premature flips and misalignments
+        const estMenuWidth = type === 'msg' ? 220 : 190;
+        const estMenuHeight = type === 'msg' ? 330 : 260;
 
         // Scale viewport dimensions for coordinate math
         const vWidth = window.innerWidth / zoom;
@@ -6523,33 +6533,54 @@ export default function Chat() {
         const mouseX = dropdownPos.x / zoom;
         const mouseY = dropdownPos.y / zoom;
 
-        // Center the menu horizontally on the click point for a more fluid feel
-        let left = mouseX - (estMenuWidth / 2);
-        let top = mouseY;
-
-        // Larger padding from edges (20px) to prevent cutting off or "stuck" feeling
-        const padding = 85;
-
-        // Vertical overflow check: flip if it would go off bottom
-        if (top + estMenuHeight > vHeight - padding) {
-            top = top - estMenuHeight;
-        }
-
-        // Horizontal overflow safety: clamp to viewport edges with padding
-        if (left < padding) left = padding;
-        if (left + estMenuWidth > vWidth - padding) {
-            left = vWidth - estMenuWidth - padding;
-        }
-
-        // Final safety clamps
-        top = Math.max(padding, Math.min(top, vHeight - estMenuHeight - padding));
-
         const menuStyle = {
             position: 'fixed',
-            top: top,
-            left: left,
             zIndex: 3000 // Very high
         };
+
+        const padding = 15;
+        let isFlippedUp = false;
+        
+        // Use a much larger height estimate to force flipping sooner on short screens
+        const flipTriggerHeight = type === 'msg' ? 450 : 350;
+
+        // Vertical positioning
+        if (mouseY + flipTriggerHeight > vHeight - padding) {
+            isFlippedUp = true;
+        }
+
+        if (isFlippedUp) {
+            // Anchor from the bottom
+            const bottomPos = vHeight - mouseY + 5;
+            menuStyle.bottom = Math.max(padding, bottomPos);
+            
+            // Limit height to available upper space so it doesn't clip off the top
+            const maxAvailableHeight = vHeight - bottomPos - padding;
+            menuStyle.maxHeight = `${maxAvailableHeight}px`;
+        } else {
+            // Anchor from the top
+            const topPos = mouseY + (type === 'msg' ? 15 : 10);
+            menuStyle.top = Math.max(padding, topPos);
+
+            // Limit height to available lower space so it doesn't clip off the bottom
+            const maxAvailableHeight = vHeight - topPos - padding;
+            menuStyle.maxHeight = `${maxAvailableHeight}px`;
+        }
+
+        // Horizontal positioning: align to the right of the trigger point
+        // Using `right` avoids arbitrary width guessing and overlap issues
+        const rightOffset = type === 'msg' ? 25 : 30;
+        let calculatedRight = vWidth - mouseX - rightOffset;
+        
+        // Ensure it doesn't push out of bounds or act weird on extreme narrow bounds
+        calculatedRight = Math.max(padding, calculatedRight);
+
+        // Fallback to left side scaling if clicked very far left or on mobile
+        if (mouseX < 250) {
+            menuStyle.left = Math.max(padding, mouseX - 10);
+        } else {
+            menuStyle.right = calculatedRight;
+        }
 
 
         if (type === 'msg') {
@@ -6557,11 +6588,18 @@ export default function Chat() {
             const isMe = String(data.sender_id?._id || data.sender_id || data.user_id) === String(currentUserId);
             const isDeleted = data.is_deleted_by_user || data.is_deleted_by_admin || (data.deleted_for && data.deleted_for.some(id => String(id) === String(currentUserId)));
             return (
-                <div
-                    className="wa-dropdown-menu msg-dropdown active-fixed"
-                    style={menuStyle}
-                    onClick={(e) => e.stopPropagation()}
-                >
+                <>
+                    <div 
+                        className="wa-dropdown-backdrop" 
+                        style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: 2999, background: 'transparent' }}
+                        onClick={() => setOpenDropdown(null)}
+                        onContextMenu={(e) => { e.preventDefault(); setOpenDropdown(null); }}
+                    />
+                    <div
+                        className="wa-dropdown-menu msg-dropdown active-fixed"
+                        style={menuStyle}
+                        onClick={(e) => e.stopPropagation()}
+                    >
                     {!isDeleted && (
                         <>
                             <div className="wa-reactions-row">
@@ -6638,6 +6676,7 @@ export default function Chat() {
                         <Trash2 size={18} style={{ marginRight: 12 }} /> Delete
                     </div>
                 </div>
+                </>
             );
         }
 
@@ -6647,7 +6686,14 @@ export default function Chat() {
             const displayName = data.name || (isCommunity ? 'Community' : (isGroup ? 'Unnamed Group' : 'User'));
 
             return (
-                <div className="wa-dropdown-menu contact-dropdown active-fixed" style={menuStyle} onClick={(e) => e.stopPropagation()}>
+                <>
+                    <div 
+                        className="wa-dropdown-backdrop" 
+                        style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: 2999, background: 'transparent' }}
+                        onClick={() => setOpenDropdown(null)}
+                        onContextMenu={(e) => { e.preventDefault(); setOpenDropdown(null); }}
+                    />
+                    <div className="wa-dropdown-menu contact-dropdown active-fixed" style={menuStyle} onClick={(e) => e.stopPropagation()}>
                     {archivedChatIds.includes(id) ? (
                         <div className="wa-dropdown-item" onClick={() => handleUnarchiveChat(id, displayName)}>
                             <Archive size={18} style={{ marginRight: 12 }} /> {isCommunity ? 'Unarchive community' : (isGroup ? 'Unarchive group' : 'Unarchive chat')}
@@ -6691,7 +6737,8 @@ export default function Chat() {
                     }}>
                         <Trash2 size={18} style={{ marginRight: 12 }} /> {data.is_community ? 'Exit community' : (isGroup ? 'Clear group' : 'Delete chat')}
                     </div>
-                </div>
+                    </div>
+                </>
             );
         }
 
@@ -6710,24 +6757,32 @@ export default function Chat() {
             };
 
             return (
-                <div
-                    className="wa-dropdown-menu contact-dropdown active-fixed"
-                    style={menuStyleHome}
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    <div className="wa-dropdown-item" onClick={() => { setIsCommunityInfoOpen(true); setOpenDropdown(null); }}>
-                        <Info size={18} style={{ marginRight: 12, color: '#54656f' }} /> Community info
+                <>
+                    <div 
+                        className="wa-dropdown-backdrop" 
+                        style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10001, background: 'transparent' }}
+                        onClick={() => setOpenDropdown(null)}
+                        onContextMenu={(e) => { e.preventDefault(); setOpenDropdown(null); }}
+                    />
+                    <div
+                        className="wa-dropdown-menu contact-dropdown active-fixed"
+                        style={menuStyleHome}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="wa-dropdown-item" onClick={() => { setIsCommunityInfoOpen(true); setOpenDropdown(null); }}>
+                            <Info size={18} style={{ marginRight: 12, color: '#54656f' }} /> Community info
+                        </div>
+                        <div className="wa-dropdown-item" onClick={() => { setOpenDropdown(null); }}>
+                            <Users size={18} style={{ marginRight: 12, color: '#54656f' }} /> View members
+                        </div>
+                        <div className="wa-dropdown-item" onClick={() => {
+                            setIsCommunitySettingsOpen(true);
+                            setOpenDropdown(null);
+                        }}>
+                            <Settings size={18} style={{ marginRight: 12, color: '#54656f' }} /> Community settings
+                        </div>
                     </div>
-                    <div className="wa-dropdown-item" onClick={() => { setOpenDropdown(null); }}>
-                        <Users size={18} style={{ marginRight: 12, color: '#54656f' }} /> View members
-                    </div>
-                    <div className="wa-dropdown-item" onClick={() => {
-                        setIsCommunitySettingsOpen(true);
-                        setOpenDropdown(null);
-                    }}>
-                        <Settings size={18} style={{ marginRight: 12, color: '#54656f' }} /> Community settings
-                    </div>
-                </div>
+                </>
             );
         }
     };
@@ -8385,7 +8440,7 @@ export default function Chat() {
             </div>
 
             {/* Chat List: Groups + Users combined */}
-            <div className="wa-user-list">
+            <div className="wa-user-list" onScroll={() => { setOpenDropdown(null); }}>
                 {!isDataLoaded ? (
                     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0' }}>
                         <CircleDashed size={24} className="wa-spinner" style={{ animation: 'waSpinner 1s linear infinite' }} />
@@ -8476,7 +8531,7 @@ export default function Chat() {
                                                 setSelectedGroup(null);
                                             }
                                         }}
-                                        onContextMenu={(e) => { e.preventDefault(); setOpenDropdown({ type: 'contact', id: item._id, data: item }); }}
+                                        onContextMenu={(e) => { e.preventDefault(); setDropdownPos({ x: e.clientX, y: e.clientY }); setOpenDropdown({ type: 'contact', id: item._id, data: item }); }}
                                         onTouchStart={(e) => { e.persist(); longPressTimer.current = setTimeout(() => { setOpenDropdown({ type: 'contact', id: item._id, data: item }); }, 600); }}
                                         onTouchEnd={() => clearTimeout(longPressTimer.current)}
                                         onTouchMove={() => clearTimeout(longPressTimer.current)}
@@ -8501,10 +8556,10 @@ export default function Chat() {
                                                 <span className="wa-chat-name">{displayName}</span>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                                     <span className="wa-chat-time">{formatTime(item.lastMessage?.created_at || item.created_at)}</span>
-                                                    <div className="wa-dropdown-trigger" onClick={(e) => {
+                                                    <div className={`wa-dropdown-trigger ${(openDropdown?.type === 'contact' && openDropdown?.id === item._id) ? 'active' : ''}`} onClick={(e) => {
                                                         e.stopPropagation();
-                                                        const pos = e.clientY > window.innerHeight - 300 ? 'up' : 'down';
-                                                        setOpenDropdown({ type: 'contact', id: item._id, pos, data: item });
+                                                        setDropdownPos({ x: e.clientX, y: e.clientY });
+                                                        setOpenDropdown({ type: 'contact', id: item._id, data: item });
                                                     }}>
                                                         <ChevronDown size={18} />
                                                     </div>
@@ -9294,17 +9349,10 @@ export default function Chat() {
                                         )}
                                         <div className="wa-group-messages">
                                             {group.msgs.map((msg, msgIdx) => {
-                                                const myId = user.id || user._id;
-                                                // The provided snippet seems to be server-side code.
-                                                // Assuming the intent was to add a client-side log for forward_count if available in msg.
-                                                // If this was intended for a server-side file, please provide that file.
-                                                if (msg.isForwarded || msg.is_forwarded) {
-                                                    console.log('DEBUG: Client-side message. Forwarded:', msg.isForwarded || msg.is_forwarded, 'Forward Count:', msg.forward_count);
-                                                }
-                                                const isMe = (msg.sender_id === myId) || (msg.user_id === myId);
+                                                const isMe = isMeMsg(msg);
 
                                                 return (
-                                                    <div key={msg.id || msgIdx}
+                                                    <div key={msg._id || msg.id || msgIdx}
                                                         id={`msg-${msg._id}`}
                                                         className={`wa-message-container ${isForwardingMode ? 'forward-mode' : ''}`}
                                                         onClick={() => {
@@ -9999,6 +10047,7 @@ export default function Chat() {
                             ref={chatMessagesRef}
                             className="wa-chat-messages-area"
                             onScroll={() => {
+                                setOpenDropdown(null);
                                 const el = chatMessagesRef.current;
                                 if (!el) return;
                                 const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -10134,7 +10183,7 @@ export default function Chat() {
                                                             onContextMenu={(e) => { if (!isForwardingMode) { e.preventDefault(); handleMsgDropdownOpen(e, msg._id, msg); } }}
                                                         >
                                                             {!isForwardingMode && (
-                                                                <div className="wa-dropdown-trigger msg-trigger" onClick={(e) => handleMsgDropdownOpen(e, msg._id, msg)}>
+                                                                <div className={`wa-dropdown-trigger msg-trigger ${(openDropdown?.type === "msg" && openDropdown?.id === msg._id) ? "active" : ""}`} onClick={(e) => handleMsgDropdownOpen(e, msg._id, msg)}>
                                                                     <ChevronDown size={18} />
                                                                 </div>
                                                             )}
@@ -11510,8 +11559,8 @@ export default function Chat() {
 
             {infoMessage && renderMessageInfo()}
 
-            {/* Global Dropdown Menu */}
-            {openDropdown && renderDropdownMenu(openDropdown.type, openDropdown.id, openDropdown.data)}
+                    {/* Global Dropdown Menu */}
+                    {openDropdown && renderDropdownMenu(openDropdown.type, openDropdown.id, openDropdown.data)}
             {isMuteModalOpen && renderMuteModal()}
             {pinReplaceModal && renderPinReplaceModal()}
             {isForwardModalOpen && renderForwardModal()}
