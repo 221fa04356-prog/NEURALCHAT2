@@ -144,7 +144,8 @@ router.get('/my-groups', authenticateToken, async (req, res) => {
         const userFavorites = currentUserObj?.favorites || [];
 
         const groups = await Group.find({
-            $or: [{ members: userId }, { removedMembers: userId }]
+            $or: [{ members: userId }, { removedMembers: userId }],
+            isAnnouncementGroup: { $ne: true }
         })
             .populate('members', 'name email _id isOnline lastSeen')
             .populate('admin', 'name _id')
