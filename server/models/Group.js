@@ -13,10 +13,15 @@ const groupSchema = new mongoose.Schema({
         inviteLink: { type: Boolean, default: false },
         approveMembers: { type: Boolean, default: false }
     },
+    isAnnouncementGroup: { type: Boolean, default: false },
     created_at: { type: Date, default: Date.now }
 }, {
     toJSON: { virtuals: true },
     toObject: { virtuals: true }
+});
+
+groupSchema.virtual('isAnnouncement').get(function() {
+    return this.isAnnouncementGroup;
 });
 
 module.exports = mongoose.model('Group', groupSchema);
