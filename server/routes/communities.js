@@ -102,6 +102,7 @@ router.post('/create', authenticateToken, async (req, res) => {
             icon: icon || null,
             creator: creatorObjId,
             members: [creatorObjId],
+            admins: [creatorObjId], // Creator is also the first admin
             announcements: announcementsGroup._id,
             groups: []
         });
@@ -154,9 +155,17 @@ router.patch('/:communityId/members', authenticateToken, async (req, res) => {
             return res.status(403).json({ error: 'Only community owner and admins can add members' });
         }
 
+        // Strictly add to members array and clean up removedMembers AND ghost admins. 
+        // Community admins are managed separately.
         await Community.updateOne(
             { _id: community._id },
-            { $addToSet: { members: { $each: idsToAdd } } }
+            { 
+                $addToSet: { members: { $each: idsToAdd } },
+                $pull: { 
+                    removedMembers: { $in: idsToAdd },
+                    admins: { $in: idsToAdd } // Ensure they don't join as "ghost admins"
+                }
+            }
         );
 
         if (community.announcements) {
@@ -275,11 +284,11 @@ router.delete('/:communityId/members/:memberId', authenticateToken, async (req, 
         const memberObjId = toObjectId(memberId);
         if (!memberObjId) return res.status(400).json({ error: 'Invalid memberId' });
 
-        // 1. Move member to removedMembers in Community
+        // 1. Move member to removedMembers in Community and CLEAN UP ADMINS
         await Community.updateOne(
             { _id: communityId },
             {
-                $pull: { members: memberObjId },
+                $pull: { members: memberObjId, admins: memberObjId },
                 $addToSet: { removedMembers: memberObjId }
             }
         );
@@ -369,23 +378,31 @@ router.patch('/:communityId/groups', authenticateToken, async (req, res) => {
         if (idsToAdd.length === 0) return res.status(400).json({ error: 'No valid groupIds' });
 
         // 1. Collect all members from the added groups
-        const groupsData = await Group.find({ _id: { $in: idsToAdd } }).select('members');
-        let allNewMemberIds = new Set();
+        const groupsData = await Group.find({ _id: { $in: idsToAdd } }).select('members admin admins');
+        let allNewMemberIdsStr = new Set();
         groupsData.forEach(g => {
-            if (g.members) {
-                g.members.forEach(m => allNewMemberIds.add(m.toString()));
-            }
+            if (g.members) g.members.forEach(m => allNewMemberIdsStr.add(m.toString()));
+            if (g.admin) allNewMemberIdsStr.add(g.admin.toString());
+            if (g.admins) g.admins.forEach(a => allNewMemberIdsStr.add(a.toString()));
         });
-        const membersToAddToCommunity = Array.from(allNewMemberIds);
+        const membersToAddToCommunityStr = Array.from(allNewMemberIdsStr);
+        const membersToAddToCommunityObj = membersToAddToCommunityStr.map(id => toObjectId(id)).filter(Boolean);
 
         // 2. Add groups and members to the community
+        // NOTE: We only add them to the 'members' array. 
+        // Even if they are admins in their respective groups, 
+        // they become normal community members until promoted by an owner/admin.
         await Community.updateOne(
             { _id: communityId },
             { 
                 $addToSet: { 
                     groups: { $each: idsToAdd },
-                    members: { $each: membersToAddToCommunity }
-                } 
+                    members: { $each: membersToAddToCommunityObj }
+                },
+                $pull: { 
+                    removedMembers: { $in: membersToAddToCommunityObj },
+                    admins: { $in: membersToAddToCommunityObj } // Prevent group admins from becoming ghost community admins
+                }
             }
         );
 
@@ -393,7 +410,10 @@ router.patch('/:communityId/groups', authenticateToken, async (req, res) => {
         if (community.announcements) {
             await Group.updateOne(
                 { _id: community.announcements },
-                { $addToSet: { members: { $each: membersToAddToCommunity } } }
+                { 
+                    $addToSet: { members: { $each: membersToAddToCommunityObj } },
+                    $pull: { removedMembers: { $in: membersToAddToCommunityObj } }
+                }
             );
 
             for (const gId of idsToAdd) {
@@ -464,8 +484,8 @@ router.patch('/:communityId/groups', authenticateToken, async (req, res) => {
             };
             
             // 1. Specifically notify new members so it appears in their sidebar
-            membersToAddToCommunity.forEach(id => {
-                req.io.to(String(id)).emit('community_member_added', {
+            membersToAddToCommunityObj.forEach(id => {
+                req.io.to(id.toString()).emit('community_member_added', {
                     community: communityData
                 });
             });
@@ -559,13 +579,19 @@ router.post('/:communityId/admins/toggle', authenticateToken, async (req, res) =
         const community = await Community.findById(communityId);
         if (!community) return res.status(404).json({ error: 'Community not found' });
 
-        // Only owner can toggle admins
-        if (String(community.creator) !== String(currentUserId)) {
-            return res.status(403).json({ error: 'Only community owner can manage admins' });
+        // Only owner or admin can toggle admins
+        const isCommAdmin = (community.admins || []).some(id => String(id) === String(currentUserId));
+        if (String(community.creator) !== String(currentUserId) && !isCommAdmin) {
+            return res.status(403).json({ error: 'Only community owner and admins can manage admins' });
         }
 
         const userToToggle = toObjectId(userId);
         if (!userToToggle) return res.status(400).json({ error: 'Invalid user id' });
+
+        // Cannot toggle the owner
+        if (String(community.creator) === String(userId)) {
+            return res.status(403).json({ error: 'Cannot manage the community owner status' });
+        }
 
         const isAdmin = (community.admins || []).some(id => String(id) === String(userId));
 
@@ -599,6 +625,241 @@ router.post('/:communityId/admins/toggle', authenticateToken, async (req, res) =
         }
 
         res.json({ status: 'updated', community: updated });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/communities/:communityId/transfer-ownership - transfer community ownership
+router.post('/:communityId/transfer-ownership', authenticateToken, async (req, res) => {
+    try {
+        const { communityId } = req.params;
+        const { newOwnerId } = req.body;
+        const currentUserId = req.user.id;
+
+        const community = await Community.findById(communityId);
+        if (!community) return res.status(404).json({ error: 'Community not found' });
+
+        // Only owner can transfer ownership
+        if (String(community.creator) !== String(currentUserId)) {
+            return res.status(403).json({ error: 'Only the community owner can transfer ownership' });
+        }
+
+        const newOwnerObjId = toObjectId(newOwnerId);
+        if (!newOwnerObjId) return res.status(400).json({ error: 'Invalid user id' });
+
+        // Check if new owner is a member
+        const memberIds = community.members.map(m => String(m._id || m));
+        const isMember = memberIds.includes(String(newOwnerId));
+        if (!isMember) {
+            console.error('[TRANSFER OWNERSHIP] Target user is not a member of the community');
+            return res.status(400).json({ error: 'New owner must be a member of the community' });
+        }
+
+        // 1. Update Community: change creator, add old owner to admins, ensure new owner is admin
+        await Community.updateOne(
+            { _id: communityId },
+            { 
+                $set: { creator: newOwnerObjId },
+                $addToSet: { admins: { $each: [toObjectId(currentUserId), newOwnerObjId] } }
+            }
+        );
+
+        // Update Announcement Group owner as well
+        if (community.announcements) {
+            await Group.updateOne(
+                { _id: community.announcements },
+                { $set: { admin: newOwnerObjId } }
+            );
+        }
+
+        // 2. Add system message to announcements
+        if (community.announcements) {
+            const User = require('../models/User');
+            const adminUser = await User.findById(currentUserId);
+            const newOwnerUser = await User.findById(newOwnerId);
+            const adminName = adminUser ? adminUser.name : 'Owner';
+            const newOwnerName = newOwnerUser ? newOwnerUser.name : 'User';
+
+            const sysMsg = await GroupMessage.create({
+                group_id: community.announcements,
+                sender_id: currentUserId,
+                type: 'system',
+                is_system: true,
+                content: `${adminName} assigned ${newOwnerName} as the new owner`
+            });
+
+            // Notify everyone in the group
+            if (req.io) {
+                const group = await Group.findById(community.announcements);
+                (group.members || []).forEach(uid => {
+                    req.io.to(String(uid)).emit('group_message', {
+                        groupId: community.announcements.toString(),
+                        message: sysMsg
+                    });
+                });
+            }
+        }
+
+        const updated = await Community.findById(communityId)
+            .populate('creator', 'name mobile countryCode _id')
+            .populate('members', 'name mobile countryCode _id about')
+            .populate('admins', 'name mobile countryCode _id about')
+            .populate('announcements', 'name icon _id members admin')
+            .populate('groups')
+            .lean();
+
+        // Notify everyone to refresh
+        if (req.io) {
+            const allMembers = [
+                updated.creator?._id || updated.creator,
+                ...(updated.members || []).map(m => m._id || m)
+            ];
+            const communityData = { ...updated, id: updated._id, is_community: true };
+            allMembers.forEach(uid => {
+                req.io.to(uid.toString()).emit('community_updated', { community: communityData });
+            });
+        }
+
+        res.json({ status: 'success', community: updated });
+    } catch (err) {
+        console.error('[TRANSFER OWNERSHIP ERROR]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PATCH /api/communities/:communityId - generic update for settings
+router.patch('/:communityId', authenticateToken, async (req, res) => {
+    try {
+        const { communityId } = req.params;
+        const { name, description, whoCanAddGroups } = req.body;
+        const userId = req.user.id;
+
+        const community = await Community.findById(communityId);
+        if (!community) return res.status(404).json({ error: 'Community not found' });
+
+        // Only owner or admin can update settings
+        const isCommAdmin = (community.admins || []).some(id => String(id) === String(userId));
+        if (String(community.creator) !== String(userId) && !isCommAdmin) {
+            return res.status(403).json({ error: 'Only community owner and admins can update settings' });
+        }
+
+        if (name !== undefined) community.name = name;
+        if (description !== undefined) community.description = description;
+        if (whoCanAddGroups !== undefined) community.whoCanAddGroups = whoCanAddGroups;
+
+        await community.save();
+
+        const updated = await Community.findById(communityId)
+            .populate('creator', 'name mobile countryCode _id')
+            .populate('members', 'name mobile countryCode _id about')
+            .populate('admins', 'name mobile countryCode _id about')
+            .populate('announcements', 'name icon _id members admin')
+            .populate('groups')
+            .lean();
+
+        if (req.io) {
+            const allMembers = [
+                updated.creator?._id || updated.creator,
+                ...(updated.members || []).map(m => m._id || m)
+            ];
+            const communityData = { ...updated, id: updated._id, is_community: true };
+            allMembers.forEach(uid => {
+                req.io.to(uid.toString()).emit('community_updated', { community: communityData });
+            });
+        }
+
+        res.json({ status: 'updated', community: updated });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/communities/:communityId - deactivated/delete community
+router.delete('/:communityId', authenticateToken, async (req, res) => {
+    try {
+        const { communityId } = req.params;
+        const community = await Community.findById(communityId);
+        if (!community) return res.status(404).json({ error: 'Community not found' });
+
+        // Only creator can deactivate the community? 
+        // User said: "admins can perform these actions... deactivating communities"
+        const isCommAdmin = (community.admins || []).some(id => String(id) === String(req.user.id));
+        if (String(community.creator) !== String(req.user.id) && !isCommAdmin) {
+            return res.status(403).json({ error: 'Only community owner and admins can deactivate community' });
+        }
+
+        // Notify members before deletion
+        if (req.io) {
+            const allMembers = [
+                community.creator,
+                ...(community.members || [])
+            ];
+            allMembers.forEach(uid => {
+                req.io.to(String(uid)).emit('community_deactivated', { communityId });
+            });
+        }
+
+        await Community.deleteOne({ _id: communityId });
+        // Optionally delete announcement group too
+        if (community.announcements) {
+            await Group.deleteOne({ _id: community.announcements });
+            await GroupMessage.deleteMany({ group_id: community.announcements });
+        }
+
+        res.json({ status: 'success', message: 'Community deactivated' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/communities/:communityId/exit - exit from community
+router.post('/:communityId/exit', authenticateToken, async (req, res) => {
+    try {
+        const { communityId } = req.params;
+        const userId = req.user.id;
+        const userObjId = toObjectId(userId);
+
+        const community = await Community.findById(communityId);
+        if (!community) return res.status(404).json({ error: 'Community not found' });
+
+        // Cannot exit if owner
+        if (String(community.creator) === String(userId)) {
+            return res.status(400).json({ error: 'Owner cannot exit community. Transfer ownership or deactivate instead.' });
+        }
+
+        // Remove from members and admins
+        await Community.updateOne(
+            { _id: communityId },
+            {
+                $pull: { members: userObjId, admins: userObjId },
+                $addToSet: { removedMembers: userObjId }
+            }
+        );
+
+        // Also remove from announcements
+        if (community.announcements) {
+            await Group.updateOne(
+                { _id: community.announcements },
+                {
+                    $pull: { members: userObjId },
+                    $addToSet: { removedMembers: userObjId }
+                }
+            );
+        }
+
+        // Notify others
+        if (req.io) {
+            const allMembers = [
+                community.creator,
+                ...(community.members || [])
+            ];
+            allMembers.forEach(uid => {
+                req.io.to(uid.toString()).emit('community_updated', { communityId });
+            });
+        }
+
+        res.json({ status: 'success', message: 'Exited from community' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
