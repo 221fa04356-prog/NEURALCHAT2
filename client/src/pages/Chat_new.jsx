@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+﻿import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import logo from '../assets/logo.png';
 import { useNavigate } from 'react-router-dom';
@@ -9,8 +9,7 @@ import {
     Info, Reply, Copy, Forward, Pin, CheckSquare, Download, Trash2, Archive, BellOff, HeartOff, XCircle, Lock, List, Heart, ThumbsDown, Share, Pencil, Image, StarOff, Camera, Link2 as LinkIcon,
     LayoutGrid, UserPlus, ArrowRight, Share2, Crop, Check, RotateCcw, Minus, Delete, User, Play, MapPin, IndianRupee, Sticker,
     ShieldCheck, Monitor, BellRing, Laptop, LogOut, Globe, Clock, Building2, Mail, Briefcase, ExternalLink,
-    ShieldAlert, Fingerprint, HardDrive, Keyboard, HelpCircle, Settings2, Volume2, MonitorSmartphone, Shield,
-    AlertCircle, UserCheck
+    ShieldAlert, Fingerprint, HardDrive, Keyboard, HelpCircle, Settings2, Volume2, MonitorSmartphone
 } from 'lucide-react';
 import io from 'socket.io-client';
 import '../styles/Chat.css';
@@ -110,6 +109,8 @@ export default function Chat() {
 
 
     const [userData, setUserData] = useState(user); // For Profile Display
+    const [accountBanned, setAccountBanned] = useState(user.bannedUntil || null);
+    const [accountLocked, setAccountLocked] = useState(user.adminLock || false);
     const [searchQuery, setSearchQuery] = useState('');
     const [newChatSearchQuery, setNewChatSearchQuery] = useState('');
     const [groupSearchQuery, setGroupSearchQuery] = useState('');
@@ -158,7 +159,7 @@ export default function Chat() {
     const [editFirstName, setEditFirstName] = useState('');
     const [editLastName, setEditLastName] = useState('');
     const [editPhone, setEditPhone] = useState('');
-    const [editCountry, setEditCountry] = useState({ name: 'India', code: 'IN', dial: '+91', flag: '🇮🇳' });
+    const [editCountry, setEditCountry] = useState({ name: 'India', code: 'IN', dial: '+91', flag: 'ðŸ‡®ðŸ‡³' });
     const [isSyncEnabled, setIsSyncEnabled] = useState(true);
     const [isCountryDropdownOpen, setIsCountryDropdownOpen] = useState(false);
 
@@ -180,15 +181,8 @@ export default function Chat() {
     const [showUnreadBanner, setShowUnreadBanner] = useState(true);
     const [showGroupMenu, setShowGroupMenu] = useState(false);
     const [showNotificationDetails, setShowNotificationDetails] = useState(false);
-    const [messageRequests, setMessageRequests] = useState([]); // Message request list
-    const [isRequestsModalOpen, setIsRequestsModalOpen] = useState(false); // Requests modal
-    const [accountBanned, setAccountBanned] = useState(user.bannedUntil || null); // Temporary ban
-    const [accountLocked, setAccountLocked] = useState(user.adminLock || false); // Permanent lock
-
-    const isAccountBanned = () => {
-        if (!accountBanned) return false;
-        return new Date() < new Date(accountBanned);
-    };
+    const [messageRequests, setMessageRequests] = useState([]); // New state for message requests
+    const [isRequestsModalOpen, setIsRequestsModalOpen] = useState(false);
     const starredMenuRef = useRef(null);
     const globalStarredMenuRef = useRef(null);
     const filtersRef = useRef(null);
@@ -461,6 +455,26 @@ export default function Chat() {
             setSnackbar({ message: `Update Failed: ${errorMsg}`, type: 'error' });
         }
     };
+
+    const fetchCurrentUser = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) return;
+            const res = await axios.get('/api/chat/me', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.data) {
+                const userFromStorage = JSON.parse(localStorage.getItem('user') || '{}');
+                const updatedUser = { ...userFromStorage, ...res.data };
+                localStorage.setItem('user', JSON.stringify(updatedUser));
+                setUserData(updatedUser);
+                setAccountBanned(res.data.bannedUntil || null);
+                setAccountLocked(res.data.adminLock || false);
+            }
+        } catch (err) {
+            console.error('Failed to fetch current user profile:', err);
+        }
+    };
     const [isEditingProfileAbout, setIsEditingProfileAbout] = useState(false);
     const [isEditingProfilePhone, setIsEditingProfilePhone] = useState(false);
     const [profileEditValue, setProfileEditValue] = useState("");
@@ -530,11 +544,6 @@ export default function Chat() {
     const [communityAddMemberSearchQuery, setCommunityAddMemberSearchQuery] = useState('');
     const [selectedCommunityMembersToAdd, setSelectedCommunityMembersToAdd] = useState([]);
     const [isConfirmCommunityAddMembersOpen, setIsConfirmCommunityAddMembersOpen] = useState(false);
-
-    const [isGroupAddMemberOpen, setIsGroupAddMemberOpen] = useState(false);
-    const [groupAddMemberSearchQuery, setGroupAddMemberSearchQuery] = useState('');
-    const [selectedGroupMembersToAdd, setSelectedGroupMembersToAdd] = useState([]);
-    const [isConfirmGroupAddMembersOpen, setIsConfirmGroupAddMembersOpen] = useState(false);
     const [communities, setCommunities] = useState([]);
     const [isCommunityHomeOpen, setIsCommunityHomeOpen] = useState(false);
     const [isCommunityInfoOpen, setIsCommunityInfoOpen] = useState(false);
@@ -546,10 +555,6 @@ export default function Chat() {
     useEffect(() => { selectedCommunityRef.current = selectedCommunity; }, [selectedCommunity]);
     const [isCommunityDescDismissed, setIsCommunityDescDismissed] = useState(false);
     const [adminContextMenu, setAdminContextMenu] = useState(null); // { member, x, y, communityId, isAdmin }
-    const [isAssignOwnerModalOpen, setIsAssignOwnerModalOpen] = useState(false);
-    const [assignOwnerTarget, setAssignOwnerTarget] = useState(null); // { member, communityId }
-    const [isSelectOwnerPanelOpen, setIsSelectOwnerPanelOpen] = useState(false);
-    const [selectOwnerSearchQuery, setSelectOwnerSearchQuery] = useState('');
 
     // Communities are persisted in MongoDB; only pin/mute preferences remain in localStorage.
 
@@ -585,14 +590,14 @@ export default function Chat() {
 
 
     const countries = [
-        { name: 'India', code: 'IN', dial: '+91', flag: '🇮🇳' },
-        { name: 'Indonesia', code: 'ID', dial: '+62', flag: '🇮🇩' },
-        { name: 'Iran', code: 'IR', dial: '+98', flag: '🇮🇷' },
-        { name: 'Iraq', code: 'IQ', dial: '+964', flag: '🇮🇶' },
-        { name: 'Ireland', code: 'IE', dial: '+353', flag: '🇮🇪' },
-        { name: 'Isle of Man', code: 'IM', dial: '+44', flag: '🇮🇲' },
-        { name: 'Israel', code: 'IL', dial: '+972', flag: '🇮🇱' },
-        { name: 'Italy', code: 'IT', dial: '+39', flag: '🇮🇹' },
+        { name: 'India', code: 'IN', dial: '+91', flag: 'ðŸ‡®ðŸ‡³' },
+        { name: 'Indonesia', code: 'ID', dial: '+62', flag: 'ðŸ‡®ðŸ‡©' },
+        { name: 'Iran', code: 'IR', dial: '+98', flag: 'ðŸ‡®ðŸ‡·' },
+        { name: 'Iraq', code: 'IQ', dial: '+964', flag: 'ðŸ‡®ðŸ‡¶' },
+        { name: 'Ireland', code: 'IE', dial: '+353', flag: 'ðŸ‡®ðŸ‡ª' },
+        { name: 'Isle of Man', code: 'IM', dial: '+44', flag: 'ðŸ‡®ðŸ‡²' },
+        { name: 'Israel', code: 'IL', dial: '+972', flag: 'ðŸ‡®ðŸ‡±' },
+        { name: 'Italy', code: 'IT', dial: '+39', flag: 'ðŸ‡®ðŸ‡¹' },
         // ... add more as needed
     ];
 
@@ -759,7 +764,7 @@ export default function Chat() {
                         selection.removeAllRanges();
 
                         if (successful) {
-                            console.log('✅ Image copied using HTTP fallback');
+                            console.log('âœ… Image copied using HTTP fallback');
                             setSnackbar({ message: 'Image copied to clipboard!', type: 'success', variant: 'system' });
                             setOpenDropdown(null);
                             return;
@@ -799,7 +804,7 @@ export default function Chat() {
                         })
                     ]);
 
-                    console.log('✅ Image copied successfully');
+                    console.log('âœ… Image copied successfully');
                     setSnackbar({ message: 'Image copied to clipboard!', type: 'success', variant: 'system' });
                     setOpenDropdown(null);
                     return;
@@ -1280,6 +1285,31 @@ export default function Chat() {
             setSnackbar({ message: `Reconnecting... (${err.message})`, type: 'info' });
         };
 
+        const onNewMessageRequest = (data) => {
+            console.log('Socket: new_message_request', data);
+            setSnackbar({ message: `New message request from ${data.senderName}`, type: 'info', variant: 'system' });
+            fetchMessageRequests();
+        };
+
+        const onRequestAccepted = (data) => {
+            console.log('Socket: request_accepted', data);
+            setSnackbar({ message: `Your message request to ${data.receiverName} was accepted!`, type: 'success', variant: 'system' });
+            fetchUsers();
+            fetchMessageRequests();
+        };
+
+        const onAccountBanned = (data) => {
+            console.log('Socket: account_banned', data);
+            setAccountBanned(data.bannedUntil);
+            setSnackbar({ message: `Your account is banned until ${new Date(data.bannedUntil).toLocaleString()}`, type: 'error' });
+        };
+
+        const onAccountLocked = (data) => {
+            console.log('Socket: account_locked', data);
+            setAccountLocked(true);
+            setSnackbar({ message: 'Your account has been locked due to multiple rejections.', type: 'error' });
+        };
+
         const onReceiveMessage = (data) => {
             console.log('[DEBUG] Socket: receive_message', data);
             const senderId = data.sender_id || data.user_id;
@@ -1317,10 +1347,10 @@ export default function Chat() {
 
                     let previewText = 'Sent a message';
                     if (data.type === 'text') previewText = data.content;
-                    else if (data.type === 'image') previewText = '📷 Sent an image';
-                    else if (data.type === 'video') previewText = '🎥 Video';
-                    else if (data.type === 'audio') previewText = '🎤 Voice message';
-                    else if (data.type === 'file') previewText = '📄 Sent a file';
+                    else if (data.type === 'image') previewText = 'ðŸ“· Sent an image';
+                    else if (data.type === 'video') previewText = 'ðŸŽ¥ Video';
+                    else if (data.type === 'audio') previewText = 'ðŸŽ¤ Voice message';
+                    else if (data.type === 'file') previewText = 'ðŸ“„ Sent a file';
 
                     if (previewText.length > 50) previewText = previewText.substring(0, 50) + '...';
 
@@ -1532,6 +1562,10 @@ export default function Chat() {
         socket.on('message_pinned', onMessagePinned);
         socket.on('message_opened', onMessageOpened);
         socket.on('user_profile_updated', onUserProfileUpdated);
+        socket.on('new_message_request', onNewMessageRequest);
+        socket.on('request_accepted', onRequestAccepted);
+        socket.on('account_banned', onAccountBanned);
+        socket.on('account_locked', onAccountLocked);
 
         const onForceLogout = () => {
             console.warn('Socket: force_logout received. Another session was started.');
@@ -1540,56 +1574,6 @@ export default function Chat() {
             window.location.href = '/';
         };
         socket.on('force_logout', onForceLogout);
-
-        const onNewMessageRequest = (data) => {
-            console.log('Socket: new_message_request', data);
-            setSnackbar({ message: `New message request from ${data.senderName}`, type: 'info', variant: 'system' });
-            fetchMessageRequests();
-        };
-        socket.on('new_message_request', onNewMessageRequest);
-
-        const onRequestAccepted = (data) => {
-            console.log('Socket: request_accepted', data);
-            setSnackbar({ message: `Your message request to ${data.receiverName} was accepted!`, type: 'success', variant: 'system' });
-            fetchUsers();
-            fetchMessageRequests();
-        };
-        socket.on('request_accepted', onRequestAccepted);
-
-        const onAccountBanned = (data) => {
-            console.log('Socket: account_banned', data);
-            setAccountBanned(data.bannedUntil);
-            // Removed snackbar as requested by user - banner will handle display
-        };
-        socket.on('account_banned', onAccountBanned);
-
-        const onAccountLocked = (data) => {
-            console.log('Socket: account_locked', data);
-            setAccountLocked(true);
-            setSnackbar({ message: 'Your account has been locked due to multiple rejections.', type: 'error' });
-        };
-        socket.on('account_locked', onAccountLocked);
-        
-        const onMessageRestrictionUpdated = (data) => {
-            console.log('Socket: message_restriction_updated', data);
-            const { targetId, status, updatedAt, rejectedBy } = data;
-            
-            setUsers(prev => prev.map(u => 
-                String(u._id) === String(targetId) 
-                    ? { ...u, requestStatus: status, requestUpdatedAt: updatedAt, requestRejectedBy: rejectedBy } 
-                    : u
-            ));
-
-            if (selectedUserRef.current && String(selectedUserRef.current._id) === String(targetId)) {
-                setSelectedUser(prev => ({
-                    ...prev,
-                    requestStatus: status,
-                    requestUpdatedAt: updatedAt,
-                    requestRejectedBy: rejectedBy
-                }));
-            }
-        };
-        socket.on('message_restriction_updated', onMessageRestrictionUpdated);
 
         // --- Connect ---
         socket.auth = { token: localStorage.getItem('token') };
@@ -1601,8 +1585,8 @@ export default function Chat() {
             onConnect();
         }
 
-        // Fetch users, groups, communities and message requests
-        Promise.all([fetchUsers(), fetchGroups(), fetchCommunities(), fetchMessageRequests()]).finally(() => {
+        // Fetch users, groups, and communities, then set loaded state to prevent flicker
+        Promise.all([fetchCurrentUser(), fetchUsers(), fetchGroups(), fetchCommunities(), fetchMessageRequests()]).finally(() => {
             setIsDataLoaded(true);
         });
 
@@ -1706,9 +1690,9 @@ export default function Chat() {
                     const groupName = groupInfo?.name || 'Group';
 
                     let previewText = data.message.content || 'Sent a message';
-                    if (data.message.type === 'image') previewText = isGroup ? '📷 Photo' : '📷 Image';
-                    else if (data.message.type === 'video') previewText = '🎥 Video';
-                    else if (data.message.type === 'file') previewText = '📄 File';
+                    if (data.message.type === 'image') previewText = isGroup ? 'ðŸ“· Photo' : 'ðŸ“· Image';
+                    else if (data.message.type === 'video') previewText = 'ðŸŽ¥ Video';
+                    else if (data.message.type === 'file') previewText = 'ðŸ“„ File';
 
                     setSnackbar({
                         senderName: `${senderName} @ ${groupName}`,
@@ -1721,7 +1705,7 @@ export default function Chat() {
                 }
             }
 
-            // Update the sidebar list — use normalized structure matching what my-groups returns
+            // Update the sidebar list â€” use normalized structure matching what my-groups returns
             setGroups(prev => prev.map(g => {
                 if (String(g._id) === String(data.groupId)) {
                     const currentUnread = g.unreadCount || 0;
@@ -1813,72 +1797,16 @@ export default function Chat() {
             }
         };
         socket.on('group_message_partial_read', onGroupMessagePartialRead);
-
-        const onGroupAdminUpdated = (data) => {
-            const { groupId, memberId, isAdmin } = data;
-            
-            setGroups(prev => prev.map(g => {
-                if (String(g._id || g.id) === String(groupId)) {
-                    let newAdmins = g.admins ? [...g.admins] : [];
-                    if (isAdmin) {
-                        if (!newAdmins.some(a => String(a._id || a) === String(memberId))) {
-                            newAdmins.push(memberId);
-                        }
-                    } else {
-                        newAdmins = newAdmins.filter(a => String(a._id || a) !== String(memberId));
-                    }
-                    return { ...g, admins: newAdmins };
-                }
-                return g;
-            }));
-
-            const currentSelectedGroup = selectedGroupRef?.current;
-            if (currentSelectedGroup && String(currentSelectedGroup._id) === String(groupId)) {
-                let newAdmins = currentSelectedGroup.admins ? [...currentSelectedGroup.admins] : [];
-                if (isAdmin) {
-                    if (!newAdmins.some(a => String(a._id || a) === String(memberId))) {
-                        newAdmins.push(memberId);
-                    }
-                } else {
-                    newAdmins = newAdmins.filter(a => String(a._id || a) !== String(memberId));
-                }
-                
-                const updatedMembers = currentSelectedGroup.members.map(member => {
-                    return {
-                        ...member,
-                        isAdmin: newAdmins.some(adminId => String(adminId) === String(member._id || member.id))
-                    };
-                });
-
-                setSelectedGroup(prev => ({ ...prev, members: updatedMembers, admins: newAdmins }));
-            }
-        };
-        socket.on('group_admin_updated', onGroupAdminUpdated);
-
-        const onGroupMembersUpdated = (data) => {
-            const { groupId, members } = data;
-            setGroups(prev => prev.map(g => String(g._id || g.id) === String(groupId) ? { ...g, members } : g));
-            
-            const currentSelectedGroup = selectedGroupRef?.current;
-            if (currentSelectedGroup && String(currentSelectedGroup._id || currentSelectedGroup.id) === String(groupId)) {
-                // Keep isAdmin flags if they were present or recalculate
-                const newAdmins = currentSelectedGroup.admins || [];
-                const updatedMembers = members.map(m => ({
-                    ...m,
-                    isAdmin: newAdmins.some(adminId => String(adminId) === String(m._id || m.id))
-                }));
-                setSelectedGroup(prev => ({ ...prev, members: updatedMembers }));
-            }
-        };
-        socket.on('group_members_updated', onGroupMembersUpdated);
+        socket.on('new_message_request', onNewMessageRequest);
+        socket.on('request_accepted', onRequestAccepted);
+        socket.on('account_banned', onAccountBanned);
+        socket.on('account_locked', onAccountLocked);
 
         return () => {
             socket.off('group_created', onGroupCreated);
             socket.off('group_message', onGroupMessage);
             socket.off('group_messages_read', onGroupMessagesRead);
             socket.off('group_message_partial_read', onGroupMessagePartialRead);
-            socket.off('group_admin_updated', onGroupAdminUpdated);
-            socket.off('group_members_updated', onGroupMembersUpdated);
             socket.off('connect', onConnect);
             socket.off('disconnect', onDisconnect);
             socket.off('connect_error', onConnectError);
@@ -2289,17 +2217,8 @@ export default function Chat() {
             await axios.post('/api/chat/requests/reject', { requestId }, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-
-            // Update local state immediately for better responsiveness
-            setSelectedUser(prev => prev ? {
-                ...prev,
-                requestStatus: 'rejected',
-                requestUpdatedAt: new Date().toISOString()
-            } : null);
-
             setSnackbar({ message: 'Request rejected', type: 'info', variant: 'system' });
             fetchMessageRequests();
-            fetchUsers();
         } catch (err) {
             console.error('handleRejectRequest error:', err);
             setSnackbar({ message: err.response?.data?.error || 'Failed to reject request', type: 'error', variant: 'system' });
@@ -2307,7 +2226,6 @@ export default function Chat() {
     };
 
     const fetchUsers = async () => {
-
         try {
             const token = localStorage.getItem('token');
             const res = await axios.get(`/api/chat/users?currentUserId=${user.id}`, {
@@ -2368,8 +2286,8 @@ export default function Chat() {
     // --- Sync Selected User with Users List ---
     useEffect(() => {
         if (selectedUser) {
-            const updatedUser = users.find(u => String(u._id) === String(selectedUser._id));
-            // Only update if data changed to avoid infinite loops
+            const updatedUser = users.find(u => u._id === selectedUser._id);
+            // Only update if data changed to avoid loops
             if (updatedUser && JSON.stringify(updatedUser) !== JSON.stringify(selectedUser)) {
                 setSelectedUser(updatedUser);
             }
@@ -2407,7 +2325,7 @@ export default function Chat() {
             });
             setOpenDropdown(null);
         } else if (pinnedIds.length >= 5) {
-            // Limit reached — open replacement modal
+            // Limit reached â€” open replacement modal
             setPinReplaceModal({ newId: contactId, isGroup, pinnedIds });
             setOpenDropdown(null);
         } else {
@@ -2885,9 +2803,6 @@ export default function Chat() {
                 : (activeTarget.is_group !== undefined ? activeTarget.is_group : !!selectedGroup);
 
             if (isCommunity) {
-                await axios.post(`/api/communities/${targetId}/exit`, {}, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
                 setCommunities(prev => prev.filter(c => String(c.id) !== String(targetId)));
 
                 // Also clear pinned state
@@ -3463,11 +3378,20 @@ export default function Chat() {
 
         } catch (err) {
             console.error("Failed to send msg", err);
-            if (err.response && err.response.status === 403) {
-                setSnackbar({ message: err.response.data.error || 'Permission denied', type: 'error' });
-                fetchUsers(); // Refresh to catch status changes
+            const errorData = err.response?.data;
+            if (errorData?.isBanned) {
+                setSnackbar({ message: `You are banned until ${new Date(errorData.bannedUntil).toLocaleString()}`, type: 'error' });
+            } else if (errorData?.adminLock) {
+                setSnackbar({ message: 'Your account is locked. Please contact admin.', type: 'error' });
+            } else {
+                setSnackbar({ message: errorData?.error || 'Failed to send message', type: 'error' });
             }
-            // Ideally remove temp message or show error
+            // Remove temp message
+            if (selectedGroup) {
+                setGroupMessages(prev => prev.filter(m => m._id !== tempId));
+            } else {
+                setMessages(prev => prev.filter(m => m._id !== tempId));
+            }
         }
     };
 
@@ -3685,7 +3609,7 @@ export default function Chat() {
             if (navigator.permissions) {
                 const permissionStatus = await navigator.permissions.query({ name: 'camera' });
                 if (permissionStatus.state === 'granted') {
-                    // Permission already granted — skip the dialog and open camera directly
+                    // Permission already granted â€” skip the dialog and open camera directly
                     startCamera();
                     return;
                 } else if (permissionStatus.state === 'denied') {
@@ -3695,7 +3619,7 @@ export default function Chat() {
                 }
             }
         } catch (err) {
-            // Permissions API not supported in this browser — fall through to permission screen
+            // Permissions API not supported in this browser â€” fall through to permission screen
             console.log('Permissions API not available, showing permission modal');
         }
 
@@ -4378,8 +4302,8 @@ export default function Chat() {
                                         </div>
                                         <div className="wa-chat-row-bottom">
                                             <span className="wa-chat-last-msg">
-                                                {item.lastMessage?.type === 'image' ? '📷 Photo' :
-                                                    item.lastMessage?.type === 'file' ? '📄 File' :
+                                                {item.lastMessage?.type === 'image' ? 'ðŸ“· Photo' :
+                                                    item.lastMessage?.type === 'file' ? 'ðŸ“„ File' :
                                                         item.lastMessage?.content || 'No messages'}
                                             </span>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -4937,10 +4861,10 @@ export default function Chat() {
                         color: 'white',
                         border: '1px solid rgba(255,255,255,0.05)'
                     }}>
-                        <div style={{ fontSize: 48, marginBottom: 16 }}>📄</div>
+                        <div style={{ fontSize: 48, marginBottom: 16 }}>ðŸ“„</div>
                         <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8 }}>{file?.name}</div>
                         <div style={{ fontSize: 14, color: '#8696a0' }}>
-                            {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} • {file?.type?.split('/').pop().toUpperCase()}
+                            {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} â€¢ {file?.type?.split('/').pop().toUpperCase()}
                         </div>
                     </div>
                 )}
@@ -5435,28 +5359,19 @@ export default function Chat() {
                         );
                     })}
 
-                    {(() => {
-                        const myId = user.id || user._id;
-                        const isMeOwner = String(selectedCommunity.creator?._id || selectedCommunity.creator) === String(myId);
-                        const isMeAdmin = (selectedCommunity.admins || []).some(a => String(a?._id || a) === String(myId));
-                        if (!(isMeOwner || isMeAdmin)) return null;
-
-                        return (
-                             <div className="wa-chat-item" style={{ padding: '12px 16px', cursor: 'pointer' }} onClick={() => {
-                                if (checkAddGroupPermission(selectedCommunity, true)) {
-                                    setIsManageGroupsOpen(true);
-                                    setIsCommunityHomeOpen(false);
-                                }
-                            }}>
-                                <div style={{ display: 'flex', gap: 15, alignItems: 'center' }}>
-                                    <div style={{ width: 44, height: 44, background: '#f0f2f5', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                        <Plus size={24} color="#667781" />
-                                    </div>
-                                    <span style={{ fontSize: 16, color: '#111b21' }}>Add group</span>
-                                </div>
+                    <div className="wa-chat-item" style={{ padding: '12px 16px', cursor: 'pointer' }} onClick={() => {
+                        if (checkAddGroupPermission(selectedCommunity)) {
+                            setIsManageGroupsOpen(true);
+                            setIsCommunityHomeOpen(false);
+                        }
+                    }}>
+                        <div style={{ display: 'flex', gap: 15, alignItems: 'center' }}>
+                            <div style={{ width: 44, height: 44, background: '#f0f2f5', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                <Plus size={24} color="#667781" />
                             </div>
-                        );
-                    })()}
+                            <span style={{ fontSize: 16, color: '#111b21' }}>Add group</span>
+                        </div>
+                    </div>
 
                     <div style={{ padding: '40px 30px', textAlign: 'center', color: '#667781' }}>
                         <p style={{ fontSize: 14, lineHeight: '1.5' }}>
@@ -5516,11 +5431,11 @@ export default function Chat() {
                                 <Pencil size={20} color={isDark ? '#aebac1' : '#54656f'} style={{ cursor: 'pointer' }} />
                             </div>
                             <div style={{ fontSize: 16, color: subTextColor, marginTop: 8 }}>
-                                Group · <span style={{ color: '#027EB5' }}>{membersCount} members</span>
+                                Group Â· <span style={{ color: '#027EB5' }}>{membersCount} members</span>
                             </div>
 
                             <div style={{ display: 'flex', gap: 12, marginTop: 24, width: '100%', justifyContent: 'center' }}>
-                                <div style={{ flex: 1, padding: '12px 0', border: '1px solid #e9edef', borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, cursor: 'pointer', maxWidth: 160 }} onClick={() => { setIsGroupAddMemberOpen(true); }}>
+                                <div style={{ flex: 1, padding: '12px 0', border: '1px solid #e9edef', borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, cursor: 'pointer', maxWidth: 160 }} onClick={() => { setIsContactInfoOpen(false); /* open add members modal */ }}>
                                     <UserPlus size={24} color="#027EB5" />
                                     <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Add</span>
                                 </div>
@@ -5643,7 +5558,7 @@ export default function Chat() {
                                 <Search size={20} color={subTextColor} style={{ cursor: 'pointer' }} />
                             </div>
 
-                            <div style={{ padding: '0 30px', display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, cursor: 'pointer' }} onClick={() => setIsGroupAddMemberOpen(true)}>
+                            <div style={{ padding: '0 30px', display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, cursor: 'pointer' }}>
                                 <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#027EB5', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
                                     <UserPlus size={20} color="#ffffff" />
                                 </div>
@@ -5657,51 +5572,34 @@ export default function Chat() {
                             </div>
 
                             <div className="wa-member-list">
-                                {(() => {
-                                    const myId = String(user.id || user._id);
-                                    let amIGroupAdmin = false;
-                                    if (activeTarget && activeTarget.members) {
-                                        const meObj = activeTarget.members.find(m => String(m._id) === myId);
-                                        if (meObj) {
-                                            amIGroupAdmin = String(meObj._id) === String(activeTarget.creator_id) ||
-                                                String(meObj._id) === String(activeTarget.creatorId) ||
-                                                meObj.name === creatorName ||
-                                                meObj.isAdmin ||
-                                                (activeTarget.admins && activeTarget.admins.some(a => String(a._id || a) === String(meObj._id))) ||
-                                                (creatorName === user.name) ||
-                                                (myId === String(activeTarget.creator_id || activeTarget.creatorId));
-                                        }
-                                    }
+                                {activeTarget.members?.map(m => {
+                                    const isMe = String(m._id) === String(user.id || user._id);
+                                    let phoneValue = m.mobile ? `+${m.mobile}` : '';
+                                    if (phoneValue.includes('91') && phoneValue.length <= 13) {
+                                        phoneValue = `+91 ${phoneValue.replace('+91', '').substring(0, 5)} ${phoneValue.replace('+91', '').substring(5)}`;
+                                    } else if (!phoneValue.startsWith('+') && m.mobile) phoneValue = `+91 ${m.mobile}`;
 
-                                    return activeTarget.members?.map(m => {
-                                        const isMe = String(m._id) === String(user.id || user._id);
-                                        let phoneValue = m.mobile ? `+${m.mobile}` : '';
-                                        if (phoneValue.includes('91') && phoneValue.length <= 13) {
-                                            phoneValue = `+91 ${phoneValue.replace('+91', '').substring(0, 5)} ${phoneValue.replace('+91', '').substring(5)}`;
-                                        } else if (!phoneValue.startsWith('+') && m.mobile) phoneValue = `+91 ${m.mobile}`;
+                                    const isGroupAdmin = String(m._id) === String(activeTarget.creator_id) ||
+                                        String(m._id) === String(activeTarget.creatorId) ||
+                                        m.name === creatorName ||
+                                        m.isAdmin ||
+                                        (isMe && creatorName === user.name) ||
+                                        (isMe && String(user.id || user._id) === String(activeTarget.creator_id || activeTarget.creatorId));
 
-                                        const isGroupAdmin = String(m._id) === String(activeTarget.creator_id) ||
-                                            String(m._id) === String(activeTarget.creatorId) ||
-                                            m.name === creatorName ||
-                                            m.isAdmin ||
-                                            (activeTarget.admins && activeTarget.admins.some(a => String(a._id || a) === String(m._id))) ||
-                                            (isMe && creatorName === user.name) ||
-                                            (isMe && String(user.id || user._id) === String(activeTarget.creator_id || activeTarget.creatorId));
-
-                                        return (
-                                            <div key={m._id} className="wa-setting-item clickable" style={{ display: 'flex', alignItems: 'center', padding: '12px 30px', cursor: 'pointer', justifyContent: 'space-between' }}
-                                                onClick={(e) => {
-                                                    if (amIGroupAdmin && !isGroupAdmin) {
-                                                        setAdminConfirmModal({ type: 'add', member: m });
-                                                    }
-                                                }}
-                                                onContextMenu={(e) => {
-                                                    e.preventDefault();
-                                                    if (amIGroupAdmin && isGroupAdmin && m.name !== activeTarget.creatorName && String(m._id) !== String(activeTarget.creator_id) && String(m._id) !== String(activeTarget.creatorId)) {
-                                                        setAdminConfirmModal({ type: 'remove', member: m });
-                                                    }
-                                                }}
-                                            >
+                                    return (
+                                        <div key={m._id} className="wa-setting-item clickable" style={{ display: 'flex', alignItems: 'center', padding: '12px 30px', cursor: 'pointer', justifyContent: 'space-between' }}
+                                            onClick={(e) => {
+                                                if (!isGroupAdmin) {
+                                                    setAdminConfirmModal({ type: 'add', member: m });
+                                                }
+                                            }}
+                                            onContextMenu={(e) => {
+                                                e.preventDefault();
+                                                if (isGroupAdmin && m.name !== activeTarget.creatorName) {
+                                                    setAdminConfirmModal({ type: 'remove', member: m });
+                                                }
+                                            }}
+                                        >
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                                                 <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', flexShrink: 0 }}>
                                                     {m.image ? <img src={m.image} alt="mem" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#54656f', fontSize: 18 }}>{m.name?.charAt(0)}</span>}
@@ -5709,7 +5607,7 @@ export default function Chat() {
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                                                     <span style={{ color: textColor, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                                                         {isMe ? 'You' : m.name}
-                                                        {(m.name === 'Kiki' || m.name === 'Kothi') && <span style={{ fontSize: 14 }}>{m.name === 'Kiki' ? '🙄' : '🐒'}</span>}
+                                                        {(m.name === 'Kiki' || m.name === 'Kothi') && <span style={{ fontSize: 14 }}>{m.name === 'Kiki' ? 'ðŸ™„' : 'ðŸ’'}</span>}
                                                     </span>
                                                     <span style={{ color: subTextColor, fontSize: 14 }}>{m.about || (isMe ? 'Available' : 'Hey there! I am using WhatsApp.')}</span>
                                                 </div>
@@ -5720,9 +5618,8 @@ export default function Chat() {
                                                 {!isMe && phoneValue && <span style={{ color: subTextColor, fontSize: 13 }}>{phoneValue}</span>}
                                             </div>
                                         </div>
-                                        );
-                                    });
-                                })()}
+                                    );
+                                })}
                             </div>
                         </div>
 
@@ -6208,7 +6105,7 @@ export default function Chat() {
                                     <FileText size={32} color="#8696a0" />
                                     <div className="wa-file-info">
                                         <p>{infoMessage.fileName}</p>
-                                        <span>{infoMessage.fileSize} bytes • PDF</span>
+                                        <span>{infoMessage.fileSize} bytes â€¢ PDF</span>
                                     </div>
                                 </div>
                             ) : (
@@ -6337,7 +6234,7 @@ export default function Chat() {
                                                 <>
                                                     {formatDateForInfo(infoMessage.read_at)} {formatTime(infoMessage.read_at)}
                                                 </>
-                                            ) : '—'}
+                                            ) : 'â€”'}
                                         </div>
                                     </div>
                                 </div>
@@ -6850,7 +6747,7 @@ export default function Chat() {
                     {!isDeleted && (
                         <>
                             <div className="wa-reactions-row">
-                                <span>👍</span><span>❤️</span><span>😂</span><span>😮</span><span>😢</span><span>🙏</span><Plus size={20} />
+                                <span>ðŸ‘</span><span>â¤ï¸</span><span>ðŸ˜‚</span><span>ðŸ˜®</span><span>ðŸ˜¢</span><span>ðŸ™</span><Plus size={20} />
                             </div>
                             <div className="wa-dropdown-divider"></div>
                         </>
@@ -7052,7 +6949,7 @@ export default function Chat() {
 
                 <div className="wa-drawer-content" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
                     <div style={{ background: 'white', marginBottom: 12 }}>
-                        {checkAddGroupPermission(community, false) && (
+                        {checkAddGroupPermission(community) && (
                             <div
                                 className="wa-manage-groups-item"
                                 style={{ padding: '15px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid #f0f2f5' }}
@@ -7530,168 +7427,6 @@ export default function Chat() {
         );
     };
 
-    const renderGroupAddMemberPanel = () => {
-        if (!isGroupAddMemberOpen) return null;
-        const targetGroup = selectedGroup;
-        if (!targetGroup) return null;
-
-        const currentMemberIds = (targetGroup.members || []).map(m => String(m._id || m.id));
-        const availableContacts = users.filter(u =>
-            String(u._id) !== String(user.id || user._id) &&
-            !currentMemberIds.includes(String(u._id))
-        );
-        const filteredContacts = availableContacts.filter(u =>
-            (u.name || '').toLowerCase().includes(groupAddMemberSearchQuery.toLowerCase()) ||
-            (u.mobile || '').includes(groupAddMemberSearchQuery)
-        );
-
-        return (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ background: '#ffffff', borderRadius: '24px', width: isMobile ? '100%' : '380px', height: isMobile ? '100%' : 'auto', maxHeight: isMobile ? '100%' : '80vh', display: 'flex', flexDirection: 'column', color: '#111b21', overflow: 'hidden', boxShadow: '0 17px 50px 0 rgba(11,20,26,.19)' }}>
-                    <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <X size={24} color="#54656f" style={{ cursor: 'pointer' }} onClick={() => { setIsGroupAddMemberOpen(false); setGroupAddMemberSearchQuery(''); setSelectedGroupMembersToAdd([]); }} />
-                        <span style={{ fontSize: 16, fontWeight: 500 }}>Add member</span>
-                    </div>
-
-                    <div style={{ padding: '0 16px 12px 16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', background: '#f0f2f5', borderRadius: '12px', padding: '8px 12px', border: 'none' }}>
-                            <Search size={18} color="#54656f" style={{ marginRight: 12 }} />
-                            <input
-                                autoFocus
-                                type="text"
-                                placeholder="Search name or number"
-                                value={groupAddMemberSearchQuery}
-                                onChange={(e) => setGroupAddMemberSearchQuery(e.target.value)}
-                                style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: 14, color: '#111b21' }}
-                            />
-                        </div>
-                    </div>
-
-                    <div style={{ padding: '8px 24px', fontSize: '13px', color: '#027EB5', fontWeight: '500' }}>Contacts</div>
-
-                    <div style={{ flex: 1, overflowY: 'auto' }}>
-                        {filteredContacts.map(u => {
-                            const isSelected = selectedGroupMembersToAdd.find(item => item._id === u._id);
-                            return (
-                                <div
-                                    key={u._id}
-                                    style={{ padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', transition: 'background 0.2s' }}
-                                    onClick={() => {
-                                        if (isSelected) {
-                                            setSelectedGroupMembersToAdd(selectedGroupMembersToAdd.filter(item => item._id !== u._id));
-                                        } else {
-                                            setSelectedGroupMembersToAdd([...selectedGroupMembersToAdd, u]);
-                                        }
-                                    }}
-                                    onMouseEnter={(e) => e.currentTarget.style.background = '#f5f6f6'}
-                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                                >
-                                    <div style={{
-                                        width: 20,
-                                        height: 20,
-                                        borderRadius: '4px',
-                                        border: `2px solid ${isSelected ? '#027EB5' : '#8696a0'}`,
-                                        background: isSelected ? '#027EB5' : 'transparent',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center'
-                                    }}>
-                                        {isSelected && <Check size={14} color="#ffffff" />}
-                                    </div>
-                                    <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                        {u.profile_photo || u.image ? <img src={u.profile_photo || u.image} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={20} color="#8696a0" />}
-                                    </div>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontSize: 16, color: '#111b21', fontWeight: 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name}</div>
-                                        <div style={{ fontSize: 13, color: '#667781', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.about || 'Available'}</div>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                    {selectedGroupMembersToAdd.length > 0 && (
-                        <div style={{ padding: '16px', background: '#ffffff', display: 'flex', justifyContent: 'center' }}>
-                            <div
-                                onClick={() => { setIsConfirmGroupAddMembersOpen(true); }}
-                                style={{ width: 44, height: 44, borderRadius: '50%', background: '#027EB5', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}
-                            >
-                                <ArrowRight size={24} color="#ffffff" />
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
-        );
-    };
-
-    const renderConfirmGroupAddMembersPanel = () => {
-        if (!isConfirmGroupAddMembersOpen || !selectedGroup) return null;
-
-        return (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ background: '#202c33', borderRadius: '16px', padding: '24px', width: '400px', maxWidth: '90%', color: '#e9edef' }}>
-                    <div style={{ fontSize: '16px', color: '#e9edef', marginBottom: '32px' }}>
-                        Add {selectedGroupMembersToAdd.map(m => m.name).join(', ')} to "{selectedGroup.name}" group?
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '16px', alignItems: 'center' }}>
-                        <span
-                            onClick={() => setIsConfirmGroupAddMembersOpen(false)}
-                            style={{ color: '#027EB5', fontSize: 14, fontWeight: '500', cursor: 'pointer' }}
-                        >
-                            Cancel
-                        </span>
-                        <div
-                            onClick={async () => {
-                                setIsConfirmGroupAddMembersOpen(false);
-                                setIsGroupAddMemberOpen(false);
-
-                                const memberNames = selectedGroupMembersToAdd.map(m => m.name);
-                                let addedText = "";
-                                if (memberNames.length === 1) addedText = `You added ${memberNames[0]}`;
-                                else if (memberNames.length === 2) addedText = `You added ${memberNames[0]} & ${memberNames[1]}`;
-                                else if (memberNames.length > 2) {
-                                    const last = memberNames.pop();
-                                    addedText = `You added ${memberNames.join(', ')} & ${last}`;
-                                }
-
-                                const sysMsg = {
-                                    _id: 'sys_' + Date.now(),
-                                    type: 'system',
-                                    is_system: true,
-                                    content: addedText,
-                                    created_at: new Date().toISOString(),
-                                    sender_id: user.id || user._id,
-                                    group_id: selectedGroup._id || selectedGroup.id
-                                };
-
-                                try {
-                                    const token = localStorage.getItem('token');
-                                    const memberIds = selectedGroupMembersToAdd.map(m => m._id || m.id).filter(Boolean);
-                                    await axios.patch(`/api/groups/${selectedGroup._id || selectedGroup.id}/members`, {
-                                        memberIds
-                                    }, {
-                                        headers: { 'Authorization': `Bearer ${token}` }
-                                    });
-
-                                    setGroupMessages(prev => [...prev, sysMsg]);
-                                    setSelectedGroupMembersToAdd([]);
-                                    setSnackbar({ message: 'Members added successfully', type: 'success' });
-                                } catch (err) {
-                                    console.error('Add group members failed:', err);
-                                    const errorMsg = err.response?.data?.error || 'Failed to add members';
-                                    setSnackbar({ message: errorMsg, type: 'error' });
-                                }
-                            }}
-                            style={{ padding: '10px 24px', background: '#027EB5', color: '#111b21', borderRadius: '24px', fontSize: 14, fontWeight: '500', cursor: 'pointer' }}
-                        >
-                            Add member
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    };
-
     const renderCommunityAddMemberPanel = () => {
         if (!isCommunityAddMemberOpen) return null;
         const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
@@ -7799,11 +7534,6 @@ export default function Chat() {
         const thinDivider = '1px solid #e9edef';
         const thickDivider = '8px solid #f0f2f5';
 
-        const myId = user.id || user._id;
-        const isMeOwner = String(community.creator?._id || community.creator) === String(myId);
-        const isMeAdmin = (community.admins || []).some(a => String(a?._id || a) === String(myId));
-        const canIManage = isMeOwner || isMeAdmin;
-
         const handleExitCommunity = () => {
             setDeleteTarget({ ...community, isCommunity: true });
             setIsDeleteChatConfirmOpen(true);
@@ -7844,7 +7574,7 @@ export default function Chat() {
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                             <span style={{ fontSize: 24, fontWeight: 400, color: textColor }}>{community.name}</span>
-                            {canIManage && <Pencil size={20} color="#54656f" style={{ cursor: 'pointer' }} onClick={() => { /* name/description edit handler */ }} />}
+                            <Pencil size={20} color="#54656f" style={{ cursor: 'pointer' }} />
                         </div>
                         {(() => {
                             const allIds = new Set();
@@ -7862,37 +7592,28 @@ export default function Chat() {
 
                             return (
                                 <div style={{ fontSize: 16, color: subTextColor, marginTop: 8 }}>
-                                    {selectedGroup?.isCommunityAnnouncements ? 'Announcements' : `Community · ${uniqueCount} member${uniqueCount !== 1 ? 's' : ''} · ${groupCount} group${groupCount !== 1 ? 's' : ''}`}
+                                    {selectedGroup?.isCommunityAnnouncements ? 'Announcements' : `Community Â· ${uniqueCount} member${uniqueCount !== 1 ? 's' : ''} Â· ${groupCount} group${groupCount !== 1 ? 's' : ''}`}
                                 </div>
                             );
                         })()}
 
                         <div style={{ display: 'flex', gap: 12, marginTop: 24, width: '100%', justifyContent: 'center' }}>
-                            {canIManage && (
-                                <>
-                                    <div className="wa-community-info-action" onClick={() => { /* invite handler */ }}>
-                                        <LinkIcon size={24} color="#027EB5" />
-                                        <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Invite</span>
-                                    </div>
-                                    <div className="wa-community-info-action" onClick={() => setIsCommunityAddMemberOpen(true)}>
-                                        <UserPlus size={24} color="#027EB5" />
-                                        <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Add members</span>
-                                    </div>
-                                    <div className="wa-community-info-action" onClick={() => {
-                                        if (checkAddGroupPermission(community, true)) {
-                                            setIsManageGroupsOpen(true);
-                                        }
-                                    }}>
-                                        <Users size={24} color="#027EB5" />
-                                        <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Add groups</span>
-                                    </div>
-                                </>
-                            )}
-                            {!canIManage && (
-                                <div style={{ fontSize: 14, color: subTextColor, fontStyle: 'italic' }}>
-                                    Member of this community
-                                </div>
-                            )}
+                            <div className="wa-community-info-action" onClick={() => { /* invite handler */ }}>
+                                <LinkIcon size={24} color="#027EB5" />
+                                <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Invite</span>
+                            </div>
+                            <div className="wa-community-info-action" onClick={() => setIsCommunityAddMemberOpen(true)}>
+                                <UserPlus size={24} color="#027EB5" />
+                                <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Add members</span>
+                            </div>
+                            <div className="wa-community-info-action" onClick={() => {
+                                if (checkAddGroupPermission(community)) {
+                                    setIsManageGroupsOpen(true);
+                                }
+                            }}>
+                                <Users size={24} color="#027EB5" />
+                                <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Add groups</span>
+                            </div>
                         </div>
                     </div>
 
@@ -7918,12 +7639,10 @@ export default function Chat() {
 
                     <div style={{ borderBottom: thickDivider }}>
                         {[
-                            ...(canIManage ? [
-                                { icon: <Users size={20} />, label: 'Manage groups', onClick: () => { if (checkAddGroupPermission(community, true)) setIsManageGroupsOpen(true); } },
-                                { icon: <Settings size={20} />, label: 'Community settings', onClick: () => setIsCommunitySettingsOpen(true) }
-                            ] : []),
+                            { icon: <Users size={20} />, label: 'Manage groups', onClick: () => { if (checkAddGroupPermission(community)) setIsManageGroupsOpen(true); } },
+                            { icon: <Settings size={20} />, label: 'Community settings', onClick: () => setIsCommunitySettingsOpen(true) },
                             { icon: <Users size={20} />, label: 'View groups (' + (community.groups?.length || 0) + ')', onClick: () => setIsCommunityGroupsListOpen(true) }
-                        ].map((item, idx, arr) => (
+                        ].map((item, idx) => (
                             <div
                                 key={idx}
                                 className="wa-community-row-item"
@@ -7932,7 +7651,7 @@ export default function Chat() {
                                     display: 'flex',
                                     alignItems: 'center',
                                     cursor: 'pointer',
-                                    borderBottom: idx < arr.length - 1 ? thinDivider : 'none'
+                                    borderBottom: idx < 2 ? thinDivider : 'none'
                                 }}
                                 onClick={item.onClick}
                             >
@@ -7963,14 +7682,12 @@ export default function Chat() {
                                 </div>
                             );
                         })()}
-                        {canIManage && (
-                            <div onClick={() => setIsCommunityAddMemberOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 20, cursor: 'pointer' }}>
-                                <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#027EB5', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                                    <UserPlus size={20} color="white" />
-                                </div>
-                                <span style={{ color: textColor, fontSize: 16 }}>Add member</span>
+                        <div onClick={() => setIsCommunityAddMemberOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 20, cursor: 'pointer' }}>
+                            <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#027EB5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <UserPlus size={20} color="white" />
                             </div>
-                        )}
+                            <span style={{ color: textColor, fontSize: 16 }}>Add member</span>
+                        </div>
                         {(() => {
                             const communityOwner = community.creator;
                             if (!communityOwner) return null;
@@ -7985,9 +7702,8 @@ export default function Chat() {
                                     <div style={{ flex: 1 }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                             <span style={{ color: textColor, fontWeight: 500 }}>{communityOwner.name}</span>
-                                            <span style={{ color: '#667781', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                                {isCurrentUserOwner ? 'You • Community owner' : 'Community owner'}
-                                                {!isCurrentUserOwner && <ChevronRight size={18} color="#8696a0" />}
+                                            <span style={{ fontSize: 11, color: '#027EB5', background: '#e7fce3', padding: '2px 8px', borderRadius: '4px' }}>
+                                                {isCurrentUserOwner ? 'You â€¢ Community owner' : 'Community owner'}
                                             </span>
                                         </div>
                                         {displayMobile && (
@@ -8005,22 +7721,17 @@ export default function Chat() {
                             .map(member => {
                                 const memberMobile = member.mobile || member.phone || '';
                                 const currentUserId = user.id || user._id;
-                                const isMeOwner = String(community.creator?._id || community.creator) === String(currentUserId);
-                                const isMeAdmin = (community.admins || []).some(a => String(a?._id || a) === String(currentUserId));
-                                const amIAdminOrOwner = isMeOwner || isMeAdmin;
-                                
-                                const isTargetOwner = String(community.creator?._id || community.creator) === String(member._id || member.id);
-                                const isTargetAdmin = (community.admins || []).some(a => String(a._id || a) === String(member._id || member.id));
-
+                                const isOwner = String(community.creator?._id || community.creator) === String(currentUserId);
+                                const isAdmin = (community.admins || []).some(a => String(a._id || a) === String(member._id || member.id));
                                 return (
                                     <div
                                         key={member._id || member.id}
                                         style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 15, borderRadius: 8 }}
                                         onContextMenu={(e) => {
-                                            if (!amIAdminOrOwner || isTargetOwner) return; // Owner cannot be context-menu'd for role changes here
+                                            if (!isOwner) return;
                                             e.preventDefault();
                                             const commId = community._id || community.id;
-                                            setAdminContextMenu({ member, x: e.clientX, y: e.clientY, communityId: commId, isAdmin: isTargetAdmin });
+                                            setAdminContextMenu({ member, x: e.clientX, y: e.clientY, communityId: commId, isAdmin });
                                         }}
                                     >
                                         <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -8038,20 +7749,17 @@ export default function Chat() {
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                 <span style={{ color: textColor, fontWeight: 500 }}>{member.name}</span>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                                    {isTargetOwner && (
-                                                        <span style={{ color: '#667781', fontSize: 13 }}>Community owner</span>
+                                                    {isAdmin && (
+                                                        <span style={{ fontSize: 11, color: '#027EB5', background: '#dbeafe', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>Admin</span>
                                                     )}
-                                                    {isTargetAdmin && !isTargetOwner && (
-                                                        <span style={{ color: '#667781', fontSize: 13 }}>Community admin</span>
-                                                    )}
-                                                    {(isMeOwner || (isMeAdmin && !isTargetOwner)) && !isTargetOwner && (
+                                                    {isOwner && (
                                                         <button
-                                                            onClick={() => handleRemoveCommunityMember(community, member)}
-                                                            className="wa-remove-member-btn"
-                                                            title="Remove member"
-                                                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%' }}
+                                                            onClick={() => {
+                                                                handleRemoveCommunityMember(community, member);
+                                                            }}
+                                                            style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#ea0038', padding: '4px' }}
                                                         >
-                                                            <X size={16} color="#ea0038" />
+                                                            <X size={16} />
                                                         </button>
                                                     )}
                                                 </div>
@@ -8068,7 +7776,7 @@ export default function Chat() {
 
                     <div style={{ background: bgColor, padding: '10px 0 40px 0', borderTop: thickDivider }}>
                         {[
-                            { icon: <UserPlus size={20} />, label: 'Assign new owner', color: textColor, action: () => { setIsSelectOwnerPanelOpen(true); setIsCommunityInfoOpen(false); } },
+                            { icon: <UserPlus size={20} />, label: 'Assign new owner', color: textColor },
                             { icon: <LogOut size={20} />, label: 'Exit community', color: '#ea0038', action: handleExitCommunity },
                             { icon: <ThumbsDown size={20} />, label: 'Report community', color: '#ea0038' },
                             { icon: <XCircle size={20} />, label: 'Deactivate community', color: '#ea0038' }
@@ -8565,7 +8273,7 @@ export default function Chat() {
                                                 <div className="wa-doc-info">
                                                     <div className="wa-doc-name-small">{msg.fileName || 'Document.pdf'}</div>
                                                     <div className="wa-doc-meta-small">
-                                                        {msg.fileSize ? Math.ceil(msg.fileSize / 1024) + ' kB' : ''} • {msg.fileName?.split('.').pop()?.toUpperCase() || 'PDF'} • {formatSharedMediaTimestamp(msg.created_at)}
+                                                        {msg.fileSize ? Math.ceil(msg.fileSize / 1024) + ' kB' : ''} â€¢ {msg.fileName?.split('.').pop()?.toUpperCase() || 'PDF'} â€¢ {formatSharedMediaTimestamp(msg.created_at)}
                                                     </div>
                                                 </div>
                                             </div>
@@ -8860,6 +8568,18 @@ export default function Chat() {
                 >
                     {t('chat_list.filter_all')}
                 </button>
+                {messageRequests.length > 0 && (
+                    <button
+                        className={`wa-filter-pill ${isRequestsModalOpen ? 'active' : ''}`}
+                        onClick={() => setIsRequestsModalOpen(true)}
+                        style={{ position: 'relative' }}
+                    >
+                        Requests
+                        <span style={{ position: 'absolute', top: -5, right: -5, background: '#027EB5', color: 'white', borderRadius: '50%', width: 18, height: 18, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', border: '2px solid white' }}>
+                            {messageRequests.length}
+                        </span>
+                    </button>
+                )}
                 <button
                     className={`wa-filter-pill ${filterType === 'unread' ? 'active' : ''}`}
                     onClick={() => setFilterType('unread')}
@@ -8878,18 +8598,6 @@ export default function Chat() {
                 >
                     {t('chat_list.filter_groups')} {groups.filter(g => g.unreadCount > 0).length > 0 && <span className="wa-pill-count">{groups.filter(g => g.unreadCount > 0).length}</span>}
                 </button>
-                {messageRequests.length > 0 && (
-                    <button
-                        className={`wa-filter-pill ${isRequestsModalOpen ? 'active' : ''}`}
-                        onClick={() => setIsRequestsModalOpen(true)}
-                        style={{ position: 'relative' }}
-                    >
-                        Requests
-                        <span style={{ position: 'absolute', top: -5, right: -5, background: '#027EB5', color: 'white', borderRadius: '50%', width: 18, height: 18, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', border: '2px solid white' }}>
-                            {messageRequests.length}
-                        </span>
-                    </button>
-                )}
                 <button className="wa-nav-icon-btn wa-filter-plus-btn"><Plus size={18} /></button>
             </div>
 
@@ -9007,22 +8715,7 @@ export default function Chat() {
                                         </div>
                                         <div className="wa-chat-info">
                                             <div className="wa-chat-row-top">
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-                                                    <span className="wa-chat-name" style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{displayName}</span>
-                                                    {item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000 && (
-                                                        <span style={{ 
-                                                            fontSize: '10px', 
-                                                            background: '#ef4444', 
-                                                            color: 'white', 
-                                                            padding: '2px 6px', 
-                                                            borderRadius: '4px', 
-                                                            fontWeight: '600',
-                                                            flexShrink: 0
-                                                        }}>
-                                                            Restricted
-                                                        </span>
-                                                    )}
-                                                </div>
+                                                <span className="wa-chat-name">{displayName}</span>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                                     <span className="wa-chat-time">{formatTime(item.lastMessage?.created_at || item.created_at)}</span>
                                                     <div className={`wa-dropdown-trigger ${(openDropdown?.type === 'contact' && openDropdown?.id === item._id) ? 'active' : ''}`} onClick={(e) => {
@@ -9058,9 +8751,9 @@ export default function Chat() {
                                                                 {item.lastMessage.duration ? formatDuration(item.lastMessage.duration) : 'Voice message'}
                                                             </span>
                                                         ) :
-                                                            item.lastMessage?.type === 'image' ? (isGroup ? '📷 Photo' : '📷 Image') :
-                                                                item.lastMessage?.type === 'video' ? '🎥 Video' :
-                                                                    item.lastMessage?.type === 'file' ? '📄 File' :
+                                                            item.lastMessage?.type === 'image' ? (isGroup ? 'ðŸ“· Photo' : 'ðŸ“· Image') :
+                                                                item.lastMessage?.type === 'video' ? 'ðŸŽ¥ Video' :
+                                                                    item.lastMessage?.type === 'file' ? 'ðŸ“„ File' :
                                                                         renderHighlightedContent(item.lastMessage?.content || (item.lastMessage?.is_system ? `${item.lastMessage.sender_id?.name || 'Someone'} ${item.lastMessage.content}` : ''))
                                                     )}
                                                 </span>
@@ -9699,50 +9392,55 @@ export default function Chat() {
                             </div>
                         </div>
 
-                        {/* Improved Restriction Banner (Under Header) */}
-                        {selectedUser.requestStatus === 'rejected' && selectedUser.requestUpdatedAt && (new Date() - new Date(selectedUser.requestUpdatedAt)) < 24 * 60 * 60 * 1000 && (
-                            <div style={{ 
-                                background: '#fff5f6', 
-                                padding: '12px 20px', 
-                                borderBottom: '1px solid #fee2e2', 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                gap: 12,
-                                borderTop: '1px solid rgba(0,0,0,0.05)',
-                                zIndex: 10
-                            }}>
-                                <div style={{ 
-                                    width: 36, 
-                                    height: 36, 
-                                    borderRadius: '50%', 
-                                    background: '#fee2e2', 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    justifyContent: 'center',
-                                    color: '#ef4444'
-                                }}>
-                                    <ShieldAlert size={20} />
-                                </div>
-                                <div style={{ flex: 1 }}>
-                                    <div style={{ fontWeight: '700', fontSize: '0.9rem', color: '#991b1b', marginBottom: '2px' }}>
-                                        Messaging Restricted
-                                    </div>
-                                    <p style={{ fontSize: '0.8rem', color: '#b91c1c', margin: 0, opacity: 0.9 }}>
-                                        {String(selectedUser.requestRejectedBy) === String(user.id || user._id) 
-                                            ? `You rejected ${selectedUser.name}'s request. Mutual restriction active.`
-                                            : `This chat was restricted by ${selectedUser.name}.`}
-                                    </p>
-                                </div>
-                                <div style={{ textAlign: 'right' }}>
-                                    <div style={{ fontSize: '0.75rem', fontWeight: '800', color: '#7f1d1d', background: '#fee2e2', padding: '4px 10px', borderRadius: '12px', display: 'inline-block' }}>
-                                        RENEWAL IN {Math.ceil((24 * 60 * 60 * 1000 - (new Date() - new Date(selectedUser.requestUpdatedAt))) / (60 * 60 * 1000))}H
-                                    </div>
-                                    <div style={{ fontSize: '0.7rem', color: '#991b1b', marginTop: '2px', opacity: 0.8 }}>
-                                        Lifts at: {new Date(new Date(selectedUser.requestUpdatedAt).getTime() + 24 * 60 * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </div>
-                                </div>
+                        {/* Account Locked/Banned Banners */}
+                        {accountLocked && (
+                            <div className="wa-request-banner" style={{ background: '#fef2f2', borderBottom: '1px solid #fee2e2', padding: '12px', display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'center' }}>
+                                <ShieldAlert size={20} color="#dc2626" />
+                                <span style={{ color: '#991b1b', fontSize: '14px', fontWeight: 500 }}>
+                                    Your account has been locked due to multiple rejections. Please contact administrative support to restore access.
+                                </span>
                             </div>
                         )}
+                        {accountBanned && new Date(accountBanned) > new Date() && !accountLocked && (
+                            <div className="wa-request-banner" style={{ background: '#fffbeb', borderBottom: '1px solid #fef3c7', padding: '12px', display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'center' }}>
+                                <Clock size={20} color="#d97706" />
+                                <span style={{ color: '#92400e', fontSize: '14px', fontWeight: 500 }}>
+                                    You are temporarily restricted from sending new requests until {new Date(accountBanned).toLocaleString()}.
+                                </span>
+                            </div>
+                        )}
+
+                        {/* Message Request Banner */}
+                        {(() => {
+                            const pendingRequest = messageRequests.find(req => String(req.fromUserId?._id || req.fromUserId) === String(selectedUser._id));
+                            if (pendingRequest) {
+                                return (
+                                    <div className="wa-request-banner" style={{ background: '#f0f2f5', padding: '15px', borderBottom: '1px solid #d1d7db', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                                        <div style={{ fontSize: 14, color: '#111b21', textAlign: 'center' }}>
+                                            <strong>{selectedUser.name}</strong> is not in your contacts.
+                                        </div>
+                                        <div style={{ display: 'flex', gap: 15 }}>
+                                            <button
+                                                onClick={() => handleAcceptRequest(pendingRequest._id)}
+                                                style={{ background: '#027EB5', color: 'white', border: 'none', padding: '8px 24px', borderRadius: '20px', fontWeight: 600, cursor: 'pointer' }}
+                                            >
+                                                Accept
+                                            </button>
+                                            <button
+                                                onClick={() => handleRejectRequest(pendingRequest._id)}
+                                                style={{ background: 'white', color: '#f15c6d', border: '1px solid #f15c6d', padding: '8px 24px', borderRadius: '20px', fontWeight: 600, cursor: 'pointer' }}
+                                            >
+                                                Reject
+                                            </button>
+                                        </div>
+                                        <div style={{ fontSize: 12, color: '#667781', textAlign: 'center' }}>
+                                            If you reject, they won't be able to message you for 24 hours.
+                                        </div>
+                                    </div>
+                                );
+                            }
+                            return null;
+                        })()}
 
                         {/* Pinned Messages Banner */}
                         {(() => {
@@ -9813,58 +9511,6 @@ export default function Chat() {
                                 </div>
                             );
                         })()}
-
-                        {/* Message Request Accept/Reject Banner (Receiver Side) */}
-                        {(() => {
-                            const pendingRequest = messageRequests.find(req =>
-                                String(req.fromUserId?._id || req.fromUserId) === String(selectedUser._id)
-                            );
-                            if (!pendingRequest) return null;
-                            return (
-                                <div style={{ background: '#f8fafc', padding: '20px', borderBottom: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, boxShadow: 'inset 0 -2px 4px rgba(0,0,0,0.02)' }}>
-                                    <div style={{ fontSize: '0.95rem', color: '#334155', textAlign: 'center', fontWeight: '500' }}>
-                                        <span style={{ color: '#027EB5', fontWeight: 'bold' }}>{selectedUser.name}</span> wants to message you.
-                                    </div>
-                                    <div style={{ display: 'flex', gap: 12 }}>
-                                        <button
-                                            onClick={() => handleAcceptRequest(pendingRequest._id)}
-                                            style={{ background: '#027EB5', color: 'white', border: 'none', padding: '10px 28px', borderRadius: '12px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 4px 6px rgba(2, 126, 181, 0.2)' }}
-                                            onMouseOver={(e) => e.target.style.transform = 'translateY(-1px)'}
-                                            onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
-                                        >
-                                            Accept
-                                        </button>
-                                        <button
-                                            onClick={() => handleRejectRequest(pendingRequest._id)}
-                                            style={{ background: 'white', color: '#f15c6d', border: '1px solid #f15c6d', padding: '10px 28px', borderRadius: '12px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s' }}
-                                            onMouseOver={(e) => e.target.style.background = '#fff5f6'}
-                                            onMouseOut={(e) => e.target.style.background = 'white'}
-                                        >
-                                            Reject
-                                        </button>
-                                    </div>
-                                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', textAlign: 'center' }}>
-                                        If you reject, they will be restricted from messaging you for 24 hours.
-                                    </div>
-                                </div>
-                            );
-                        })()}
-
-
-                        {/* Lock Banner (Independent of specific chat) */}
-                        {accountLocked && selectedUser.requestStatus !== 'rejected' && (
-                             <div style={{ background: '#fff5f6', padding: '20px', borderBottom: '1px solid #fee2e2', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                                <div style={{ color: '#ef4444', fontSize: '1.2rem', marginBottom: '4px' }}>
-                                    <Shield size={24} />
-                                </div>
-                                <div style={{ fontWeight: '700', fontSize: '1rem', color: '#991b1b', textAlign: 'center' }}>
-                                    Account Permanently Locked
-                                </div>
-                                <p style={{ fontSize: '0.9rem', color: '#b91c1c', textAlign: 'center', margin: 0, maxWidth: '80%' }}>
-                                    Your account has been locked due to multiple rejections by contacts. Please contact the administrator for further assistance.
-                                </p>
-                            </div>
-                        )}
 
                         {/* Messages */}
                         <div
@@ -9970,7 +9616,7 @@ export default function Chat() {
                                                                         {isMeMsg(msg.reply_to) ? 'You' : (selectedUser.name || 'User')}
                                                                     </div>
                                                                     <div className="wa-reply-context-text">
-                                                                        {msg.reply_to.type === 'image' ? '📷 Image' : (msg.reply_to.type === 'file' ? '📄 File' : (msg.reply_to.content || ''))}
+                                                                        {msg.reply_to.type === 'image' ? 'ðŸ“· Image' : (msg.reply_to.type === 'file' ? 'ðŸ“„ File' : (msg.reply_to.content || ''))}
                                                                     </div>
                                                                 </div>
                                                             )}
@@ -10033,7 +9679,7 @@ export default function Chat() {
                                                                                         {msg.fileName || 'Document.pdf'}
                                                                                     </div>
                                                                                     <div className="wa-doc-meta">
-                                                                                        {msg.pageCount || 1} pages • {(msg.fileName || msg.file_path)?.split('.').pop()?.toUpperCase() || 'PDF'} • {msg.fileSize ? Math.ceil(msg.fileSize / 1024) + ' kB' : 'Unknown size'}
+                                                                                        {msg.pageCount || 1} pages â€¢ {(msg.fileName || msg.file_path)?.split('.').pop()?.toUpperCase() || 'PDF'} â€¢ {msg.fileSize ? Math.ceil(msg.fileSize / 1024) + ' kB' : 'Unknown size'}
                                                                                     </div>
                                                                                 </div>
 
@@ -10081,7 +9727,7 @@ export default function Chat() {
                                                                                     <img src={msg.link_preview.image} alt={msg.link_preview.title} />
                                                                                     {(msg.link_preview.domain?.includes('youtube') || msg.link_preview.domain?.includes('youtu.be')) && (
                                                                                         <div className="wa-link-preview-play-btn">
-                                                                                            <div className="wa-play-icon">▶</div>
+                                                                                            <div className="wa-play-icon">â–¶</div>
                                                                                         </div>
                                                                                     )}
                                                                                 </div>
@@ -10244,11 +9890,11 @@ export default function Chat() {
                                             <div style={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
                                                 <div className="wa-reply-preview-header">
                                                     <span className="wa-reply-preview-name">
-                                                        {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || 'User')}
+                                                        {isMeMsg(replyingTo) ? t('chat_window.you') : (selectedUser?.name || 'User')}
                                                     </span>
                                                 </div>
                                                 <div className="wa-reply-preview-content">
-                                                    {replyingTo.type === 'image' ? '📷 Photo' : (replyingTo.type === 'file' ? '📄 File' : replyingTo.content)}
+                                                    {replyingTo.type === 'image' ? 'ðŸ“· Photo' : (replyingTo.type === 'file' ? 'ðŸ“„ File' : replyingTo.content)}
                                                 </div>
                                             </div>
                                             {replyingTo.type === 'image' && replyingTo.file_path && (
@@ -10256,152 +9902,158 @@ export default function Chat() {
                                                     <img src={replyingTo.file_path} alt="thumbnail" />
                                                 </div>
                                             )}
-                                            <X size={16} className="wa-reply-preview-close" onClick={() => setReplyingTo(null)} />
+                                            <X
+                                                size={16}
+                                                className="wa-reply-preview-close"
+                                                onClick={() => setReplyingTo(null)}
+                                            />
                                         </div>
                                     )}
 
-                                    {isRecording ? (
-                                                <div className="wa-recording-ui" style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                                                    <div style={{ flex: 1 }}></div>
+                                    <div className="wa-input-pill">
+                                        {!isRecording && (
+                                            <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
+                                                {renderAttachmentMenu()}
+                                                <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
+                                                    <Paperclip size={22} color="#54656f" />
+                                                </button>
+                                                <input
+                                                    type="file"
+                                                    ref={fileInputRef}
+                                                    style={{ display: 'none' }}
+                                                    accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
+                                                    onChange={handleFileSelect}
+                                                />
+                                                <button className="wa-nav-icon-btn">
+                                                    <Smile size={22} color="#54656f" />
+                                                </button>
+                                            </div>
+                                        )}
 
-                                                    <div style={{ display: 'flex', alignItems: 'center' }}>
-                                                        <button className="wa-nav-icon-btn" style={{ padding: '0px', width: 'auto', marginRight: '24px' }} onClick={cancelRecording} title="Cancel">
-                                                            <Trash2 size={24} color="#8696a0" />
-                                                        </button>
+                                        {isRecording ? (
+                                            <div className="wa-recording-ui" style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                                                <div style={{ flex: 1 }}></div>
 
-                                                        <div className="wa-recording-dot-wrap" style={{ marginRight: '32px' }}>
-                                                            {recordingPaused ? (
-                                                                <>
-                                                                    <button
-                                                                        className="wa-nav-icon-btn tooltip-wrapper"
-                                                                        style={{ padding: '0px', width: 'auto', marginRight: '16px', background: 'transparent' }}
-                                                                        onClick={isReviewPlaying ? pauseReview : playReview}
-                                                                        data-tooltip={isReviewPlaying ? "Pause" : "Play"}
-                                                                    >
-                                                                        {isReviewPlaying ? (
-                                                                            <svg viewBox="0 0 24 24" width="24" height="24" fill="#8696a0"><path d="M9 16h2V8H9v8zm4-8v8h2V8h-2z"></path></svg>
-                                                                        ) : (
-                                                                            <svg viewBox="0 0 24 24" width="24" height="24" fill="#8696a0"><path d="M8 5v14l11-7z"></path></svg>
-                                                                        )}
-                                                                    </button>
+                                                <div style={{ display: 'flex', alignItems: 'center' }}>
+                                                    <button className="wa-nav-icon-btn" style={{ padding: '0px', width: 'auto', marginRight: '24px' }} onClick={cancelRecording} title="Cancel">
+                                                        <Trash2 size={24} color="#8696a0" />
+                                                    </button>
 
-                                                                    <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: 'var(--primary, #23D2EF)', marginRight: '4px' }}></div>
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <div className="wa-recording-red-dot pulse"></div>
-                                                                    <span className="wa-recording-time">{formatRecordingTime(recordingTime)}</span>
-                                                                </>
-                                                            )}
-                                                        </div>
+                                                    <div className="wa-recording-dot-wrap" style={{ marginRight: '32px' }}>
+                                                        {recordingPaused ? (
+                                                            <>
+                                                                <button
+                                                                    className="wa-nav-icon-btn tooltip-wrapper"
+                                                                    style={{ padding: '0px', width: 'auto', marginRight: '16px', background: 'transparent' }}
+                                                                    onClick={isReviewPlaying ? pauseReview : playReview}
+                                                                    data-tooltip={isReviewPlaying ? "Pause" : "Play"}
+                                                                >
+                                                                    {isReviewPlaying ? (
+                                                                        <svg viewBox="0 0 24 24" width="24" height="24" fill="#8696a0"><path d="M9 16h2V8H9v8zm4-8v8h2V8h-2z"></path></svg>
+                                                                    ) : (
+                                                                        <svg viewBox="0 0 24 24" width="24" height="24" fill="#8696a0"><path d="M8 5v14l11-7z"></path></svg>
+                                                                    )}
+                                                                </button>
 
-                                                        <div className="wa-recording-waves" style={{ marginRight: '16px' }}>
-                                                            <canvas ref={canvasRef} className="wa-audio-canvas" width="140" height="28"></canvas>
-                                                        </div>
-
-                                                        {recordingPaused && (
-                                                            <span className="wa-recording-time" style={{ marginRight: '24px', minWidth: '40px', color: '#8696a0' }}>
-                                                                {isReviewPlaying ? formatRecordingTime(previewTime) : formatRecordingTime(recordingTime)}
-                                                            </span>
+                                                                <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: 'var(--primary, #23D2EF)', marginRight: '4px' }}></div>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <div className="wa-recording-red-dot pulse"></div>
+                                                                <span className="wa-recording-time">{formatRecordingTime(recordingTime)}</span>
+                                                            </>
                                                         )}
+                                                    </div>
 
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                                                            {!recordingPaused ? (
-                                                                <button className="wa-record-action-btn pause tooltip-wrapper" onClick={pauseRecording} data-tooltip="Pause recording" style={{ background: 'transparent' }}>
-                                                                    <svg viewBox="5 5 14 14" width="28" height="28" fill="#ef697a"><path d="M9 16h2V8H9v8zm4-8v8h2V8h-2z"></path></svg>
-                                                                </button>
-                                                            ) : (
-                                                                <button className="wa-record-action-btn resume tooltip-wrapper" onClick={resumeRecording} data-tooltip="Resume recording" style={{ background: 'transparent' }}>
-                                                                    <Mic size={24} color="#ef697a" />
-                                                                </button>
-                                                            )}
-                                                            <button
-                                                                onClick={() => {
-                                                                    setIsViewOnce(!isViewOnce);
-                                                                    setSnackbar({ message: !isViewOnce ? "Voice message set to view once" : "Voice message view once removed", type: 'info', variant: 'system' });
-                                                                }}
-                                                                style={{ background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                                                title="View once"
-                                                            >
-                                                                <div style={{
-                                                                    width: 24, height: 24, borderRadius: '50%', border: `1.5px dashed ${isViewOnce ? 'var(--primary, #23D2EF)' : '#8696a0'}`,
-                                                                    backgroundColor: isViewOnce ? 'var(--primary, #23D2EF)' : 'transparent',
-                                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                                    transition: 'all 0.2s',
-                                                                }}>
-                                                                    <span style={{ fontSize: 11, fontWeight: '700', color: isViewOnce ? '#111b21' : '#8696a0' }}>1</span>
-                                                                </div>
+                                                    <div className="wa-recording-waves" style={{ marginRight: '16px' }}>
+                                                        <canvas ref={canvasRef} className="wa-audio-canvas" width="140" height="28"></canvas>
+                                                    </div>
+
+                                                    {recordingPaused && (
+                                                        <span className="wa-recording-time" style={{ marginRight: '24px', minWidth: '40px', color: '#8696a0' }}>
+                                                            {isReviewPlaying ? formatRecordingTime(previewTime) : formatRecordingTime(recordingTime)}
+                                                        </span>
+                                                    )}
+
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                                        {!recordingPaused ? (
+                                                            <button className="wa-record-action-btn pause tooltip-wrapper" onClick={pauseRecording} data-tooltip="Pause recording" style={{ background: 'transparent' }}>
+                                                                <svg viewBox="5 5 14 14" width="28" height="28" fill="#ef697a"><path d="M9 16h2V8H9v8zm4-8v8h2V8h-2z"></path></svg>
                                                             </button>
-                                                            <button className="wa-send-btn-circle-inner recording" onClick={stopAndSendRecording}>
-                                                                <Send size={24} color="white" strokeWidth={2.5} />
+                                                        ) : (
+                                                            <button className="wa-record-action-btn resume tooltip-wrapper" onClick={resumeRecording} data-tooltip="Resume recording" style={{ background: 'transparent' }}>
+                                                                <Mic size={24} color="#ef697a" />
                                                             </button>
-                                                        </div>
+                                                        )}
+                                                        <button
+                                                            onClick={() => {
+                                                                setIsViewOnce(!isViewOnce);
+                                                                setSnackbar({ message: !isViewOnce ? "Voice message set to view once" : "Voice message view once removed", type: 'info', variant: 'system' });
+                                                            }}
+                                                            style={{ background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                                            title="View once"
+                                                        >
+                                                            <div style={{
+                                                                width: 24, height: 24, borderRadius: '50%', border: `1.5px dashed ${isViewOnce ? 'var(--primary, #23D2EF)' : '#8696a0'}`,
+                                                                backgroundColor: isViewOnce ? 'var(--primary, #23D2EF)' : 'transparent',
+                                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                                transition: 'all 0.2s',
+                                                            }}>
+                                                                <span style={{ fontSize: 11, fontWeight: '700', color: isViewOnce ? '#111b21' : '#8696a0' }}>1</span>
+                                                            </div>
+                                                        </button>
+                                                        <button className="wa-send-btn-circle-inner recording" onClick={stopAndSendRecording}>
+                                                            <Send size={24} color="white" strokeWidth={2.5} />
+                                                        </button>
                                                     </div>
                                                 </div>
-                                            ) : (
-                                                <div style={{ display: 'flex', width: '100%', alignItems: 'center' }}>
-                                                    <div className="wa-input-pill">
-                                                        <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
-                                                            {renderAttachmentMenu()}
-                                                            <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
-                                                                <Paperclip size={22} color="#54656f" />
-                                                            </button>
-                                                            <input
-                                                                type="file"
-                                                                ref={fileInputRef}
-                                                                style={{ display: 'none' }}
-                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
-                                                                onChange={handleFileSelect}
-                                                            />
-                                                            <button className="wa-nav-icon-btn">
-                                                                <Smile size={22} color="#54656f" />
-                                                            </button>
+                                            </div>
+                                        ) : (
+                                            <div style={{ display: 'flex', width: '100%', alignItems: 'center' }}>
+                                                <div className="wa-input-area">
+                                                    {file && (
+                                                        <div className="wa-file-preview-badge">
+                                                            {file.name.substring(0, 15)}...
+                                                            <button onClick={() => setFile(null)}>Ã—</button>
                                                         </div>
-                                                        <div className="wa-input-area">
-                                                            {file && (
-                                                                <div className="wa-file-preview-badge">
-                                                                    {file.name.substring(0, 15)}...
-                                                                    <button onClick={() => setFile(null)}>×</button>
-                                                                </div>
-                                                            )}
-                                                            <textarea
-                                                                id="p2p-message-input"
-                                                                name="message"
-                                                                aria-label="Type a message"
-                                                                className="wa-input-box"
-                                                                placeholder={t('chat_window.input_placeholder')}
-                                                                value={input}
-                                                                onChange={(e) => setInput(e.target.value)}
-                                                                onPaste={handlePaste}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                                                        e.preventDefault();
-                                                                        handleSend(e);
-                                                                    }
-                                                                }}
-                                                                rows={1}
-                                                                style={{ resize: 'none', overflowY: 'auto' }}
-                                                            />
-                                                        </div>
-                                                        {(!input.trim() && !file) && (
-                                                            <div className="wa-footer-right-icons">
-                                                                <div className="mic-wrapper" data-tooltip="Voice message">
-                                                                    <button className="wa-nav-icon-btn-pill mic-hover" onClick={startRecording}>
-                                                                        <Mic size={22} color="#54656f" className="mic-icon-svg" />
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                    {(input.trim() || file) && (
-                                                        <div className="wa-footer-right-icons">
-                                                            <button onClick={handleSend} className="wa-send-btn-circle-inner">
-                                                                <Send size={24} color="white" strokeWidth={2.5} />
+                                                    )}
+                                                    <textarea
+                                                        id="p2p-message-input"
+                                                        name="message"
+                                                        aria-label="Type a message"
+                                                        className="wa-input-box"
+                                                        placeholder={accountLocked ? "Account Locked" : accountBanned && new Date(accountBanned) > new Date() ? "Temporary Restriction" : t('chat_window.input_placeholder')}
+                                                        value={input}
+                                                        onChange={(e) => setInput(e.target.value)}
+                                                        onPaste={handlePaste}
+                                                        disabled={accountLocked || (accountBanned && new Date(accountBanned) > new Date())}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                                e.preventDefault();
+                                                                handleSend(e);
+                                                            }
+                                                        }}
+                                                        rows={1}
+                                                        style={{ resize: 'none', overflowY: 'auto' }}
+                                                    />
+                                                </div>
+
+                                                <div className="wa-footer-right-icons">
+                                                    {(input.trim() || file) ? (
+                                                        <button onClick={handleSend} className="wa-send-btn-circle-inner">
+                                                            <Send size={24} color="white" strokeWidth={2.5} />
+                                                        </button>
+                                                    ) : (
+                                                        <div className="mic-wrapper" data-tooltip="Voice message">
+                                                            <button className="wa-nav-icon-btn-pill mic-hover" onClick={startRecording}>
+                                                                <Mic size={22} color="#54656f" className="mic-icon-svg" />
                                                             </button>
                                                         </div>
                                                     )}
                                                 </div>
-                                    )}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         )}
@@ -10647,7 +10299,7 @@ export default function Chat() {
                                         {String(selectedGroup.admin?._id || selectedGroup.admin) === String(user.id || user._id) ? 'You created this group' : `${selectedGroup.admin?.name || 'Admin'} created this group`}
                                     </div>
                                     <div className="wa-group-welcome-subtitle">
-                                        {selectedGroup.members?.length} members • {selectedGroup.members?.length} contacts • Created {formatDateForSeparator(selectedGroup.created_at)}
+                                        {selectedGroup.members?.length} members â€¢ {selectedGroup.members?.length} contacts â€¢ Created {formatDateForSeparator(selectedGroup.created_at)}
                                     </div>
                                     <div className="wa-group-welcome-action">Add description...</div>
                                     <div className="wa-group-welcome-buttons">
@@ -10742,27 +10394,6 @@ export default function Chat() {
                                                         }
                                                         displayContent = `${adder} added ${target}`;
                                                     }
-                                                    // Handle ownership transfer: "AdminName assigned NewOwner as the new owner"
-                                                    else if (content.includes(' assigned ') && content.includes(' as the new owner')) {
-                                                        const parts = content.split(' assigned ');
-                                                        let assigner = parts[0];
-                                                        const subParts = parts[1].split(' as the new owner');
-                                                        let target = subParts[0];
-
-                                                        if (String(msg.sender_id?._id || msg.sender_id) === String(myId)) {
-                                                            assigner = 'You';
-                                                        }
-                                                        
-                                                        if (target === myName) {
-                                                            target = 'you';
-                                                        }
-                                                        
-                                                        if (assigner === 'You') {
-                                                            displayContent = `You assigned ${target} as the new owner`;
-                                                        } else {
-                                                            displayContent = `${target} is now a Community Owner`;
-                                                        }
-                                                    }
                                                     // Fallback for legacy "You removed/added" messages
                                                     else {
                                                         const prefixMe = 'You ';
@@ -10824,11 +10455,11 @@ export default function Chat() {
                                                                     lineHeight: '1.6'
                                                                 }}>
                                                                     <li style={{ display: 'flex', marginBottom: '8px', alignItems: 'flex-start' }}>
-                                                                        <span style={{ marginRight: '10px', marginTop: '2px' }}>•</span>
+                                                                        <span style={{ marginRight: '10px', marginTop: '2px' }}>â€¢</span>
                                                                         <span>Members in this group are now community members.</span>
                                                                     </li>
                                                                     <li style={{ display: 'flex', alignItems: 'flex-start' }}>
-                                                                        <span style={{ marginRight: '10px', marginTop: '2px' }}>•</span>
+                                                                        <span style={{ marginRight: '10px', marginTop: '2px' }}>â€¢</span>
                                                                         <span>Anyone in the community can join this group.</span>
                                                                     </li>
                                                                 </ul>
@@ -10911,7 +10542,7 @@ export default function Chat() {
                                                                         {isMeMsg(msg.reply_to) ? 'You' : (msg.reply_to.sender_id?.name || 'User')}
                                                                     </div>
                                                                     <div className="wa-reply-context-text">
-                                                                        {msg.reply_to.type === 'image' ? '📷 Photo' : (msg.reply_to.type === 'file' ? '📄 File' : msg.reply_to.content)}
+                                                                        {msg.reply_to.type === 'image' ? 'ðŸ“· Photo' : (msg.reply_to.type === 'file' ? 'ðŸ“„ File' : msg.reply_to.content)}
                                                                     </div>
                                                                 </div>
                                                             )}
@@ -10950,7 +10581,7 @@ export default function Chat() {
                                                                             <FileText size={32} color="#8696a0" />
                                                                             <div className="wa-msg-file-info">
                                                                                 <div className="wa-msg-file-name">{msg.fileName || 'document.pdf'}</div>
-                                                                                <div className="wa-msg-file-meta">{msg.fileSize || 'Unknown size'} • {msg.fileName?.split('.').pop().toUpperCase()}</div>
+                                                                                <div className="wa-msg-file-meta">{msg.fileSize || 'Unknown size'} â€¢ {msg.fileName?.split('.').pop().toUpperCase()}</div>
                                                                             </div>
                                                                             <Download size={20} color="#8696a0" className="wa-file-download-icon" />
                                                                         </div>
@@ -11135,7 +10766,7 @@ export default function Chat() {
                                                     </span>
                                                 </div>
                                                 <div className="wa-reply-preview-content">
-                                                    {replyingTo.type === 'image' ? '📷 Photo' : (replyingTo.type === 'file' ? '📄 File' : replyingTo.content)}
+                                                    {replyingTo.type === 'image' ? 'ðŸ“· Photo' : (replyingTo.type === 'file' ? 'ðŸ“„ File' : replyingTo.content)}
                                                 </div>
                                             </div>
                                             {replyingTo.type === 'image' && replyingTo.file_path && (
@@ -11147,158 +10778,154 @@ export default function Chat() {
                                         </div>
                                     )}
 
-                                    {(accountLocked || isAccountBanned() || (selectedUser.requestStatus === 'rejected' && selectedUser.requestUpdatedAt && (new Date() - new Date(selectedUser.requestUpdatedAt)) < 24 * 60 * 60 * 1000)) && (selectedUser.requestStatus === 'rejected' || selectedUser.requestStatus === 'pending') ? (
-                                        <div style={{ width: '100%', padding: '12px', background: '#f8fafc', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem', border: '1px solid #e2e8f0' }}>
-                                            Messaging is restricted for 24 hours.
-                                        </div>
-                                    ) : (
-                                        isRecording ? (
-                                            <div className="wa-recording-ui" style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                                                <div style={{ flex: 1 }}></div>
-
-                                                <div style={{ display: 'flex', alignItems: 'center' }}>
-                                                    <button className="wa-nav-icon-btn" style={{ padding: '0px', width: 'auto', marginRight: '24px' }} onClick={cancelRecording} title="Cancel">
-                                                        <Trash2 size={24} color="#8696a0" />
-                                                    </button>
-
-                                                    <div className="wa-recording-dot-wrap" style={{ marginRight: '32px' }}>
-                                                        {recordingPaused ? (
-                                                            <>
-                                                                <button
-                                                                    className="wa-nav-icon-btn tooltip-wrapper"
-                                                                    style={{ padding: '0px', width: 'auto', marginRight: '16px', background: 'transparent' }}
-                                                                    onClick={isReviewPlaying ? pauseReview : playReview}
-                                                                    data-tooltip={isReviewPlaying ? "Pause" : "Play"}
-                                                                >
-                                                                    {isReviewPlaying ? (
-                                                                        <svg viewBox="0 0 24 24" width="24" height="24" fill="#8696a0"><path d="M9 16h2V8H9v8zm4-8v8h2V8h-2z"></path></svg>
-                                                                    ) : (
-                                                                        <svg viewBox="0 0 24 24" width="24" height="24" fill="#8696a0"><path d="M8 5v14l11-7z"></path></svg>
-                                                                    )}
-                                                                </button>
-
-                                                                <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: 'var(--primary, #23D2EF)', marginRight: '4px' }}></div>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <div className="wa-recording-red-dot pulse"></div>
-                                                                <span className="wa-recording-time">{formatRecordingTime(recordingTime)}</span>
-                                                            </>
-                                                        )}
-                                                    </div>
-
-                                                    <div className="wa-recording-waves" style={{ marginRight: '16px' }}>
-                                                        <canvas ref={canvasRef} className="wa-audio-canvas" width="140" height="28"></canvas>
-                                                    </div>
-
-                                                    {recordingPaused && (
-                                                        <span className="wa-recording-time" style={{ marginRight: '24px', minWidth: '40px', color: '#8696a0' }}>
-                                                            {isReviewPlaying ? formatRecordingTime(previewTime) : formatRecordingTime(recordingTime)}
-                                                        </span>
-                                                    )}
-
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                                                        {!recordingPaused ? (
-                                                            <button className="wa-record-action-btn pause tooltip-wrapper" onClick={pauseRecording} data-tooltip="Pause recording" style={{ background: 'transparent' }}>
-                                                                <svg viewBox="5 5 14 14" width="28" height="28" fill="#ef697a"><path d="M9 16h2V8H9v8zm4-8v8h2V8h-2z"></path></svg>
-                                                            </button>
-                                                        ) : (
-                                                            <button className="wa-record-action-btn resume tooltip-wrapper" onClick={resumeRecording} data-tooltip="Resume recording" style={{ background: 'transparent' }}>
-                                                                <Mic size={24} color="#ef697a" />
-                                                            </button>
-                                                        )}
-                                                        <button
-                                                            onClick={() => {
-                                                                setIsViewOnce(!isViewOnce);
-                                                                setSnackbar({ message: !isViewOnce ? "Voice message set to view once" : "Voice message view once removed", type: 'info', variant: 'system' });
-                                                            }}
-                                                            style={{ background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                                            title="View once"
-                                                        >
-                                                            <div style={{
-                                                                width: 24, height: 24, borderRadius: '50%', border: `1.5px dashed ${isViewOnce ? 'var(--primary, #23D2EF)' : '#8696a0'}`,
-                                                                backgroundColor: isViewOnce ? 'var(--primary, #23D2EF)' : 'transparent',
-                                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                                transition: 'all 0.2s',
-                                                            }}>
-                                                                <span style={{ fontSize: 11, fontWeight: '700', color: isViewOnce ? '#111b21' : '#8696a0' }}>1</span>
-                                                            </div>
-                                                        </button>
-                                                        <button className="wa-send-btn-circle-inner recording" onClick={stopAndSendRecording}>
-                                                            <Send size={24} color="white" strokeWidth={2.5} />
-                                                        </button>
-                                                    </div>
-                                                </div>
+                                    <div className="wa-footer-inner">
+                                        {(selectedGroup?.removedMembers || []).some(mId => String(mId._id || mId) === String(userData?.id || userData?._id || user?.id || user?._id)) ? (
+                                            <div style={{ padding: '15px', background: '#f0f2f5', textAlign: 'center', color: '#667781', fontSize: '14px', width: '100%', borderTop: '1px solid #e9edef' }}>
+                                                You can't send messages to this group because you're no longer a participant.
                                             </div>
                                         ) : (
-                                                <div style={{ display: 'flex', width: '100%', alignItems: 'center' }}>
-                                                    <div className="wa-input-pill">
-                                                        <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
-                                                            {renderAttachmentMenu()}
-                                                            <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
-                                                                <Paperclip size={22} color="#54656f" />
+                                            <div className="wa-input-pill">
+                                                {!isRecording && (
+                                                    <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
+                                                        {renderAttachmentMenu()}
+                                                        <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
+                                                            <Plus size={22} color="#54656f" />
+                                                        </button>
+                                                        <input
+                                                            type="file"
+                                                            ref={fileInputRef}
+                                                            style={{ display: 'none' }}
+                                                            accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
+                                                            onChange={handleFileSelect}
+                                                        />
+                                                        <button className="wa-nav-icon-btn">
+                                                            <Smile size={22} color="#54656f" />
+                                                        </button>
+                                                    </div>
+                                                )}
+
+                                                {isRecording ? (
+                                                    <div className="wa-recording-ui" style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                                                        <div style={{ flex: 1 }}></div>
+
+                                                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                                                            <button className="wa-nav-icon-btn" style={{ padding: '0px', width: 'auto', marginRight: '24px' }} onClick={cancelRecording} title="Cancel">
+                                                                <Trash2 size={24} color="#8696a0" />
                                                             </button>
-                                                            <input
-                                                                type="file"
-                                                                ref={fileInputRef}
-                                                                style={{ display: 'none' }}
-                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
-                                                                onChange={handleFileSelect}
-                                                            />
-                                                            <button className="wa-nav-icon-btn">
-                                                                <Smile size={22} color="#54656f" />
-                                                            </button>
-                                                        </div>
-                                                        <div className="wa-input-area">
-                                                            {file && (
-                                                                <div className="wa-file-preview-badge">
-                                                                    {file.name.substring(0, 15)}...
-                                                                    <button onClick={() => setFile(null)}>×</button>
-                                                                </div>
+
+                                                            <div className="wa-recording-dot-wrap" style={{ marginRight: '32px' }}>
+                                                                {recordingPaused ? (
+                                                                    <>
+                                                                        <button
+                                                                            className="wa-nav-icon-btn tooltip-wrapper"
+                                                                            style={{ padding: '0px', width: 'auto', marginRight: '16px', background: 'transparent' }}
+                                                                            onClick={isReviewPlaying ? pauseReview : playReview}
+                                                                            data-tooltip={isReviewPlaying ? "Pause" : "Play"}
+                                                                        >
+                                                                            {isReviewPlaying ? (
+                                                                                <svg viewBox="0 0 24 24" width="24" height="24" fill="#8696a0"><path d="M9 16h2V8H9v8zm4-8v8h2V8h-2z"></path></svg>
+                                                                            ) : (
+                                                                                <svg viewBox="0 0 24 24" width="24" height="24" fill="#8696a0"><path d="M8 5v14l11-7z"></path></svg>
+                                                                            )}
+                                                                        </button>
+                                                                        <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: 'var(--primary, #23D2EF)', marginRight: '4px' }}></div>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <div className="wa-recording-red-dot pulse"></div>
+                                                                        <span className="wa-recording-time">{formatRecordingTime(recordingTime)}</span>
+                                                                    </>
+                                                                )}
+                                                            </div>
+
+                                                            <div className="wa-recording-waves" style={{ marginRight: '16px' }}>
+                                                                <canvas ref={canvasRef} className="wa-audio-canvas" width="140" height="28"></canvas>
+                                                            </div>
+
+                                                            {recordingPaused && (
+                                                                <span className="wa-recording-time" style={{ marginRight: '24px', minWidth: '40px', color: '#8696a0' }}>
+                                                                    {isReviewPlaying ? formatRecordingTime(previewTime) : formatRecordingTime(recordingTime)}
+                                                                </span>
                                                             )}
+
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                                                {!recordingPaused ? (
+                                                                    <button className="wa-record-action-btn pause tooltip-wrapper" onClick={pauseRecording} data-tooltip="Pause recording" style={{ background: 'transparent' }}>
+                                                                        <svg viewBox="5 5 14 14" width="28" height="28" fill="#ef697a"><path d="M9 16h2V8H9v8zm4-8v8h2V8h-2z"></path></svg>
+                                                                    </button>
+                                                                ) : (
+                                                                    <button className="wa-record-action-btn resume tooltip-wrapper" onClick={resumeRecording} data-tooltip="Resume recording" style={{ background: 'transparent' }}>
+                                                                        <Mic size={24} color="#ef697a" />
+                                                                    </button>
+                                                                )}
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setIsViewOnce(!isViewOnce);
+                                                                        setSnackbar({ message: !isViewOnce ? "Voice message set to view once" : "Voice message view once removed", type: 'info', variant: 'system' });
+                                                                    }}
+                                                                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                                                    title="View once"
+                                                                >
+                                                                    <div style={{
+                                                                        width: 24, height: 24, borderRadius: '50%', border: `1.5px dashed ${isViewOnce ? 'var(--primary, #23D2EF)' : '#8696a0'}`,
+                                                                        backgroundColor: isViewOnce ? 'var(--primary, #23D2EF)' : 'transparent',
+                                                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                                        transition: 'all 0.2s',
+                                                                    }}>
+                                                                        <span style={{ fontSize: 11, fontWeight: '700', color: isViewOnce ? '#111b21' : '#8696a0' }}>1</span>
+                                                                    </div>
+                                                                </button>
+                                                                <button className="wa-send-btn-circle-inner recording" onClick={stopAndSendRecording}>
+                                                                    <Send size={24} color="white" strokeWidth={2.5} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ display: 'flex', width: '100%', alignItems: 'center' }}>
+                                                        <div className="wa-input-area">
                                                             <textarea
-                                                                id="p2p-message-input"
+                                                                id="group-message-input"
                                                                 name="message"
                                                                 aria-label="Type a message"
                                                                 className="wa-input-box"
-                                                                placeholder={t('chat_window.input_placeholder')}
-                                                                value={input}
-                                                                onChange={(e) => setInput(e.target.value)}
-                                                                onPaste={handlePaste}
-                                                                onKeyDown={(e) => {
+                                                                placeholder="Type a message"
+                                                                value={groupInput}
+                                                                onChange={(e) => setGroupInput(e.target.value)}
+                                                                onKeyDown={async (e) => {
                                                                     if (e.key === 'Enter' && !e.shiftKey) {
                                                                         e.preventDefault();
-                                                                        handleSend(e);
+                                                                        handleSend(null, groupInput);
                                                                     }
                                                                 }}
                                                                 rows={1}
                                                                 style={{ resize: 'none', overflowY: 'auto' }}
                                                             />
                                                         </div>
-                                                        {(!input.trim() && !file) && (
-                                                            <div className="wa-footer-right-icons">
-                                                                <div className="mic-wrapper" data-tooltip="Voice message">
-                                                                    <button className="wa-nav-icon-btn-pill mic-hover" onClick={startRecording}>
-                                                                        <Mic size={22} color="#54656f" className="mic-icon-svg" />
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                    {(input.trim() || file) && (
+
                                                         <div className="wa-footer-right-icons">
-                                                            <button onClick={handleSend} className="wa-send-btn-circle-inner">
-                                                                <Send size={24} color="white" strokeWidth={2.5} />
-                                                            </button>
+                                                            {groupInput.trim() ? (
+                                                                <button className="wa-send-btn-circle-inner" onClick={() => handleSend(null, groupInput)}>
+                                                                    <Send size={24} color="white" strokeWidth={2.5} />
+                                                                </button>
+                                                            ) : (
+                                                                <button className="wa-nav-icon-btn-pill" onClick={() => {
+                                                                    setIsRecording(true);
+                                                                    startRecording();
+                                                                }}>
+                                                                    <Mic size={22} color="#54656f" />
+                                                                </button>
+                                                            )}
                                                         </div>
-                                                    )}
-                                                </div>
-                                            )
+                                                    </div>
+                                                )}
+                                            </div>
                                         )}
                                     </div>
                                 </div>
-                            )}
-                        </>
+                            </div>
+                        )}
+                    </>
                 ) : (
                     <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#41525d' }}>
                         <h2>Neural Chat</h2>
@@ -11322,15 +10949,12 @@ export default function Chat() {
             {isMessageSearchOpen && (selectedUser || selectedGroup) && renderSearchSidebar()}
             {renderContactInfoPanel()}
             {renderCommunityInfoPanel()}
-            {renderSelectOwnerPanel()}
             {renderCommunityGroupsListPanel()}
             {renderManageGroupsPanel()}
             {renderAddExistingGroupsPanel()}
             {renderConfirmAddGroupsPanel()}
             {renderCommunityAddMemberPanel()}
             {renderConfirmCommunityAddMembersPanel()}
-            {renderGroupAddMemberPanel()}
-            {renderConfirmGroupAddMembersPanel()}
             {isCommunityNewGroupOpen && renderNewGroupDrawer(true)}
             {renderSharedMediaPanel()}
             {renderStarredMessagesPanel()}
@@ -11338,25 +10962,24 @@ export default function Chat() {
             {renderNotificationSettingsPanel()}
             {renderCommunitySettingsPanel()}
             {renderWhoCanAddGroupsModal()}
-            {renderAssignOwnerModal()}
         </div >
     );
 
-    const checkAddGroupPermission = (community, showAlert = false) => {
+    const checkAddGroupPermission = (community) => {
         if (!community) return true;
-        const myId = user.id || user._id;
-        const isOwner = String(community.creator?._id || community.creator) === String(myId);
-        const isAdmin = isOwner || (community.admins || []).some(a => String(a?._id || a) === String(myId));
+        if (community.whoCanAddGroups === 'admins') {
+            const myId = user.id || user._id;
+            // A community is identified by creator field or if current user is the "Community info" owner
+            const isAdmin = community.creator === myId || String(community.id || community._id) === String(myId);
 
-        if (!isAdmin) {
-            if (showAlert) {
+            if (!isAdmin) {
                 setSnackbar({
-                    message: "Only community owner and admins can add new groups",
+                    message: "You don't have permission to add new groups into the community",
                     type: 'info',
                     duration: 5000
                 });
+                return false;
             }
-            return false;
         }
         return true;
     };
@@ -11443,31 +11066,16 @@ export default function Chat() {
                             Cancel
                         </button>
                         <button
-                                onClick={async () => {
-                                    const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
-                                    if (community) {
-                                        try {
-                                            const token = localStorage.getItem('token');
-                                            const res = await axios.patch(`/api/communities/${community.id || community._id}`, {
-                                                whoCanAddGroups: pendingWhoCanAddGroups
-                                            }, {
-                                                headers: { 'Authorization': `Bearer ${token}` }
-                                            });
-                                            
-                                            if (res.data.community) {
-                                                const updated = { ...res.data.community, id: res.data.community._id, is_community: true };
-                                                const comId = (c) => String(c.id || c._id);
-                                                setCommunities(prev => prev.map(c => comId(c) === comId(community) ? updated : c));
-                                                setSelectedCommunity(updated);
-                                                setSnackbar({ message: 'Permissions updated', type: 'success', variant: 'system' });
-                                            }
-                                        } catch (err) {
-                                            console.error('Update community failed:', err);
-                                            setSnackbar({ message: 'Failed to update permissions', type: 'error', variant: 'system' });
-                                        }
-                                    }
-                                    setIsWhoCanAddGroupsModalOpen(false);
-                                }}
+                            onClick={() => {
+                                const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
+                                if (community) {
+                                    const updatedCommunity = { ...community, whoCanAddGroups: pendingWhoCanAddGroups };
+                                    const comId = (c) => String(c.id || c._id);
+                                    setCommunities(prev => prev.map(c => comId(c) === comId(community) ? updatedCommunity : c));
+                                    setSelectedCommunity(updatedCommunity);
+                                }
+                                setIsWhoCanAddGroupsModalOpen(false);
+                            }}
                             style={{ background: '#027EB5', border: 'none', color: '#111b21', padding: '10px 24px', borderRadius: '24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
                         >
                             Confirm
@@ -11478,198 +11086,50 @@ export default function Chat() {
         );
     };
 
-    const renderSelectOwnerPanel = () => {
-        if (!isSelectOwnerPanelOpen) return null;
-
-        const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
-        if (!community) return null;
-
-        // Collect all members and admins (excluding current owner)
-        const ownerId = community.creator?._id || community.creator;
-        const allCandidates = [
-            ...(community.members || []),
-            ...(community.admins || [])
-        ].filter((m, index, self) => 
-            String(m._id || m.id || m) !== String(ownerId) &&
-            self.findIndex(t => String(t._id || t.id || t) === String(m._id || m.id || m)) === index
-        );
-
-        const filtered = allCandidates.filter(m => {
-            const mName = m.name || '';
-            const search = selectOwnerSearchQuery || '';
-            return mName.toLowerCase().includes(search.toLowerCase());
-        });
-
-        // Group by initial
-        const grouped = filtered.reduce((acc, m) => {
-            const initial = m.name ? m.name.charAt(0).toUpperCase() : '#';
-            if (!acc[initial]) acc[initial] = [];
-            acc[initial].push(m);
-            return acc;
-        }, {});
-
-        const sortedInitials = Object.keys(grouped).sort();
-
-        return (
-            <div className={`wa-contact-info-panel ${isSelectOwnerPanelOpen ? 'active' : ''}`}>
-                <div className="wa-contact-info-header" style={{ padding: '0 16px' }}>
-                     <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 10, height: '100%' }}>
-                        <button 
-                            onClick={() => { 
-                                setIsSelectOwnerPanelOpen(false); 
-                                setIsCommunityInfoOpen(true); 
-                                setSelectOwnerSearchQuery('');
-                            }} 
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#027EB5', fontSize: 16, padding: '8px 0' }}
-                        >
-                            Cancel
-                        </button>
-                        <span style={{ fontSize: 19, fontWeight: 500, color: textColor, flex: 1, textAlign: 'center', paddingRight: 40 }}>Select new owner</span>
-                     </div>
-                </div>
-
-                <div className="wa-contact-info-body" style={{ background: '#f0f2f5', padding: 0, overflowY: 'auto' }}>
-                    <div style={{ padding: '12px 16px' }}>
-                        <div style={{ background: '#ffffff', borderRadius: '8px', display: 'flex', alignItems: 'center', padding: '0 12px', height: 40 }}>
-                            <Search size={18} color="#8696a0" />
-                            <input 
-                                type="text"
-                                placeholder="Search"
-                                value={selectOwnerSearchQuery}
-                                onChange={(e) => setSelectOwnerSearchQuery(e.target.value)}
-                                style={{ background: 'none', border: 'none', flex: 1, padding: '0 12px', fontSize: 15, outline: 'none', color: textColor }}
-                            />
+    const renderRequestsModal = () => (
+        <div className="wa-mute-modal-overlay" onClick={() => setIsRequestsModalOpen(false)} style={{ zIndex: 11000 }}>
+            <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '450px', width: '90%' }}>
+                <div className="wa-mute-modal-content">
+                    <div className="wa-mute-header-centered" style={{ borderBottom: '1px solid #f0f2f5', paddingBottom: '15px' }}>
+                        <div className="wa-mute-icon-wrapper" style={{ background: '#f0f9fa' }}>
+                            <MessageSquare size={28} color="#027EB5" />
                         </div>
+                        <h3 style={{ margin: '10px 0 5px 0', fontSize: '20px', color: '#111b21' }}>Message Requests</h3>
+                        <p style={{ margin: 0, fontSize: '14px', color: '#667781' }}>People you haven't chatted with before</p>
                     </div>
-
-                    <div style={{ padding: '0 24px 20px', fontSize: 13, color: '#667781', textAlign: 'center', lineHeight: '1.4' }}>
-                         You can only assign community admins as new owners.
-                    </div>
-
-                    <div style={{ background: 'white', minHeight: '100%' }}>
-                        {sortedInitials.length === 0 ? (
-                            <div style={{ padding: 40, textAlign: 'center', color: '#667781' }}>No members found</div>
+                    <div className="wa-mute-body" style={{ maxHeight: '400px', overflowY: 'auto', padding: '10px 0' }}>
+                        {messageRequests.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                                <MessageSquare size={48} color="#dfe5e7" style={{ marginBottom: 15 }} />
+                                <p style={{ color: '#667781', fontSize: '16px' }}>No pending requests</p>
+                            </div>
                         ) : (
-                            sortedInitials.map(initial => (
-                                <div key={initial}>
-                                    <div style={{ padding: '20px 24px 10px', fontSize: 14, color: '#027EB5', fontWeight: 500 }}>{initial}</div>
-                                    {grouped[initial].map(member => (
-                                        <div 
-                                            key={member._id || member.id}
-                                            onClick={() => {
-                                                setAssignOwnerTarget({ member, communityId: community._id || community.id });
-                                                setIsAssignOwnerModalOpen(true);
-                                            }}
-                                            style={{ display: 'flex', alignItems: 'center', gap: 15, padding: '12px 24px', cursor: 'pointer' }}
-                                            className="wa-member-item-hover"
-                                        >
-                                            <div style={{ width: 45, height: 45, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                {member.profile_photo || member.image ? (
-                                                    <img src={member.profile_photo || member.image} alt={member.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                ) : (
-                                                    <UserIcon size={24} color="#8696a0" />
-                                                )}
-                                            </div>
-                                            <div style={{ flex: 1, borderBottom: '1px solid #f0f2f5', paddingBottom: 12 }}>
-                                                <div style={{ color: '#111b21', fontWeight: 500, fontSize: 16 }}>{member.name}</div>
-                                                <div style={{ color: '#667781', fontSize: 13, marginTop: 2 }}>{member.about || 'Available'}</div>
-                                            </div>
+                            messageRequests.map(req => (
+                                <div key={req._id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 15px', borderBottom: '1px solid #f0f2f5', transition: 'background 0.2s', cursor: 'default' }} onMouseEnter={(e) => e.currentTarget.style.background = '#f8f9fa'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
+                                        <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
+                                            {(req.fromUserId?.avatar || req.fromUserId?.image) ? <img src={req.fromUserId.avatar || req.fromUserId.image} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 18, color: '#54656f' }}>{(req.fromUserId?.name || 'U')[0].toUpperCase()}</span>}
                                         </div>
-                                    ))}
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ fontWeight: 500, color: '#111b21', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{req.fromUserId?.name || 'New User'}</div>
+                                            <div style={{ fontSize: 12, color: '#667781' }}>{req.messagePreview || 'Wants to message you'}</div>
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 8, marginLeft: 10 }}>
+                                        <button onClick={() => { handleAcceptRequest(req._id); setIsRequestsModalOpen(false); }} style={{ padding: '8px 16px', borderRadius: '20px', border: 'none', background: '#027EB5', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: 600, transition: 'opacity 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.opacity = 0.8} onMouseLeave={(e) => e.currentTarget.style.opacity = 1}>Accept</button>
+                                        <button onClick={() => { handleRejectRequest(req._id); setIsRequestsModalOpen(false); }} style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #f15c6d', background: 'transparent', color: '#f15c6d', cursor: 'pointer', fontSize: '13px', fontWeight: 600, transition: 'all 0.2s' }} onMouseEnter={(e) => { e.currentTarget.style.background = '#f15c6d'; e.currentTarget.style.color = 'white'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#f15c6d'; }}>Reject</button>
+                                    </div>
                                 </div>
                             ))
                         )}
-                        <div style={{ height: 100 }}></div>
+                    </div>
+                    <div className="wa-mute-footer-centered" style={{ paddingTop: '10px' }}>
+                        <button className="wa-mute-btn-cancel" onClick={() => setIsRequestsModalOpen(false)} style={{ background: '#f0f2f5', color: '#54656f', border: 'none', padding: '10px 20px', borderRadius: '20px', width: '100%', fontWeight: 500, cursor: 'pointer' }}>Close</button>
                     </div>
                 </div>
             </div>
-        );
-    };
-
-    const renderAssignOwnerModal = () => {
-        if (!isAssignOwnerModalOpen || !assignOwnerTarget) return null;
-        const { member, communityId } = assignOwnerTarget;
-
-        return (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 40000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ background: '#ffffff', borderRadius: '24px', padding: '32px', width: '420px', maxWidth: '90%', color: '#111b21', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', boxShadow: '0 10px 40px rgba(0,0,0,0.2)', position: 'relative' }}>
-                    
-                    <button onClick={() => setIsAssignOwnerModalOpen(false)} style={{ alignSelf: 'flex-end', background: 'none', border: 'none', cursor: 'pointer', padding: 0, position: 'absolute', top: 20, right: 20 }}>
-                        <X size={28} color="#54656f" />
-                    </button>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 32, justifyContent: 'center' }}>
-                        <div style={{ width: 64, height: 60, borderRadius: '16px', background: '#ffeef0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <Users size={32} color="#f43f5e" />
-                        </div>
-                        <ArrowRight size={24} color="#8696a0" />
-                        <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#fff7ed', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                            {member.profile_photo || member.image ? <img src={member.profile_photo || member.image} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <div style={{ background: '#ffedd5', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><User size={32} color="#f97316" /></div>}
-                        </div>
-                    </div>
-
-                    <h2 style={{ fontSize: 32, fontWeight: 700, marginBottom: 32, color: '#111b21', lineHeight: '1.2' }}>Assign {member.name} as new owner?</h2>
-
-                    <div style={{ textAlign: 'left', width: '100%', marginBottom: 40, padding: '0 10px' }}>
-                        <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
-                            <div style={{ marginTop: 4 }}>
-                                <AlertCircle size={22} color="#667781" />
-                            </div>
-                            <div>
-                                <div style={{ fontSize: 17, fontWeight: 700, color: '#111b21' }}>You'll no longer be the owner</div>
-                                <div style={{ fontSize: 15, color: '#667781', marginTop: 4, lineHeight: '1.5' }}>Only the owner can deactivate the community.</div>
-                            </div>
-                        </div>
-
-                        <div style={{ display: 'flex', gap: 16 }}>
-                            <div style={{ marginTop: 4 }}>
-                                <UserCheck size={22} color="#667781" />
-                            </div>
-                            <div>
-                                <div style={{ fontSize: 17, fontWeight: 700, color: '#111b21' }}>You'll remain a community admin</div>
-                                <div style={{ fontSize: 15, color: '#667781', marginTop: 4, lineHeight: '1.5' }}>Another admin can demote you or remove you from the community.</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <button
-                        onClick={async () => {
-                            try {
-                                const token = localStorage.getItem('token');
-                                const res = await axios.post(`/api/communities/${communityId}/transfer-ownership`, {
-                                    newOwnerId: member._id || member.id
-                                }, {
-                                    headers: { 'Authorization': `Bearer ${token}` }
-                                });
-                                
-                                if (res.data?.status === 'success') {
-                                    const updatedComm = res.data.community;
-                                    const cId = String(communityId);
-                                    const normalized = { ...updatedComm, id: updatedComm._id, is_community: true };
-                                    
-                                    setCommunities(prev => prev.map(c => String(c._id || c.id) === cId ? normalized : c));
-                                    if (selectedCommunity && String(selectedCommunity._id || selectedCommunity.id) === cId) {
-                                        setSelectedCommunity(normalized);
-                                    }
-                                    
-                                    setSnackbar({ message: `Ownership transferred to ${member.name}`, type: 'success' });
-                                    setIsAssignOwnerModalOpen(false);
-                                    setAssignOwnerTarget(null);
-                                }
-                            } catch (err) {
-                                console.error('Transfer ownership failed:', err);
-                                const errorMsg = err.response?.data?.error || err.message || 'Failed to transfer ownership';
-                                setSnackbar({ message: errorMsg, type: 'error' });
-                            }
-                        }}
-                        style={{ width: '100%', padding: '16px', background: '#1fa855', color: 'white', border: 'none', borderRadius: '44px', fontSize: 18, fontWeight: 700, cursor: 'pointer' }}
-                    >
-                        Confirm
-                    </button>
-                </div>
-            </div>
-        );
-    };
+        </div>
+    );
 
     const renderSettingsPanel = () => {
         if (!isSettingsOpen) return null;
@@ -11708,7 +11168,7 @@ export default function Chat() {
                                                 <div className="wa-settings-status-dot pulse" /> {t('settings.profile.status_available')}
                                             </span>
                                         </div>
-                                        <p className="wa-settings-title">{userData.designation || "Lead Systems Architect"} — <span>Enterprise Core</span></p>
+                                        <p className="wa-settings-title">{userData.designation || "Lead Systems Architect"} â€” <span>Enterprise Core</span></p>
                                         <div className="wa-settings-meta-row">
                                             <div className="wa-settings-meta-item"><Building2 size={14} /> HQ - San Francisco</div>
                                             <div className="wa-settings-meta-item"><Clock size={14} /> (GMT-7) Pacific Time</div>
@@ -11789,23 +11249,23 @@ export default function Chat() {
 
                 case 'general': {
                     const languages = [
-                        'Albanian, Shqip', 'Arabic, العربية', 'Azerbaijani, Azərbaycan',
-                        'Bangla, বাংলা', 'Brazilian Portuguese, Português (Brasil)',
-                        'British English, British English', 'Bulgarian, Български', 'Catalan, Català',
-                        'Chinese Simplified, 中文(简体)', 'Chinese Traditional, 中文(繁體)',
-                        'Croatian, Hrvatski', 'Czech, Čeština', 'Danish, Dansk',
+                        'Albanian, Shqip', 'Arabic, Ø§Ù„Ø¹Ø±Ø¨ÙŠØ©', 'Azerbaijani, AzÉ™rbaycan',
+                        'Bangla, à¦¬à¦¾à¦‚à¦²à¦¾', 'Brazilian Portuguese, PortuguÃªs (Brasil)',
+                        'British English, British English', 'Bulgarian, Ð‘ÑŠÐ»Ð³Ð°Ñ€ÑÐºÐ¸', 'Catalan, CatalÃ ',
+                        'Chinese Simplified, ä¸­æ–‡(ç®€ä½“)', 'Chinese Traditional, ä¸­æ–‡(ç¹é«”)',
+                        'Croatian, Hrvatski', 'Czech, ÄŒeÅ¡tina', 'Danish, Dansk',
                         'Dutch, Nederlands', 'English, English', 'Estonian, Eesti',
-                        'Finnish, Suomi', 'French, Français', 'German, Deutsch',
-                        'Greek, Ελληνικά', 'Hebrew, עברית', 'Hindi, हिन्दी',
+                        'Finnish, Suomi', 'French, FranÃ§ais', 'German, Deutsch',
+                        'Greek, Î•Î»Î»Î·Î½Î¹ÎºÎ¬', 'Hebrew, ×¢×‘×¨×™×ª', 'Hindi, à¤¹à¤¿à¤¨à¥à¤¦à¥€',
                         'Hungarian, Magyar', 'Indonesian, Bahasa Indonesia', 'Italian, Italiano',
-                        'Japanese, 日本語', 'Kannada, ಕನ್ನಡ', 'Korean, 한국어',
-                        'Latvian, Latviešu', 'Lithuanian, Lietuvių', 'Malay, Bahasa Melayu',
-                        'Marathi, मराठी', 'Norwegian, Norsk', 'Polish, Polski',
-                        'Romanian, Română', 'Russian, Русский', 'Slovak, Slovenčina',
-                        'Slovenian, Slovenščina', 'Spanish, Español', 'Swedish, Svenska',
-                        'Tamil, தமிழ்', 'Telugu, తెలుగు', 'Thai, ไทย',
-                        'Turkish, Türkçe', 'Ukrainian, Українська', 'Urdu, اردو',
-                        'Vietnamese, Tiếng Việt'
+                        'Japanese, æ—¥æœ¬èªž', 'Kannada, à²•à²¨à³à²¨à²¡', 'Korean, í•œêµ­ì–´',
+                        'Latvian, LatvieÅ¡u', 'Lithuanian, LietuviÅ³', 'Malay, Bahasa Melayu',
+                        'Marathi, à¤®à¤°à¤¾à¤ à¥€', 'Norwegian, Norsk', 'Polish, Polski',
+                        'Romanian, RomÃ¢nÄƒ', 'Russian, Ð ÑƒÑÑÐºÐ¸Ð¹', 'Slovak, SlovenÄina',
+                        'Slovenian, SlovenÅ¡Äina', 'Spanish, EspaÃ±ol', 'Swedish, Svenska',
+                        'Tamil, à®¤à®®à®¿à®´à¯', 'Telugu, à°¤à±†à°²à±à°—à±', 'Thai, à¹„à¸—à¸¢',
+                        'Turkish, TÃ¼rkÃ§e', 'Ukrainian, Ð£ÐºÑ€Ð°Ñ—Ð½ÑÑŒÐºÐ°', 'Urdu, Ø§Ø±Ø¯Ùˆ',
+                        'Vietnamese, Tiáº¿ng Viá»‡t'
                     ];
 
                     return (
@@ -11886,7 +11346,7 @@ export default function Chat() {
                     return (
                         <div className="wa-settings-tab-content fade-in">
                             <div className="wa-settings-grid privacy-grid">
-                                {/* 🔐 1. Personal Info Visibility */}
+                                {/* ðŸ” 1. Personal Info Visibility */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">Personal Info Visibility</h4>
                                     <button className="wa-settings-list-action">
@@ -11946,7 +11406,7 @@ export default function Chat() {
                                     </div>
                                 </div>
 
-                                {/* 🔒 2. Messaging & Forwarding Control */}
+                                {/* ðŸ”’ 2. Messaging & Forwarding Control */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">Messaging & Forwarding Control</h4>
                                     <button className="wa-settings-list-action">
@@ -12008,7 +11468,7 @@ export default function Chat() {
                                     </div>
                                 </div>
 
-                                {/* 🧠 3. AI Privacy Protection */}
+                                {/* ðŸ§  3. AI Privacy Protection */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">AI Privacy Protection</h4>
                                     <div className="wa-settings-item">
@@ -12056,7 +11516,7 @@ export default function Chat() {
                                     </button>
                                 </div>
 
-                                {/* 📸 4. Screenshot & Media Protection */}
+                                {/* ðŸ“¸ 4. Screenshot & Media Protection */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">Screenshot & Media Protection</h4>
                                     <div className="wa-settings-item">
@@ -12097,7 +11557,7 @@ export default function Chat() {
                                     </div>
                                 </div>
 
-                                {/* 📍 5. Device & Access Privacy */}
+                                {/* ðŸ“ 5. Device & Access Privacy */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">Device & Access Privacy</h4>
                                     <div className="wa-settings-item">
@@ -12145,7 +11605,7 @@ export default function Chat() {
                                     </button>
                                 </div>
 
-                                {/* 🎭 6. Hidden & Decoy Mode */}
+                                {/* ðŸŽ­ 6. Hidden & Decoy Mode */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">Hidden & Decoy Mode</h4>
                                     <div className="wa-settings-item">
@@ -12183,7 +11643,7 @@ export default function Chat() {
                                     </div>
                                 </div>
 
-                                {/* 📊 7. Privacy Score & Monitoring */}
+                                {/* ðŸ“Š 7. Privacy Score & Monitoring */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">Privacy Score & Monitoring</h4>
                                     <div className="wa-settings-item">
@@ -12495,65 +11955,9 @@ export default function Chat() {
                     {/* Global Dropdown Menu */}
                     {openDropdown && renderDropdownMenu(openDropdown.type, openDropdown.id, openDropdown.data)}
             {isMuteModalOpen && renderMuteModal()}
+            {isRequestsModalOpen && renderRequestsModal()}
             {pinReplaceModal && renderPinReplaceModal()}
             {isForwardModalOpen && renderForwardModal()}
-
-            {/* Message Requests Modal */}
-            {isRequestsModalOpen && (
-                <div className="wa-mute-modal-overlay" onClick={() => setIsRequestsModalOpen(false)} style={{ zIndex: 11000 }}>
-                    <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '450px', width: '90%' }}>
-                        <div className="wa-mute-modal-content">
-                            <div className="wa-mute-header-centered" style={{ borderBottom: '1px solid #f0f2f5', paddingBottom: '15px' }}>
-                                <div className="wa-mute-icon-wrapper" style={{ background: '#f0f9fa' }}>
-                                    <MessageSquare size={28} color="#027EB5" />
-                                </div>
-                                <h3 style={{ margin: '10px 0 5px 0', fontSize: '20px', color: '#111b21' }}>Message Requests</h3>
-                                <p style={{ margin: 0, fontSize: '14px', color: '#667781' }}>People you haven't chatted with before</p>
-                            </div>
-                            <div className="wa-mute-body" style={{ maxHeight: '400px', overflowY: 'auto', padding: '10px 0' }}>
-                                {messageRequests.length === 0 ? (
-                                    <div style={{ textAlign: 'center', padding: '40px 0' }}>
-                                        <MessageSquare size={48} color="#dfe5e7" style={{ marginBottom: 15 }} />
-                                        <p style={{ color: '#667781', fontSize: '16px' }}>No pending requests</p>
-                                    </div>
-                                ) : (
-                                    messageRequests.map(req => (
-                                        <div key={req._id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 15px', borderBottom: '1px solid #f0f2f5', transition: 'background 0.2s', cursor: 'default' }}
-                                            onMouseEnter={(e) => e.currentTarget.style.background = '#f8f9fa'}
-                                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
-                                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
-                                                    {(req.fromUserId?.avatar || req.fromUserId?.image)
-                                                        ? <img src={req.fromUserId.avatar || req.fromUserId.image} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="avatar" />
-                                                        : <span style={{ fontSize: 18, color: '#54656f' }}>{(req.fromUserId?.name || 'U')[0].toUpperCase()}</span>
-                                                    }
-                                                </div>
-                                                <div style={{ flex: 1, minWidth: 0 }}>
-                                                    <div style={{ fontWeight: 500, color: '#111b21', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{req.fromUserId?.name || 'New User'}</div>
-                                                    <div style={{ fontSize: 12, color: '#667781' }}>Wants to message you</div>
-                                                </div>
-                                            </div>
-                                            <div style={{ display: 'flex', gap: 8, marginLeft: 10 }}>
-                                                <button
-                                                    onClick={() => { handleAcceptRequest(req._id); setIsRequestsModalOpen(false); }}
-                                                    style={{ padding: '8px 16px', borderRadius: '20px', border: 'none', background: '#027EB5', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
-                                                >Accept</button>
-                                                <button
-                                                    onClick={() => { handleRejectRequest(req._id); setIsRequestsModalOpen(false); }}
-                                                    style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #f15c6d', background: 'transparent', color: '#f15c6d', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
-                                                >Reject</button>
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                            <div className="wa-mute-footer-centered" style={{ paddingTop: '10px' }}>
-                                <button className="wa-mute-btn-cancel" onClick={() => setIsRequestsModalOpen(false)} style={{ background: '#f0f2f5', color: '#54656f', border: 'none', padding: '10px 20px', borderRadius: '20px', width: '100%', fontWeight: 500, cursor: 'pointer' }}>Close</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* Language Change Confirmation Modal */}
             {isLangConfirmOpen && pendingLanguage && (
@@ -12716,54 +12120,13 @@ export default function Chat() {
                                 Cancel
                             </button>
                             <button
-                                onClick={async () => {
-                                    try {
-                                        const m = adminConfirmModal.member;
-                                        const action = adminConfirmModal.type === 'add' ? 'add' : 'remove';
-                                        
-                                        // Optioally show a loading state here or just rely on API speed
-                                        const res = await axios.patch(`/api/groups/${selectedGroup._id || selectedGroup.id}/admin`, {
-                                            memberId: m._id || m.id,
-                                            action
-                                        }, {
-                                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-                                        });
-                                        
-                                        if (res.data.status === 'success') {
-                                            const updatedGroup = res.data.group;
-                                            
-                                            // Update local selectedGroup's admins array for immediate UI
-                                            const activeTarget = selectedGroup;
-                                            const newAdmins = updatedGroup.admins || [];
-                                            
-                                            // Make sure the "isAdmin" property correctly updates locally 
-                                            // based on whether they are now in the admins array
-                                            const updatedMembers = activeTarget.members.map(member => {
-                                                return {
-                                                    ...member,
-                                                    isAdmin: newAdmins.some(adminId => String(adminId) === String(member._id || member.id))
-                                                };
-                                            });
-                                            
-                                            setSelectedGroup({ ...activeTarget, members: updatedMembers, admins: newAdmins });
-                                            
-                                            // Update groups list globally as well
-                                            setGroups(prev => prev.map(g => {
-                                                if (String(g._id || g.id) === String(activeTarget._id || activeTarget.id)) {
-                                                    return { ...g, admins: newAdmins };
-                                                }
-                                                return g;
-                                            }));
-                                            
-                                            setSnackbar({ message: `Successfully ${action === 'add' ? 'added' : 'removed'} admin`, type: 'success', variant: 'system' });
-                                        }
-                                    } catch (err) {
-                                        console.error('Failed to update group admin:', err);
-                                        const errorMsg = err.response?.data?.error || err.message || 'Error updating group admin';
-                                        setSnackbar({ message: `Failed: ${errorMsg}`, type: 'error' });
-                                    } finally {
-                                        setAdminConfirmModal(null);
-                                    }
+                                onClick={() => {
+                                    const m = adminConfirmModal.member;
+                                    const isAdmin = adminConfirmModal.type === 'add';
+                                    const activeTarget = selectedGroup;
+                                    const updatedMembers = activeTarget.members.map(member => member._id === m._id ? { ...member, isAdmin } : member);
+                                    setSelectedGroup({ ...activeTarget, members: updatedMembers });
+                                    setAdminConfirmModal(null);
                                 }}
                                 style={{ padding: '8px 24px', borderRadius: 24, border: 'none', background: '#027EB5', color: 'white', cursor: 'pointer', fontWeight: 500 }}
                             >
@@ -12994,40 +12357,12 @@ export default function Chat() {
                         {!adminContextMenu.isAdmin && (
                             <div style={{ margin: '0 20px 14px', background: '#f0f2f5', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#54656f' }}>
                                 <div style={{ fontWeight: 600, color: '#3b4a54', marginBottom: 5 }}>Admin permissions include:</div>
-                                <div style={{ marginBottom: 2 }}>• Add &amp; remove members</div>
-                                <div style={{ marginBottom: 2 }}>• Add &amp; delete groups</div>
-                                <div style={{ marginBottom: 2 }}>• Manage community settings</div>
-                                <div>• Deactivate the community</div>
+                                <div style={{ marginBottom: 2 }}>â€¢ Add &amp; remove members</div>
+                                <div style={{ marginBottom: 2 }}>â€¢ Add &amp; delete groups</div>
+                                <div style={{ marginBottom: 2 }}>â€¢ Manage community settings</div>
+                                <div>â€¢ Deactivate the community</div>
                             </div>
                         )}
-
-                        <div style={{ padding: '4px 20px 16px' }}>
-                             <button
-                                 onClick={() => {
-                                     setAssignOwnerTarget({ member: adminContextMenu.member, communityId: adminContextMenu.communityId });
-                                     setIsAssignOwnerModalOpen(true);
-                                     setAdminContextMenu(null);
-                                 }}
-                                 style={{
-                                     width: '100%',
-                                     padding: '10px',
-                                     background: '#f0f2f5',
-                                     border: 'none',
-                                     borderRadius: '8px',
-                                     color: '#027EB5',
-                                     fontSize: 14,
-                                     fontWeight: 500,
-                                     cursor: 'pointer',
-                                     display: 'flex',
-                                     alignItems: 'center',
-                                     justifyContent: 'center',
-                                     gap: 8
-                                 }}
-                             >
-                                 <UserPlus size={18} />
-                                 Assign as new community owner
-                             </button>
-                        </div>
 
                         {/* Actions */}
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '14px 20px', borderTop: '1px solid #e9edef' }}>
@@ -13096,6 +12431,7 @@ export default function Chat() {
                 </div>
             )}
 
+            {isRequestsModalOpen && renderRequestsModal()}
         </>
     );
 }

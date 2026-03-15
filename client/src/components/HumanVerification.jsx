@@ -5,18 +5,9 @@ import { Check, Phone, Image as ImageIcon, RefreshCw, Volume2, X, RefreshCcw, Se
 import '../styles/HumanVerification.css';
 
 const PUZZLE_IMAGES = [
-    "https://images.unsplash.com/photo-1614729939124-032f0b56c9ce?w=400&q=80",
-    "https://images.unsplash.com/photo-1506744626753-eda81846c498?w=400&q=80",
-    "https://images.unsplash.com/photo-1472214103451-9374bd1c798e?w=400&q=80",
-    "https://images.unsplash.com/photo-1465146344425-f00d5f5c8f07?w=400&q=80",
-    "https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?w=400&q=80",
-    "https://images.unsplash.com/photo-1433086966358-54859d0ed716?w=400&q=80",
-    "https://images.unsplash.com/photo-1501854140801-50d01698950b?w=400&q=80",
-    "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=400&q=80",
-    "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=400&q=80",
-    "https://images.unsplash.com/photo-1475924156734-496f6cac6ec1?w=400&q=80",
-    "https://images.unsplash.com/photo-1434725039720-aaad6dd32dfe?w=400&q=80",
-    "https://images.unsplash.com/photo-1505765050516-f72dcac9c60e?w=400&q=80"
+    "/puzzle/mountain.png",
+    "/puzzle/abstract.png",
+    "/puzzle/nature.png"
 ];
 
 export default function HumanVerification({ onVerified, context, identifier }) {

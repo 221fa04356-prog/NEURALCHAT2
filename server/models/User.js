@@ -17,7 +17,10 @@ const userSchema = new mongoose.Schema({
     favorites: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     isOnline: { type: Boolean, default: false },
     lastSeen: { type: Date, default: Date.now },
-    created_at: { type: Date, default: Date.now }
+    created_at: { type: Date, default: Date.now },
+    bannedUntil: { type: Date, default: null },       // Temporary ban on sending requests
+    rejectionCount: { type: Number, default: 0 },     // Strike counter (banned after each rejection, locked after 3)
+    adminLock: { type: Boolean, default: false }       // Locked by admin after 3 strikes
 }, {
     toJSON: { virtuals: true },
     toObject: { virtuals: true }
