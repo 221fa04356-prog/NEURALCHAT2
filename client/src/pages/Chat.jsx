@@ -10260,7 +10260,12 @@ export default function Chat() {
                                         </div>
                                     )}
 
-                                    {isRecording ? (
+                                    {(accountLocked || isAccountBanned() || (selectedUser?.requestStatus === 'rejected' && selectedUser?.requestUpdatedAt && (new Date() - new Date(selectedUser?.requestUpdatedAt)) < 24 * 60 * 60 * 1000)) && (selectedUser?.requestStatus === 'rejected' || selectedUser?.requestStatus === 'pending') ? (
+                                        <div style={{ width: '100%', padding: '12px', background: '#f8fafc', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem', border: '1px solid #e2e8f0' }}>
+                                            Messaging is restricted for 24 hours.
+                                        </div>
+                                    ) : (
+                                        isRecording ? (
                                                 <div className="wa-recording-ui" style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                                                     <div style={{ flex: 1 }}></div>
 
@@ -10401,7 +10406,8 @@ export default function Chat() {
                                                         </div>
                                                     )}
                                                 </div>
-                                    )}
+                                            )
+                                        )}
                                 </div>
                             </div>
                         )}
@@ -11147,7 +11153,7 @@ export default function Chat() {
                                         </div>
                                     )}
 
-                                    {(accountLocked || isAccountBanned() || (selectedUser.requestStatus === 'rejected' && selectedUser.requestUpdatedAt && (new Date() - new Date(selectedUser.requestUpdatedAt)) < 24 * 60 * 60 * 1000)) && (selectedUser.requestStatus === 'rejected' || selectedUser.requestStatus === 'pending') ? (
+                                    {(accountLocked || isAccountBanned() || (selectedUser?.requestStatus === 'rejected' && selectedUser?.requestUpdatedAt && (new Date() - new Date(selectedUser?.requestUpdatedAt)) < 24 * 60 * 60 * 1000)) && (selectedUser?.requestStatus === 'rejected' || selectedUser?.requestStatus === 'pending') ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#f8fafc', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem', border: '1px solid #e2e8f0' }}>
                                             Messaging is restricted for 24 hours.
                                         </div>
