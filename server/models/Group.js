@@ -6,6 +6,7 @@ const groupSchema = new mongoose.Schema({
     members: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }],
     removedMembers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     admin: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, // Creator
+    admins: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // Additional admins
     permissions: {
         editSettings: { type: Boolean, default: true },
         sendMessages: { type: Boolean, default: true },

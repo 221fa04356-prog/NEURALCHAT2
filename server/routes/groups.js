@@ -433,4 +433,151 @@ router.post('/:groupId/messages/mark-read', authenticateToken, async (req, res) 
     }
 });
 
+// PATCH /api/groups/:groupId/admin - Add or remove group admin
+router.patch('/:groupId/admin', authenticateToken, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const { memberId, action } = req.body;
+        const userId = req.user.id;
+
+        const group = await Group.findById(groupId);
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+        
+        // Verify current user is a group admin
+        const isAdmin = String(userId) === String(group.admin) || (group.admins || []).some(admin => String(admin) === String(userId));
+        if (!isAdmin) {
+            return res.status(403).json({ error: 'Only admins can modify group admins' });
+        }
+
+        // Verify TARGET is a member
+        if (!(group.members || []).some(m => String(m) === String(memberId))) {
+            return res.status(400).json({ error: 'User is not a member of the group' });
+        }
+        
+        // Cannot modify original creator
+        if (String(memberId) === String(group.admin)) {
+            return res.status(400).json({ error: 'Cannot modify permissions for group creator' });
+        }
+
+        if (!group.admins) group.admins = [];
+        const isCurrentAdmin = group.admins.some(admin => String(admin) === String(memberId));
+
+        if (action === 'add' && !isCurrentAdmin) {
+            group.admins.push(memberId);
+        } else if (action === 'remove' && isCurrentAdmin) {
+            group.admins = group.admins.filter(a => String(a) !== String(memberId));
+        }
+
+        await group.save();
+
+        if (req.io) {
+            group.members.forEach(memId => {
+                req.io.to(memId.toString()).emit('group_admin_updated', {
+                    groupId,
+                    memberId,
+                    isAdmin: action === 'add'
+                });
+            });
+        }
+
+        res.json({ status: 'success', group });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PATCH /api/groups/:groupId/members - Add members to group
+router.patch('/:groupId/members', authenticateToken, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const { memberIds } = req.body;
+        const userId = req.user.id;
+
+        const group = await Group.findById(groupId);
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+        
+        // Check if current user is an admin
+        const isAdmin = String(userId) === String(group.admin) || (group.admins || []).some(admin => String(admin) === String(userId));
+        if (!isAdmin) {
+            return res.status(403).json({ error: 'Only admins can add members' });
+        }
+
+        const newMemberIds = (memberIds || []).filter(id => !group.members.some(m => String(m) === String(id)));
+        if (newMemberIds.length === 0) return res.json({ status: 'success', group });
+
+        group.members.push(...newMemberIds);
+        
+        // remove from removedMembers if they were there
+        if (group.removedMembers) {
+            group.removedMembers = group.removedMembers.filter(m => !newMemberIds.some(id => String(id) === String(m)));
+        }
+
+        await group.save();
+
+        // SYNC WITH COMMUNITY
+        // If this group belongs to a community, ensure members are added there too
+        const Community = require('../models/Community');
+        const community = await Community.findOne({ groups: groupId });
+        if (community) {
+            const idsObjToAdd = newMemberIds.map(id => new mongoose.Types.ObjectId(id));
+            
+            await Community.updateOne(
+                { _id: community._id },
+                { 
+                    $addToSet: { members: { $each: idsObjToAdd } },
+                    $pull: { removedMembers: { $in: idsObjToAdd } }
+                }
+            );
+
+            if (community.announcements) {
+                await Group.updateOne(
+                    { _id: community.announcements },
+                    { 
+                        $addToSet: { members: { $each: idsObjToAdd } },
+                        $pull: { removedMembers: { $in: idsObjToAdd } }
+                    }
+                );
+            }
+
+            // Optional: notify about community member addition
+            if (req.io) {
+                const updatedComm = await Community.findById(community._id)
+                    .populate('creator', 'name mobile countryCode _id')
+                    .populate('members', 'name mobile countryCode _id about')
+                    .populate('admins', 'name mobile countryCode _id about')
+                    .populate('announcements', 'name icon _id members admin')
+                    .lean();
+
+                const communityData = { ...updatedComm, id: updatedComm._id, is_community: true };
+                
+                // Notify all members of community about update
+                const allMembers = [
+                    updatedComm.creator?._id || updatedComm.creator,
+                    ...(updatedComm.members || []).map(m => m._id || m)
+                ];
+                allMembers.forEach(uid => {
+                    req.io.to(uid.toString()).emit('community_updated', {
+                        community: communityData
+                    });
+                });
+            }
+        }
+
+        // Emit to all members
+        if (req.io) {
+            const populated = await Group.findById(groupId).populate('members', 'name image mobile about');
+            group.members.forEach(m => {
+                req.io.to(m.toString()).emit('group_members_updated', { 
+                    groupId, 
+                    members: populated.members 
+                });
+            });
+        }
+
+        res.json({ status: 'success', group });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;
