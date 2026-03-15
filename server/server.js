@@ -86,6 +86,7 @@ io.use((socket, next) => {
 });
 
 const User = require('./models/User'); // Import User model
+const MessageRequest = require('./models/MessageRequest'); // Import MessageRequest model
 
 // Track active connections per user
 const userSocketCount = new Map();
@@ -127,14 +128,94 @@ io.on('connection', async (socket) => {
         console.log(`User ${userId} joined room ${roomUserId}`);
     });
 
-    socket.on('send_message', (data) => {
+    socket.on('send_message', async (data) => {
         console.log(`Socket: Message from ${userId} to ${data.receiverId}`);
         const secureData = {
             ...data,
             sender_id: userId,
             user_id: userId
         };
-        io.to(data.receiverId).emit('receive_message', secureData);
+
+        try {
+            const receiverId = data.receiverId;
+
+            // Check if there is an accepted request (either direction)
+            const acceptedRequest = await MessageRequest.findOne({
+                $or: [
+                    { sender_id: userId, receiver_id: receiverId, status: 'accepted' },
+                    { sender_id: receiverId, receiver_id: userId, status: 'accepted' }
+                ]
+            });
+
+            if (acceptedRequest) {
+                // Accepted — relay message normally
+                io.to(receiverId).emit('receive_message', secureData);
+                return;
+            }
+
+            // Check if a pending request already exists from this sender to this receiver
+            const existingRequest = await MessageRequest.findOne({
+                sender_id: userId,
+                receiver_id: receiverId
+            });
+
+            if (!existingRequest) {
+                // First message — create the request and notify receiver
+                await MessageRequest.create({
+                    sender_id: userId,
+                    receiver_id: receiverId,
+                    status: 'pending'
+                });
+
+                const senderUser = await User.findById(userId).select('name');
+                const senderName = senderUser ? senderUser.name : 'Someone';
+
+                io.to(receiverId).emit('new_message_request', {
+                    senderId: userId,
+                    senderName,
+                    requestCreated: true
+                });
+
+                console.log(`[MSG_REQUEST] New request from ${userId} to ${receiverId}`);
+            } else if (existingRequest.status === 'rejected') {
+                // Check if ban is still active
+                const sender = await User.findById(userId).select('bannedUntil adminLock name');
+                
+                if (sender.adminLock) {
+                     socket.emit('account_locked', { message: 'Your account is permanently locked from messaging.' });
+                     return;
+                }
+
+                if (sender.bannedUntil && new Date() < new Date(sender.bannedUntil)) {
+                    // Still banned
+                    socket.emit('account_banned', { 
+                        bannedUntil: sender.bannedUntil,
+                        message: 'You are temporarily restricted from messaging.' 
+                    });
+                    console.log(`[MSG_REQUEST] User ${userId} is still banned until ${sender.bannedUntil}`);
+                    return;
+                } else {
+                    // Ban expired! Allow them to re-request (reset status to pending)
+                    existingRequest.status = 'pending';
+                    existingRequest.created_at = new Date();
+                    await existingRequest.save();
+
+                    io.to(receiverId).emit('new_message_request', {
+                        senderId: userId,
+                        senderName: sender.name,
+                        requestCreated: true
+                    });
+                    console.log(`[MSG_REQUEST] Ban expired for ${userId}, request reset to pending.`);
+                }
+            } else {
+                console.log(`[MSG_REQUEST] Request already exists (status: ${existingRequest.status}), not relaying.`);
+            }
+            // Do NOT relay message — receiver must accept first
+        } catch (err) {
+            console.error('[MSG_REQUEST] Error in send_message handler:', err);
+            // Fallback: relay message anyway to avoid breaking chat
+            io.to(data.receiverId).emit('receive_message', secureData);
+        }
     });
 
     socket.on('disconnect', async (reason) => {

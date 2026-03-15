@@ -1604,23 +1604,26 @@ html {
 
 .wa-input-pill {
     background-color: white;
-    border-radius: 24px;
-    padding: 5px 10px;
+    border-radius: 30px;
+    padding: 0 12px;
     display: flex;
     align-items: center;
-    width: 100%;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    flex: 1;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    min-height: 48px;
+    margin-right: 8px;
 }
 
 .wa-input-box {
     flex: 1;
     background-color: transparent;
     border: none;
-    padding: 10px 0;
+    padding: 12px 8px;
     font-size: 15px;
     outline: none;
     color: var(--wa-text-primary);
     max-height: 120px;
+    resize: none;
 }
 
 .wa-footer-wrapper {

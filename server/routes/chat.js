@@ -8,6 +8,7 @@ const GroupMessage = require('../models/GroupMessage');
 const ChatDeletion = require('../models/ChatDeletion');
 const User = require('../models/User'); // Import User model
 const Group = require('../models/Group'); // Import Group model
+const MessageRequest = require('../models/MessageRequest'); // Import MessageRequest model
 const Groq = require('groq-sdk');
 const pdfParse = require('pdf-parse'); // Renamed to avoid confusion
 const mammoth = require('mammoth');
@@ -164,7 +165,7 @@ router.get('/history/:userId', async (req, res) => {
 // GET Current User Profile - Secured with Auth
 router.get('/me', authenticateToken, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).select('name email mobile designation about role isOnline lastSeen');
+        const user = await User.findById(req.user.id).select('name email mobile designation about role isOnline lastSeen bannedUntil rejectionCount adminLock');
         if (!user) return res.status(404).json({ error: 'User not found' });
         res.json(user);
     } catch (err) {
@@ -231,14 +232,35 @@ router.get('/users', authenticateToken, async (req, res) => {
                 Message.countDocuments({ ...baseQuery, 'link_preview.url': { $exists: true, $ne: null } })
             ]);
 
+            // 4. Check for message request status
+            const request = await MessageRequest.findOne({
+                $or: [
+                    { sender_id: u._id, receiver_id: currentUserId },
+                    { sender_id: currentUserId, receiver_id: u._id }
+                ]
+            }).lean();
+
+            const isAccepted = request && request.status === 'accepted';
+            const isPendingForMe = request && request.status === 'pending' && String(request.receiver_id) === String(currentUserId);
+            const isRejected = request && request.status === 'rejected';
+
+            // Show logs for debugging (remove once verified)
+            if (request) {
+                console.log(`[USER_LIST] Connection ${currentUserId} <-> ${u._id} is ${request.status}`);
+            }
+
             return {
                 ...u.toObject(),
-                lastMessage: lastMsg,
-                unreadCount,
-                mediaCount,
-                docCount,
-                linkCount,
-                isFavorite: userFavorites.some(favId => String(favId) === String(u._id))
+                lastMessage: (isAccepted || !request) ? lastMsg : null, 
+                unreadCount: (isAccepted || !request) ? unreadCount : 0,
+                mediaCount: (isAccepted || !request) ? mediaCount : 0,
+                docCount: (isAccepted || !request) ? docCount : 0,
+                linkCount: (isAccepted || !request) ? linkCount : 0,
+                isFavorite: userFavorites.some(favId => String(favId) === String(u._id)),
+                hasPendingRequest: isPendingForMe,
+                requestStatus: request ? request.status : 'none',
+                requestUpdatedAt: request ? request.updated_at : null,
+                requestRejectedBy: (request && request.status === 'rejected') ? request.receiver_id : null
             };
         }));
 
@@ -510,6 +532,28 @@ router.get('/p2p/:userId/:otherUserId', authenticateToken, async (req, res) => {
             return res.status(403).json({ error: 'You are not authorized to view this chat history' });
         }
 
+        // --- NEW: Message Request Guard ---
+        const currentId = req.user.id;
+        const otherId = (currentId === userId) ? otherUserId : userId;
+
+        const request = await MessageRequest.findOne({
+            $or: [
+                { sender_id: otherId, receiver_id: currentId },
+                { sender_id: currentId, receiver_id: otherId }
+            ]
+        });
+
+        // If a request exists but is NOT accepted, and I am the receiver (or it was rejected)
+        // hide the history.
+        if (request && request.status !== 'accepted') {
+            const isReceiver = String(request.receiver_id) === String(currentId);
+            if (isReceiver || request.status === 'rejected') {
+                console.log(`[P2P GUARD] Hiding history for ${currentId} from ${otherId} because status is ${request.status}`);
+                return res.json([]);
+            }
+        }
+        // --- END GUARD ---
+
         const messages = await Message.find({
             $or: [
                 { user_id: userId, receiver_id: otherUserId },
@@ -612,6 +656,57 @@ router.post('/send', authenticateToken, (req, res, next) => {
 
         // If toUserId is present -> P2P Message
         if (toUserId) {
+            // --- NEW: Message Request Check ---
+            const acceptedRequest = await MessageRequest.findOne({
+                $or: [
+                    { sender_id: userId, receiver_id: toUserId, status: 'accepted' },
+                    { sender_id: toUserId, receiver_id: userId, status: 'accepted' }
+                ]
+            });
+
+            if (!acceptedRequest) {
+                // If not accepted, check if a pending or rejected request exists
+                const existingRequest = await MessageRequest.findOne({
+                    $or: [
+                        { sender_id: userId, receiver_id: toUserId },
+                        { sender_id: toUserId, receiver_id: userId }
+                    ]
+                });
+
+                if (!existingRequest) {
+                    // Create pending request if none exists
+                    await MessageRequest.create({
+                        sender_id: userId,
+                        receiver_id: toUserId,
+                        status: 'pending'
+                    });
+
+                    // Notify receiver
+                    if (req.io) {
+                        const senderUser = await User.findById(userId).select('name');
+                        req.io.to(String(toUserId)).emit('new_message_request', {
+                            senderId: userId,
+                            senderName: senderUser ? senderUser.name : 'New User',
+                            requestCreated: true
+                        });
+                    }
+                } else if (existingRequest.status === 'rejected') {
+                    // Mutual Block Check: Restricted for 24 hours after rejection
+                    const isWithin24Hours = (new Date() - new Date(existingRequest.updated_at)) < 24 * 60 * 60 * 1000;
+                    if (isWithin24Hours) {
+                        return res.status(403).json({ 
+                            error: 'Messaging is restricted for 24 hours after a rejection.',
+                            restrictedUntil: new Date(existingRequest.updated_at.getTime() + 24 * 60 * 60 * 1000)
+                        });
+                    }
+                    // If after 24 hours, allow sending a NEW request (implicit by returning and letting flow continue)
+                }
+
+                // If pending, we do NOT save the message to DB and do NOT relay it
+                return res.json({ status: 'pending_request', message: 'Message request sent. Receiver must accept before they see your messages.' });
+            }
+            // --- END REQUEST CHECK ---
+
             // Detect URL for preview
             const urlRegex = /(https?:\/\/[^\s]+)/g;
             const urlMatch = content ? content.match(urlRegex) : null;
@@ -1359,4 +1454,166 @@ router.get('/admin/unethical-messages', authenticateToken, async (req, res) => {
     }
 });
 
-module.exports = router;
+// ============================================================
+// MESSAGE REQUEST ROUTES
+// ============================================================
+
+// GET pending message requests for the current user
+router.get('/requests', authenticateToken, async (req, res) => {
+    try {
+        const currentUserId = req.user.id;
+
+        // Step 1: Get raw request documents (no populate - just plain docs)
+        const requests = await MessageRequest.find({
+            receiver_id: currentUserId,
+            status: 'pending'
+        }).lean();
+
+        console.log('[REQUESTS] Raw requests found:', requests.length, requests.map(r => ({ id: r._id, sender_id: r.sender_id })));
+
+        if (requests.length === 0) {
+            return res.json([]);
+        }
+
+        // Step 2: Fetch sender users manually using the sender_id values
+        const senderIds = requests.map(r => r.sender_id).filter(Boolean);
+        const senders = await User.find({ _id: { $in: senderIds } })
+            .select('name email mobile')
+            .lean();
+
+        console.log('[REQUESTS] Senders fetched:', senders.length, senders.map(s => ({ id: s._id, name: s.name })));
+
+        // Build lookup map
+        const senderMap = {};
+        senders.forEach(s => { senderMap[String(s._id)] = s; });
+
+        // Step 3: Build response
+        const formatted = requests.map(r => {
+            const sender = senderMap[String(r.sender_id)];
+            return {
+                _id: r._id,
+                fromUserId: sender ? {
+                    _id: sender._id,
+                    name: sender.name,
+                    email: sender.email,
+                    mobile: sender.mobile,
+                } : { _id: r.sender_id, name: 'Unknown User' },
+                messagePreview: null,
+                status: r.status,
+                created_at: r.created_at
+            };
+        });
+
+        console.log('[REQUESTS] Formatted response:', formatted.map(f => ({ id: f._id, name: f.fromUserId?.name })));
+        res.json(formatted);
+    } catch (err) {
+        console.error('[REQUESTS] GET error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST accept a message request
+router.post('/requests/accept', authenticateToken, async (req, res) => {
+    try {
+        const { requestId } = req.body;
+        const currentUserId = req.user.id;
+
+        const request = await MessageRequest.findById(requestId);
+        if (!request) return res.status(404).json({ error: 'Request not found' });
+        if (String(request.receiver_id) !== String(currentUserId)) {
+            return res.status(403).json({ error: 'Not authorized' });
+        }
+
+        request.status = 'accepted';
+        request.updated_at = new Date();
+        await request.save();
+
+        // Notify the sender that their request was accepted
+        if (req.io) {
+            const receiver = await User.findById(currentUserId).select('name');
+            req.io.to(String(request.sender_id)).emit('request_accepted', {
+                requestId: request._id,
+                receiverName: receiver ? receiver.name : 'User'
+            });
+        }
+
+        res.json({ status: 'accepted', requestId });
+    } catch (err) {
+        console.error('[REQUESTS] Accept error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST reject a message request — applies 24-hour ban; 3 strikes = account locked
+router.post('/requests/reject', authenticateToken, async (req, res) => {
+    try {
+        const { requestId } = req.body;
+        const currentUserId = req.user.id;
+
+        const request = await MessageRequest.findById(requestId);
+        if (!request) return res.status(404).json({ error: 'Request not found' });
+        if (String(request.receiver_id) !== String(currentUserId)) {
+            return res.status(403).json({ error: 'Not authorized' });
+        }
+
+        request.status = 'rejected';
+        request.updated_at = new Date();
+        await request.save();
+
+        // Apply penalty to sender
+        const sender = await User.findById(request.sender_id);
+        if (!sender) return res.status(404).json({ error: 'Sender not found' });
+
+        sender.rejectionCount = (sender.rejectionCount || 0) + 1;
+
+        if (sender.rejectionCount >= 3) {
+            // Three strikes — lock account
+            sender.adminLock = true;
+            await sender.save();
+
+            if (req.io) {
+                req.io.to(String(sender._id)).emit('account_locked', {
+                    message: 'Your account has been locked due to multiple rejections.'
+                });
+                req.io.to('admins').emit('account_locked_notify', {
+                    userId: sender._id,
+                    userName: sender.name,
+                    rejectionCount: sender.rejectionCount
+                });
+            }
+        } else {
+            // Temporary 24-hour ban
+            sender.bannedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000);
+            await sender.save();
+
+            if (req.io) {
+                req.io.to(String(sender._id)).emit('account_banned', {
+                    bannedUntil: sender.bannedUntil,
+                    message: 'You have been temporarily restricted from sending requests for 24 hours.'
+                });
+            }
+        }
+
+        if (req.io) {
+            req.io.to(String(request.sender_id)).emit('message_restriction_updated', {
+                targetId: currentUserId,
+                status: 'rejected',
+                updatedAt: request.updated_at,
+                rejectedBy: currentUserId
+            });
+            req.io.to(String(currentUserId)).emit('message_restriction_updated', {
+                targetId: request.sender_id,
+                status: 'rejected',
+                updatedAt: request.updated_at,
+                rejectedBy: currentUserId
+            });
+        }
+
+        res.json({ status: 'rejected', requestId, rejectionCount: sender.rejectionCount });
+    } catch (err) {
+        console.error('[REQUESTS] Reject error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+module.exports = router;
