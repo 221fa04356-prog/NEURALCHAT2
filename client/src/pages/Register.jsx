@@ -5,6 +5,7 @@ import { UserPlus, Mail, Phone, User, Briefcase, ArrowLeft, Shield } from 'lucid
 import LandingBackground from '../components/LandingBackground';
 import HumanVerification from '../components/HumanVerification';
 import CountryCodeSelect from '../components/CountryCodeSelect';
+import Snackbar from '../components/Snackbar';
 import { countryCodes } from '../utils/countryCodes';
 import '../styles/Home.css';
 
@@ -12,6 +13,7 @@ export default function Register() {
     const [formData, setFormData] = useState({ name: '', email: '', mobile: '', designation: '', countryCode: '+91' });
     const [msg, setMsg] = useState('');
     const [error, setError] = useState('');
+    const [snackbar, setSnackbar] = useState({ open: false, message: '', type: 'info' });
     const [isHumanVerified, setIsHumanVerified] = useState(false);
 
     const handleSubmit = async (e) => {
@@ -45,15 +47,26 @@ export default function Register() {
         try {
             const res = await axios.post('/api/auth/register', formData);
             setMsg(res.data.message);
+            setSnackbar({ open: true, message: res.data.message || 'Registration requested. Wait for admin approval.', type: 'success' });
             setFormData({ name: '', email: '', mobile: '', designation: '', countryCode: '+91' });
         } catch (err) {
             setError(err.response?.data?.error || 'Registration failed');
+            setSnackbar({ open: true, message: err.response?.data?.error || 'Registration failed', type: 'error' });
         }
     };
 
     return (
         <div className="home-container">
             <LandingBackground />
+
+            {snackbar.open && (
+                <Snackbar
+                    message={snackbar.message}
+                    senderName="Neural Chat"
+                    type={snackbar.type || 'info'}
+                    onClose={() => setSnackbar({ ...snackbar, open: false })}
+                />
+            )}
 
             <div className="home-content-wrapper">
                 <div className="login-card-container fade-in-scale">
@@ -68,16 +81,7 @@ export default function Register() {
                         </div>
 
                         <form onSubmit={handleSubmit} className="login-form">
-                            {error && (
-                                <div className="alert alert-error">
-                                    <Shield size={16} /> {error}
-                                </div>
-                            )}
-                            {msg && (
-                                <div className="alert alert-success">
-                                    <UserPlus size={16} /> {msg}
-                                </div>
-                            )}
+
 
                             <div className="form-group-custom">
                                 <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>
