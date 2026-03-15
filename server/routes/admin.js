@@ -67,7 +67,8 @@ router.post('/approve', async (req, res) => {
             password_signature: signature,
             login_id: loginId,
             status: 'approved',
-            is_temporary_password: true
+            is_temporary_password: true,
+            created_at: new Date()
         });
 
         res.json({ message: 'User approved with Login ID and Password' });

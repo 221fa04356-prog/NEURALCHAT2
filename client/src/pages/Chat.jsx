@@ -2907,7 +2907,8 @@ export default function Chat() {
                 if (isGroup) {
                     setGroups(prev => prev.filter(g => (g._id !== targetId && g.id !== targetId)));
                 } else {
-                    setUsers(prev => prev.map(u => (u._id === targetId || u.id === targetId) ? { ...u, lastMessage: null, unreadCount: 0 } : u));
+                    // Refresh users to clear history and potentially hide from active list
+                    fetchUsers();
                 }
             }
 
@@ -3423,6 +3424,14 @@ export default function Chat() {
                     'Authorization': `Bearer ${token}`
                 }
             });
+
+            if (res.data.status === 'pending_request') {
+                setMessages(prev => prev.filter(m => m.id !== tempId));
+                setSnackbar({ message: 'Message request sent. They must accept before you can continue.', type: 'info', variant: 'system' });
+                fetchUsers();
+                fetchMessageRequests();
+                return;
+            }
 
             const sentMsg = res.data.message;
 
@@ -4127,7 +4136,12 @@ export default function Chat() {
 
                     {/* Grouped Contacts */}
                     {letters.map(letter => {
-                        const filtered = grouped[letter].filter(u => u.name?.toLowerCase().includes(newChatSearchQuery.toLowerCase()));
+                        const q = newChatSearchQuery.toLowerCase();
+                        const filtered = grouped[letter].filter(u => 
+                            u.name?.toLowerCase().includes(q) || 
+                            u.mobile?.toLowerCase().includes(q) ||
+                            u.email?.toLowerCase().includes(q)
+                        );
                         if (filtered.length === 0) return null;
 
                         return (
@@ -4737,7 +4751,11 @@ export default function Chat() {
         }
 
         const sortedUsers = [...users].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-        const grouped = sortedUsers.reduce((acc, u) => {
+        const filteredUsers = sortedUsers.filter(u => {
+            const q = groupSearchQuery.toLowerCase();
+            return u.name?.toLowerCase().includes(q) || u.mobile?.toLowerCase().includes(q);
+        });
+        const grouped = filteredUsers.reduce((acc, u) => {
             const letter = (u.name?.[0] || "#").toUpperCase();
             if (!acc[letter]) acc[letter] = [];
             acc[letter].push(u);
@@ -8647,8 +8665,10 @@ export default function Chat() {
             </div>
         );
     };
-    const totalUnread = users.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0) + groups.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0);
-    const totalActiveUnread = users.filter(u => !archivedChatIds.includes(u._id)).reduce((acc, curr) => acc + (curr.unreadCount || 0), 0) + groups.filter(g => !archivedChatIds.includes(g._id)).reduce((acc, curr) => acc + (curr.unreadCount || 0), 0);
+    const totalUnread = users.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0) + 
+        groups.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0);
+    const totalActiveUnread = users.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id) ? 0 : (curr.unreadCount || 0)), 0) + 
+                             groups.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id || curr.id) ? 0 : (curr.unreadCount || 0)), 0);
     const totalUnreadArchived = users.filter(u => archivedChatIds.includes(u._id) && (u.unreadCount || 0) > 0).length + groups.filter(g => archivedChatIds.includes(g._id) && (g.unreadCount || 0) > 0).length;
     const totalFavorites = users.filter(u => u.isFavorite && !archivedChatIds.includes(u._id)).length + groups.filter(g => g.isFavorite && !archivedChatIds.includes(g._id)).length;
 
@@ -8662,7 +8682,7 @@ export default function Chat() {
         if (unreadChats.length === 0) return null;
 
         return (
-            <div className="wa-notification-dropdown" onClick={(e) => e.stopPropagation()}>
+            <div className="wa-notification-dropdown" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
                 <div className="wa-notification-header">
                     {t('notifications.unread_title', 'Unread Messages')}
                 </div>
@@ -8671,6 +8691,7 @@ export default function Chat() {
                         <div
                             key={chat._id}
                             className="wa-notification-item"
+                            onMouseDown={(e) => e.stopPropagation()}
                             onClick={() => {
                                 if (chat.is_group) {
                                     setSelectedGroup(chat);
@@ -8680,8 +8701,31 @@ export default function Chat() {
                                     fetchGroupMessages(chat._id);
                                     setGroups(prev => prev.map(g => g._id === chat._id ? { ...g, unreadCount: 0 } : g));
                                 } else {
-                                    handleUserSelect(chat);
+                                    // Force-select: bypass the same-user guard in handleUserSelect
+                                    setInput('');
+                                    setFile(null);
+                                    setTypingLinkPreview(null);
+                                    setReplyingTo(null);
+                                    setIsChatSelectionMode(false);
+                                    setIsForwardingMode(false);
+                                    setForwardSelectedMsgs([]);
+                                    setInfoMessage(null);
+                                    setIsContactInfoOpen(false);
+                                    setIsMessageSearchOpen(false);
+                                    setIsStarredMessagesOpen(false);
+                                    setIsSharedMediaOpen(false);
+                                    setIsEditContactOpen(false);
+                                    setShowScrollBtn(false);
+                                    setSelectedUser(chat);
                                     setSelectedGroup(null);
+                                    if (selectedUserRef) selectedUserRef.current = chat;
+                                    if (selectedGroupRef) selectedGroupRef.current = null;
+                                    
+                                    // Mark as read and update local state for immediate feedback
+                                    markAsRead(chat._id);
+                                    setUsers(prev => prev.map(u => u._id === chat._id ? { ...u, unreadCount: 0 } : u));
+                                    
+                                    fetchP2PRequest(chat._id);
                                 }
                                 setShowNotificationDetails(false);
                             }}
@@ -8793,35 +8837,100 @@ export default function Chat() {
                     </div>
                     <div className="wa-unread-banner-list">
                         {[
-                            ...users.filter(u => u.unreadCount > 0).map(u => ({ ...u, is_group: false })),
-                            ...groups.filter(g => g.unreadCount > 0).map(g => ({ ...g, is_group: true }))
-                        ].sort((a, b) => new Date(b.lastMessage?.created_at || 0) - new Date(a.lastMessage?.created_at || 0))
+                            ...users.filter(u => u.unreadCount > 0 && !(u.requestStatus === 'rejected' && u.requestUpdatedAt && (new Date() - new Date(u.requestUpdatedAt)) < 24 * 60 * 60 * 1000)).map(u => ({ ...u, is_group: false, is_community: false })),
+                            ...groups.filter(g => g.unreadCount > 0).map(g => ({ ...g, is_group: true, is_community: false })),
+                            ...communities.filter(c => (c.unreadCount || 0) > 0).map(c => ({ ...c, is_community: true, is_group: false, _id: c.id, lastMessage: c.announcements?.lastMessage })),
+                            ...messageRequests.map(r => ({ ...r, _id: r._id, is_message_request: true, name: r.fromUserId?.name || 'New Request', lastMessage: { content: 'Wants to message you', created_at: r.created_at } }))
+                        ].sort((a, b) => new Date(b.lastMessage?.created_at || b.created_at || 0) - new Date(a.lastMessage?.created_at || a.created_at || 0))
                             .map(chat => (
                                 <div
                                     key={chat._id}
                                     className="wa-unread-banner-item"
+                                    onMouseDown={(e) => e.stopPropagation()}
                                     onClick={(e) => {
+                                        e.preventDefault();
                                         e.stopPropagation();
-                                        if (chat.is_group) {
-                                            setSelectedGroup(chat);
+
+                                        const originalContact = users.find(u => u._id === chat._id);
+                                        const originalGroup = groups.find(g => g._id === chat._id);
+                                        const originalComm = communities.find(c => String(c.id) === String(chat._id));
+
+                                        if (chat.is_message_request) {
+                                            setIsRequestsModalOpen(true);
+                                            setShowNotificationDetails(false);
+                                            return;
+                                        }
+
+                                        // Close all overlays and drawers
+                                        setIsProfileOpen(false);
+                                        setIsNewChatOpen(false);
+                                        setIsNewGroupOpen(false);
+                                        setIsNewCommunityOpen(false);
+                                        setIsArchivedChatsOpen(false);
+                                        setIsGlobalStarredOpen(false);
+                                        setIsSettingsOpen(false);
+                                        setIsContactInfoOpen(false);
+                                        setIsCommunityInfoOpen(false);
+                                        setIsMessageSearchOpen(false);
+                                        setIsSharedMediaOpen(false);
+                                        setIsEditContactOpen(false);
+                                        setShowNotificationDetails(false);
+
+                                        if (chat.is_community && originalComm) {
+                                            setSelectedCommunity(originalComm);
+                                            setIsCommunityHomeOpen(true);
+                                            setSelectedGroup(null);
                                             setSelectedUser(null);
                                             if (selectedUserRef) selectedUserRef.current = null;
-                                            if (selectedGroupRef) selectedGroupRef.current = chat;
+                                            if (selectedGroupRef) selectedGroupRef.current = null;
+                                            setCommunities(prev => prev.map(c => String(c.id) === String(chat._id) ? { ...c, unreadCount: 0 } : c));
+                                        } else if (chat.is_group && originalGroup) {
+                                            setSelectedGroup(originalGroup);
+                                            setSelectedUser(null);
+                                            setSelectedCommunity(null);
+                                            setIsCommunityHomeOpen(false);
+                                            if (selectedUserRef) selectedUserRef.current = null;
+                                            if (selectedGroupRef) selectedGroupRef.current = originalGroup;
                                             fetchGroupMessages(chat._id);
                                             setGroups(prev => prev.map(g => g._id === chat._id ? { ...g, unreadCount: 0 } : g));
-                                        } else {
-                                            handleUserSelect(chat);
+                                        } else if (originalContact) {
+                                            // Force-select: bypass the same-user guard in handleUserSelect.
+                                            // Reset all chat state first, then re-fetch messages.
+                                            setInput('');
+                                            setFile(null);
+                                            setTypingLinkPreview(null);
+                                            setReplyingTo(null);
+                                            setIsChatSelectionMode(false);
+                                            setIsForwardingMode(false);
+                                            setForwardSelectedMsgs([]);
+                                            setInfoMessage(null);
+                                            setIsContactInfoOpen(false);
+                                            setIsMessageSearchOpen(false);
+                                            setIsStarredMessagesOpen(false);
+                                            setIsSharedMediaOpen(false);
+                                            setIsEditContactOpen(false);
+                                            setShowScrollBtn(false);
+                                            setSelectedUser(originalContact);
                                             setSelectedGroup(null);
+                                            setSelectedCommunity(null);
+                                            setIsCommunityHomeOpen(false);
+                                            if (selectedUserRef) selectedUserRef.current = originalContact;
+                                            if (selectedGroupRef) selectedGroupRef.current = null;
+                                            
+                                            // Mark as read and update local state for immediate feedback
+                                            markAsRead(originalContact._id);
+                                            setUsers(prev => prev.map(u => u._id === originalContact._id ? { ...u, unreadCount: 0 } : u));
+                                            
+                                            fetchP2PRequest(originalContact._id);
                                         }
-                                        setShowNotificationDetails(false);
                                     }}
                                 >
                                     <div className="wa-unread-item-header">
                                         <span className="wa-unread-item-name">
                                             <span className="wa-unread-chat-type-icon">
-                                                {chat.is_group ? <Users size={14} /> : <User size={14} />}
+                                                {chat.is_community ? <Users size={14} style={{ opacity: 0.8 }} /> : (chat.is_group ? <Users size={14} /> : <User size={14} />)}
                                             </span>
-                                            {chat.name}
+                                            {chat.name || (chat.firstName ? `${chat.firstName} ${chat.lastName || ''}` : 'User')}
                                         </span>
                                         <span className="wa-unread-item-count">{chat.unreadCount}</span>
                                     </div>
@@ -8854,6 +8963,18 @@ export default function Chat() {
 
             {/* Filters */}
             <div className={`wa-filters ${leftPanelWidth < 380 ? 'compact' : ''}`} ref={filtersRef}>
+                {messageRequests.length > 0 && (
+                    <button
+                        className={`wa-filter-pill ${isRequestsModalOpen ? 'active' : ''}`}
+                        onClick={() => setIsRequestsModalOpen(true)}
+                        style={{ position: 'relative' }}
+                    >
+                        Requests
+                        <span style={{ position: 'absolute', top: -5, right: -5, background: '#027EB5', color: 'white', borderRadius: '50%', width: 18, height: 18, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', border: '2px solid white' }}>
+                            {messageRequests.length}
+                        </span>
+                    </button>
+                )}
                 <button
                     className={`wa-filter-pill ${filterType === 'all' ? 'active' : ''}`}
                     onClick={() => setFilterType('all')}
@@ -8878,18 +8999,6 @@ export default function Chat() {
                 >
                     {t('chat_list.filter_groups')} {groups.filter(g => g.unreadCount > 0).length > 0 && <span className="wa-pill-count">{groups.filter(g => g.unreadCount > 0).length}</span>}
                 </button>
-                {messageRequests.length > 0 && (
-                    <button
-                        className={`wa-filter-pill ${isRequestsModalOpen ? 'active' : ''}`}
-                        onClick={() => setIsRequestsModalOpen(true)}
-                        style={{ position: 'relative' }}
-                    >
-                        Requests
-                        <span style={{ position: 'absolute', top: -5, right: -5, background: '#027EB5', color: 'white', borderRadius: '50%', width: 18, height: 18, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', border: '2px solid white' }}>
-                            {messageRequests.length}
-                        </span>
-                    </button>
-                )}
                 <button className="wa-nav-icon-btn wa-filter-plus-btn"><Plus size={18} /></button>
             </div>
 
@@ -8902,38 +9011,93 @@ export default function Chat() {
                     </div>
                 ) : (
                     <>
-                        {/* Unified Chat List: Groups + Users mixed by Pinned status and Date */}
-                        {[...groups.map(g => ({ ...g, is_group: true })), ...users.map(u => ({ ...u, is_group: false })), ...communities.map(c => ({ ...c, is_community: true, _id: c.id, lastMessage: c.announcements?.lastMessage }))]
-                            .filter(item => {
-                                const displayName = item.name || (item.is_group ? 'Unnamed Group' : 'User');
-                                const contentPart = item.lastMessage?.content || '';
-                                const nameMatch = displayName.toLowerCase().includes(searchQuery.toLowerCase());
-                                const msgMatch = contentPart.toLowerCase().includes(searchQuery.toLowerCase());
-                                const matchesSearch = nameMatch || msgMatch;
+                        {(() => {
+                            const displayItems = [...groups.map(g => ({ ...g, is_group: true })), ...users.map(u => ({ ...u, is_group: false })), ...communities.map(c => ({ ...c, is_community: true, _id: c.id, lastMessage: c.announcements?.lastMessage }))]
+                                .filter(item => {
+                                    const displayName = item.name || (item.is_group ? 'Unnamed Group' : 'User');
+                                    const contentPart = item.lastMessage?.content || '';
+                                    const q = searchQuery.toLowerCase();
+                                    const nameMatch = displayName.toLowerCase().includes(q);
+                                    const msgMatch = contentPart.toLowerCase().includes(q);
+                                    const mobileMatch = !item.is_group && item.mobile?.toLowerCase().includes(q);
+                                    const emailMatch = !item.is_group && item.email?.toLowerCase().includes(q);
+                                    const matchesSearch = nameMatch || msgMatch || mobileMatch || emailMatch;
 
-                                if (filterType === 'groups') {
-                                    return matchesSearch && (item.is_group || item.is_community);
-                                }
+                                    if (filterType === 'groups') {
+                                        return matchesSearch && (item.is_group || item.is_community);
+                                    }
 
-                                if (archivedChatIds.includes(item._id)) return false;
-                                if (filterType === 'all') {
+                                    if (archivedChatIds.includes(item._id)) return false;
+
+                                    // If not searching and on "All" tab, hide users with no history/no pinning/no active requests
+                                    if (!searchQuery.trim() && filterType === 'all' && !item.is_group && !item.is_community) {
+                                        const hasHistory = !!item.lastMessage;
+                                        const isPinned = !!item.isPinned;
+                                        const isPending = item.requestStatus === 'pending';
+                                        const isRestricted = item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000;
+
+                                        if (!hasHistory && !isPinned && !isPending && !isRestricted) return false;
+                                    }
+
+                                    if (filterType === 'all') {
+                                        return matchesSearch;
+                                    }
+                                    if (filterType === 'unread') return matchesSearch && (item.unreadCount > 0);
+                                    if (filterType === 'favorites') return matchesSearch && item.isFavorite;
+                                    if (filterType === 'groups') return matchesSearch && item.is_group;
                                     return matchesSearch;
+                                })
+                                .sort((a, b) => {
+                                    // Pinned always first
+                                    if (a.isPinned && !b.isPinned) return -1;
+                                    if (!a.isPinned && b.isPinned) return 1;
+                                    // Then by date, defaulting to 0 if none
+                                    const dateA = new Date(a.lastMessage?.created_at || a.created_at || 0);
+                                    const dateB = new Date(b.lastMessage?.created_at || b.created_at || 0);
+                                    return dateB - dateA;
+                                });
+
+                            if (displayItems.length === 0) {
+                                if (!searchQuery.trim() && filterType === 'all') {
+                                    return (
+                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 30px', textAlign: 'center', color: '#8696a0' }}>
+                                            <div style={{ background: 'rgba(2, 126, 181, 0.05)', borderRadius: '50%', padding: '24px', marginBottom: '16px' }}>
+                                                <Plus size={40} color="#027EB5" style={{ opacity: 0.6 }} />
+                                            </div>
+                                            <p style={{ fontSize: '15px', color: '#111b21', marginBottom: '8px', fontWeight: '500' }}>No chats yet</p>
+                                            <p style={{ fontSize: '13px', lineHeight: '1.5', marginBottom: '24px' }}>Start a fresh conversation with your colleagues or friends.</p>
+                                            <button 
+                                                className="wa-nav-icon-btn" 
+                                                style={{ 
+                                                    background: '#027EB5', 
+                                                    color: 'white', 
+                                                    borderRadius: '24px', 
+                                                    padding: '10px 24px', 
+                                                    fontSize: '14px', 
+                                                    fontWeight: '600',
+                                                    width: 'auto',
+                                                    height: 'auto',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '8px',
+                                                    boxShadow: '0 4px 12px rgba(2, 126, 181, 0.2)'
+                                                }}
+                                                onClick={(e) => { e.stopPropagation(); setIsNewChatOpen(true); }}
+                                            >
+                                                <Plus size={18} />
+                                                Start Chat
+                                            </button>
+                                        </div>
+                                    );
                                 }
-                                if (filterType === 'unread') return matchesSearch && (item.unreadCount > 0);
-                                if (filterType === 'favorites') return matchesSearch && item.isFavorite;
-                                if (filterType === 'groups') return matchesSearch && item.is_group;
-                                return matchesSearch;
-                            })
-                            .sort((a, b) => {
-                                // Pinned always first
-                                if (a.isPinned && !b.isPinned) return -1;
-                                if (!a.isPinned && b.isPinned) return 1;
-                                // Then by date, defaulting to 0 if none
-                                const dateA = new Date(a.lastMessage?.created_at || a.created_at || 0);
-                                const dateB = new Date(b.lastMessage?.created_at || b.created_at || 0);
-                                return dateB - dateA;
-                            })
-                            .map(item => {
+                                return (
+                                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0', fontSize: '14px' }}>
+                                        No results found
+                                    </div>
+                                );
+                            }
+
+                            return displayItems.map(item => {
                                 const isGroup = item.is_group;
                                 const displayName = item.name || (isGroup ? 'Unnamed Group' : 'User');
 
@@ -9009,19 +9173,6 @@ export default function Chat() {
                                             <div className="wa-chat-row-top">
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
                                                     <span className="wa-chat-name" style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{displayName}</span>
-                                                    {item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000 && (
-                                                        <span style={{ 
-                                                            fontSize: '10px', 
-                                                            background: '#ef4444', 
-                                                            color: 'white', 
-                                                            padding: '2px 6px', 
-                                                            borderRadius: '4px', 
-                                                            fontWeight: '600',
-                                                            flexShrink: 0
-                                                        }}>
-                                                            Restricted
-                                                        </span>
-                                                    )}
                                                 </div>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                                     <span className="wa-chat-time">{formatTime(item.lastMessage?.created_at || item.created_at)}</span>
@@ -9061,21 +9212,30 @@ export default function Chat() {
                                                             item.lastMessage?.type === 'image' ? (isGroup ? '📷 Photo' : '📷 Image') :
                                                                 item.lastMessage?.type === 'video' ? '🎥 Video' :
                                                                     item.lastMessage?.type === 'file' ? '📄 File' :
-                                                                        renderHighlightedContent(item.lastMessage?.content || (item.lastMessage?.is_system ? `${item.lastMessage.sender_id?.name || 'Someone'} ${item.lastMessage.content}` : ''))
+                                                                        (item.lastMessage?.is_request_placeholder) ? (
+                                                                            <span style={{ color: '#027EB5', fontWeight: '500' }}>{item.lastMessage.content}</span>
+                                                                        ) : (item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000) ? (
+                                                                            <span style={{ color: '#ef4444', fontStyle: 'italic' }}>Messaging restricted</span>
+                                                                        ) : (
+                                                                            renderHighlightedContent(item.lastMessage?.content || (item.lastMessage?.is_system ? `${item.lastMessage.sender_id?.name || 'Someone'} ${item.lastMessage.content}` : ''))
+                                                                        )
                                                     )}
                                                 </span>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                                     {item.isFavorite && <Heart size={14} color="#8696a0" />}
                                                     {item.isMuted && <BellOff size={14} color="#8696a0" />}
                                                     {item.isPinned && <Pin size={14} color="#8696a0" style={{ transform: 'rotate(45deg)' }} />}
-                                                    {item.unreadCount > 0 && <div className="wa-unread-badge">{item.unreadCount}</div>}
+                                                    {item.unreadCount > 0 && !(item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000) && (
+                                                        <div className="wa-unread-badge">{item.unreadCount}</div>
+                                                    )}
                                                 </div>
                                             </div>
                                             {/* {renderDropdownMenu('contact', item._id, item)} */}
                                         </div>
                                     </div>
                                 );
-                            })}
+                            });
+                        })()}
                     </>
                 )}
             </div>
@@ -10260,7 +10420,15 @@ export default function Chat() {
                                         </div>
                                     )}
 
-                                    {(accountLocked || isAccountBanned() || (selectedUser?.requestStatus === 'rejected' && selectedUser?.requestUpdatedAt && (new Date() - new Date(selectedUser?.requestUpdatedAt)) < 24 * 60 * 60 * 1000)) && (selectedUser?.requestStatus === 'rejected' || selectedUser?.requestStatus === 'pending') ? (
+                                    {accountLocked ? (
+                                        <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
+                                            Account Permanently Locked. Please contact the administrator.
+                                        </div>
+                                    ) : isAccountBanned() ? (
+                                        <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
+                                            Messaging is temporarily restricted.
+                                        </div>
+                                    ) : (selectedUser?.requestStatus === 'rejected' && selectedUser?.requestUpdatedAt && (new Date() - new Date(selectedUser?.requestUpdatedAt)) < 24 * 60 * 60 * 1000) && (selectedUser?.requestStatus === 'rejected' || selectedUser?.requestStatus === 'pending') ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#f8fafc', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem', border: '1px solid #e2e8f0' }}>
                                             Messaging is restricted for 24 hours.
                                         </div>
@@ -11153,7 +11321,15 @@ export default function Chat() {
                                         </div>
                                     )}
 
-                                    {(accountLocked || isAccountBanned() || (selectedUser?.requestStatus === 'rejected' && selectedUser?.requestUpdatedAt && (new Date() - new Date(selectedUser?.requestUpdatedAt)) < 24 * 60 * 60 * 1000)) && (selectedUser?.requestStatus === 'rejected' || selectedUser?.requestStatus === 'pending') ? (
+                                    {accountLocked ? (
+                                        <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
+                                            Account Permanently Locked. Please contact the administrator.
+                                        </div>
+                                    ) : isAccountBanned() ? (
+                                        <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
+                                            Messaging is temporarily restricted.
+                                        </div>
+                                    ) : (selectedUser?.requestStatus === 'rejected' && selectedUser?.requestUpdatedAt && (new Date() - new Date(selectedUser?.requestUpdatedAt)) < 24 * 60 * 60 * 1000) && (selectedUser?.requestStatus === 'rejected' || selectedUser?.requestStatus === 'pending') ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#f8fafc', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem', border: '1px solid #e2e8f0' }}>
                                             Messaging is restricted for 24 hours.
                                         </div>
