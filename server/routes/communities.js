@@ -42,7 +42,7 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
             .populate('creator', 'name mobile countryCode _id')
             .populate('members', 'name mobile countryCode _id about')
             .populate('admins', 'name mobile countryCode _id about')
-            .populate('announcements', 'name icon _id members admin')
+            .populate('announcements', 'name icon _id members admin removedMembers')
             .sort({ created_at: -1 })
             .lean();
 
@@ -111,7 +111,7 @@ router.post('/create', authenticateToken, async (req, res) => {
             .populate('creator', 'name mobile countryCode _id')
             .populate('members', 'name mobile countryCode _id about')
             .populate('admins', 'name mobile countryCode _id about')
-            .populate('announcements', 'name icon _id members admin')
+            .populate('announcements', 'name icon _id members admin removedMembers')
             .lean();
 
         const lastMsg = await GroupMessage.findOne({ group_id: announcementsGroup._id })
@@ -171,7 +171,10 @@ router.patch('/:communityId/members', authenticateToken, async (req, res) => {
         if (community.announcements) {
             await Group.updateOne(
                 { _id: community.announcements },
-                { $addToSet: { members: { $each: idsToAdd } } }
+                { 
+                    $addToSet: { members: { $each: idsToAdd } },
+                    $pull: { removedMembers: { $in: idsToAdd } }
+                }
             );
 
             // Log announcement
@@ -214,7 +217,7 @@ router.patch('/:communityId/members', authenticateToken, async (req, res) => {
             .populate('creator', 'name mobile countryCode _id')
             .populate('members', 'name mobile countryCode _id about')
             .populate('admins', 'name mobile countryCode _id about')
-            .populate('announcements', 'name icon _id members admin')
+            .populate('announcements', 'name icon _id members admin removedMembers')
             .lean();
 
         let lastMsg = null;
@@ -334,6 +337,7 @@ router.delete('/:communityId/members/:memberId', authenticateToken, async (req, 
                 // Also emit a specific removal event to trigger UI refresh for the removed user
                 req.io.to(memberId).emit('community_member_removed', {
                     communityId,
+                    memberId,
                     message: `You were removed from ${community.name}`
                 });
 
@@ -471,7 +475,7 @@ router.patch('/:communityId/groups', authenticateToken, async (req, res) => {
             .populate('creator', 'name mobile countryCode _id')
             .populate('members', 'name mobile countryCode _id about')
             .populate('admins', 'name mobile countryCode _id about')
-            .populate('announcements', 'name icon _id members admin')
+            .populate('announcements', 'name icon _id members admin removedMembers')
             .populate('groups')
             .lean();
 
@@ -557,7 +561,7 @@ router.delete('/:communityId/groups/:groupId', authenticateToken, async (req, re
             .populate('creator', 'name mobile countryCode _id')
             .populate('members', 'name mobile countryCode _id about')
             .populate('admins', 'name mobile countryCode _id about')
-            .populate('announcements', 'name icon _id members admin')
+            .populate('announcements', 'name icon _id members admin removedMembers')
             .populate('groups')
             .lean();
 
@@ -607,7 +611,7 @@ router.post('/:communityId/admins/toggle', authenticateToken, async (req, res) =
             .populate('creator', 'name mobile countryCode _id')
             .populate('members', 'name mobile countryCode _id about')
             .populate('admins', 'name mobile countryCode _id about')
-            .populate('announcements', 'name icon _id members admin')
+            .populate('announcements', 'name icon _id members admin removedMembers')
             .populate('groups')
             .lean();
 
@@ -705,7 +709,7 @@ router.post('/:communityId/transfer-ownership', authenticateToken, async (req, r
             .populate('creator', 'name mobile countryCode _id')
             .populate('members', 'name mobile countryCode _id about')
             .populate('admins', 'name mobile countryCode _id about')
-            .populate('announcements', 'name icon _id members admin')
+            .populate('announcements', 'name icon _id members admin removedMembers')
             .populate('groups')
             .lean();
 
@@ -754,7 +758,7 @@ router.patch('/:communityId', authenticateToken, async (req, res) => {
             .populate('creator', 'name mobile countryCode _id')
             .populate('members', 'name mobile countryCode _id about')
             .populate('admins', 'name mobile countryCode _id about')
-            .populate('announcements', 'name icon _id members admin')
+            .populate('announcements', 'name icon _id members admin removedMembers')
             .populate('groups')
             .lean();
 
@@ -813,6 +817,70 @@ router.delete('/:communityId', authenticateToken, async (req, res) => {
     }
 });
 
+// POST /api/communities/:communityId/transfer-ownership - transfer community ownership
+router.post('/:communityId/transfer-ownership', authenticateToken, async (req, res) => {
+    try {
+        const { communityId } = req.params;
+        const { newOwnerId } = req.body;
+        const currentUserId = req.user.id;
+
+        if (!newOwnerId) return res.status(400).json({ error: 'newOwnerId is required' });
+
+        const community = await Community.findById(communityId);
+        if (!community) return res.status(404).json({ error: 'Community not found' });
+
+        // Only the current owner can transfer
+        if (String(community.creator) !== String(currentUserId)) {
+            return res.status(403).json({ error: 'Only the community owner can transfer ownership' });
+        }
+
+        const newOwnerObjId = toObjectId(newOwnerId);
+        if (!newOwnerObjId) return res.status(400).json({ error: 'Invalid newOwnerId' });
+
+        // New owner must be an existing member or admin
+        const isMember = (community.members || []).some(id => String(id) === String(newOwnerId));
+        const isAdmin = (community.admins || []).some(id => String(id) === String(newOwnerId));
+        if (!isMember && !isAdmin) {
+            return res.status(400).json({ error: 'New owner must be an existing community member or admin' });
+        }
+
+        // Transfer: set new creator, add old owner to members if not already there, remove new owner from admins if was admin
+        await Community.updateOne(
+            { _id: communityId },
+            {
+                $set: { creator: newOwnerObjId },
+                $addToSet: { members: toObjectId(currentUserId) }, // old owner becomes member
+                $pull: { admins: newOwnerObjId } // new owner should not be in admins too
+            }
+        );
+
+        const updated = await Community.findById(communityId)
+            .populate('creator', 'name mobile countryCode _id')
+            .populate('members', 'name mobile countryCode _id about')
+            .populate('admins', 'name mobile countryCode _id about')
+            .populate('announcements', 'name icon _id members admin removedMembers')
+            .populate('groups')
+            .lean();
+
+        // Notify all members
+        if (req.io) {
+            const communityData = { ...updated, id: updated._id, is_community: true };
+            const allMembers = [
+                updated.creator?._id || updated.creator,
+                ...(updated.members || []).map(m => m._id || m)
+            ];
+            allMembers.forEach(uid => {
+                req.io.to(String(uid)).emit('community_updated', { community: communityData });
+            });
+        }
+
+        res.json({ status: 'success', message: 'Ownership transferred', community: updated });
+    } catch (err) {
+        console.error('[TRANSFER OWNERSHIP ERROR]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // POST /api/communities/:communityId/exit - exit from community
 router.post('/:communityId/exit', authenticateToken, async (req, res) => {
     try {
@@ -828,24 +896,42 @@ router.post('/:communityId/exit', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Owner cannot exit community. Transfer ownership or deactivate instead.' });
         }
 
-        // Remove from members and admins
-        await Community.updateOne(
-            { _id: communityId },
-            {
-                $pull: { members: userObjId, admins: userObjId },
-                $addToSet: { removedMembers: userObjId }
-            }
-        );
+        const { deleteForMe } = req.body;
 
-        // Also remove from announcements
-        if (community.announcements) {
-            await Group.updateOne(
-                { _id: community.announcements },
+        // Remove from members and admins
+        if (deleteForMe) {
+            await Community.updateOne(
+                { _id: communityId },
                 {
-                    $pull: { members: userObjId },
+                    $pull: { members: userObjId, admins: userObjId, removedMembers: userObjId }
+                }
+            );
+        } else {
+            await Community.updateOne(
+                { _id: communityId },
+                {
+                    $pull: { members: userObjId, admins: userObjId },
                     $addToSet: { removedMembers: userObjId }
                 }
             );
+        }
+
+        // Also remove from announcements
+        if (community.announcements) {
+            if (deleteForMe) {
+                await Group.updateOne(
+                    { _id: community.announcements },
+                    { $pull: { members: userObjId, removedMembers: userObjId } }
+                );
+            } else {
+                await Group.updateOne(
+                    { _id: community.announcements },
+                    {
+                        $pull: { members: userObjId },
+                        $addToSet: { removedMembers: userObjId }
+                    }
+                );
+            }
         }
 
         // Notify others

@@ -12,6 +12,13 @@ import {
     ShieldAlert, Fingerprint, HardDrive, Keyboard, HelpCircle, Settings2, Volume2, MonitorSmartphone, Shield,
     AlertCircle, UserCheck
 } from 'lucide-react';
+
+const searchSlideStyles = `
+@keyframes wa-slide-left {
+    from { transform: translateX(20px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+`;
 import io from 'socket.io-client';
 import '../styles/Chat.css';
 import '../styles/PrivacySettings.css';
@@ -49,6 +56,12 @@ export default function Chat() {
     const [selectedUser, setSelectedUser] = useState(null);
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
+    useEffect(() => {
+        const style = document.createElement('style');
+        style.innerHTML = searchSlideStyles;
+        document.head.appendChild(style);
+        return () => document.head.removeChild(style);
+    }, []);
     const user = JSON.parse(localStorage.getItem('user') || '{}');
     const navigate = useNavigate();
     const bottomRef = useRef(null);
@@ -251,6 +264,12 @@ export default function Chat() {
         showRiskAlerts: true
     });
     const [isDeleteChatConfirmOpen, setIsDeleteChatConfirmOpen] = useState(false);
+    const [isExitCommunityModalOpen, setIsExitCommunityModalOpen] = useState(false);
+    const [isOwnerExitCommunityModalOpen, setIsOwnerExitCommunityModalOpen] = useState(false);
+    const [isAssignNewOwnerOpen, setIsAssignNewOwnerOpen] = useState(false);
+    const [isTransferOwnershipConfirmOpen, setIsTransferOwnershipConfirmOpen] = useState(false);
+    const [ownershipTransferTarget, setOwnershipTransferTarget] = useState(null);
+    const [exitCommunityTarget, setExitCommunityTarget] = useState(null);
     const [deleteTarget, setDeleteTarget] = useState(null); // { id, isGroup, name }
     const fontSizesArr = [
         '25%', '33%', '50%', '67%', '75%', '80%', '90%',
@@ -398,6 +417,68 @@ export default function Chat() {
             localStorage.setItem('neuChat_baseDPR', currentDPR.toString());
             setSnackbar({ message: 'Scale calibrated to 100%', type: 'success', variant: 'system' });
         }
+    };
+
+    // Helper to check if messaging is restricted for the current chat
+    const isMessagingRestricted = () => {
+        const myId = userRef.current?._id || userRef.current?.id || user?._id || user?.id;
+        if (!myId) return false;
+
+        if (accountLocked || isAccountBanned()) return true;
+
+        if (selectedUser) {
+            const isRejected = selectedUser?.requestStatus === 'rejected';
+            const isPending = selectedUser?.requestStatus === 'pending';
+            const updatedAt = selectedUser?.requestUpdatedAt;
+            
+            if (isPending) return true;
+            if (isRejected && updatedAt && (new Date() - new Date(updatedAt)) < 24 * 60 * 60 * 1000) {
+                return true;
+            }
+        }
+
+        if (selectedGroup) {
+            // Normalize members to IDs for comparison
+            const memberIds = (selectedGroup.members || []).map(m => String(m._id || m));
+            const removedIds = (selectedGroup.removedMembers || []).map(m => String(m._id || m));
+            
+            const isMem = memberIds.includes(String(myId));
+            const isRem = removedIds.includes(String(myId));
+            const isOwner = String(selectedGroup.admin?._id || selectedGroup.admin) === String(myId) || String(selectedGroup.creator?._id || selectedGroup.creator) === String(myId);
+
+            // Announcements special check (belongs to community)
+            if (selectedGroup.isCommunityAnnouncements || selectedGroup.isAnnouncementGroup) {
+                const commIdCheck = String(selectedGroup.community_id || selectedGroup.communityId || '');
+                let community = (communities || []).find(c => 
+                    String(c.announcements?._id || c.announcements) === String(selectedGroup._id) ||
+                    (commIdCheck && String(c._id || c.id) === commIdCheck)
+                );
+                
+                // Fallback to selectedCommunity if it matches and communities array is stale
+                if (!community && selectedCommunity && (
+                    String(selectedCommunity.announcements?._id || selectedCommunity.announcements) === String(selectedGroup._id) ||
+                    (commIdCheck && String(selectedCommunity._id || selectedCommunity.id) === commIdCheck)
+                )) {
+                    community = selectedCommunity;
+                }
+                
+                if (community) {
+                    const isCommMem = (community.members || []).some(m => String(m._id || m) === String(myId));
+                    const isCommOwner = String(community.creator?._id || community.creator) === String(myId);
+                    const isCommAdmin = (community.admins || []).some(m => String(m._id || m) === String(myId));
+
+                    if (isCommMem || isCommOwner || isCommAdmin) {
+                        return false; // Trust community membership for announcements
+                    }
+                    return true; // Not in community, so restricted from announcements
+                }
+            }
+
+            // Regular group removal check
+            if (isRem && !isMem && !isOwner) return true;
+        }
+
+        return false;
     };
 
     // Derive translator from the currently selected language (re-computed on every render,
@@ -550,6 +631,8 @@ export default function Chat() {
     const [assignOwnerTarget, setAssignOwnerTarget] = useState(null); // { member, communityId }
     const [isSelectOwnerPanelOpen, setIsSelectOwnerPanelOpen] = useState(false);
     const [selectOwnerSearchQuery, setSelectOwnerSearchQuery] = useState('');
+    const [communityMemberSearchQuery, setCommunityMemberSearchQuery] = useState('');
+    const [isCommunityMemberSearchOpen, setIsCommunityMemberSearchOpen] = useState(false);
 
     // Communities are persisted in MongoDB; only pin/mute preferences remain in localStorage.
 
@@ -569,6 +652,13 @@ export default function Chat() {
     useEffect(() => {
         communitiesRef.current = communities;
     }, [communities]);
+
+    useEffect(() => {
+        if (!isCommunityInfoOpen) {
+            setCommunityMemberSearchQuery('');
+            setIsCommunityMemberSearchOpen(false);
+        }
+    }, [isCommunityInfoOpen]);
 
 
 
@@ -1631,11 +1721,17 @@ export default function Chat() {
         // Listen for community member removal notifications
         const onCommunityMemberRemoved = (data) => {
             console.log('Socket: community_member_removed', data);
+            
+            // Only show snackbar if the removed member is ME
+            const myId = userRef.current?.id || userRef.current?._id;
+            const removedUserId = data.memberId || data.userId;
+            
+            if (removedUserId && myId && String(removedUserId) === String(myId)) {
+                setSnackbar({ message: data.message || 'You were removed from the community', type: 'info', variant: 'system' });
+            }
+            
             fetchCommunities();
             fetchGroups();
-
-            // Do not clear the UI, let the user see the system message.
-            setSnackbar({ message: data.message || 'You were removed from the community', type: 'info', variant: 'system' });
         };
         socket.on('community_member_removed', onCommunityMemberRemoved);
         
@@ -1643,6 +1739,14 @@ export default function Chat() {
         const onCommunityMemberAdded = (data) => {
             console.log('Socket: community_member_added', data);
             fetchCommunities();
+            if (data.community) {
+                const updatedComm = { ...data.community, id: data.community._id || data.community.id, is_community: true };
+                setCommunities(prev => {
+                    const exists = prev.some(c => String(c._id || c.id) === String(updatedComm.id));
+                    if (exists) return prev.map(c => String(c._id || c.id) === String(updatedComm.id) ? updatedComm : c);
+                    return [updatedComm, ...prev];
+                });
+            }
             setSnackbar({ message: data.message || `You were added to community ${data.community?.name || ''}`, type: 'success', variant: 'system' });
         };
         socket.on('community_member_added', onCommunityMemberAdded);
@@ -1653,13 +1757,27 @@ export default function Chat() {
             fetchCommunities();
             // If we are looking at this community's info, refresh it
             const commId = data.communityId || data.community?._id || data.community?.id;
-            const currentSelected = selectedCommunityRef.current;
-            if (currentSelected && String(currentSelected._id || currentSelected.id) === String(commId)) {
-                if (data.community) {
-                    setSelectedCommunity(data.community);
-                } else {
-                    // We need the full object to refresh the info panel. 
-                    // fetchCommunities will update the main list, we can pull from it.
+            
+            if (data.community) {
+                const updatedComm = { ...data.community, id: data.community._id || data.community.id, is_community: true };
+                setCommunities(prev => prev.map(c => String(c._id || c.id) === String(commId) ? updatedComm : c));
+                
+                const currentSelected = selectedCommunityRef.current;
+                if (currentSelected && String(currentSelected._id || currentSelected.id) === String(commId)) {
+                    setSelectedCommunity(updatedComm);
+                }
+            }
+
+            // Also refresh active group metadata if it's the current community's announcement or related
+            const currentGroup = selectedGroupRef.current;
+            if (currentGroup) {
+                const token = localStorage.getItem('token');
+                if (token) {
+                    axios.get(`/api/groups/${currentGroup._id}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    }).then(res => {
+                        if (res.data) setSelectedGroup(prev => ({ ...prev, ...res.data }));
+                    }).catch(() => {});
                 }
             }
         };
@@ -1681,6 +1799,18 @@ export default function Chat() {
             console.log(`[DEBUG] Group Message Evaluation: Group: ${data.groupId}, Sender: ${msgSenderId}, Me: ${myId}, isCurrent: ${isCurrentGroup}, isMine: ${isMyOwnMessage}`);
 
             if (isCurrentGroup) {
+                // Refresh group metadata (sync members, removedMembers)
+                const token = localStorage.getItem('token');
+                if (token) {
+                    axios.get(`/api/groups/${data.groupId}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    }).then(res => {
+                        if (res.data) {
+                            setSelectedGroup(prev => ({ ...prev, ...res.data }));
+                        }
+                    }).catch(e => console.error('Failed to refresh group metadata:', e));
+                }
+
                 setGroupMessages(prev => {
                     if (prev.find(m => m._id === data.message?._id)) return prev;
                     if (isMyOwnMessage) return prev; // Avoid duplicating optimistic message
@@ -1688,8 +1818,6 @@ export default function Chat() {
                 });
                 setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
 
-                // Auto-mark as read since the user is in the group chat
-                const token = localStorage.getItem('token');
                 if (token && !isMyOwnMessage) {
                     axios.post(`/api/groups/${data.groupId}/messages/mark-read`, {}, {
                         headers: { 'Authorization': `Bearer ${token}` }
@@ -2885,7 +3013,7 @@ export default function Chat() {
                 : (activeTarget.is_group !== undefined ? activeTarget.is_group : !!selectedGroup);
 
             if (isCommunity) {
-                await axios.post(`/api/communities/${targetId}/exit`, {}, {
+                await axios.post(`/api/communities/${targetId}/exit`, { deleteForMe: true }, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
                 setCommunities(prev => prev.filter(c => String(c.id) !== String(targetId)));
@@ -2928,6 +3056,109 @@ export default function Chat() {
         } catch (err) {
             console.error("Delete chat failed", err);
             setSnackbar({ message: 'Failed to delete chat', type: 'error', variant: 'system' });
+        }
+    };
+
+    const handleExitCommunityAction = async (type) => {
+        const community = exitCommunityTarget;
+        if (!community) return;
+
+        try {
+            const token = localStorage.getItem('token');
+            const targetId = community._id || community.id;
+
+            await axios.post(`/api/communities/${targetId}/exit`, { deleteForMe: type === 'delete' }, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            if (type === 'delete') {
+                setCommunities(prev => prev.filter(c => String(c.id || c._id) !== String(targetId)));
+            } else {
+                // For "Exit" (not delete), refresh communities to get updated status
+                await fetchCommunities();
+            }
+
+            // If we are currently viewing the community we just left/deleted, clear the view
+            const isViewingThisCommunity = selectedCommunity && String(selectedCommunity.id || selectedCommunity._id) === String(targetId);
+            const isViewingCommunityAnnouncements = selectedGroup && 
+                                                    (selectedGroup.isCommunityAnnouncements || selectedGroup.isAnnouncementGroup) &&
+                                                    String(selectedGroup.communityId?._id || selectedGroup.communityId || selectedGroup.community_id?._id || selectedGroup.community_id || '') === String(targetId);
+
+            if (type === 'delete' && (isViewingThisCommunity || isViewingCommunityAnnouncements)) {
+                setSelectedCommunity(null);
+                setSelectedGroup(null);
+                setIsCommunityHomeOpen(false);
+                setIsCommunityInfoOpen(false);
+                setIsCommunityGroupsListOpen(false); // Clear groups list panel too
+                setIsManageGroupsOpen(false);
+                setIsAddExistingGroupsOpen(false);
+                setIsCommunityAddMemberOpen(false);
+                setIsAssignNewOwnerOpen(false);
+                handleBackToChatList();
+            }
+
+            setIsExitCommunityModalOpen(false);
+            setExitCommunityTarget(null);
+            setSnackbar({ message: 'Exited community successfully', type: 'success', variant: 'system' });
+        } catch (err) {
+            console.error("Exit community failed", err);
+            const errorMsg = err.response?.data?.error || err.message || 'Failed to exit community';
+            setSnackbar({ message: errorMsg, type: 'error', variant: 'system' });
+        }
+    };
+
+    const handleAssignNewOwner = async (member) => {
+        if (!exitCommunityTarget || !member) return;
+        try {
+            const token = localStorage.getItem('token');
+            const comId = exitCommunityTarget.id || exitCommunityTarget._id;
+            
+            await axios.post(`/api/communities/${comId}/transfer-ownership`, {
+                newOwnerId: member._id || member.id
+            }, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            setSnackbar({ message: `Ownership transferred to ${member.name}`, type: 'success', variant: 'system' });
+            setIsAssignNewOwnerOpen(false);
+            
+            // Re-fetch or update local community state to reflect new owner
+            // (Old owner remains as member)
+            const updatedComm = { ...exitCommunityTarget };
+            updatedComm.creator = member; 
+            // The server response usually includes the full updated community, 
+            // but we can also rely on the socket event 'community_updated' 
+            // which the server emits in the transfer-ownership route.
+        } catch (err) {
+            console.error('Transfer ownership failed:', err);
+            const errorMsg = err.response?.data?.error || err.message || 'Failed to transfer ownership';
+            setSnackbar({ message: errorMsg, type: 'error', variant: 'system' });
+        }
+    };
+
+    const isRemovedFromCommunity = (comm) => {
+        if (!comm) return false;
+        const myId = user.id || user._id;
+        const isMem = (comm.members || []).some(m => String(m._id || m) === String(myId)) || 
+                      String(comm.creator?._id || comm.creator) === String(myId) ||
+                      (comm.admins || []).some(a => String(a?._id || a) === String(myId));
+        const isRem = (comm.removedMembers || []).some(m => String(m._id || m) === String(myId));
+        return isRem && !isMem;
+    };
+
+    const handleExitCommunity = (comm) => {
+        const target = comm || selectedCommunity;
+        if (!target) return;
+        
+        setExitCommunityTarget(target);
+        
+        const myId = user.id || user._id;
+        const isOwner = String(target.creator?._id || target.creator) === String(myId);
+        
+        if (isOwner) {
+            setIsOwnerExitCommunityModalOpen(true);
+        } else {
+            setIsExitCommunityModalOpen(true);
         }
     };
 
@@ -4082,15 +4313,36 @@ export default function Chat() {
                 <div className="wa-drawer-content" style={{ background: 'white', overflowY: 'auto', flex: 1 }}>
                     {/* Search Bar */}
                     <div style={{ padding: '10px 16px' }}>
-                        <div className="wa-search-bar" style={{ background: '#f0f2f5', borderRadius: 8, padding: '6px 12px', display: 'flex', alignItems: 'center' }}>
+                        <div className="wa-search-bar" style={{ background: '#f0f2f5', borderRadius: 24, padding: '6px 12px', display: 'flex', alignItems: 'center', position: 'relative' }}>
                             <Search size={18} color="#54656f" style={{ marginRight: 15 }} />
                             <input
                                 type="text"
                                 placeholder={t('new_chat.search_placeholder')}
-                                style={{ background: 'transparent', border: 'none', outline: 'none', width: '100%', fontSize: 15 }}
+                                style={{ background: 'transparent', border: 'none', outline: 'none', width: '100%', fontSize: 15, paddingRight: newChatSearchQuery ? '32px' : '12px' }}
                                 value={newChatSearchQuery}
                                 onChange={(e) => setNewChatSearchQuery(e.target.value)}
                             />
+                            {newChatSearchQuery && (
+                                <button
+                                    onClick={() => setNewChatSearchQuery('')}
+                                    style={{
+                                        position: 'absolute',
+                                        right: '12px',
+                                        background: '#D1D7DB',
+                                        border: 'none',
+                                        borderRadius: '50%',
+                                        width: '18px',
+                                        height: '18px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: 'pointer',
+                                        padding: 0
+                                    }}
+                                >
+                                    <X size={12} color="#54656F" strokeWidth={3} />
+                                </button>
+                            )}
                         </div>
                     </div>
 
@@ -5360,6 +5612,13 @@ export default function Chat() {
                 </div>
 
                 <div className="wa-drawer-content" style={{ background: 'white', flex: 1, padding: 0, display: 'flex', flexDirection: 'column' }}>
+                    {isRemovedFromCommunity(selectedCommunity) && (
+                        <div style={{ background: '#F8F9FA', padding: '16px 20px', borderBottom: '1px solid #E9EDEF', textAlign: 'center' }}>
+                            <p style={{ margin: 0, color: '#667781', fontSize: '14px', fontWeight: 500 }}>
+                                You are no longer a member in this community.
+                            </p>
+                        </div>
+                    )}
                     {/* Announcements Item */}
                     <div
                         className="wa-chat-item"
@@ -7028,6 +7287,13 @@ export default function Chat() {
                         }}>
                             <Settings size={18} style={{ marginRight: 12, color: '#54656f' }} /> Community settings
                         </div>
+                        <div style={{ height: '1px', background: '#f0f2f5', margin: '4px 0' }}></div>
+                        <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => {
+                            handleExitCommunity(selectedCommunity);
+                            setOpenDropdown(null);
+                        }}>
+                            <LogOut size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Exit community
+                        </div>
                     </div>
                 </>
             );
@@ -7804,9 +8070,8 @@ export default function Chat() {
         const isMeAdmin = (community.admins || []).some(a => String(a?._id || a) === String(myId));
         const canIManage = isMeOwner || isMeAdmin;
 
-        const handleExitCommunity = () => {
-            setDeleteTarget({ ...community, isCommunity: true });
-            setIsDeleteChatConfirmOpen(true);
+        const onExitClick = () => {
+             handleExitCommunity(community);
         };
 
         return (
@@ -7822,7 +8087,11 @@ export default function Chat() {
             >
                 <div className="wa-contact-info-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'white', borderBottom: thinDivider, color: textColor, flexShrink: 0 }}>
                     <button
-                        onClick={() => setIsCommunityInfoOpen(false)}
+                        onClick={() => {
+                            setIsCommunityInfoOpen(false);
+                            setIsCommunityMemberSearchOpen(false);
+                            setCommunityMemberSearchQuery('');
+                        }}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 24, padding: 0 }}
                     >
                         <X size={24} color="#54656f" />
@@ -7957,9 +8226,82 @@ export default function Chat() {
                             }
                             const totalMembers = allIds.size;
                             return (
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                                    <span style={{ fontSize: 14, color: subTextColor }}>{totalMembers} community member{totalMembers !== 1 ? 's' : ''}</span>
-                                    <Search size={18} color="#54656f" />
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, minHeight: 36 }}>
+                                    <span style={{ fontSize: 14, color: subTextColor, whiteSpace: 'nowrap' }}>
+                                        {totalMembers} community member{totalMembers !== 1 ? 's' : ''}
+                                    </span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: isCommunityMemberSearchOpen ? 1 : 'none', justifyContent: 'flex-end', marginLeft: 10 }}>
+                                        {!isCommunityMemberSearchOpen ? (
+                                            <button 
+                                                onClick={() => setIsCommunityMemberSearchOpen(true)}
+                                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center' }}
+                                            >
+                                                <Search size={18} color="#54656f" />
+                                            </button>
+                                        ) : (
+                                            <div style={{ 
+                                                display: 'flex', 
+                                                alignItems: 'center', 
+                                                background: 'white', 
+                                                borderRadius: 8, 
+                                                padding: '0 2px 0 10px',
+                                                flex: 1,
+                                                maxWidth: 280,
+                                                border: '2px solid #027eb5',
+                                                boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1), 0 2px 8px rgba(2, 126, 181, 0.15)',
+                                                animation: 'wa-slide-left 0.2s ease-out',
+                                                height: 40,
+                                                overflow: 'hidden',
+                                                position: 'relative'
+                                            }}>
+                                                <Search size={16} color="#027eb5" style={{ marginRight: 8, flexShrink: 0 }} />
+                                                <input 
+                                                    autoFocus
+                                                    type="text"
+                                                    placeholder="Search members..."
+                                                    value={communityMemberSearchQuery}
+                                                    onChange={(e) => setCommunityMemberSearchQuery(e.target.value)}
+                                                    style={{ 
+                                                        flex: 1, 
+                                                        border: 'none', 
+                                                        background: 'transparent', 
+                                                        outline: 'none', 
+                                                        fontSize: 14, 
+                                                        padding: '8px 0',
+                                                        color: '#111b21',
+                                                        fontWeight: '500',
+                                                        width: '100%',
+                                                        paddingRight: 40
+                                                    }}
+                                                />
+                                                <button 
+                                                    onClick={() => {
+                                                        setIsCommunityMemberSearchOpen(false);
+                                                        setCommunityMemberSearchQuery('');
+                                                    }}
+                                                    style={{ 
+                                                        background: '#D1D7DB', 
+                                                        border: 'none', 
+                                                        cursor: 'pointer', 
+                                                        width: 18, 
+                                                        height: 18, 
+                                                        borderRadius: '50%', 
+                                                        display: 'flex', 
+                                                        alignItems: 'center', 
+                                                        justifyContent: 'center', 
+                                                        position: 'absolute',
+                                                        right: 12,
+                                                        top: '50%',
+                                                        transform: 'translateY(-50%)',
+                                                        flexShrink: 0,
+                                                        padding: 0
+                                                    }}
+                                                >
+                                                    <X size={10} color="#54656f" strokeWidth={4} />
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             );
                         })()}
@@ -7974,6 +8316,12 @@ export default function Chat() {
                         {(() => {
                             const communityOwner = community.creator;
                             if (!communityOwner) return null;
+                            
+                            // Filter logic
+                            const ownerName = communityOwner.name || '';
+                            const matchesSearch = ownerName.toLowerCase().includes(communityMemberSearchQuery.toLowerCase());
+                            if (communityMemberSearchQuery && !matchesSearch) return null;
+
                             const currentUserId = user.id || user._id;
                             const isCurrentUserOwner = currentUserId && String(communityOwner._id || communityOwner.id || communityOwner) === String(currentUserId);
                             const displayMobile = communityOwner.mobile || '';
@@ -7999,8 +8347,15 @@ export default function Chat() {
                         })()}
                         {community.members && community.members
                             .filter(m => {
+                                if (!m) return false;
                                 const ownerId = community.creator?._id || community.creator;
-                                return String(m._id || m.id) !== String(ownerId);
+                                if (String(m._id || m.id) === String(ownerId)) return false;
+                                
+                                if (communityMemberSearchQuery) {
+                                    const name = m.name || '';
+                                    return name.toLowerCase().includes(communityMemberSearchQuery.toLowerCase());
+                                }
+                                return true;
                             })
                             .map(member => {
                                 const memberMobile = member.mobile || member.phone || '';
@@ -8068,9 +8423,7 @@ export default function Chat() {
 
                     <div style={{ background: bgColor, padding: '10px 0 40px 0', borderTop: thickDivider }}>
                         {[
-                            { icon: <UserPlus size={20} />, label: 'Assign new owner', color: textColor, action: () => { setIsSelectOwnerPanelOpen(true); setIsCommunityInfoOpen(false); } },
-                            { icon: <LogOut size={20} />, label: 'Exit community', color: '#ea0038', action: handleExitCommunity },
-                            { icon: <ThumbsDown size={20} />, label: 'Report community', color: '#ea0038' },
+                            { icon: <LogOut size={20} />, label: 'Exit community', color: '#ea0038', action: onExitClick },
                             { icon: <XCircle size={20} />, label: 'Deactivate community', color: '#ea0038' }
                         ].map((item, idx) => (
                             <div
@@ -8833,7 +9186,7 @@ export default function Chat() {
 
             {/* Search */}
             <div className="wa-search-section">
-                <div className="wa-search-bar">
+                <div className="wa-search-bar" style={{ position: 'relative' }}>
                     <Search size={18} color="#54656f" />
                     <input
                         type="text"
@@ -8844,10 +9197,33 @@ export default function Chat() {
                         className="wa-search-input"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
+                        style={{ paddingRight: searchQuery ? '36px' : '12px' }}
                     />
+                    {searchQuery && (
+                        <button
+                            onClick={() => setSearchQuery('')}
+                            style={{
+                                position: 'absolute',
+                                right: '12px',
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                background: '#D1D7DB',
+                                border: 'none',
+                                borderRadius: '50%',
+                                width: '18px',
+                                height: '18px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                padding: 0,
+                                zIndex: 5
+                            }}
+                        >
+                            <X size={10} color="#54656f" strokeWidth={4} />
+                        </button>
+                    )}
                 </div>
-
-
             </div>
 
 
@@ -9188,6 +9564,8 @@ export default function Chat() {
 
     const handleBackToChatList = () => {
         setSelectedUser(null);
+        setSelectedGroup(null);
+        setSelectedCommunity(null);
         setInput('');
         setFile(null);
         setTypingLinkPreview(null);
@@ -10260,9 +10638,22 @@ export default function Chat() {
                                         </div>
                                     )}
 
-                                    {(accountLocked || isAccountBanned() || (selectedUser?.requestStatus === 'rejected' && selectedUser?.requestUpdatedAt && (new Date() - new Date(selectedUser?.requestUpdatedAt)) < 24 * 60 * 60 * 1000)) && (selectedUser?.requestStatus === 'rejected' || selectedUser?.requestStatus === 'pending') ? (
+                                    {isMessagingRestricted() ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#f8fafc', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem', border: '1px solid #e2e8f0' }}>
-                                            Messaging is restricted for 24 hours.
+                                            {(() => {
+                                                if (selectedGroup?.isCommunityAnnouncements || selectedGroup?.isAnnouncementGroup) {
+                                                    const commIdCheck = String(selectedGroup.community_id || selectedGroup.communityId || '');
+                                                    let community = (communities || []).find(c =>
+                                                        String(c.announcements?._id || c.announcements) === String(selectedGroup._id) ||
+                                                        (commIdCheck && String(c._id || c.id) === commIdCheck)
+                                                    );
+                                                    if (!community && selectedCommunity) community = selectedCommunity;
+                                                    if (community && isRemovedFromCommunity(community)) {
+                                                        return "You're no longer a member in this community.";
+                                                    }
+                                                }
+                                                return selectedGroup ? 'You were removed from this group and cannot send messages.' : 'Messaging is restricted.';
+                                            })()}
                                         </div>
                                     ) : (
                                         isRecording ? (
@@ -11153,9 +11544,22 @@ export default function Chat() {
                                         </div>
                                     )}
 
-                                    {(accountLocked || isAccountBanned() || (selectedUser?.requestStatus === 'rejected' && selectedUser?.requestUpdatedAt && (new Date() - new Date(selectedUser?.requestUpdatedAt)) < 24 * 60 * 60 * 1000)) && (selectedUser?.requestStatus === 'rejected' || selectedUser?.requestStatus === 'pending') ? (
+                                    {isMessagingRestricted() ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#f8fafc', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem', border: '1px solid #e2e8f0' }}>
-                                            Messaging is restricted for 24 hours.
+                                            {(() => {
+                                                if (selectedGroup?.isCommunityAnnouncements || selectedGroup?.isAnnouncementGroup) {
+                                                    const commIdCheck = String(selectedGroup.community_id || selectedGroup.communityId || '');
+                                                    let community = (communities || []).find(c =>
+                                                        String(c.announcements?._id || c.announcements) === String(selectedGroup._id) ||
+                                                        (commIdCheck && String(c._id || c.id) === commIdCheck)
+                                                    );
+                                                    if (!community && selectedCommunity) community = selectedCommunity;
+                                                    if (community && isRemovedFromCommunity(community)) {
+                                                        return "You're no longer a member in this community.";
+                                                    }
+                                                }
+                                                return selectedGroup ? 'You were removed from this group and cannot send messages.' : 'Messaging is restricted.';
+                                            })()}
                                         </div>
                                     ) : (
                                         isRecording ? (
@@ -12909,6 +13313,70 @@ export default function Chat() {
                 </div>
             )}
 
+            {isExitCommunityModalOpen && exitCommunityTarget && (
+                <div className="wa-mute-modal-overlay" onClick={() => setIsExitCommunityModalOpen(false)} style={{ zIndex: 11000 }}>
+                    <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '450px', width: '90%', borderRadius: '16px', padding: 0 }}>
+                        <div className="wa-mute-modal-content" style={{ padding: '24px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                                <h3 style={{ fontSize: '20px', color: '#111b21', margin: 0 }}>Exit community: "{exitCommunityTarget.name}"?</h3>
+                                <button onClick={() => setIsExitCommunityModalOpen(false)} style={{ background: '#f0f2f5', border: 'none', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                                    <X size={18} color="#54656f" />
+                                </button>
+                            </div>
+                            <div style={{ background: '#F0F2F5', padding: '16px', borderRadius: '12px', marginBottom: 24 }}>
+                                <p style={{ margin: 0, fontSize: '14px', color: '#667781', textAlign: 'center', lineHeight: '1.5' }}>
+                                    You will also leave all groups in this community. Only admins are notified when you leave a community.
+                                </p>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                <div 
+                                    onClick={() => handleExitCommunityAction('exit')}
+                                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderRadius: '12px', cursor: 'pointer', background: 'transparent', transition: 'background 0.2s' }}
+                                    className="wa-exit-option"
+                                >
+                                    <span style={{ fontSize: '16px', color: '#111b21' }}>Exit community</span>
+                                    <LogOut size={20} color="#111b21" style={{ transform: 'rotate(180deg)' }} />
+                                </div>
+                                <div style={{ height: '1px', background: '#f0f2f5', margin: '0 20px' }}></div>
+                                <div 
+                                    onClick={() => handleExitCommunityAction('delete')}
+                                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderRadius: '12px', cursor: 'pointer', background: 'transparent', transition: 'background 0.2s' }}
+                                    className="wa-exit-option"
+                                >
+                                    <span style={{ fontSize: '16px', color: '#ea0038' }}>Exit and delete for me</span>
+                                    <Trash2 size={20} color="#ea0038" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isOwnerExitCommunityModalOpen && exitCommunityTarget && (
+                <div className="wa-mute-modal-overlay" onClick={() => setIsOwnerExitCommunityModalOpen(false)} style={{ zIndex: 11000 }}>
+                    <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px', width: '90%', borderRadius: '16px', background: 'white', padding: '24px 32px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                        <p style={{ color: '#111b21', fontSize: '18px', margin: '0 0 32px 0', lineHeight: 1.4, fontWeight: 500 }}>
+                            As the owner, you'll need to assign a new owner to exit the community.
+                        </p>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '20px', alignItems: 'center' }}>
+                            <button 
+                                onClick={() => { setIsOwnerExitCommunityModalOpen(false); setIsAssignNewOwnerOpen(true); }}
+                                style={{ background: 'none', border: 'none', color: '#027EB5', fontSize: '16px', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                                className="assign-owner-link"
+                            >
+                                Assign new owner
+                            </button>
+                            <button 
+                                onClick={() => setIsOwnerExitCommunityModalOpen(false)}
+                                style={{ background: '#027EB5', color: 'white', border: 'none', borderRadius: '24px', padding: '10px 24px', fontSize: '16px', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {viewOnceMsg && (
                 <div
                     className="wa-view-once-modal-overlay"
@@ -13097,6 +13565,138 @@ export default function Chat() {
                             >
                                 Yes
                              </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Assign New Owner Right Panel */}
+            {isAssignNewOwnerOpen && exitCommunityTarget && (
+                <div
+                    className="wa-contact-info-panel active"
+                    style={{
+                        zIndex: 12000,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        animation: 'slideInRight 0.25s ease-out',
+                        background: '#f0f2f5'
+                    }}
+                >
+                    <div style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'white', borderBottom: '1px solid #e9edef', position: 'relative', flexShrink: 0 }}>
+                        <button onClick={() => setIsAssignNewOwnerOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', position: 'absolute', left: 16 }}>
+                            <ArrowLeft size={24} color="#54656f" />
+                        </button>
+                        <div style={{ flex: 1, textAlign: 'center', fontSize: 18, fontWeight: 500, color: '#3b4a54', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', margin: '0 48px' }}>
+                            Assign new owner
+                        </div>
+                    </div>
+
+                    <div style={{ padding: '12px 20px 16px', background: '#f0f2f5', borderBottom: '1px solid #e9edef' }}>
+                        <p style={{ fontSize: 13, color: '#667781', margin: 0, lineHeight: '1.5' }}>
+                            Select an admin to transfer ownership before you exit the community.
+                        </p>
+                    </div>
+
+                    <div style={{ flex: 1, overflowY: 'auto', background: '#f0f2f5' }}>
+                        {(() => {
+                            const adminsExceptMe = (exitCommunityTarget.admins || []).filter(admin => 
+                                String(admin._id || admin.id) !== String(user.id || user._id)
+                            );
+                            
+                            if (adminsExceptMe.length === 0) {
+                                return (
+                                    <div style={{ padding: '60px 20px', textAlign: 'center' }}>
+                                        <Users size={48} color="#ccc" style={{ marginBottom: 16 }} />
+                                        <p style={{ color: '#667781', fontSize: 14, lineHeight: 1.5 }}>
+                                            No other admins found in this community.<br />
+                                            Please promote a member to admin first.
+                                        </p>
+                                    </div>
+                                );
+                            }
+
+                            return (
+                                <div style={{ marginTop: 8 }}>
+                                    {adminsExceptMe.map(admin => {
+                                        const adminId = admin._id || admin.id;
+                                        return (
+                                            <div
+                                                key={adminId}
+                                                className="wa-owner-select-item"
+                                                onClick={() => {
+                                                    setOwnershipTransferTarget(admin);
+                                                    setIsTransferOwnershipConfirmOpen(true);
+                                                }}
+                                            style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                padding: '14px 20px',
+                                                background: 'white',
+                                                borderBottom: '1px solid #f0f2f5',
+                                                cursor: 'pointer',
+                                                transition: 'background 0.15s',
+                                                gap: 14
+                                            }}
+                                        >
+                                            <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                {admin.avatar || admin.image || admin.profile_photo ? (
+                                                    <img src={admin.avatar || admin.image || admin.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                ) : (
+                                                    <UserIcon size={22} color="#8696a0" />
+                                                )}
+                                            </div>
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ color: '#111b21', fontWeight: 500, fontSize: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{admin.name}</div>
+                                                <div style={{ color: '#667781', fontSize: 13, marginTop: 2 }}>Community Admin</div>
+                                            </div>
+                                            <ChevronRight size={18} color="#8696a0" />
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            );
+                        })()}
+                    </div>
+                </div>
+            )}
+            {isTransferOwnershipConfirmOpen && ownershipTransferTarget && (
+                <div 
+                    className="wa-mute-modal-overlay" 
+                    onClick={() => setIsTransferOwnershipConfirmOpen(false)} 
+                    style={{ zIndex: 31000, background: 'rgba(11,20,26,0.85)', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                    <div 
+                        className="wa-mute-modal" 
+                        onClick={(e) => e.stopPropagation()} 
+                        style={{ maxWidth: '450px', width: '90%', borderRadius: '16px', padding: 0, background: '#ffffff', boxShadow: '0 17px 50px 0 rgba(0,0,0,0.19)', overflow: 'hidden' }}
+                    >
+                        <div style={{ padding: '24px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                                <h3 style={{ fontSize: '20px', color: '#111b21', margin: 0 }}>Transfer ownership?</h3>
+                                <button onClick={() => setIsTransferOwnershipConfirmOpen(false)} style={{ background: '#f0f2f5', border: 'none', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                                    <X size={18} color="#54656f" />
+                                </button>
+                            </div>
+                            <p style={{ color: '#3b4a54', fontSize: '15px', lineHeight: '1.5', margin: '0 0 24px' }}>
+                                Transfer community ownership to <strong>{ownershipTransferTarget.name}</strong>?
+                            </p>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                                <button
+                                    onClick={() => setIsTransferOwnershipConfirmOpen(false)}
+                                    style={{ padding: '10px 24px', borderRadius: '24px', border: '1px solid #e9edef', background: 'transparent', color: '#027EB5', fontWeight: 500, cursor: 'pointer' }}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={async () => {
+                                        setIsTransferOwnershipConfirmOpen(false);
+                                        await handleAssignNewOwner(ownershipTransferTarget);
+                                    }}
+                                    style={{ padding: '10px 24px', borderRadius: '24px', border: 'none', background: '#027EB5', color: 'white', fontWeight: 500, cursor: 'pointer' }}
+                                >
+                                    Transfer
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
