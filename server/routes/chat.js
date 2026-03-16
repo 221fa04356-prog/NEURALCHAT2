@@ -203,27 +203,27 @@ router.get('/users', authenticateToken, async (req, res) => {
             // 1. Get Last Message
             const lastMsg = await Message.findOne({
                 $or: [
-                    { user_id: currentUserId, receiver_id: u._id },
-                    { user_id: u._id, receiver_id: currentUserId }
+                    { user_id: new mongoose.Types.ObjectId(currentUserId), receiver_id: new mongoose.Types.ObjectId(u._id) },
+                    { user_id: new mongoose.Types.ObjectId(u._id), receiver_id: new mongoose.Types.ObjectId(currentUserId) }
                 ],
-                deleted_for: { $ne: currentUserId }
+                deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
             }).sort({ created_at: -1 }).select('content created_at type sender_id duration is_deleted_by_admin is_deleted_by_user deleted_for').lean();
 
             // 2. Get Unread Count
             const unreadCount = await Message.countDocuments({
-                user_id: u._id,
-                receiver_id: currentUserId,
+                user_id: new mongoose.Types.ObjectId(u._id),
+                receiver_id: new mongoose.Types.ObjectId(currentUserId),
                 is_read: false,
-                deleted_for: { $ne: currentUserId }
+                deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
             });
 
             // 3. Get Media, Docs, and Links counts
             const baseQuery = {
                 $or: [
-                    { user_id: currentUserId, receiver_id: u._id },
-                    { user_id: u._id, receiver_id: currentUserId }
+                    { user_id: new mongoose.Types.ObjectId(currentUserId), receiver_id: new mongoose.Types.ObjectId(u._id) },
+                    { user_id: new mongoose.Types.ObjectId(u._id), receiver_id: new mongoose.Types.ObjectId(currentUserId) }
                 ],
-                deleted_for: { $ne: currentUserId }
+                deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
             };
 
             const [mediaCount, docCount, linkCount] = await Promise.all([
@@ -242,20 +242,27 @@ router.get('/users', authenticateToken, async (req, res) => {
 
             const isAccepted = request && request.status === 'accepted';
             const isPendingForMe = request && request.status === 'pending' && String(request.receiver_id) === String(currentUserId);
-            const isRejected = request && request.status === 'rejected';
+            const isPendingFromMe = request && request.status === 'pending' && String(request.sender_id) === String(currentUserId);
 
-            // Show logs for debugging (remove once verified)
-            if (request) {
-                console.log(`[USER_LIST] Connection ${currentUserId} <-> ${u._id} is ${request.status}`);
+            let effectiveLastMsg = lastMsg;
+
+            // If it's a pending request, show a placeholder if no real history exists
+            if (!effectiveLastMsg && request && request.status === 'pending') {
+                effectiveLastMsg = {
+                    content: isPendingForMe ? 'New Message Request' : 'Message Request Sent',
+                    created_at: request.updated_at || request.created_at,
+                    type: 'text',
+                    is_request_placeholder: true
+                };
             }
 
             return {
                 ...u.toObject(),
-                lastMessage: (isAccepted || !request) ? lastMsg : null, 
-                unreadCount: (isAccepted || !request) ? unreadCount : 0,
-                mediaCount: (isAccepted || !request) ? mediaCount : 0,
-                docCount: (isAccepted || !request) ? docCount : 0,
-                linkCount: (isAccepted || !request) ? linkCount : 0,
+                lastMessage: effectiveLastMsg, 
+                unreadCount: isAccepted ? unreadCount : (isPendingForMe ? 1 : 0),
+                mediaCount: isAccepted ? mediaCount : 0,
+                docCount: isAccepted ? docCount : 0,
+                linkCount: isAccepted ? linkCount : 0,
                 isFavorite: userFavorites.some(favId => String(favId) === String(u._id)),
                 hasPendingRequest: isPendingForMe,
                 requestStatus: request ? request.status : 'none',
@@ -532,7 +539,7 @@ router.get('/p2p/:userId/:otherUserId', authenticateToken, async (req, res) => {
             return res.status(403).json({ error: 'You are not authorized to view this chat history' });
         }
 
-        // --- NEW: Message Request Guard ---
+        // --- Message Request Guard ---
         const currentId = req.user.id;
         const otherId = (currentId === userId) ? otherUserId : userId;
 
@@ -543,23 +550,38 @@ router.get('/p2p/:userId/:otherUserId', authenticateToken, async (req, res) => {
             ]
         });
 
-        // If a request exists but is NOT accepted, and I am the receiver (or it was rejected)
-        // hide the history.
+        // If a request exists but is NOT accepted, check if real history exists before hiding.
         if (request && request.status !== 'accepted') {
-            const isReceiver = String(request.receiver_id) === String(currentId);
-            if (isReceiver || request.status === 'rejected') {
-                console.log(`[P2P GUARD] Hiding history for ${currentId} from ${otherId} because status is ${request.status}`);
-                return res.json([]);
+            // Check if real messages already exist (not deleted-for-all)
+            const priorCount = await Message.countDocuments({
+                $or: [
+                    { user_id: currentId, receiver_id: otherId },
+                    { user_id: otherId, receiver_id: currentId }
+                ]
+            });
+
+            if (priorCount === 0) {
+                // No real history — apply the guard
+                const isReceiver = String(request.receiver_id) === String(currentId);
+                if (isReceiver || request.status === 'rejected') {
+                    console.log(`[P2P GUARD] Hiding history for ${currentId} from ${otherId} because status is ${request.status}`);
+                    return res.json([]);
+                }
+            } else {
+                // Real history exists — auto-accept the stale request
+                request.status = 'accepted';
+                request.updated_at = new Date();
+                await request.save();
             }
         }
         // --- END GUARD ---
 
         const messages = await Message.find({
             $or: [
-                { user_id: userId, receiver_id: otherUserId },
-                { user_id: otherUserId, receiver_id: userId }
+                { user_id: new mongoose.Types.ObjectId(userId), receiver_id: new mongoose.Types.ObjectId(otherUserId) },
+                { user_id: new mongoose.Types.ObjectId(otherUserId), receiver_id: new mongoose.Types.ObjectId(userId) }
             ],
-            deleted_for: { $ne: req.user.id }
+            deleted_for: { $ne: new mongoose.Types.ObjectId(req.user.id) }
         })
             .sort({ created_at: 1 })
             .populate('reply_to', 'content type file_path user_id sender_id');
@@ -656,7 +678,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
 
         // If toUserId is present -> P2P Message
         if (toUserId) {
-            // --- NEW: Message Request Check ---
+            // --- Message Request Check ---
             const acceptedRequest = await MessageRequest.findOne({
                 $or: [
                     { sender_id: userId, receiver_id: toUserId, status: 'accepted' },
@@ -665,45 +687,83 @@ router.post('/send', authenticateToken, (req, res, next) => {
             });
 
             if (!acceptedRequest) {
-                // If not accepted, check if a pending or rejected request exists
-                const existingRequest = await MessageRequest.findOne({
+                // === Check for real prior chat history first ===
+                // If the two users have EVER exchanged any messages that were not deleted-for-everyone,
+                // they already have an established relationship — skip the request gate entirely.
+                const priorMessageCount = await Message.countDocuments({
                     $or: [
-                        { sender_id: userId, receiver_id: toUserId },
-                        { sender_id: toUserId, receiver_id: userId }
-                    ]
+                        { user_id: new mongoose.Types.ObjectId(userId), receiver_id: new mongoose.Types.ObjectId(toUserId) },
+                        { user_id: new mongoose.Types.ObjectId(toUserId), receiver_id: new mongoose.Types.ObjectId(userId) }
+                    ],
+                    deleted_for: { $ne: new mongoose.Types.ObjectId(userId) } // Use SENDER (userId) to determine if they start fresh
                 });
 
-                if (!existingRequest) {
-                    // Create pending request if none exists
-                    await MessageRequest.create({
-                        sender_id: userId,
-                        receiver_id: toUserId,
-                        status: 'pending'
+                if (priorMessageCount > 0) {
+                    const staleRequest = await MessageRequest.findOne({
+                        $or: [
+                            { sender_id: new mongoose.Types.ObjectId(userId), receiver_id: new mongoose.Types.ObjectId(toUserId) },
+                            { sender_id: new mongoose.Types.ObjectId(toUserId), receiver_id: new mongoose.Types.ObjectId(userId) }
+                        ]
+                    });
+                    if (staleRequest && staleRequest.status !== 'accepted') {
+                        staleRequest.status = 'accepted';
+                        staleRequest.updated_at = new Date();
+                        await staleRequest.save();
+                    }
+                    // Fall through to normal message sending below
+                } else {
+                    // === No prior history — apply the request gate ===
+                    const existingRequest = await MessageRequest.findOne({
+                        $or: [
+                            { sender_id: userId, receiver_id: toUserId },
+                            { sender_id: toUserId, receiver_id: userId }
+                        ]
                     });
 
-                    // Notify receiver
-                    if (req.io) {
-                        const senderUser = await User.findById(userId).select('name');
-                        req.io.to(String(toUserId)).emit('new_message_request', {
-                            senderId: userId,
-                            senderName: senderUser ? senderUser.name : 'New User',
-                            requestCreated: true
+                    if (!existingRequest) {
+                        // Create new pending request
+                        await MessageRequest.create({
+                            sender_id: userId,
+                            receiver_id: toUserId,
+                            status: 'pending'
                         });
-                    }
-                } else if (existingRequest.status === 'rejected') {
-                    // Mutual Block Check: Restricted for 24 hours after rejection
-                    const isWithin24Hours = (new Date() - new Date(existingRequest.updated_at)) < 24 * 60 * 60 * 1000;
-                    if (isWithin24Hours) {
-                        return res.status(403).json({ 
-                            error: 'Messaging is restricted for 24 hours after a rejection.',
-                            restrictedUntil: new Date(existingRequest.updated_at.getTime() + 24 * 60 * 60 * 1000)
-                        });
-                    }
-                    // If after 24 hours, allow sending a NEW request (implicit by returning and letting flow continue)
-                }
 
-                // If pending, we do NOT save the message to DB and do NOT relay it
-                return res.json({ status: 'pending_request', message: 'Message request sent. Receiver must accept before they see your messages.' });
+                        // Notify receiver
+                        if (req.io) {
+                            const senderUser = await User.findById(userId).select('name');
+                            req.io.to(String(toUserId)).emit('new_message_request', {
+                                senderId: userId,
+                                senderName: senderUser ? senderUser.name : 'New User',
+                                requestCreated: true
+                            });
+                        }
+                    } else if (existingRequest.status === 'rejected') {
+                        // Restricted for 24 hours after rejection
+                        const isWithin24Hours = (new Date() - new Date(existingRequest.updated_at)) < 24 * 60 * 60 * 1000;
+                        if (isWithin24Hours) {
+                            return res.status(403).json({ 
+                                error: 'Messaging is restricted for 24 hours after a rejection.',
+                                restrictedUntil: new Date(existingRequest.updated_at.getTime() + 24 * 60 * 60 * 1000)
+                            });
+                        }
+                        // After 24 hours: reset request to pending
+                        existingRequest.status = 'pending';
+                        existingRequest.sender_id = userId;
+                        existingRequest.receiver_id = toUserId;
+                        existingRequest.updated_at = new Date();
+                        await existingRequest.save();
+                        if (req.io) {
+                            const senderUser = await User.findById(userId).select('name');
+                            req.io.to(String(toUserId)).emit('new_message_request', {
+                                senderId: userId,
+                                senderName: senderUser ? senderUser.name : 'New User',
+                                requestCreated: true
+                            });
+                        }
+                    }
+                    // Block the send — request is pending
+                    return res.json({ status: 'pending_request', message: 'Message request sent. Receiver must accept before they see your messages.' });
+                }
             }
             // --- END REQUEST CHECK ---
 
@@ -1419,6 +1479,15 @@ router.post('/chat/delete-history', authenticateToken, async (req, res) => {
                 },
                 { $addToSet: { deleted_for: userId } }
             );
+
+            // Also reset the message request status to 'pending' or remove it 
+            // so starting a new chat requires a fresh request.
+            await MessageRequest.deleteMany({
+                $or: [
+                    { sender_id: new mongoose.Types.ObjectId(userId), receiver_id: new mongoose.Types.ObjectId(contactId) },
+                    { sender_id: new mongoose.Types.ObjectId(contactId), receiver_id: new mongoose.Types.ObjectId(userId) }
+                ]
+            });
         }
         res.json({ status: 'success' });
     } catch (err) {
@@ -1463,32 +1532,67 @@ router.get('/requests', authenticateToken, async (req, res) => {
     try {
         const currentUserId = req.user.id;
 
-        // Step 1: Get raw request documents (no populate - just plain docs)
-        const requests = await MessageRequest.find({
+        // Step 1: Get raw pending request documents
+        const rawRequests = await MessageRequest.find({
             receiver_id: currentUserId,
             status: 'pending'
         }).lean();
 
-        console.log('[REQUESTS] Raw requests found:', requests.length, requests.map(r => ({ id: r._id, sender_id: r.sender_id })));
+        console.log('[REQUESTS] Raw requests found:', rawRequests.length);
 
-        if (requests.length === 0) {
+        if (rawRequests.length === 0) {
             return res.json([]);
         }
 
-        // Step 2: Fetch sender users manually using the sender_id values
-        const senderIds = requests.map(r => r.sender_id).filter(Boolean);
+        // Step 2: Filter out stale requests where real chat history already exists.
+        // These are requests created erroneously — the users already have an established relationship.
+        const validRequests = [];
+        for (const r of rawRequests) {
+            // Check if the current user (receiver) has visible history
+            const receiverHasHistory = await Message.countDocuments({
+                $or: [
+                    { user_id: new mongoose.Types.ObjectId(r.sender_id), receiver_id: new mongoose.Types.ObjectId(currentUserId) },
+                    { user_id: new mongoose.Types.ObjectId(currentUserId), receiver_id: new mongoose.Types.ObjectId(r.sender_id) }
+                ],
+                deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
+            });
+
+            // Also check if the sender has visible history. 
+            // If the sender has no history, they are starting fresh — so we MUST show the request.
+            const senderHasHistoryCount = await Message.countDocuments({
+                $or: [
+                    { user_id: new mongoose.Types.ObjectId(r.sender_id), receiver_id: new mongoose.Types.ObjectId(currentUserId) },
+                    { user_id: new mongoose.Types.ObjectId(currentUserId), receiver_id: new mongoose.Types.ObjectId(r.sender_id) }
+                ],
+                deleted_for: { $ne: new mongoose.Types.ObjectId(r.sender_id) }
+            });
+
+            if (receiverHasHistory > 0 && senderHasHistoryCount > 0) {
+                // Both have history — request is definitely stale (likely from a bug or old state)
+                await MessageRequest.updateOne({ _id: r._id }, { status: 'accepted', updated_at: new Date() });
+                console.log(`[REQUESTS] Auto-accepted stale request ${r._id} (both sides have history)`);
+            } else {
+                // Either sender or receiver (or both) have NO history — treat as valid fresh start/new contact
+                validRequests.push(r);
+            }
+        }
+
+        if (validRequests.length === 0) {
+            return res.json([]);
+        }
+
+        // Step 3: Fetch sender users manually using the sender_id values
+        const senderIds = validRequests.map(r => r.sender_id).filter(Boolean);
         const senders = await User.find({ _id: { $in: senderIds } })
             .select('name email mobile')
             .lean();
-
-        console.log('[REQUESTS] Senders fetched:', senders.length, senders.map(s => ({ id: s._id, name: s.name })));
 
         // Build lookup map
         const senderMap = {};
         senders.forEach(s => { senderMap[String(s._id)] = s; });
 
-        // Step 3: Build response
-        const formatted = requests.map(r => {
+        // Step 4: Build response
+        const formatted = validRequests.map(r => {
             const sender = senderMap[String(r.sender_id)];
             return {
                 _id: r._id,
@@ -1504,7 +1608,7 @@ router.get('/requests', authenticateToken, async (req, res) => {
             };
         });
 
-        console.log('[REQUESTS] Formatted response:', formatted.map(f => ({ id: f._id, name: f.fromUserId?.name })));
+        console.log('[REQUESTS] Final response:', formatted.map(f => ({ id: f._id, name: f.fromUserId?.name })));
         res.json(formatted);
     } catch (err) {
         console.error('[REQUESTS] GET error:', err);

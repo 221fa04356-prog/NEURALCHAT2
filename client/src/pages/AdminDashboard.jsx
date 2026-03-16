@@ -13,13 +13,14 @@ import {
 import { io } from 'socket.io-client';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-    ResponsiveContainer, PieChart, Pie, Cell, Legend
+    ResponsiveContainer, PieChart, Pie, Cell, Legend, Label
 } from 'recharts';
 import logo from '../assets/logo.png';
 import NeuralBackground from '../components/NeuralBackground';
 
 
 const CustomTooltip = ({ active, payload, label, coordinate, scrollRef }) => {
+    const isMobile = window.innerWidth <= 768;
     if (active && payload && payload.length) {
         const data = payload[0].payload;
         let shiftStyle = {};
@@ -30,31 +31,47 @@ const CustomTooltip = ({ active, payload, label, coordinate, scrollRef }) => {
             const tooltipX = coordinate.x;
 
             const TOOLTIP_ESTIMATED_WIDTH = 220;
-            const RECHARTS_FLIP_THRESHOLD = 300; // If within 300px of SVG right, Recharts natively flips it
+            const RECHARTS_FLIP_THRESHOLD = 300; 
 
             const isNearSvgRight = (scrollWidth - tooltipX) < RECHARTS_FLIP_THRESHOLD;
             const isNearVisibleRight = (tooltipX - scrollLeft) > (containerWidth - TOOLTIP_ESTIMATED_WIDTH);
+            const isNearVisibleLeft = (tooltipX - scrollLeft) < 120;
 
-            // Shift left if near the right edge of the visible window, but ONLY if Recharts isn't already flipping it
-            if (isNearVisibleRight && !isNearSvgRight) {
+            if (isNearVisibleLeft) {
+                shiftStyle = { transform: 'translateX(60px)' };
+            } else if (isNearVisibleRight && !isNearSvgRight) {
                 shiftStyle = { transform: 'translateX(calc(-100% - 30px))' };
             }
         }
 
+        const formattedLabel = (() => {
+            if (!label || typeof label !== 'string' || !label.includes('-')) return label;
+            const parts = label.split('-');
+            const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            if (parts.length === 3) {
+                return `${parseInt(parts[2])} ${monthNames[parseInt(parts[1]) - 1]} ${parts[0]}`;
+            } else if (parts.length === 2) {
+                return `${monthNames[parseInt(parts[1]) - 1]} ${parts[0]}`;
+            }
+            return label;
+        })();
+
         return (
             <div style={{
                 background: '#fff',
-                padding: '10px',
+                padding: isMobile ? '6px 10px' : '10px 15px',
                 borderRadius: '8px',
-                boxShadow: '0 0 2rem rgba(0,0,0,0.1)',
+                boxShadow: '0 8px 30px rgba(0,0,0,0.12)',
                 border: 'none',
                 position: 'relative',
+                zIndex: 1000,
+                whiteSpace: 'nowrap',
                 ...shiftStyle
             }}>
-                <p style={{ margin: '0 0 5px', fontWeight: 'bold' }}>{label}</p>
-                <p style={{ margin: 0, color: '#0A7C8F' }}>Approved Users : {data.approved || 0}</p>
-                <p style={{ margin: 0, color: '#0FB5D0' }}>Pending Approvals : {data.pending || 0}</p>
-                <p style={{ margin: 0, color: '#2BC9E4' }}>Reset Requests : {data.resets || 0}</p>
+                <p style={{ margin: '0 0 5px', fontWeight: 'bold', color: '#525f7f', fontSize: isMobile ? '11px' : '14px' }}>{formattedLabel}</p>
+                <p style={{ margin: 0, color: '#0A7C8F', fontSize: isMobile ? '10px' : '13px', fontWeight: '600' }}>{isMobile ? 'Approved' : 'Approved Users'} : {data.approved || 0}</p>
+                <p style={{ margin: 0, color: '#0FB5D0', fontSize: isMobile ? '10px' : '13px', fontWeight: '600' }}>{isMobile ? 'Pending' : 'Pending Approvals'} : {data.pending || 0}</p>
+                <p style={{ margin: 0, color: '#2BC9E4', fontSize: isMobile ? '10px' : '13px', fontWeight: '600' }}>{isMobile ? 'Resets' : 'Reset Requests'} : {data.resets || 0}</p>
             </div>
         );
     }
@@ -196,43 +213,41 @@ export default function AdminDashboard() {
     }, []);
 
     useEffect(() => {
-        if (chartScrollRef.current && stats?.chartData) {
-            const chartData = stats.chartData[chartPeriod] || [];
+        if (activeTab === 'overview' && chartScrollRef.current && stats?.chartData) {
+            const timer = setTimeout(() => {
+                const chartData = stats.chartData[chartPeriod] || [];
+                const today = new Date();
+                let todayKey;
 
-            // Get today's date in the appropriate format based on period
-            const today = new Date();
-            let todayKey;
+                if (chartPeriod === 'day') {
+                    const y = today.getFullYear();
+                    const m = String(today.getMonth() + 1).padStart(2, '0');
+                    const d = String(today.getDate()).padStart(2, '0');
+                    todayKey = `${y}-${m}-${d}`;
+                } else if (chartPeriod === 'month') {
+                    const y = today.getFullYear();
+                    const m = String(today.getMonth() + 1).padStart(2, '0');
+                    todayKey = `${y}-${m}`;
+                } else if (chartPeriod === 'year') {
+                    todayKey = String(today.getFullYear());
+                }
 
-            if (chartPeriod === 'day') {
-                // Format: YYYY-MM-DD
-                todayKey = today.toISOString().split('T')[0];
-            } else if (chartPeriod === 'month') {
-                // Format: YYYY-MM
-                const year = today.getFullYear();
-                const month = String(today.getMonth() + 1).padStart(2, '0');
-                todayKey = `${year}-${month}`;
-            } else if (chartPeriod === 'year') {
-                // Format: YYYY
-                todayKey = String(today.getFullYear());
-            }
-
-            // Find the index of today's data point
-            const todayIndex = chartData.findIndex(item => item.name === todayKey);
-
-            if (todayIndex !== -1) {
-                // Calculate scroll position to center today's bar
-                const barGroupWidth = isMobile ? 80 : 120;
+                const todayIndex = chartData.findIndex(item => item.name === todayKey);
                 const scrollContainer = chartScrollRef.current;
-                const targetScrollLeft = (todayIndex * barGroupWidth) - (scrollContainer.clientWidth / 2) + (barGroupWidth / 2);
-
-                // Scroll to today's date
-                scrollContainer.scrollLeft = Math.max(0, targetScrollLeft);
-            } else {
-                // Fallback: scroll to the end if today's date is not in the data
-                chartScrollRef.current.scrollLeft = chartScrollRef.current.scrollWidth;
-            }
+                
+                if (scrollContainer) {
+                    if (todayIndex !== -1) {
+                        const barGroupWidth = isMobile ? 80 : 120;
+                        const targetScrollLeft = (todayIndex * barGroupWidth) - (scrollContainer.clientWidth / 2) + (barGroupWidth / 2);
+                        scrollContainer.scrollLeft = Math.max(0, targetScrollLeft);
+                    } else {
+                        scrollContainer.scrollLeft = scrollContainer.scrollWidth;
+                    }
+                }
+            }, 150);
+            return () => clearTimeout(timer);
         }
-    }, [stats, chartPeriod, isMobile]);
+    }, [stats, chartPeriod, isMobile, activeTab]);
 
     // Admin User Data
     const [adminUser] = useState(() => {
@@ -1186,18 +1201,18 @@ export default function AdminDashboard() {
                                         >
                                             <div style={{ width: calculatedWidth > 0 ? `${calculatedWidth}px` : '100%', height: '100%', minWidth: '100%' }}>
                                                 <ResponsiveContainer width="100%" height="100%">
-                                                    <BarChart data={fullData} margin={{ left: 0, right: 10, top: 0, bottom: 0 }}>
+                                                    <BarChart data={fullData} margin={{ left: 0, right: 10, top: 10, bottom: 60 }}>
                                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e9ecef" />
                                                         <XAxis
                                                             dataKey="name"
                                                             axisLine={false}
                                                             tickLine={false}
                                                             tick={{ fill: '#8898aa', fontSize: isMobile ? 10 : 12 }}
-                                                            dy={15}
+                                                            dy={isMobile ? 18 : 10}
                                                             interval={0}
                                                             angle={0}
                                                             textAnchor="middle"
-                                                            height={isMobile ? 50 : 40}
+                                                            height={isMobile ? 65 : 40}
                                                             tickFormatter={(val) => {
                                                                 if (!val) return '';
                                                                 if (chartPeriod === 'day') {
@@ -1233,13 +1248,15 @@ export default function AdminDashboard() {
                         <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'center' }}>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', justifyContent: 'center' }}>
                                 {[
-                                    { color: '#0A7C8F', label: 'Approved Users' },
-                                    { color: '#0FB5D0', label: 'Pending Approvals' },
-                                    { color: '#2BC9E4', label: 'Reset Requests' }
+                                    { color: '#0A7C8F', label: 'Approved Users', count: stats?.totalUsers || 0 },
+                                    { color: '#0FB5D0', label: 'Pending Approvals', count: stats?.pendingApprovals || 0 },
+                                    { color: '#2BC9E4', label: 'Reset Requests', count: stats?.activeResets || 0 }
                                 ].map((item, i) => (
                                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                         <div style={{ width: '12px', height: '12px', background: item.color, borderRadius: '2px' }} />
-                                        <span style={{ fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>{item.label}</span>
+                                        <span style={{ fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>
+                                            {item.label} <span style={{ color: item.color, marginLeft: '4px' }}>{item.count}</span>
+                                        </span>
                                     </div>
                                 ))}
                             </div>
@@ -1247,16 +1264,20 @@ export default function AdminDashboard() {
                     </div>
 
                     {/* Pie Chart */}
-                    <div style={{ background: 'white', padding: '1.5rem', borderRadius: '1rem', boxShadow: '0 0 2rem rgba(0,0,0,0.05)', textAlign: 'center' }}>
+                    <div style={{ background: 'white', padding: '1.5rem', borderRadius: '1rem', boxShadow: '0 0 2rem rgba(0,0,0,0.05)', textAlign: 'center', position: 'relative' }}>
                         <h4 style={{ margin: '0 0 1.5rem 0', fontWeight: '700', color: '#32325d', textAlign: 'center' }}>User Status Distribution</h4>
-                        <div style={{ height: '320px', width: '100%' }}>
+                        <div style={{ height: '320px', width: '100%', position: 'relative' }}>
                             {(() => {
-                                const COLORS = ['#0A7C8F', '#0FB5D0', '#2BC9E4'];
+                                const COLORS = ['#0a7789', '#0eabc4', '#23d2ef'];
                                 const pieData = [
                                     { name: 'Approved Users', value: stats?.totalUsers || 0 },
                                     { name: 'Pending Approvals', value: stats?.pendingApprovals || 0 },
                                     { name: 'Reset Requests', value: stats?.activeResets || 0 }
-                                ];
+                                ].map(item => ({
+                                    ...item,
+                                    // Visual trick: use a small value for 0 counts to make the slice visible
+                                    renderValue: item.value === 0 ? 0.8 : item.value
+                                }));
                                 return (
                                     <ResponsiveContainer width="100%" height="100%">
                                         <PieChart>
@@ -1264,32 +1285,50 @@ export default function AdminDashboard() {
                                                 data={pieData}
                                                 innerRadius={isMobile ? 70 : 85}
                                                 outerRadius={isMobile ? 100 : 120}
-                                                paddingAngle={5}
-                                                dataKey="value"
+                                                paddingAngle={2}
+                                                dataKey="renderValue"
                                                 tabIndex={-1}
                                             >
                                                 {pieData.map((entry, index) => (
                                                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} style={{ outline: 'none' }} />
                                                 ))}
                                             </Pie>
-                                            <Tooltip />
+                                            <Tooltip
+                                                formatter={(value, name, props) => [props.payload.value, name]}
+                                                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                                            />
                                         </PieChart>
                                     </ResponsiveContainer>
                                 );
                             })()}
                         </div>
 
-                        {/* Custom Legend - Matching Image Style */}
-                        <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'center' }}>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? '1rem' : '1.5rem', justifyContent: 'center' }}>
+                        {/* Custom Legend - Reorganized Layout */}
+                        <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+                            {/* Row 1: Approved and Pending */}
+                            <div style={{ display: 'flex', gap: isMobile ? '1rem' : '1.5rem', justifyContent: 'center', flexWrap: 'wrap' }}>
                                 {[
-                                    { color: '#0A7C8F', label: 'Approved Users' },
-                                    { color: '#0FB5D0', label: 'Pending Approvals' },
-                                    { color: '#2BC9E4', label: 'Reset Requests' }
+                                    { color: '#0a7789', label: 'Approved Users', count: stats?.totalUsers || 0 },
+                                    { color: '#0eabc4', label: 'Pending Approvals', count: stats?.pendingApprovals || 0 }
                                 ].map((item, i) => (
                                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                         <div style={{ width: '14px', height: '14px', background: item.color, borderRadius: '3px' }} />
-                                        <span style={{ fontSize: isMobile ? '0.75rem' : '0.85rem', color: '#8898aa', fontWeight: '600' }}>{item.label}</span>
+                                        <span style={{ fontSize: isMobile ? '0.75rem' : '0.85rem', color: '#8898aa', fontWeight: '600' }}>
+                                            {item.label} <span style={{ color: item.color, marginLeft: '4px' }}>{item.count}</span>
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                            {/* Row 2: Reset Requests (Centered) */}
+                            <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                {[
+                                    { color: '#23d2ef', label: 'Reset Requests', count: stats?.activeResets || 0 }
+                                ].map((item, i) => (
+                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <div style={{ width: '14px', height: '14px', background: item.color, borderRadius: '3px' }} />
+                                        <span style={{ fontSize: isMobile ? '0.75rem' : '0.85rem', color: '#8898aa', fontWeight: '600' }}>
+                                            {item.label} <span style={{ color: item.color, marginLeft: '4px' }}>{item.count}</span>
+                                        </span>
                                     </div>
                                 ))}
                             </div>
@@ -1800,7 +1839,7 @@ export default function AdminDashboard() {
                 height: '100vh'
             }}>
                 <div
-                    style={{ padding: '0', height: '60px', display: 'flex', alignItems: 'center', gap: '3px', borderBottom: '1px solid #f6f9fc' }}
+                    style={{ padding: '0', height: '60px', display: 'flex', alignItems: 'center', gap: '3px', borderBottom: 'none', boxShadow: 'none' }}
                 >
                     <div
                         onClick={() => {
@@ -1820,10 +1859,10 @@ export default function AdminDashboard() {
 
                 <div style={{ flex: 1, padding: '0.5rem 0' }}>
                     {[
-                        { id: 'overview', name: 'Dashboard', icon: LayoutDashboard },
-                        { id: 'management', name: 'Total Users', icon: Users, count: stats?.totalUsers },
-                        { id: 'pending', name: 'Pending Approvals', icon: UserCheck, count: stats?.pendingApprovals },
-                        { id: 'resets', name: 'Reset Requests', icon: Key, count: stats?.activeResets }
+                        { id: 'overview', name: 'Dashboard', icon: LayoutDashboard, color: '#0A7C8F' },
+                        { id: 'management', name: 'Total Users', icon: Users, count: stats?.totalUsers, color: '#0A7C8F' },
+                        { id: 'pending', name: 'Pending Approvals', icon: UserCheck, count: stats?.pendingApprovals, color: '#0FB5D0' },
+                        { id: 'resets', name: 'Reset Requests', icon: Key, count: stats?.activeResets, color: '#2BC9E4' }
                     ].map(item => (
                         <div
                             key={item.id}
@@ -1837,23 +1876,40 @@ export default function AdminDashboard() {
                                 marginBottom: '0.5rem',
                                 transition: 'all 0.2s',
                                 background: 'transparent',
-                                color: activeTab === item.id ? '#0A7C8F' : '#3e4b5b',
+                                color: item.color,
                                 position: 'relative'
                             }}
                         >
-                            <item.icon size={20} style={{ color: activeTab === item.id ? '#0A7C8F' : '#adb5bd' }} />
+                            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                                <item.icon size={20} style={{ color: item.color }} />
+                                {(!sidebarOpen && !isMobile && item.count !== undefined) && (
+                                    <span style={{
+                                        position: 'absolute', top: '-10px', right: '-12px',
+                                        background: 'transparent !important',
+                                        color: item.color,
+                                        fontSize: '0.65rem', fontWeight: '800',
+                                        padding: '0', borderRadius: '0',
+                                        minWidth: '14px', textAlign: 'center',
+                                        zIndex: 1,
+                                        boxShadow: 'none'
+                                    }}>
+                                        {item.count || 0}
+                                    </span>
+                                )}
+                            </div>
                             {(isMobile || sidebarOpen) && (
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1 }}>
-                                    <span style={{ fontWeight: activeTab === item.id ? '700' : '400', fontSize: '0.9rem' }}>{item.name}</span>
-                                    {item.count !== undefined && item.count > 0 && (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1, marginLeft: '1rem' }}>
+                                    <span style={{ fontWeight: activeTab === item.id ? '800' : '600', fontSize: '0.9rem' }}>{item.name}</span>
+                                    {item.count !== undefined && (
                                         <span style={{
-                                            background: activeTab === item.id ? '#0A7C8F' : '#f2edf3',
-                                            color: activeTab === item.id ? 'white' : '#8898aa',
-                                            fontSize: '0.7rem', fontWeight: '700',
-                                            padding: '2px 8px', borderRadius: '10px',
-                                            minWidth: '20px', textAlign: 'center'
+                                            background: 'transparent !important',
+                                            color: item.color,
+                                            fontSize: '0.9rem', fontWeight: '700',
+                                            padding: '0', borderRadius: '0',
+                                            minWidth: '20px', textAlign: 'center',
+                                            boxShadow: 'none'
                                         }}>
-                                            {item.count}
+                                            {item.count || 0}
                                         </span>
                                     )}
                                 </div>
