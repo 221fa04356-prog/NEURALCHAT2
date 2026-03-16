@@ -6778,3 +6778,29 @@ html {
 
 .wa-community-info-action { flex: 1; padding: 12px 0; border: 1px solid #e9edef; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; transition: all 0.2s; }
 .wa-community-info-action:hover { background-color: #f8f9fa; border-color: #d1d7db; }
+
+/* Exit Community Modal */
+.wa-exit-option:hover {
+    background: #f5f6f6 !important;
+}
+
+.assign-owner-link:hover {
+    text-decoration: underline;
+    opacity: 0.8;
+}
+
+.wa-owner-select-item:hover {
+    background: #f5f6f6 !important;
+}
+
+@media (max-width: 768px) {
+    .wa-exit-option {
+        padding: 14px 16px !important;
+    }
+}
+
+@keyframes slideInRight {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+}
+

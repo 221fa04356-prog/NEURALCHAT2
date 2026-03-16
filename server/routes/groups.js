@@ -186,6 +186,32 @@ router.get('/my-groups', authenticateToken, async (req, res) => {
     }
 });
 
+// GET /api/groups/:groupId - Get single group metadata
+router.get('/:groupId', authenticateToken, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const userId = req.user.id;
+
+        const group = await Group.findById(groupId)
+            .populate('members', 'name email _id isOnline lastSeen about mobile countryCode')
+            .populate('admin', 'name _id')
+            .populate('admins', 'name _id');
+
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+
+        const isMem = (group.members || []).some(m => String(m._id || m) === String(userId));
+        const isRem = (group.removedMembers || []).some(m => String(m._id || m) === String(userId));
+
+        if (!isMem && !isRem) {
+            return res.status(403).json({ error: 'Not a group member' });
+        }
+
+        res.json(group);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // GET /api/groups/:groupId/messages - Get messages for a group
 router.get('/:groupId/messages', authenticateToken, async (req, res) => {
     try {
@@ -236,8 +262,11 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
         const group = await Group.findById(groupId);
         if (!group) return res.status(404).json({ error: 'Group not found' });
 
+        const isMem = (group.members || []).some(m => String(m) === String(senderId));
         const isRemoved = (group.removedMembers || []).some(m => String(m) === String(senderId));
-        if (isRemoved) {
+        const isOwner = String(group.admin) === String(senderId);
+
+        if (isRemoved && !isMem && !isOwner) {
             return res.status(403).json({ error: 'You have been removed from this group and cannot send messages.' });
         }
 
