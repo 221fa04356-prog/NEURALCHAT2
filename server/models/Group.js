@@ -15,6 +15,12 @@ const groupSchema = new mongoose.Schema({
         approveMembers: { type: Boolean, default: false }
     },
     isAnnouncementGroup: { type: Boolean, default: false },
+    userHistory: [{
+        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        joinedAt: { type: Date, default: Date.now },
+        leftAt: { type: Date },
+        visibleFrom: { type: Date, default: Date.now }
+    }],
     created_at: { type: Date, default: Date.now }
 }, {
     toJSON: { virtuals: true },

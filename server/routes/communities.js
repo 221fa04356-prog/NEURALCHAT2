@@ -8,6 +8,7 @@ const Group = require('../models/Group');
 const GroupMessage = require('../models/GroupMessage');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'neural_secret_77';
+const { handleMembershipJoin, handleMembershipExit } = require('../utils/membership');
 
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
@@ -42,23 +43,73 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
             .populate('creator', 'name mobile countryCode _id')
             .populate('members', 'name mobile countryCode _id about')
             .populate('admins', 'name mobile countryCode _id about')
-            .populate('announcements', 'name icon _id members admin removedMembers')
+            .populate({
+                path: 'announcements',
+                select: 'name icon _id members admin admins removedMembers isAnnouncementGroup userHistory',
+                populate: {
+                    path: 'members',
+                    select: 'name about mobile image'
+                }
+            })
+            .populate({
+                path: 'groups',
+                select: 'name icon _id members admin admins removedMembers community_id userHistory',
+                populate: {
+                    path: 'members',
+                    select: 'name about mobile image'
+                }
+            })
             .sort({ created_at: -1 })
             .lean();
 
         const enriched = await Promise.all((communities || []).map(async (c) => {
             let lastMsg = null;
+            let unreadCount = 0;
             if (c.announcements?._id) {
                 lastMsg = await GroupMessage.findOne({ group_id: c.announcements._id })
                     .sort({ created_at: -1 })
                     .populate('sender_id', 'name _id')
                     .lean();
+
+                // Find user's visibleFrom for this group
+                const history = (c.userHistory || []).find(h => String(h.user) === String(userId));
+                const visibleFrom = history?.visibleFrom || new Date(0);
+
+                // Calculate unread count for current user in the announcements group
+                unreadCount = await GroupMessage.countDocuments({
+                    group_id: c.announcements._id,
+                    sender_id: { $ne: userObjId },
+                    read_by: { $ne: userObjId },
+                    is_system: { $ne: true },
+                    created_at: { $gte: visibleFrom }
+                });
             }
+
+            // Enrich individual groups
+            const enrichedGroups = await Promise.all((c.groups || []).map(async (g) => {
+                const history = (g.userHistory || []).find(h => String(h.user) === String(userId));
+                const visibleFrom = history?.visibleFrom || new Date(0);
+                
+                const gUnreadCount = await GroupMessage.countDocuments({
+                    group_id: g._id,
+                    sender_id: { $ne: userObjId },
+                    read_by: { $ne: userObjId },
+                    is_system: { $ne: true },
+                    created_at: { $gte: visibleFrom }
+                });
+
+                return {
+                    ...g,
+                    unreadCount: gUnreadCount
+                };
+            }));
 
             return {
                 ...c,
                 id: c._id,
                 is_community: true,
+                unreadCount,
+                groups: enrichedGroups,
                 announcements: c.announcements ? { ...c.announcements, lastMessage: lastMsg } : c.announcements
             };
         }));
@@ -96,16 +147,23 @@ router.post('/create', authenticateToken, async (req, res) => {
             content: 'Welcome to your community!'
         });
 
-        const community = await Community.create({
+        const community = new Community({
             name: String(name).trim(),
             description: description || '',
             icon: icon || null,
             creator: creatorObjId,
             members: [creatorObjId],
-            admins: [creatorObjId], // Creator is also the first admin
+            admins: [creatorObjId],
             announcements: announcementsGroup._id,
             groups: []
         });
+
+        handleMembershipJoin(community, creatorObjId);
+        await community.save();
+
+        // Also add creator to announcement group history properly
+        handleMembershipJoin(announcementsGroup, creatorObjId);
+        await announcementsGroup.save();
 
         const populated = await Community.findById(community._id)
             .populate('creator', 'name mobile countryCode _id')
@@ -155,27 +213,18 @@ router.patch('/:communityId/members', authenticateToken, async (req, res) => {
             return res.status(403).json({ error: 'Only community owner and admins can add members' });
         }
 
-        // Strictly add to members array and clean up removedMembers AND ghost admins. 
-        // Community admins are managed separately.
-        await Community.updateOne(
-            { _id: community._id },
-            { 
-                $addToSet: { members: { $each: idsToAdd } },
-                $pull: { 
-                    removedMembers: { $in: idsToAdd },
-                    admins: { $in: idsToAdd } // Ensure they don't join as "ghost admins"
-                }
-            }
-        );
+        if (!community) return res.status(404).json({ error: 'Community not found' });
+
+        // Update Community
+        handleMembershipJoin(community, idsToAdd);
+        await community.save();
 
         if (community.announcements) {
-            await Group.updateOne(
-                { _id: community.announcements },
-                { 
-                    $addToSet: { members: { $each: idsToAdd } },
-                    $pull: { removedMembers: { $in: idsToAdd } }
-                }
-            );
+            const annGroup = await Group.findById(community.announcements);
+            if (annGroup) {
+                handleMembershipJoin(annGroup, idsToAdd);
+                await annGroup.save();
+            }
 
             // Log announcement
             const User = require('../models/User');
@@ -217,7 +266,22 @@ router.patch('/:communityId/members', authenticateToken, async (req, res) => {
             .populate('creator', 'name mobile countryCode _id')
             .populate('members', 'name mobile countryCode _id about')
             .populate('admins', 'name mobile countryCode _id about')
-            .populate('announcements', 'name icon _id members admin removedMembers')
+            .populate({
+                path: 'announcements',
+                select: 'name icon _id members admin admins removedMembers isAnnouncementGroup',
+                populate: {
+                    path: 'members',
+                    select: 'name about mobile image'
+                }
+            })
+            .populate({
+                path: 'groups',
+                select: 'name icon _id members admin admins removedMembers',
+                populate: {
+                    path: 'members',
+                    select: 'name about mobile image'
+                }
+            })
             .lean();
 
         let lastMsg = null;
@@ -288,16 +352,15 @@ router.delete('/:communityId/members/:memberId', authenticateToken, async (req, 
         if (!memberObjId) return res.status(400).json({ error: 'Invalid memberId' });
 
         // 1. Move member to removedMembers in Community and CLEAN UP ADMINS
-        await Community.updateOne(
-            { _id: communityId },
-            {
-                $pull: { members: memberObjId, admins: memberObjId },
-                $addToSet: { removedMembers: memberObjId }
-            }
-        );
+        const comm = await Community.findById(communityId);
+        if (comm) {
+            handleMembershipExit(comm, memberObjId);
+            await comm.save();
+        }
 
         // 2. Add system message to announcements
         if (community.announcements) {
+            // ... (system message logic continues below)
             const User = require('../models/User');
             const adminUser = await User.findById(req.user.id);
             const targetUser = await User.findById(memberId);
@@ -312,14 +375,12 @@ router.delete('/:communityId/members/:memberId', authenticateToken, async (req, 
                 content: `${adminName} removed ${userName}`
             });
 
-            // Handle Announcements Group (only remove from here)
-            await Group.updateOne(
-                { _id: community.announcements },
-                {
-                    $pull: { members: memberObjId },
-                    $addToSet: { removedMembers: memberObjId }
-                }
-            );
+            // Handle Announcements Group (removal)
+            const annGroup = await Group.findById(community.announcements);
+            if (annGroup) {
+                handleMembershipExit(annGroup, memberObjId);
+                await annGroup.save();
+            }
 
             // Notify everyone in the group including the removed user (so they see the system msg)
             if (req.io) {
@@ -393,32 +454,26 @@ router.patch('/:communityId/groups', authenticateToken, async (req, res) => {
         const membersToAddToCommunityObj = membersToAddToCommunityStr.map(id => toObjectId(id)).filter(Boolean);
 
         // 2. Add groups and members to the community
-        // NOTE: We only add them to the 'members' array. 
-        // Even if they are admins in their respective groups, 
-        // they become normal community members until promoted by an owner/admin.
-        await Community.updateOne(
-            { _id: communityId },
-            { 
-                $addToSet: { 
-                    groups: { $each: idsToAdd },
-                    members: { $each: membersToAddToCommunityObj }
-                },
-                $pull: { 
-                    removedMembers: { $in: membersToAddToCommunityObj },
-                    admins: { $in: membersToAddToCommunityObj } // Prevent group admins from becoming ghost community admins
+        const comm = await Community.findById(communityId);
+        if (comm) {
+            // Add groups
+            idsToAdd.forEach(gId => {
+                if (!comm.groups.some(existing => existing.toString() === gId.toString())) {
+                    comm.groups.push(gId);
                 }
-            }
-        );
+            });
+            // Add members with history
+            handleMembershipJoin(comm, membersToAddToCommunityObj);
+            await comm.save();
+        }
 
         // 3. Add members to the announcements group
         if (community.announcements) {
-            await Group.updateOne(
-                { _id: community.announcements },
-                { 
-                    $addToSet: { members: { $each: membersToAddToCommunityObj } },
-                    $pull: { removedMembers: { $in: membersToAddToCommunityObj } }
-                }
-            );
+            const annGroup = await Group.findById(community.announcements);
+            if (annGroup) {
+                handleMembershipJoin(annGroup, membersToAddToCommunityObj);
+                await annGroup.save();
+            }
 
             for (const gId of idsToAdd) {
                 const group = await Group.findById(gId);
@@ -475,8 +530,22 @@ router.patch('/:communityId/groups', authenticateToken, async (req, res) => {
             .populate('creator', 'name mobile countryCode _id')
             .populate('members', 'name mobile countryCode _id about')
             .populate('admins', 'name mobile countryCode _id about')
-            .populate('announcements', 'name icon _id members admin removedMembers')
-            .populate('groups')
+            .populate({
+                path: 'announcements',
+                select: 'name icon _id members admin admins removedMembers isAnnouncementGroup',
+                populate: {
+                    path: 'members',
+                    select: 'name about mobile image'
+                }
+            })
+            .populate({
+                path: 'groups',
+                select: 'name icon _id members admin admins removedMembers',
+                populate: {
+                    path: 'members',
+                    select: 'name about mobile image'
+                }
+            })
             .lean();
 
         // Notify added members and everyone else
@@ -899,38 +968,32 @@ router.post('/:communityId/exit', authenticateToken, async (req, res) => {
         const { deleteForMe } = req.body;
 
         // Remove from members and admins
-        if (deleteForMe) {
-            await Community.updateOne(
-                { _id: communityId },
-                {
-                    $pull: { members: userObjId, admins: userObjId, removedMembers: userObjId }
-                }
-            );
-        } else {
-            await Community.updateOne(
-                { _id: communityId },
-                {
-                    $pull: { members: userObjId, admins: userObjId },
-                    $addToSet: { removedMembers: userObjId }
-                }
-            );
+        const comm = await Community.findById(communityId);
+        if (comm) {
+            if (deleteForMe) {
+                // Completely remove
+                comm.members = comm.members.filter(m => m.toString() !== userId);
+                comm.admins = comm.admins.filter(a => a.toString() !== userId);
+                comm.removedMembers = comm.removedMembers.filter(r => r.toString() !== userId);
+                comm.userHistory = comm.userHistory.filter(h => h.user.toString() !== userId);
+            } else {
+                handleMembershipExit(comm, userObjId);
+            }
+            await comm.save();
         }
 
         // Also remove from announcements
         if (community.announcements) {
-            if (deleteForMe) {
-                await Group.updateOne(
-                    { _id: community.announcements },
-                    { $pull: { members: userObjId, removedMembers: userObjId } }
-                );
-            } else {
-                await Group.updateOne(
-                    { _id: community.announcements },
-                    {
-                        $pull: { members: userObjId },
-                        $addToSet: { removedMembers: userObjId }
-                    }
-                );
+            const annGroup = await Group.findById(community.announcements);
+            if (annGroup) {
+                if (deleteForMe) {
+                    annGroup.members = annGroup.members.filter(m => m.toString() !== userId);
+                    annGroup.removedMembers = annGroup.removedMembers.filter(r => r.toString() !== userId);
+                    annGroup.userHistory = annGroup.userHistory.filter(h => h.user.toString() !== userId);
+                } else {
+                    handleMembershipExit(annGroup, userObjId);
+                }
+                await annGroup.save();
             }
         }
 

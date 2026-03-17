@@ -10,6 +10,7 @@ const path = require('path');
 const fs = require('fs');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'neural_secret_77';
+const { handleMembershipJoin, handleMembershipExit } = require('../utils/membership');
 
 // --- Multer Configuration (Sync with chat.js) ---
 const storage = multer.diskStorage({
@@ -88,13 +89,16 @@ router.post('/create', authenticateToken, async (req, res) => {
 
         console.log('[GROUP CREATE] Creating group with admin:', adminId, 'and members:', memberIds);
 
-        const group = await Group.create({
+        const group = new Group({
             name: name || '',
             icon: icon || null,
-            members: allMembers,
+            members: [],
             admin: adminId,
             permissions: permissions || { editSettings: true, sendMessages: true }
         });
+
+        handleMembershipJoin(group, allMembers);
+        await group.save();
 
         console.log('[GROUP CREATE] Group created successfully:', group._id);
 
@@ -161,13 +165,18 @@ router.get('/my-groups', authenticateToken, async (req, res) => {
                 .populate('sender_id', 'name')
                 .lean();
 
-            // Calculate unread count for current user
             const userIdObj = new mongoose.Types.ObjectId(userId);
+            
+            // Find user's visibleFrom for this group
+            const history = (g.userHistory || g.toObject?.().userHistory || []).find(h => String(h.user) === String(userId));
+            const visibleFrom = history?.visibleFrom || new Date(0);
+
             const unreadCount = await GroupMessage.countDocuments({
                 group_id: g._id,
                 sender_id: { $ne: userIdObj },
                 read_by: { $ne: userIdObj },
-                is_system: { $ne: true }
+                is_system: { $ne: true },
+                created_at: { $gte: visibleFrom }
             });
 
             return {
@@ -229,9 +238,14 @@ router.get('/:groupId/messages', authenticateToken, async (req, res) => {
             return res.status(403).json({ error: 'Not a group member' });
         }
 
+        // Find user's visibleFrom for this group
+        const history = (group.userHistory || []).find(h => String(h.user) === String(userId));
+        const visibleFrom = history?.visibleFrom || new Date(0);
+
         const messages = await GroupMessage.find({
             group_id: groupId,
-            deleted_for: { $ne: userId }
+            deleted_for: { $ne: userId },
+            created_at: { $gte: visibleFrom }
         })
             .populate('sender_id', 'name _id')
             .populate('read_by', 'name image _id')
@@ -534,13 +548,7 @@ router.patch('/:groupId/members', authenticateToken, async (req, res) => {
         const newMemberIds = (memberIds || []).filter(id => !group.members.some(m => String(m) === String(id)));
         if (newMemberIds.length === 0) return res.json({ status: 'success', group });
 
-        group.members.push(...newMemberIds);
-        
-        // remove from removedMembers if they were there
-        if (group.removedMembers) {
-            group.removedMembers = group.removedMembers.filter(m => !newMemberIds.some(id => String(id) === String(m)));
-        }
-
+        handleMembershipJoin(group, newMemberIds);
         await group.save();
 
         // SYNC WITH COMMUNITY
@@ -550,22 +558,15 @@ router.patch('/:groupId/members', authenticateToken, async (req, res) => {
         if (community) {
             const idsObjToAdd = newMemberIds.map(id => new mongoose.Types.ObjectId(id));
             
-            await Community.updateOne(
-                { _id: community._id },
-                { 
-                    $addToSet: { members: { $each: idsObjToAdd } },
-                    $pull: { removedMembers: { $in: idsObjToAdd } }
-                }
-            );
+            handleMembershipJoin(community, idsObjToAdd);
+            await community.save();
 
             if (community.announcements) {
-                await Group.updateOne(
-                    { _id: community.announcements },
-                    { 
-                        $addToSet: { members: { $each: idsObjToAdd } },
-                        $pull: { removedMembers: { $in: idsObjToAdd } }
-                    }
-                );
+                const annGroup = await Group.findById(community.announcements);
+                if (annGroup) {
+                    handleMembershipJoin(annGroup, idsObjToAdd);
+                    await annGroup.save();
+                }
             }
 
             // Optional: notify about community member addition
@@ -605,6 +606,95 @@ router.patch('/:groupId/members', authenticateToken, async (req, res) => {
 
         res.json({ status: 'success', group });
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/groups/:groupId/join - Join a group (if permited, e.g. community member)
+router.post('/:groupId/join', authenticateToken, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const userId = req.user.id;
+        const userObjId = new mongoose.Types.ObjectId(userId);
+
+        const group = await Group.findById(groupId);
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+
+        // Check if already a member
+        if (group.members.some(m => String(m) === String(userId))) {
+            return res.status(400).json({ error: 'Already a member' });
+        }
+
+        // Check if removed
+        if (group.removedMembers?.some(m => String(m) === String(userId))) {
+            return res.status(403).json({ error: 'You were removed from this group and cannot join.' });
+        }
+
+        // Check if group belongs to a community the user is in
+        const Community = require('../models/Community');
+        const community = await Community.findOne({ groups: groupId });
+        
+        if (!community) {
+            return res.status(403).json({ error: 'This group is private and cannot be joined without an invite.' });
+        }
+
+        const isCommMem = (community.members || []).some(m => String(m) === String(userId));
+        const isCommOwner = String(community.creator) === String(userId);
+        const isCommAdmin = (community.admins || []).some(a => String(a) === String(userId));
+
+        if (!(isCommMem || isCommOwner || isCommAdmin)) {
+            return res.status(403).json({ error: 'You must be a member of the community to join its groups.' });
+        }
+
+        // Join allowed
+        handleMembershipJoin(group, userObjId);
+        await group.save();
+
+        // System message
+        const sysMsg = await GroupMessage.create({
+            group_id: groupId,
+            sender_id: userId,
+            type: 'system',
+            is_system: true,
+            content: 'joined via community'
+        });
+
+        const populatedGroup = await Group.findById(groupId)
+            .populate('members', 'name email _id isOnline lastSeen about mobile image')
+            .populate('admin', 'name _id')
+            .populate('admins', 'name _id');
+
+        // Emit to all members
+        if (req.io) {
+            populatedGroup.members.forEach(m => {
+                req.io.to(String(m._id)).emit('group_members_updated', {
+                    groupId,
+                    members: populatedGroup.members
+                });
+                
+                // If it's the joining user, also notify them clearly
+                if (String(m._id) === String(userId)) {
+                    req.io.to(String(userId)).emit('group_joined', {
+                        group: {
+                            ...populatedGroup.toObject(),
+                            isGroup: true
+                        }
+                    });
+                }
+            });
+            
+            // Also emit the system message
+            populatedGroup.members.forEach(m => {
+                req.io.to(String(m._id)).emit('group_message', {
+                    groupId,
+                    message: sysMsg
+                });
+            });
+        }
+
+        res.json({ status: 'success', group: populatedGroup });
+    } catch (err) {
+        console.error('[GROUP JOIN ERROR]', err);
         res.status(500).json({ error: err.message });
     }
 });
