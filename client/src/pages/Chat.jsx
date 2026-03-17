@@ -97,6 +97,29 @@ export default function Chat() {
     const [showViewOnceModal, setShowViewOnceModal] = useState(false);
     const [viewOnceMsg, setViewOnceMsg] = useState(null);
 
+    const handleJoinGroup = async (groupId) => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.post(`/api/groups/${groupId}/join`, {}, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.data.status === 'success') {
+                const joinedGroup = { ...res.data.group, isGroup: true };
+                setGroups(prev => {
+                    const exists = prev.find(g => String(g._id) === String(groupId));
+                    if (exists) return prev.map(g => String(g._id) === String(groupId) ? joinedGroup : g);
+                    return [...prev, joinedGroup];
+                });
+                setSelectedGroup(joinedGroup);
+                fetchGroupMessages(groupId);
+                setSnackbar({ message: `Joined ${joinedGroup.name} successfully!`, type: 'success', variant: 'system' });
+            }
+        } catch (err) {
+            console.error('[JOIN GROUP ERROR]', err);
+            setSnackbar({ message: err.response?.data?.error || 'Failed to join group', type: 'error' });
+        }
+    };
+
     // --- UI States ---
     const [view, setView] = useState('chats'); // 'chats' | 'profile' | 'status' etc.
     const [isProfileOpen, setIsProfileOpen] = useState(false); // Controls the "Profile Drawer" overlay
@@ -438,44 +461,50 @@ export default function Chat() {
         }
 
         if (selectedGroup) {
-            // Normalize members to IDs for comparison
-            const memberIds = (selectedGroup.members || []).map(m => String(m._id || m));
-            const removedIds = (selectedGroup.removedMembers || []).map(m => String(m._id || m));
-            
-            const isMem = memberIds.includes(String(myId));
-            const isRem = removedIds.includes(String(myId));
-            const isOwner = String(selectedGroup.admin?._id || selectedGroup.admin) === String(myId) || String(selectedGroup.creator?._id || selectedGroup.creator) === String(myId);
+            const currentMyId = String(myId);
+            const isMeMember = (selectedGroup.members || []).some(m => String(m._id || m) === currentMyId);
+            const isMeOwner = String(selectedGroup.admin?._id || selectedGroup.admin || selectedGroup.creator_id || selectedGroup.creatorId) === currentMyId;
+            const isMeAdmin = (selectedGroup.admins || []).some(a => String(a?._id || a) === currentMyId);
 
-            // Announcements special check (belongs to community)
+            // Owners and group admins are never restricted from messaging their own groups
+            if (isMeOwner || isMeAdmin) return false;
+
+            // Announcements group check
             if (selectedGroup.isCommunityAnnouncements || selectedGroup.isAnnouncementGroup) {
+                if (isMeMember) return false;
+
+                // Fallback to community membership check
                 const commIdCheck = String(selectedGroup.community_id || selectedGroup.communityId || '');
                 let community = (communities || []).find(c => 
                     String(c.announcements?._id || c.announcements) === String(selectedGroup._id) ||
                     (commIdCheck && String(c._id || c.id) === commIdCheck)
                 );
                 
-                // Fallback to selectedCommunity if it matches and communities array is stale
                 if (!community && selectedCommunity && (
                     String(selectedCommunity.announcements?._id || selectedCommunity.announcements) === String(selectedGroup._id) ||
                     (commIdCheck && String(selectedCommunity._id || selectedCommunity.id) === commIdCheck)
                 )) {
                     community = selectedCommunity;
                 }
-                
+
                 if (community) {
-                    const isCommMem = (community.members || []).some(m => String(m._id || m) === String(myId));
-                    const isCommOwner = String(community.creator?._id || community.creator) === String(myId);
-                    const isCommAdmin = (community.admins || []).some(m => String(m._id || m) === String(myId));
+                    const isCommMem = (community.members || []).some(m => String(m._id || m) === currentMyId);
+                    const isCommOwner = String(community.creator?._id || community.creator) === currentMyId;
+                    const isCommAdmin = (community.admins || []).some(a => String(a?._id || a) === currentMyId);
 
                     if (isCommMem || isCommOwner || isCommAdmin) {
-                        return false; // Trust community membership for announcements
+                        return false; 
                     }
-                    return true; // Not in community, so restricted from announcements
                 }
+                return true; // Restricted if not in community
             }
 
-            // Regular group removal check
-            if (isRem && !isMem && !isOwner) return true;
+            // Regular group: if you're not in the members list, you're restricted
+            if (!isMeMember) return true;
+
+            // Check for explicitly removed members
+            const isMeRem = (selectedGroup.removedMembers || []).some(m => String(m._id || m) === currentMyId);
+            if (isMeRem) return true;
         }
 
         return false;
@@ -622,6 +651,7 @@ export default function Chat() {
     const [isCommunityGroupsListOpen, setIsCommunityGroupsListOpen] = useState(false);
     const [isCommunitySettingsOpen, setIsCommunitySettingsOpen] = useState(false);
     const [isWhoCanAddGroupsModalOpen, setIsWhoCanAddGroupsModalOpen] = useState(false);
+    const [communityInfoTab, setCommunityInfoTab] = useState('community'); // 'community' or 'announcements'
     const [pendingWhoCanAddGroups, setPendingWhoCanAddGroups] = useState('everyone');
     const [selectedCommunity, setSelectedCommunity] = useState(null);
     useEffect(() => { selectedCommunityRef.current = selectedCommunity; }, [selectedCommunity]);
@@ -1786,7 +1816,8 @@ export default function Chat() {
         // Listen for new group messages
         const onGroupMessage = (data) => {
             console.log('[DEBUG] group_message received:', data);
-            fetchGroups(); // Refresh group list for unread counts & last message sync (like p2p does)
+            fetchGroups(); 
+            fetchCommunities(); // Added for unread counts & last message sync in communities
             const currentSelectedGroup = selectedGroupRef?.current;
             // Only consider it 'current' if we have an active selection AND we are looking at the chat
             const isCurrentGroup = !!(currentSelectedGroup && String(currentSelectedGroup._id) === String(data.groupId));
@@ -2304,6 +2335,9 @@ export default function Chat() {
     };
 
     const fetchGroupMessages = async (groupId) => {
+        // Clear previous messages to avoid showing stale data from other groups
+        setGroupMessages([]);
+        
         try {
             const token = localStorage.getItem('token');
             const res = await axios.get(`/api/groups/${groupId}/messages`, {
@@ -2331,6 +2365,10 @@ export default function Chat() {
             setGroups(prev => prev.map(g => String(g._id) === String(groupId) ? { ...g, unreadCount: 0 } : g));
         } catch (err) {
             console.error('fetchGroupMessages error:', err);
+            // If restricted, we definitely should have an empty messages state
+            if (err.response?.status === 403) {
+                setGroupMessages([]);
+            }
         }
     };
 
@@ -3703,11 +3741,18 @@ export default function Chat() {
 
         } catch (err) {
             console.error("Failed to send msg", err);
+            
+            // REMOVE OPTIMISTIC MESSAGE ON FAILURE
+            if (selectedGroup) {
+                setGroupMessages(prev => prev.filter(m => m.id !== tempId && m._id !== tempId));
+            } else {
+                setMessages(prev => prev.filter(m => m.id !== tempId && m._id !== tempId));
+            }
+
             if (err.response && err.response.status === 403) {
                 setSnackbar({ message: err.response.data.error || 'Permission denied', type: 'error' });
                 fetchUsers(); // Refresh to catch status changes
             }
-            // Ideally remove temp message or show error
         }
     };
 
@@ -5644,19 +5689,31 @@ export default function Chat() {
                         onClick={() => {
                             const annGroup = selectedCommunity.announcements;
                             if (annGroup) {
+                                const annId = (typeof annGroup === 'object') ? (annGroup._id || annGroup.id) : annGroup;
                                 setSelectedGroup({
-                                    ...annGroup,
+                                    ...(typeof annGroup === 'object' ? annGroup : {}),
+                                    _id: annId,
+                                    id: annId,
                                     name: 'Announcements',
                                     isCommunityAnnouncements: true,
+                                    community_id: selectedCommunity._id || selectedCommunity.id,
                                     communityName: selectedCommunity.name,
                                     communityIcon: selectedCommunity.icon,
                                     communityDescription: selectedCommunity.description
                                 });
                                 setSelectedUser(null);
-                                fetchGroupMessages(annGroup._id || annGroup.id);
+                                fetchGroupMessages(annId);
+                                setIsCommunityInfoOpen(true);
+                                setIsContactInfoOpen(false);
+                                setCommunityInfoTab('announcements');
                             }
                             setIsCommunityHomeOpen(true); // Keep it open
-                            if (window.innerWidth <= 768) setIsNewChatOpen(false);
+                            if (window.innerWidth <= 768) {
+                                setIsNewChatOpen(false);
+                                setIsContactInfoOpen(false);
+                                setIsCommunityInfoOpen(false);
+                                setIsCommunityHomeOpen(false);
+                            }
                         }}
                     >
                         <div style={{ display: 'flex', gap: 15, alignItems: 'center' }}>
@@ -5680,7 +5737,11 @@ export default function Chat() {
 
                     {/* Add Group Item */}
                     {/* Groups List */}
-                    {(selectedCommunity.groups || []).map(gItem => {
+                    {(selectedCommunity.groups || []).filter(gItem => {
+                        const gId = typeof gItem === 'object' ? (gItem._id || gItem.id) : gItem;
+                        const annId = selectedCommunity.announcements?._id || selectedCommunity.announcements;
+                        return String(gId) !== String(annId);
+                    }).map(gItem => {
                         const gId = typeof gItem === 'object' ? (gItem._id || gItem.id) : gItem;
                         const fullGroup = groups.find(group => String(group._id) === String(gId));
                         const g = fullGroup || (typeof gItem === 'object' ? gItem : null);
@@ -5695,6 +5756,12 @@ export default function Chat() {
                                     setSelectedGroup(g);
                                     setSelectedUser(null);
                                     fetchGroupMessages(g._id || g.id);
+                                    setIsContactInfoOpen(true);
+                                    setIsCommunityInfoOpen(false);
+                                    if (window.innerWidth <= 768) {
+                                        setIsContactInfoOpen(false);
+                                        setIsCommunityHomeOpen(false);
+                                    }
                                 }}
                             >
                                 <div style={{ display: 'flex', gap: 15, alignItems: 'center' }}>
@@ -5705,7 +5772,12 @@ export default function Chat() {
                                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                                             <span style={{ fontSize: 16, fontWeight: 500, color: '#111b21' }}>{g.name || 'Group'}</span>
                                         </div>
-                                        <div style={{ fontSize: 14, color: '#667781' }}>{(g.members?.length || 0)} members</div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <div style={{ fontSize: 14, color: '#667781' }}>{(g.members?.length || 0)} members</div>
+                                            {g.unreadCount > 0 && (
+                                                <div className="wa-unread-badge" style={{ position: 'static', marginLeft: 8 }}>{g.unreadCount}</div>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -5789,11 +5861,15 @@ export default function Chat() {
                                 )}
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
-                                <span style={{ fontSize: 24, color: textColor, fontWeight: 400 }}>{displayName}</span>
-                                <Pencil size={20} color={isDark ? '#aebac1' : '#54656f'} style={{ cursor: 'pointer' }} />
+                                <span style={{ fontSize: 24, color: textColor, fontWeight: 400 }}>
+                                    {activeTarget.isCommunityAnnouncements ? activeTarget.communityName : displayName}
+                                </span>
+                                {!activeTarget.isCommunityAnnouncements && (
+                                    <Pencil size={20} color={isDark ? '#aebac1' : '#54656f'} style={{ cursor: 'pointer' }} />
+                                )}
                             </div>
                             <div style={{ fontSize: 16, color: subTextColor, marginTop: 8 }}>
-                                Group · <span style={{ color: '#027EB5' }}>{membersCount} members</span>
+                                {activeTarget.isCommunityAnnouncements ? 'Announcements' : 'Group'} · <span style={{ color: '#027EB5' }}>{membersCount} members</span>
                             </div>
 
                             <div style={{ display: 'flex', gap: 12, marginTop: 24, width: '100%', justifyContent: 'center' }}>
@@ -5812,11 +5888,11 @@ export default function Chat() {
 
                         <div style={{ background: itemBgColor, padding: '14px 30px' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
-                                <span style={{ color: '#027EB5', fontSize: 15 }}>Add group description</span>
-                                <Pencil size={20} color={'#54656f'} />
+                                <span style={{ color: '#027EB5', fontSize: 15 }}>{activeTarget.description || 'Add group description'}</span>
+                                {!activeTarget.isCommunityAnnouncements && <Pencil size={20} color={'#54656f'} />}
                             </div>
                             <div style={{ color: subTextColor, fontSize: 14, marginTop: 12, lineHeight: 1.4 }}>
-                                Group created by {creatorName}, on {formatDateForInfo(createdAt)} at {new Date(createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                {activeTarget.isCommunityAnnouncements ? 'Only admins can send messages' : `Group created by ${creatorName}, on ${formatDateForInfo(createdAt)} at ${new Date(createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
                             </div>
                         </div>
 
@@ -8186,8 +8262,34 @@ export default function Chat() {
                     <div style={{ borderBottom: thickDivider }}></div>
 
                     <div style={{ display: 'flex', borderBottom: thinDivider }}>
-                        <div style={{ flex: 1, padding: '15px 0', textAlign: 'center', color: '#027EB5', borderBottom: '3px solid #027EB5', fontWeight: 500, cursor: 'pointer' }}>Community</div>
-                        <div style={{ flex: 1, padding: '15px 0', textAlign: 'center', color: subTextColor, fontWeight: 500, cursor: 'pointer' }}>Announcements</div>
+                        <div 
+                            style={{ 
+                                flex: 1, 
+                                padding: '15px 0', 
+                                textAlign: 'center', 
+                                color: communityInfoTab === 'community' ? '#027EB5' : subTextColor, 
+                                borderBottom: communityInfoTab === 'community' ? '3px solid #027EB5' : 'none', 
+                                fontWeight: 500, 
+                                cursor: 'pointer' 
+                            }}
+                            onClick={() => setCommunityInfoTab('community')}
+                        >
+                            Community
+                        </div>
+                        <div 
+                            style={{ 
+                                flex: 1, 
+                                padding: '15px 0', 
+                                textAlign: 'center', 
+                                color: communityInfoTab === 'announcements' ? '#027EB5' : subTextColor, 
+                                borderBottom: communityInfoTab === 'announcements' ? '3px solid #027EB5' : 'none', 
+                                fontWeight: 500, 
+                                cursor: 'pointer' 
+                            }}
+                            onClick={() => setCommunityInfoTab('announcements')}
+                        >
+                            Announcements
+                        </div>
                     </div>
 
                     <div style={{ padding: '20px', borderBottom: thickDivider }}>
@@ -9019,17 +9121,24 @@ export default function Chat() {
         );
     };
     const totalUnread = users.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0) + 
-        groups.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0);
+        groups.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0) +
+        communities.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0);
     const totalActiveUnread = users.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id) ? 0 : (curr.unreadCount || 0)), 0) + 
-                             groups.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id || curr.id) ? 0 : (curr.unreadCount || 0)), 0);
-    const totalUnreadArchived = users.filter(u => archivedChatIds.includes(u._id) && (u.unreadCount || 0) > 0).length + groups.filter(g => archivedChatIds.includes(g._id) && (g.unreadCount || 0) > 0).length;
-    const totalFavorites = users.filter(u => u.isFavorite && !archivedChatIds.includes(u._id)).length + groups.filter(g => g.isFavorite && !archivedChatIds.includes(g._id)).length;
+                             groups.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id || curr.id) ? 0 : (curr.unreadCount || 0)), 0) +
+                             communities.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id || curr.id) ? 0 : (curr.unreadCount || 0)), 0);
+    const totalUnreadArchived = users.filter(u => archivedChatIds.includes(u._id) && (u.unreadCount || 0) > 0).length + 
+                                groups.filter(g => archivedChatIds.includes(g._id) && (g.unreadCount || 0) > 0).length +
+                                communities.filter(c => archivedChatIds.includes(c.id || c._id) && (c.unreadCount || 0) > 0).length;
+    const totalFavorites = users.filter(u => u.isFavorite && !archivedChatIds.includes(u._id)).length + 
+                           groups.filter(g => g.isFavorite && !archivedChatIds.includes(g._id)).length +
+                           communities.filter(c => c.isFavorite && !archivedChatIds.includes(c.id || c._id)).length;
 
 
     const renderNotificationDetails = () => {
         const unreadChats = [
-            ...users.filter(u => u.unreadCount > 0).map(u => ({ ...u, is_group: false })),
-            ...groups.filter(g => g.unreadCount > 0).map(g => ({ ...g, is_group: true }))
+            ...users.filter(u => u.unreadCount > 0).map(u => ({ ...u, is_group: false, is_community: false })),
+            ...groups.filter(g => g.unreadCount > 0).map(g => ({ ...g, is_group: true, is_community: false })),
+            ...communities.filter(c => (c.unreadCount || 0) > 0).map(c => ({ ...c, is_community: true, is_group: false, _id: c.id, lastMessage: c.announcements?.lastMessage }))
         ].sort((a, b) => new Date(b.lastMessage?.created_at || 0) - new Date(a.lastMessage?.created_at || 0));
 
         if (unreadChats.length === 0) return null;
@@ -9046,7 +9155,18 @@ export default function Chat() {
                             className="wa-notification-item"
                             onMouseDown={(e) => e.stopPropagation()}
                             onClick={() => {
-                                if (chat.is_group) {
+                                if (chat.is_community) {
+                                    const originalComm = communities.find(c => String(c.id || c._id) === String(chat._id));
+                                    if (originalComm) {
+                                        setSelectedCommunity(originalComm);
+                                        setIsCommunityHomeOpen(true);
+                                        setSelectedGroup(null);
+                                        setSelectedUser(null);
+                                        if (selectedUserRef) selectedUserRef.current = null;
+                                        if (selectedGroupRef) selectedGroupRef.current = null;
+                                        setCommunities(prev => prev.map(c => String(c.id || c._id) === String(chat._id) ? { ...c, unreadCount: 0 } : c));
+                                    }
+                                } else if (chat.is_group) {
                                     setSelectedGroup(chat);
                                     setSelectedUser(null);
                                     if (selectedUserRef) selectedUserRef.current = null;
@@ -10798,7 +10918,6 @@ export default function Chat() {
                                         </div>
                                     )}
 
-                                    {isMessagingRestricted() ? (
                                     {accountLocked ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
                                             Account Permanently Locked. Please contact the administrator.
@@ -10807,7 +10926,7 @@ export default function Chat() {
                                         <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
                                             Messaging is temporarily restricted.
                                         </div>
-                                    ) : (selectedUser?.requestStatus === 'rejected' && selectedUser?.requestUpdatedAt && (new Date() - new Date(selectedUser?.requestUpdatedAt)) < 24 * 60 * 60 * 1000) && (selectedUser?.requestStatus === 'rejected' || selectedUser?.requestStatus === 'pending') ? (
+                                    ) : isMessagingRestricted() ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#f8fafc', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem', border: '1px solid #e2e8f0' }}>
                                             {(() => {
                                                 if (selectedGroup?.isCommunityAnnouncements || selectedGroup?.isAnnouncementGroup) {
@@ -11713,7 +11832,6 @@ export default function Chat() {
                                         </div>
                                     )}
 
-                                    {isMessagingRestricted() ? (
                                     {accountLocked ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
                                             Account Permanently Locked. Please contact the administrator.
@@ -11722,9 +11840,29 @@ export default function Chat() {
                                         <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
                                             Messaging is temporarily restricted.
                                         </div>
-                                    ) : (selectedUser?.requestStatus === 'rejected' && selectedUser?.requestUpdatedAt && (new Date() - new Date(selectedUser?.requestUpdatedAt)) < 24 * 60 * 60 * 1000) && (selectedUser?.requestStatus === 'rejected' || selectedUser?.requestStatus === 'pending') ? (
-                                        <div style={{ width: '100%', padding: '12px', background: '#f8fafc', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem', border: '1px solid #e2e8f0' }}>
+                                    ) : isMessagingRestricted() ? (
+                                        <div style={{ 
+                                            width: '100%', 
+                                            padding: '12px 20px', 
+                                            background: '#f8fafc', 
+                                            borderRadius: '12px', 
+                                            textAlign: 'center', 
+                                            color: '#54656f', 
+                                            fontSize: '0.95rem', 
+                                            border: '1px solid #e2e8f0',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: '12px',
+                                            margin: '4px 0',
+                                            minHeight: '62px'
+                                        }}>
                                             {(() => {
+                                                const myIdVal = userRef.current?._id || userRef.current?.id || user?._id || user?.id;
+                                                const currentMyId = String(myIdVal);
+                                                
+                                                // Community membership check for announcements
                                                 if (selectedGroup?.isCommunityAnnouncements || selectedGroup?.isAnnouncementGroup) {
                                                     const commIdCheck = String(selectedGroup.community_id || selectedGroup.communityId || '');
                                                     let community = (communities || []).find(c =>
@@ -11736,7 +11874,48 @@ export default function Chat() {
                                                         return "You're no longer a member in this community.";
                                                     }
                                                 }
-                                                return selectedGroup ? 'You were removed from this group and cannot send messages.' : 'Messaging is restricted.';
+
+                                                // Membership check for regular group
+                                                const isMem = (selectedGroup?.members || []).some(m => String(m._id || m) === currentMyId);
+                                                const isOwner = String(selectedGroup?.admin?._id || selectedGroup?.admin || selectedGroup?.creator_id || selectedGroup?.creatorId) === currentMyId;
+                                                const isAdmin = (selectedGroup?.admins || []).some(a => String(a?._id || a) === currentMyId);
+                                                
+                                                if (!isMem && !isOwner && !isAdmin) {
+                                                    // If it's a community group, show join option
+                                                    const commId = selectedGroup?.community_id || selectedGroup?.communityId;
+                                                    if (commId || selectedGroup?.isCommunityGroup) {
+                                                        return (
+                                                            <>
+                                                                <div style={{ fontWeight: 500 }}>You cannot message in this group since you are not a member</div>
+                                                                <button 
+                                                                    className="wa-nav-icon-btn" 
+                                                                    style={{ 
+                                                                        background: '#027EB5', 
+                                                                        color: 'white', 
+                                                                        borderRadius: '24px', 
+                                                                        padding: '8px 24px', 
+                                                                        fontSize: '14px', 
+                                                                        fontWeight: '600',
+                                                                        width: 'auto',
+                                                                        height: 'auto',
+                                                                        border: 'none',
+                                                                        cursor: 'pointer'
+                                                                    }}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleJoinGroup(selectedGroup._id || selectedGroup.id);
+                                                                    }}
+                                                                >
+                                                                    Join Group
+                                                                </button>
+                                                            </>
+                                                        );
+                                                    }
+                                                    return "You cannot message in this group since you are not a member";
+                                                }
+
+                                                // If we reached here (isMessagingRestricted was true but we didn't match), show default
+                                                return "You cannot message in this group since you are not a member";
                                             })()}
                                         </div>
                                     ) : (

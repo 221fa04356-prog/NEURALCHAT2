@@ -11,6 +11,12 @@ const communitySchema = new mongoose.Schema({
     announcements: { type: mongoose.Schema.Types.ObjectId, ref: 'Group' },
     whoCanAddGroups: { type: String, enum: ['everyone', 'admins'], default: 'admins' },
     admins: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    userHistory: [{
+        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        joinedAt: { type: Date, default: Date.now },
+        leftAt: { type: Date },
+        visibleFrom: { type: Date, default: Date.now }
+    }],
     created_at: { type: Date, default: Date.now }
 }, {
     toJSON: { virtuals: true },
