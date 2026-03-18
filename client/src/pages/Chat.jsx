@@ -1880,30 +1880,60 @@ export default function Chat() {
                 }
             }
 
-            // Update the sidebar list — use normalized structure matching what my-groups returns
+            // Update sidebars/drawers
+            const lastMsg = {
+                _id: data.message?._id,
+                content: data.message?.content || '',
+                type: data.message?.type || 'text',
+                created_at: data.message?.created_at || new Date().toISOString(),
+                sender_id: data.message?.sender_id,
+                is_deleted_by_user: data.message?.is_deleted_by_user,
+                is_deleted_by_admin: data.message?.is_deleted_by_admin,
+                deleted_for: data.message?.deleted_for,
+                duration: data.message?.duration,
+                is_system: data.message?.is_system,
+            };
+
+            // 1. Update regular groups list
             setGroups(prev => prev.map(g => {
                 if (String(g._id) === String(data.groupId)) {
                     const currentUnread = g.unreadCount || 0;
-                    // Sender NEVER gets unread. Receiver gets +1 if not in chat.
                     const newUnread = (isCurrentGroup || isMyOwnMessage) ? 0 : (currentUnread + 1);
-                    console.log(`[DEBUG] Final Unread for ${g.name || g._id}: ${newUnread} (base was ${currentUnread})`);
-                    // Normalize lastMessage so sidebar renders correctly
-                    const lastMsg = {
-                        _id: data.message?._id,
-                        content: data.message?.content || '',
-                        type: data.message?.type || 'text',
-                        created_at: data.message?.created_at || new Date().toISOString(),
-                        sender_id: data.message?.sender_id,
-                        is_deleted_by_user: data.message?.is_deleted_by_user,
-                        is_deleted_by_admin: data.message?.is_deleted_by_admin,
-                        deleted_for: data.message?.deleted_for,
-                        duration: data.message?.duration,
-                        is_system: data.message?.is_system,
-                    };
                     return { ...g, lastMessage: lastMsg, unreadCount: newUnread };
                 }
                 return g;
             }));
+
+            // 2. Update communities drawer
+            const updateComm = (c) => {
+                const annId = String(c.announcements?._id || c.announcements?.id || c.announcements);
+                const isAnn = String(data.groupId) === annId;
+                const hasGroup = (c.groups || []).some(g => String(g._id || g.id || g) === String(data.groupId));
+                
+                if (hasGroup || isAnn) {
+                    let updatedC = { ...c };
+                    if (isAnn) {
+                        updatedC.unreadCount = (isCurrentGroup || isMyOwnMessage) ? 0 : (c.unreadCount || 0) + 1;
+                        updatedC.announcements = {
+                            ...c.announcements,
+                            lastMessage: lastMsg
+                        };
+                    } else {
+                        updatedC.groups = (c.groups || []).map(g => {
+                            if (String(g._id || g.id) === String(data.groupId)) {
+                                const newU = (isCurrentGroup || isMyOwnMessage) ? 0 : (g.unreadCount || 0) + 1;
+                                return { ...g, lastMessage: lastMsg, unreadCount: newU };
+                            }
+                            return g;
+                        });
+                    }
+                    return updatedC;
+                }
+                return c;
+            };
+
+            setCommunities(prev => prev.map(updateComm));
+            setSelectedCommunity(prev => prev ? updateComm(prev) : null);
         };
         socket.on('group_message', onGroupMessage);
 
@@ -1912,6 +1942,21 @@ export default function Chat() {
             if (String(data.readerId) === String(myId)) {
                 // If I'm the one who read the messages, sync sidebar unread count
                 setGroups(prev => prev.map(g => String(g._id) === String(data.groupId) ? { ...g, unreadCount: 0 } : g));
+                
+                const clearUnread = (c) => {
+                    const annId = String(c.announcements?._id || c.announcements?.id || c.announcements);
+                    if (String(data.groupId) === annId) return { ...c, unreadCount: 0 };
+                    const hasG = (c.groups || []).some(g => String(g._id || g.id || g) === String(data.groupId));
+                    if (hasG) {
+                        return {
+                            ...c,
+                            groups: (c.groups || []).map(g => String(g._id || g.id) === String(data.groupId) ? { ...g, unreadCount: 0 } : g)
+                        };
+                    }
+                    return c;
+                };
+                setCommunities(prev => prev.map(clearUnread));
+                setSelectedCommunity(prev => prev ? clearUnread(prev) : null);
                 fetchGroups();
             }
 
@@ -1936,6 +1981,21 @@ export default function Chat() {
             const myId = userRef.current?.id || userRef.current?._id;
             if (String(data.readerId) === String(myId)) {
                 setGroups(prev => prev.map(g => String(g._id) === String(data.groupId) ? { ...g, unreadCount: 0 } : g));
+                
+                const clearUnread = (c) => {
+                    const annId = String(c.announcements?._id || c.announcements?.id || c.announcements);
+                    if (String(data.groupId) === annId) return { ...c, unreadCount: 0 };
+                    const hasG = (c.groups || []).some(g => String(g._id || g.id || g) === String(data.groupId));
+                    if (hasG) {
+                        return {
+                            ...c,
+                            groups: (c.groups || []).map(g => String(g._id || g.id) === String(data.groupId) ? { ...g, unreadCount: 0 } : g)
+                        };
+                    }
+                    return c;
+                };
+                setCommunities(prev => prev.map(clearUnread));
+                setSelectedCommunity(prev => prev ? clearUnread(prev) : null);
                 fetchGroups();
             }
 
@@ -2363,6 +2423,23 @@ export default function Chat() {
             });
             // Immediately update local groups state unreadCount to 0 (so refresh doesn't flash badge)
             setGroups(prev => prev.map(g => String(g._id) === String(groupId) ? { ...g, unreadCount: 0 } : g));
+
+            const updateUnread = (c) => {
+                const annId = String(c.announcements?._id || c.announcements?.id || c.announcements);
+                if (String(groupId) === annId) {
+                    return { ...c, unreadCount: 0 };
+                }
+                const hasG = (c.groups || []).some(g => String(g._id || g.id || g) === String(groupId));
+                if (hasG) {
+                    return {
+                        ...c,
+                        groups: (c.groups || []).map(g => String(g._id || g.id) === String(groupId) ? { ...g, unreadCount: 0 } : g)
+                    };
+                }
+                return c;
+            };
+            setCommunities(prev => prev.map(updateUnread));
+            setSelectedCommunity(prev => prev ? updateUnread(prev) : null);
         } catch (err) {
             console.error('fetchGroupMessages error:', err);
             // If restricted, we definitely should have an empty messages state
@@ -5723,11 +5800,20 @@ export default function Chat() {
                             <div style={{ flex: 1, overflow: 'hidden' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                                     <span style={{ fontSize: 16, fontWeight: 500, color: '#111b21' }}>Announcements</span>
-                                    <span style={{ fontSize: 12, color: '#667781' }}>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase()}</span>
+                                    <span style={{ fontSize: 12, color: '#667781' }}>
+                                        {selectedCommunity.announcements?.lastMessage 
+                                            ? formatTime(selectedCommunity.announcements.lastMessage.created_at)
+                                            : formatTime(selectedCommunity.created_at)}
+                                    </span>
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span style={{ fontSize: 14, color: '#667781', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Welcome to your community!</span>
-                                    <Pin size={14} color="#8696a0" />
+                                    <div style={{ fontSize: 14, color: '#667781', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
+                                        {selectedCommunity.announcements?.lastMessage?.content || 'Welcome to your community!'}
+                                    </div>
+                                    {selectedCommunity.unreadCount > 0 && (
+                                        <div className="wa-unread-badge" style={{ position: 'static', marginLeft: 8 }}>{selectedCommunity.unreadCount}</div>
+                                    )}
+                                    <Pin size={14} color="#8696a0" style={{ marginLeft: 8 }} />
                                 </div>
                             </div>
                         </div>
@@ -5770,10 +5856,31 @@ export default function Chat() {
                                     </div>
                                     <div style={{ flex: 1, overflow: 'hidden' }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                                            <span style={{ fontSize: 16, fontWeight: 500, color: '#111b21' }}>{g.name || 'Group'}</span>
+                                            <span style={{ fontSize: 16, fontWeight: 500, color: '#111b21', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name || 'Group'}</span>
+                                            {g.lastMessage && (
+                                                <span style={{ fontSize: 12, color: '#667781', flexShrink: 0 }}>
+                                                    {formatTime(g.lastMessage.created_at)}
+                                                </span>
+                                            )}
                                         </div>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <div style={{ fontSize: 14, color: '#667781' }}>{(g.members?.length || 0)} members</div>
+                                            <div style={{ fontSize: 14, color: '#667781', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
+                                                {g.lastMessage ? (
+                                                    <span>
+                                                        {g.lastMessage.type === 'image' ? (
+                                                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Camera size={14} /> Photo</span>
+                                                        ) : g.lastMessage.type === 'video' ? (
+                                                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Video size={14} /> Video</span>
+                                                        ) : g.lastMessage.type === 'file' ? (
+                                                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><FileText size={14} /> File</span>
+                                                        ) : g.lastMessage.type === 'audio' ? (
+                                                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Mic size={14} /> Voice</span>
+                                                        ) : g.lastMessage.is_system ? (
+                                                            `${g.lastMessage.sender_id?.name || 'Someone'} ${g.lastMessage.content}`
+                                                        ) : g.lastMessage.content}
+                                                    </span>
+                                                ) : `${(g.members?.length || 0)} members`}
+                                            </div>
                                             {g.unreadCount > 0 && (
                                                 <div className="wa-unread-badge" style={{ position: 'static', marginLeft: 8 }}>{g.unreadCount}</div>
                                             )}

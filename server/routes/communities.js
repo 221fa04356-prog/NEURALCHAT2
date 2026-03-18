@@ -90,6 +90,14 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
                 const history = (g.userHistory || []).find(h => String(h.user) === String(userId));
                 const visibleFrom = history?.visibleFrom || new Date(0);
                 
+                const lastMsg = await GroupMessage.findOne({
+                    group_id: g._id,
+                    deleted_for: { $ne: userId }
+                })
+                    .sort({ created_at: -1 })
+                    .populate('sender_id', 'name')
+                    .lean();
+
                 const gUnreadCount = await GroupMessage.countDocuments({
                     group_id: g._id,
                     sender_id: { $ne: userObjId },
@@ -100,6 +108,7 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
 
                 return {
                     ...g,
+                    lastMessage: lastMsg,
                     unreadCount: gUnreadCount
                 };
             }));
@@ -547,6 +556,64 @@ router.patch('/:communityId/groups', authenticateToken, async (req, res) => {
                 }
             })
             .lean();
+
+        // Enrich groups with last message and unread count
+        if (updated) {
+            const userId = req.user.id;
+            const userObjId = toObjectId(userId);
+            
+            updated.groups = await Promise.all((updated.groups || []).map(async (g) => {
+                const history = (g.userHistory || []).find(h => String(h.user) === String(userId));
+                const visibleFrom = history?.visibleFrom || new Date(0);
+
+                const lastMsg = await GroupMessage.findOne({
+                    group_id: g._id,
+                    deleted_for: { $ne: userId }
+                })
+                    .sort({ created_at: -1 })
+                    .populate('sender_id', 'name')
+                    .lean();
+
+                const gUnreadCount = await GroupMessage.countDocuments({
+                    group_id: g._id,
+                    sender_id: { $ne: userObjId },
+                    read_by: { $ne: userObjId },
+                    is_system: { $ne: true },
+                    created_at: { $gte: visibleFrom }
+                });
+
+                return {
+                    ...g,
+                    lastMessage: lastMsg,
+                    unreadCount: gUnreadCount
+                };
+            }));
+            
+            // Enrich announcements
+            if (updated.announcements) {
+                const lastMsg = await GroupMessage.findOne({ group_id: updated.announcements._id })
+                    .sort({ created_at: -1 })
+                    .populate('sender_id', 'name _id')
+                    .lean();
+
+                const history = (updated.userHistory || []).find(h => String(h.user) === String(userId));
+                const visibleFrom = history?.visibleFrom || new Date(0);
+
+                const unreadCount = await GroupMessage.countDocuments({
+                    group_id: updated.announcements._id,
+                    sender_id: { $ne: userObjId },
+                    read_by: { $ne: userObjId },
+                    is_system: { $ne: true },
+                    created_at: { $gte: visibleFrom }
+                });
+
+                updated.announcements = {
+                    ...updated.announcements,
+                    lastMessage: lastMsg
+                };
+                updated.unreadCount = unreadCount;
+            }
+        }
 
         // Notify added members and everyone else
         if (req.io) {
