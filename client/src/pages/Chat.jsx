@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, memo } from 'react';
 import axios from 'axios';
+import ImageEditorModal from '../components/ImageEditorModal';
 import logo from '../assets/logo.png';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -1114,7 +1115,8 @@ export default function Chat() {
         approveMembers: false
     });
     const [permissionToasts, setPermissionToasts] = useState([]);
-    const [cameraModal, setCameraModal] = useState('none'); // 'none' | 'permission' | 'blocked' | 'active' | 'adjust'
+    const [cameraModal, setCameraModal] = useState('none'); // 'none' | 'permission' | 'blocked' | 'active' | 'adjust' | 'editor'
+    const [cameraPurpose, setCameraPurpose] = useState('profile');
     const [cameraStream, setCameraStream] = useState(null);
     const [capturedImage, setCapturedImage] = useState(null);
 
@@ -4379,7 +4381,8 @@ export default function Chat() {
         setCameraModal('none');
     };
 
-    const handleCameraAction = async () => {
+    const handleCameraAction = async (purpose = 'profile') => {
+        setCameraPurpose(typeof purpose === 'string' ? purpose : 'profile');
         setIsGroupIconMenuOpen(false);
         setIsCommunityIconMenuOpen(false);
 
@@ -4423,9 +4426,14 @@ export default function Chat() {
             ctx.drawImage(videoRef.current, 0, 0);
 
             setCapturedImage(canvas.toDataURL('image/png'));
-            setCameraModal('adjust');
-            setImageScale(1);
-            setImagePos({ x: 0, y: 0 });
+            
+            if (cameraPurpose === 'chat') {
+                setCameraModal('editor');
+            } else {
+                setCameraModal('adjust');
+                setImageScale(1);
+                setImagePos({ x: 0, y: 0 });
+            }
 
             // Stop camera stream once captured
             if (cameraStream) {
@@ -4433,6 +4441,16 @@ export default function Chat() {
                 setCameraStream(null);
             }
         }
+    };
+
+    const handleEditorDone = async (dataUrl) => {
+        setCameraModal('none');
+        try {
+            const res = await fetch(dataUrl);
+            const blob = await res.blob();
+            const fileObj = new File([blob], "camera_capture.png", { type: "image/png" });
+            setFile(fileObj);
+        } catch(e) { console.error("Editor commit error", e); }
     };
 
     const handleImageDragStart = (e) => {
@@ -5027,7 +5045,7 @@ export default function Chat() {
                     setIsAttachmentMenuOpen(false);
                 }
             },
-            { icon: Camera, label: t('chat_window.camera'), color: '#ff2e74', onClick: () => { setIsAttachmentMenuOpen(false); } },
+            { icon: Camera, label: t('chat_window.camera'), color: '#ff2e74', onClick: () => { setIsAttachmentMenuOpen(false); handleCameraAction('chat'); } },
             { icon: User, label: t('chat_window.contact'), color: '#009de2', onClick: () => { setIsAttachmentMenuOpen(false); } },
             { icon: List, label: t('chat_window.poll'), color: '#ffbc38', onClick: () => { setIsAttachmentMenuOpen(false); } },
             { icon: Calendar, label: t('chat_window.event'), color: '#ef0b33', onClick: () => { setIsAttachmentMenuOpen(false); } },
@@ -5595,7 +5613,7 @@ export default function Chat() {
             height: '100%',
             display: 'flex',
             flexDirection: 'column',
-            background: '#0b141a', // WhatsApp Dark Preview Style
+            background: '#e9edef', // Light Application Theme Background
             position: 'relative',
             zIndex: 1000
         }}>
@@ -5605,11 +5623,10 @@ export default function Chat() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                background: 'rgba(11, 20, 26, 0.8)',
-                backdropFilter: 'blur(10px)',
-                color: 'white',
+                background: '#f0f2f5',
+                color: '#111b21',
                 flexShrink: 0,
-                borderBottom: '1px solid rgba(255,255,255,0.1)'
+                borderBottom: '1px solid #d1d7db'
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                     <button
@@ -5617,12 +5634,12 @@ export default function Chat() {
                             setFile(null);
                             // Cleanup object URL if needed, though browsers usually handle it
                         }}
-                        style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', padding: 4 }}
+                        style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 4 }}
                         title="Close preview"
                     >
                         <X size={24} />
                     </button>
-                    <span style={{ fontSize: 16, fontWeight: 500 }}>Preview</span>
+                    <span style={{ fontSize: 16, fontWeight: 500, color: '#111b21' }}>Preview</span>
                 </div>
             </div>
 
@@ -5635,7 +5652,8 @@ export default function Chat() {
                 alignItems: 'center',
                 overflow: 'hidden',
                 padding: '20px 40px',
-                position: 'relative'
+                position: 'relative',
+                background: '#f0f2f5' // Matches chat background color generally
             }}>
                 {file && file.type.startsWith('image/') ? (
                     <img
@@ -5645,7 +5663,7 @@ export default function Chat() {
                             maxWidth: '100%',
                             maxHeight: '100%',
                             objectFit: 'contain',
-                            boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                             borderRadius: 4
                         }}
                     />
@@ -5661,8 +5679,8 @@ export default function Chat() {
                                 maxWidth: '100%',
                                 maxHeight: '100%',
                                 borderRadius: 8,
-                                boxShadow: '0 8px 30px rgba(0,0,0,0.6)',
-                                background: 'black'
+                                boxShadow: '0 8px 12px rgba(0,0,0,0.1)',
+                                background: '#111b21'
                             }}
                         />
                     </div>
@@ -5670,15 +5688,15 @@ export default function Chat() {
                     <div style={{
                         textAlign: 'center',
                         padding: 60,
-                        background: '#111b21',
+                        background: '#ffffff',
                         borderRadius: 12,
-                        boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
-                        color: 'white',
-                        border: '1px solid rgba(255,255,255,0.05)'
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+                        color: '#111b21',
+                        border: '1px solid #d1d7db'
                     }}>
                         <div style={{ fontSize: 48, marginBottom: 16 }}>📄</div>
-                        <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8 }}>{file?.name}</div>
-                        <div style={{ fontSize: 14, color: '#8696a0' }}>
+                        <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8, color: '#111b21' }}>{file?.name}</div>
+                        <div style={{ fontSize: 14, color: '#54656f' }}>
                             {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} • {file?.type?.split('/').pop().toUpperCase()}
                         </div>
                     </div>
@@ -5688,19 +5706,19 @@ export default function Chat() {
             {/* Footer / Caption Input */}
             <div style={{
                 padding: '12px 24px 32px',
-                background: 'rgba(11, 20, 26, 0.9)',
+                background: '#f0f2f5',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 12,
-                borderTop: '1px solid rgba(255,255,255,0.1)'
+                borderTop: '1px solid #d1d7db'
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <div className="wa-input-pill" style={{
                         flex: 1,
-                        background: '#2a3942',
+                        background: '#ffffff',
                         borderRadius: 8,
                         padding: '4px 12px',
-                        border: 'none'
+                        border: '1px solid #d1d7db'
                     }}>
                         <input
                             type="text"
@@ -5712,7 +5730,7 @@ export default function Chat() {
                                 background: 'transparent',
                                 border: 'none',
                                 outline: 'none',
-                                color: 'white',
+                                color: '#111b21',
                                 padding: '10px 0',
                                 fontSize: 15
                             }}
@@ -5737,7 +5755,7 @@ export default function Chat() {
                             alignItems: 'center',
                             justifyContent: 'center',
                             cursor: 'pointer',
-                            boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+                            boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
                             flexShrink: 0
                         }}
                     >
@@ -6127,9 +6145,8 @@ export default function Chat() {
                                 });
                                 setSelectedUser(null);
                                 fetchGroupMessages(annId);
-                                setIsCommunityInfoOpen(true);
+                                setIsCommunityInfoOpen(false);
                                 setIsContactInfoOpen(false);
-                                setCommunityInfoTab('announcements');
                             }
                             setIsCommunityHomeOpen(true); // Keep it open
                             if (window.innerWidth <= 768) {
@@ -6189,7 +6206,7 @@ export default function Chat() {
                                     setSelectedGroup(g);
                                     setSelectedUser(null);
                                     fetchGroupMessages(g._id || g.id);
-                                    setIsContactInfoOpen(true);
+                                    setIsContactInfoOpen(false);
                                     setIsCommunityInfoOpen(false);
                                     if (window.innerWidth <= 768) {
                                         setIsContactInfoOpen(false);
@@ -10083,6 +10100,14 @@ export default function Chat() {
                                         key={item._id}
                                         className={`wa-user-item ${((item.is_community && selectedCommunity?.id === item.id) || (isGroup && selectedGroup?._id === item._id) || (!isGroup && selectedUser?._id === item._id)) ? 'active' : ''}`}
                                         onClick={() => {
+                                            setIsContactInfoOpen(false);
+                                            setIsCommunityInfoOpen(false);
+                                            setIsMessageSearchOpen(false);
+                                            setIsStarredMessagesOpen(false);
+                                            setIsSharedMediaOpen(false);
+                                            setIsEditContactOpen(false);
+                                            setIsCommunitySettingsOpen(false);
+                                            
                                             if (item.is_community) {
                                                 setSelectedCommunity(item);
                                                 setIsCommunityHomeOpen(true);
@@ -10094,6 +10119,13 @@ export default function Chat() {
                                             if (isGroup) {
                                                 setSelectedGroup(item);
                                                 setSelectedUser(null);
+                                                setInput('');
+                                                setFile(null);
+                                                setTypingLinkPreview(null);
+                                                setReplyingTo(null);
+                                                setIsChatSelectionMode(false);
+                                                setIsForwardingMode(false);
+                                                setForwardSelectedMsgs([]);
                                                 fetchGroupMessages(item._id);
                                                 setGroups(prev => prev.map(g => g._id === item._id ? { ...g, unreadCount: 0 } : g));
                                             } else {
@@ -10674,28 +10706,30 @@ export default function Chat() {
                 )}
 
                 {cameraModal === 'active' && (
-                    <div className="wa-camera-active-container">
-                        <div className="wa-camera-header" style={{ display: 'flex', alignItems: 'center', height: 60, padding: '0 16px' }}>
-                            <button onClick={closeCamera} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', alignItems: 'center', width: 40, padding: 0 }}>
-                                <X size={24} />
-                            </button>
-                            <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
-                                <span style={{ fontSize: 19, fontWeight: 500, whiteSpace: 'nowrap' }}>Capture photo</span>
+                    <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.4)', zIndex: 4000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div style={{ width: '100%', maxWidth: 700, background: '#fff', borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', margin: '0 20px', boxShadow: '0 17px 50px 0 rgba(0,0,0,0.19), 0 12px 15px 0 rgba(0,0,0,0.24)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', height: 60, padding: '0 20px', borderBottom: '1px solid #e9edef' }}>
+                                <button onClick={closeCamera} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', alignItems: 'center', width: 40, padding: 0 }}>
+                                    <X size={24} />
+                                </button>
+                                <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+                                    <span style={{ fontSize: 18, fontWeight: 500, color: '#111b21', whiteSpace: 'nowrap' }}>Capture photo</span>
+                                </div>
+                                <div style={{ width: 40 }}></div>
                             </div>
-                            <div style={{ width: 40 }}></div>
-                        </div>
-                        <div className="wa-camera-video-wrapper">
-                            <video
-                                ref={videoRef}
-                                autoPlay
-                                playsInline
-                                className="wa-camera-live-video"
-                            />
-                        </div>
-                        <div className="wa-camera-footer">
-                            <button className="wa-camera-capture-btn" onClick={capturePhoto}>
-                                <Camera size={32} />
-                            </button>
+                            <div style={{ width: '100%', background: '#f0f2f5', display: 'flex', justifyContent: 'center', position: 'relative' }}>
+                                <video
+                                    ref={videoRef}
+                                    autoPlay
+                                    playsInline
+                                    style={{ width: '100%', maxHeight: '60vh', objectFit: 'cover' }}
+                                />
+                            </div>
+                            <div style={{ padding: '20px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff' }}>
+                                <button onClick={capturePhoto} style={{ width: 64, height: 64, borderRadius: '50%', background: '#0084ff', color: 'white', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', transition: 'transform 0.2s' }} onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.95)'} onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'} onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}>
+                                    <Camera size={28} />
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}
@@ -10757,6 +10791,18 @@ export default function Chat() {
                             </button>
                         </div>
                     </div>
+                )}
+                
+                {cameraModal === 'editor' && (
+                    <ImageEditorModal 
+                        imageUrl={capturedImage}
+                        onRetake={() => {
+                            setCameraModal('active');
+                            startCamera();
+                        }}
+                        onDone={handleEditorDone}
+                        onClose={() => setCameraModal('none')}
+                    />
                 )}
             </div>
         );
