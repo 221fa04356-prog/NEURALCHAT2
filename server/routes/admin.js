@@ -8,6 +8,7 @@ const Group = require('../models/Group');
 const GroupMessage = require('../models/GroupMessage');
 const ChatDeletion = require('../models/ChatDeletion');
 const PasswordReset = require('../models/PasswordReset');
+const Community = require('../models/Community');
 const sendEmail = require('../utils/emailService');
 const crypto = require('crypto');
 const getLocalIp = require('../utils/getLocalIp');
@@ -278,14 +279,49 @@ router.get('/chat/contacts/:userId', async (req, res) => {
         const contacts = await User.find({ _id: { $in: contactIds } }).select('name email');
 
         // Fetch groups this user is a member of
-        const groups = await Group.find({ members: new mongoose.Types.ObjectId(userId) }).select('name');
+        const groups = await Group.find({ members: new mongoose.Types.ObjectId(userId) }).select('name').lean();
 
         // Check if user has AI messages
         const hasAI = await Message.exists({ user_id: userId, receiver_id: null });
 
+        const groupIds = groups.map(g => g._id);
+        const communities = await Community.find({
+            $or: [
+                { groups: { $in: groupIds } },
+                { announcements: { $in: groupIds } }
+            ]
+        }).populate('groups', 'name').select('name groups announcements').lean();
+
         const result = [
-            ...contacts.map(c => ({ id: c._id, name: c.name, email: c.email, type: 'user' })),
-            ...groups.map(g => ({ id: g._id, name: g.name || 'Unnamed Group', email: 'Group', type: 'group' }))
+            ...contacts.map(c => ({ id: c._id, name: c.name, email: c.email, type: 'user', subtext: 'Peer-to-Peer Chat' })),
+            ...groups.map(g => {
+                let name = g.name || 'Unnamed Group';
+                let subtext = 'Group Chat';
+
+                const commAsAnn = communities.find(c => String(c.announcements) === String(g._id));
+                const commAsGroup = communities.find(c => c.groups.some(cg => String(cg._id || cg) === String(g._id)));
+
+                if (commAsAnn) {
+                    name = name === 'Announcements' || name === 'Unnamed Group' || !name ? `${commAsAnn.name} Announcements` : name;
+                    if (commAsAnn.groups && commAsAnn.groups.length > 0) {
+                        const groupNames = commAsAnn.groups.map(gr => gr.name);
+                        if (groupNames.length === 1) {
+                            subtext = `Integrated with group ${groupNames[0]}`;
+                        } else if (groupNames.length === 2) {
+                            subtext = `Integrated with groups ${groupNames[0]} and ${groupNames[1]}`;
+                        } else {
+                            const last = groupNames.pop();
+                            subtext = `Integrated with groups ${groupNames.join(', ')} and ${last}`;
+                        }
+                    } else {
+                        subtext = `No groups are present in the community`;
+                    }
+                } else if (commAsGroup) {
+                    subtext = `Integrated with ${commAsGroup.name}`;
+                }
+
+                return { id: g._id, name: name, email: 'Group', type: 'group', subtext: subtext };
+            })
         ];
 
         if (hasAI) {

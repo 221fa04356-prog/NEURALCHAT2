@@ -2141,7 +2141,7 @@ export default function AdminDashboard() {
                                             {chatContacts.filter(c => c.type !== 'ai' && c.name !== 'AI Assistant').map(c => (
                                                 <div key={c.id} onClick={() => handleSelectContact(c)} style={{ background: 'white', padding: '1rem', borderRadius: '1rem', border: '1px solid #e9ecef', cursor: 'pointer', transition: 'all 0.2s' }} className="hover-card">
                                                     <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#32325d' }}>{c.name}</div>
-                                                    <div style={{ fontSize: '0.75rem', color: '#8898aa' }}>{c.type === 'ai' ? 'Automated Assistant' : (c.type === 'group' ? 'Group Chat' : 'Peer-to-Peer Chat')}</div>
+                                                    <div style={{ fontSize: '0.75rem', color: '#8898aa' }}>{c.subtext || (c.type === 'ai' ? 'Automated Assistant' : (c.type === 'group' ? 'Group Chat' : 'Peer-to-Peer Chat'))}</div>
                                                 </div>
                                             ))}
                                         </div>
