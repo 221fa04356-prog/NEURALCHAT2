@@ -917,6 +917,187 @@ html {
     }
 }
 
+/* View Once Fullscreen Player */
+.wa-view-once-fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: va-fade-in 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes va-fade-in {
+    from {
+        opacity: 0;
+        transform: scale(1.05);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.wa-view-once-content {
+    background: rgba(255, 255, 255, 0.4);
+    border: 1px solid rgba(2, 126, 181, 0.15);
+    border-radius: 32px;
+    padding: 60px 40px;
+    width: 90%;
+    max-width: 450px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.05);
+}
+
+.wa-view-once-header h2 {
+    margin: 15px 0 5px;
+    font-size: 24px;
+    color: #111b21;
+}
+
+.wa-view-once-header p {
+    color: #027EB5;
+    font-weight: 500;
+    font-size: 14px;
+    margin-bottom: 30px;
+}
+
+.wa-view-once-avatar-container {
+    position: relative;
+    width: 100px;
+    height: 100px;
+    margin: 0 auto;
+}
+
+.wa-view-once-avatar-large {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 3px solid #027EB5;
+    padding: 3px;
+    background: white;
+}
+
+.wa-voice-mic-badge-large {
+    position: absolute;
+    bottom: -5px;
+    right: -5px;
+    background: white;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.wa-fullscreen-waveform {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 60px;
+    margin: 40px 0;
+}
+
+.wa-waveform-bar-large {
+    width: 6px;
+    background: #027EB5;
+    border-radius: 4px;
+    opacity: 0.3;
+    transition: all 0.2s ease;
+}
+
+.wa-waveform-bar-large.animating {
+    animation: wave-bounce 0.8s infinite ease-in-out;
+}
+
+@keyframes wave-bounce {
+
+    0%,
+    100% {
+        transform: scaleY(1);
+        opacity: 0.3;
+    }
+
+    50% {
+        transform: scaleY(2.2);
+        opacity: 1;
+    }
+}
+
+.wa-play-control-large {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+}
+
+.wa-play-control-large .wa-action-btn {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    background: #027EB5;
+    color: white;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 8px 25px rgba(2, 126, 181, 0.3);
+    transition: transform 0.2s;
+}
+
+.wa-play-control-large .wa-action-btn:hover {
+    transform: scale(1.05);
+}
+
+.wa-fullscreen-timer {
+    font-size: 18px;
+    font-weight: 500;
+    color: #54656f;
+}
+
+.wa-view-once-footer {
+    margin-top: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #667781;
+    font-size: 13px;
+}
+
+.wa-fullscreen-close {
+    position: absolute;
+    top: 30px;
+    right: 30px;
+    background: rgba(0, 0, 0, 0.05);
+    border: none;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #54656f;
+    transition: background 0.2s;
+}
+
+.wa-fullscreen-close:hover {
+    background: rgba(0, 0, 0, 0.1);
+}
+
 @media (min-width: 835px) and (max-width: 1024px) {
     .wa-left-panel {
         width: 350px;
@@ -1298,6 +1479,187 @@ html {
     z-index: 1;
 }
 
+/* View Once Fullscreen Player */
+.wa-view-once-fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: va-fade-in 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes va-fade-in {
+    from {
+        opacity: 0;
+        transform: scale(1.05);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.wa-view-once-content {
+    background: rgba(255, 255, 255, 0.4);
+    border: 1px solid rgba(2, 126, 181, 0.15);
+    border-radius: 32px;
+    padding: 60px 40px;
+    width: 90%;
+    max-width: 450px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.05);
+}
+
+.wa-view-once-header h2 {
+    margin: 15px 0 5px;
+    font-size: 24px;
+    color: #111b21;
+}
+
+.wa-view-once-header p {
+    color: #027EB5;
+    font-weight: 500;
+    font-size: 14px;
+    margin-bottom: 30px;
+}
+
+.wa-view-once-avatar-container {
+    position: relative;
+    width: 100px;
+    height: 100px;
+    margin: 0 auto;
+}
+
+.wa-view-once-avatar-large {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 3px solid #027EB5;
+    padding: 3px;
+    background: white;
+}
+
+.wa-voice-mic-badge-large {
+    position: absolute;
+    bottom: -5px;
+    right: -5px;
+    background: white;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.wa-fullscreen-waveform {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 60px;
+    margin: 40px 0;
+}
+
+.wa-waveform-bar-large {
+    width: 6px;
+    background: #027EB5;
+    border-radius: 4px;
+    opacity: 0.3;
+    transition: all 0.2s ease;
+}
+
+.wa-waveform-bar-large.animating {
+    animation: wave-bounce 0.8s infinite ease-in-out;
+}
+
+@keyframes wave-bounce {
+
+    0%,
+    100% {
+        transform: scaleY(1);
+        opacity: 0.3;
+    }
+
+    50% {
+        transform: scaleY(2.2);
+        opacity: 1;
+    }
+}
+
+.wa-play-control-large {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+}
+
+.wa-play-control-large .wa-action-btn {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    background: #027EB5;
+    color: white;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 8px 25px rgba(2, 126, 181, 0.3);
+    transition: transform 0.2s;
+}
+
+.wa-play-control-large .wa-action-btn:hover {
+    transform: scale(1.05);
+}
+
+.wa-fullscreen-timer {
+    font-size: 18px;
+    font-weight: 500;
+    color: #54656f;
+}
+
+.wa-view-once-footer {
+    margin-top: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #667781;
+    font-size: 13px;
+}
+
+.wa-fullscreen-close {
+    position: absolute;
+    top: 30px;
+    right: 30px;
+    background: rgba(0, 0, 0, 0.05);
+    border: none;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #54656f;
+    transition: background 0.2s;
+}
+
+.wa-fullscreen-close:hover {
+    background: rgba(0, 0, 0, 0.1);
+}
+
 /* Scroll-to-bottom Button */
 .wa-scroll-to-bottom-btn {
     position: absolute;
@@ -1605,12 +1967,12 @@ html {
 .wa-input-pill {
     background-color: white;
     border-radius: 30px;
-    padding: 0 12px;
+    padding: 0 4px 0 12px;
     display: flex;
     align-items: center;
     flex: 1;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    min-height: 48px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    min-height: 54px;
     margin-right: 8px;
 }
 
@@ -1698,6 +2060,113 @@ html {
         width: 46px;
         height: 46px;
     }
+}
+
+
+/* Mic button idle state - shown when no text is entered */
+.wa-mic-btn-idle {
+    background: transparent;
+    border: none;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.1s ease, color 0.2s, background 0.2s;
+    color: #54656f;
+}
+
+.wa-mic-btn-idle:hover {
+    background: #027eb5;
+    color: white !important;
+}
+
+.wa-mic-btn-idle:active {
+    transform: scale(0.9);
+}
+
+.wa-send-btn-inner {
+    background: #027eb5;
+    border: none;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    margin-right: 0;
+}
+
+.wa-send-btn-inner:hover {
+    background: #027eb5;
+    /* Using standard theme color, no darkness */
+}
+
+.wa-send-btn-inner:active {
+    transform: scale(0.9);
+}
+
+/* --- Custom Tooltip System --- */
+[data-tooltip] {
+    position: relative;
+}
+
+[data-tooltip]::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 120%;
+    /* Above the button */
+    right: 0;
+    /* Align right edge of tooltip with right edge of button */
+    transform: translateY(10px);
+    background: white;
+    color: #027eb5;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+    z-index: 9999;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(2, 126, 181, 0.1);
+}
+
+[data-tooltip]::before {
+    content: '';
+    position: absolute;
+    bottom: 120%;
+    right: 15px;
+    /* Align arrow with button center */
+    transform: translateY(10px);
+    border: 6px solid transparent;
+    border-top-color: white;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+    z-index: 9999;
+}
+
+[data-tooltip]:hover::after,
+[data-tooltip]:hover::before {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+.wa-footer-right-icons-inner {
+    display: flex;
+    align-items: center;
+    padding-right: 0px;
+    /* Most right corner */
 }
 
 /* Reply Preview inside the pill */
@@ -2089,6 +2558,9 @@ html {
     overflow-y: auto;
     animation: dropdownPop 0.2s cubic-bezier(0, 0, 0.2, 1);
     border: none;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
 }
 
 @keyframes dropdownPop {
@@ -2104,8 +2576,9 @@ html {
 }
 
 .wa-dropdown-item {
-    padding: 8px 24px;
-    font-size: 14.5px;
+    padding: 8px 20px;
+    font-size: 13.8px;
+    line-height: 1.4;
     color: #3b4a54;
     cursor: pointer;
     display: flex;
@@ -2210,10 +2683,22 @@ html {
 
 .wa-reactions-row {
     display: flex;
-    padding: 8px 18px;
-    gap: 12px;
-    font-size: 22px;
-    justify-content: space-between;
+    padding: 10px 12px;
+    gap: 8px;
+    font-size: 20px;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 100%;
+    box-sizing: border-box;
+    line-height: normal;
+}
+
+@media (max-width: 480px) {
+    .wa-reactions-row {
+        gap: 6px;
+        padding: 8px 10px;
+        font-size: 19px;
+    }
 }
 
 .wa-reactions-row span {
@@ -6397,203 +6882,7 @@ html {
     }
 }
 
-/* Voice Recording UI */
-.mic-wrapper {
-    position: relative;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
 
-.mic-wrapper:hover::after {
-    content: attr(data-tooltip);
-    position: absolute;
-    bottom: 50px;
-    right: 0px;
-    background-color: #f0f2f5;
-    color: #111b21;
-    padding: 6px 10px;
-    border-radius: 4px;
-    font-size: 13px;
-    white-space: nowrap;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-    pointer-events: none;
-}
-
-.wa-nav-icon-btn-pill.mic-hover {
-    transition: all 0.2s;
-    padding: 10px;
-    border-radius: 50%;
-}
-
-.wa-nav-icon-btn-pill.mic-hover:hover {
-    background-color: var(--primary, #23D2EF);
-    color: white;
-}
-
-.wa-nav-icon-btn-pill.mic-hover:hover .mic-icon-svg {
-    stroke: white;
-}
-
-.wa-recording-ui {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    justify-content: space-between;
-    padding: 0 10px;
-}
-
-.wa-recording-center {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex: 1;
-    justify-content: flex-end;
-    padding-right: 16px;
-}
-
-.wa-recording-dot-wrap {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.wa-recording-red-dot {
-    width: 10px;
-    height: 10px;
-    background-color: #ef697a;
-    border-radius: 50%;
-}
-
-.pulse {
-    animation: waPulse 1.5s infinite;
-}
-
-@keyframes waPulse {
-    0% {
-        transform: scale(0.95);
-        box-shadow: 0 0 0 0 rgba(239, 105, 122, 0.7);
-    }
-
-    70% {
-        transform: scale(1);
-        box-shadow: 0 0 0 6px rgba(239, 105, 122, 0);
-    }
-
-    100% {
-        transform: scale(0.95);
-        box-shadow: 0 0 0 0 rgba(239, 105, 122, 0);
-    }
-}
-
-.wa-recording-time {
-    font-size: 14px;
-    color: #111b21;
-    font-weight: 500;
-}
-
-.wa-recording-time-paused {
-    font-size: 14px;
-    color: #111b21;
-    font-weight: 500;
-    margin-left: 8px;
-}
-
-.wa-recording-waves {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    height: 24px;
-    margin-left: 10px;
-}
-
-.wa-wave {
-    width: 3px;
-    background-color: #8696a0;
-    border-radius: 2px;
-    transition: height 0.2s ease;
-}
-
-.wa-wave.anim {
-    animation: waveAnim 0.8s infinite alternate ease-in-out;
-}
-
-.wa-recording-waves .wa-wave:nth-child(even) {
-    animation-delay: 0.1s;
-}
-
-.wa-recording-waves .wa-wave:nth-child(3n) {
-    animation-delay: 0.3s;
-}
-
-.wa-recording-waves .wa-wave:nth-child(4n) {
-    animation-delay: 0.5s;
-}
-
-@keyframes waveAnim {
-    0% {
-        height: 10%;
-    }
-
-    100% {
-        height: 90%;
-    }
-}
-
-.wa-recording-right {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-}
-
-.wa-record-action-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-}
-
-.wa-record-action-btn.pause {
-    background-color: rgba(239, 105, 122, 0.15);
-}
-
-.wa-record-action-btn.resume {
-    background-color: transparent;
-}
-
-.wa-recording-lock {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.tooltip-wrapper {
-    position: relative;
-}
-
-.tooltip-wrapper:hover::after {
-    content: attr(data-tooltip);
-    position: absolute;
-    top: -40px;
-    background-color: #f0f2f5;
-    color: #111b21;
-    padding: 6px 10px;
-    border-radius: 4px;
-    font-size: 12px;
-    white-space: nowrap;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-    pointer-events: none;
-    z-index: 100;
-}
-
-.wa-send-btn-circle-inner.recording {
-    background-color: var(--primary, #23D2EF);
-}
 
 /* View Once Modal */
 .wa-view-once-modal-overlay {
@@ -6620,64 +6909,9 @@ html {
 }
 
 
-.wa-input-pill.recording-active {
-    background-color: transparent !important;
-    box-shadow: none !important;
-}
 
-[data-theme='dark'] .wa-input-pill.recording-active .wa-input-area {
-    background-color: #202c33 !important;
-}
 
-[data-theme='light'] .wa-input-pill.recording-active .wa-input-area {
-    background-color: #f0f2f5 !important;
-}
-
-.wa-input-area.recording-active-area {
-    transition: all 0.2s ease-in-out;
-}
-
-@media (max-width: 768px) {
-    .wa-recording-ui {
-        padding: 0 4px;
-        gap: 8px;
-    }
-
-    .wa-recording-center {
-        justify-content: flex-start;
-        padding-right: 0px;
-        gap: 6px;
-    }
-
-    .wa-audio-canvas {
-        width: 80px !important;
-    }
-
-    .wa-record-action-btn {
-        width: 32px;
-        height: 32px;
-    }
-
-    .wa-record-action-btn svg {
-        width: 20px;
-        height: 20px;
-    }
-
-    .wa-recording-time {
-        font-size: 12px;
-        margin-right: 8px !important;
-        min-width: 30px !important;
-    }
-
-    .wa-recording-right {
-        gap: 8px;
-    }
-
-    .wa-send-btn-circle-inner.recording {
-        width: 36px;
-        height: 36px;
-    }
-}
+@media (max-width: 768px) {}
 
 /* Attachment Menu Styles */
 .wa-attachment-menu {
@@ -6769,15 +7003,37 @@ html {
         height: 24px;
     }
 }
+
 /* Community Info Styles */
-.wa-community-row-item { transition: background-color 0.2s; }
-.wa-community-row-item:hover { background-color: #f5f6f6; }
+.wa-community-row-item {
+    transition: background-color 0.2s;
+}
+
+.wa-community-row-item:hover {
+    background-color: #f5f6f6;
+}
+
 .wa-manage-community-text:hover {
     color: #027EB5 !important;
 }
 
-.wa-community-info-action { flex: 1; padding: 12px 0; border: 1px solid #e9edef; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; transition: all 0.2s; }
-.wa-community-info-action:hover { background-color: #f8f9fa; border-color: #d1d7db; }
+.wa-community-info-action {
+    flex: 1;
+    padding: 12px 0;
+    border: 1px solid #e9edef;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.wa-community-info-action:hover {
+    background-color: #f8f9fa;
+    border-color: #d1d7db;
+}
 
 /* Exit Community Modal */
 .wa-exit-option:hover {
@@ -6800,7 +7056,337 @@ html {
 }
 
 @keyframes slideInRight {
-    from { transform: translateX(100%); }
-    to { transform: translateX(0); }
+    from {
+        transform: translateX(100%);
+    }
+
+    to {
+        transform: translateX(0);
+    }
 }
+
+
+/* Voice Recording & Playback UI */
+.wa-voice-record-container {
+    display: flex;
+    align-items: center;
+    background-color: #ffffff;
+    border-radius: 20px;
+    padding: 8px 16px;
+    gap: 12px;
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    transition: all 0.3s ease;
+    animation: slideInBottom 0.2s ease-out;
+}
+
+@keyframes slideInBottom {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.wa-recording-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #ef4444;
+    font-weight: 500;
+}
+
+.wa-recording-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: #ef4444;
+    animation: pulse-red 1.5s infinite;
+}
+
+@keyframes pulse-red {
+    0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+    }
+
+    70% {
+        transform: scale(1);
+        box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+    }
+
+    100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    }
+}
+
+.wa-recording-waveform {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: 1;
+    height: 30px;
+}
+
+.wa-waveform-bar {
+    width: 2px;
+    background-color: #54656f;
+    border-radius: 1px;
+    transition: height 0.1s ease;
+    transform-origin: center;
+}
+
+@keyframes voice-wave {
+
+    0%,
+    100% {
+        transform: scaleY(0.2);
+    }
+
+    50% {
+        transform: scaleY(1.3);
+    }
+}
+
+.wa-waveform-bar.live-wave {
+    animation: voice-wave 0.9s ease-in-out infinite;
+}
+
+.wa-voice-btn.hover-red:hover {
+    background: #fee2e2;
+}
+
+
+.wa-voice-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.wa-voice-btn {
+    background: none;
+    border: none;
+    padding: 8px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+    color: #54656f;
+}
+
+.wa-voice-btn:hover {
+    background: #f0f2f5;
+}
+
+.wa-voice-btn.delete:hover {
+    background: #fee2e2;
+    color: #ef4444;
+}
+
+.wa-voice-btn.stop {
+    color: #ef4444;
+}
+
+.wa-voice-btn.play {
+    color: #027EB5;
+}
+
+.wa-review-player {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+}
+
+.wa-voice-review-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.wa-voice-send-btn {
+    background: #027EB5;
+    border: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.wa-voice-send-btn:hover {
+    transform: scale(1.05);
+    background: #016b9a;
+}
+
+.wa-view-once-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #54656f;
+    transition: color 0.2s;
+}
+
+.wa-view-once-btn.active {
+    color: #027EB5;
+}
+
+.wa-view-once-circle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+/* Voice Message Bubble Styling */
+.wa-voice-bubble-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 4px;
+    min-width: 220px;
+}
+
+.wa-voice-bubble-content.view-once {
+    min-width: unset;
+}
+
+.wa-voice-bubble-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #dfe5e7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    flex-shrink: 0;
+}
+
+.wa-voice-mic-badge {
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    color: #027EB5;
+    background: white;
+    border-radius: 50%;
+    padding: 1px;
+}
+
+.wa-voice-bubble-player {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.wa-voice-waveform-static {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 24px;
+}
+
+.wa-voice-meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: #54656f;
+}
+
+/* Glassy Theme for Voice Messages */
+.wa-voice-bubble-content.wa-glassy-playing {
+    position: relative;
+    overflow: hidden;
+}
+
+.wa-voice-bubble-content.spent {
+    cursor: default;
+}
+
+.wa-view-once-badge.spent .wa-view-once-circle {
+    opacity: 0.7;
+}
+
+.wa-view-once-btn.active .wa-view-once-circle {
+    background: rgba(2, 126, 181, 0.12);
+    transform: scale(1.1);
+    transition: all 0.2s ease;
+}
+
+/* Base styles for the glassy effect transition */
+.wa-voice-bubble-content {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+
+/* Refined View Once Fullscreen Player */
+.wa-view-once-fullscreen {
+    background: rgba(0, 0, 0, 0.03) !important;
+    backdrop-filter: blur(25px) !important;
+    -webkit-backdrop-filter: blur(25px) !important;
+}
+
+.wa-view-once-content {
+    background: #ffffff !important;
+    border: 1px solid rgba(0, 0, 0, 0.05) !important;
+    border-radius: 40px !important;
+    max-width: 480px !important;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.08) !important;
+    position: relative !important;
+}
+
+.wa-view-once-avatar-container,
+.wa-view-once-avatar-large,
+.wa-voice-mic-badge-large {
+    display: none !important;
+}
+
+.wa-fullscreen-close-text {
+    position: absolute !important;
+    top: 15px !important;
+    right: 15px !important;
+    left: auto !important;
+    bottom: auto !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    border: none !important;
+    padding: 10px;
+    font-size: 16px;
+    font-weight: 700;
+    color: #027EB5 !important;
+    cursor: pointer;
+    transition: all 0.2s;
+    z-index: 100 !important;
+    width: auto !important;
+    margin: 0 !important;
+}
+
+.wa-fullscreen-close-text:hover {
+    opacity: 0.6;
+    transform: scale(1.05) !important;
+}
+
+
 

@@ -98,3 +98,116 @@ button:focus-visible {
     transform: rotate(360deg);
   }
 }
+
+/* Send Button Styling (Base and Hover) */
+.wa-send-btn-inner {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.wa-send-btn-inner:hover {
+  transform: scale(1.1) !important;
+  background-color: #026ca0 !important;
+  /* Darker blue */
+  box-shadow: 0 3px 10px rgba(2, 126, 181, 0.3) !important;
+}
+
+/* Apply similar premium styles to voice controls */
+.wa-voice-btn {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: #8696a0 !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  cursor: pointer !important;
+  outline: none !important;
+  border-radius: 50% !important;
+  box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+  appearance: none !important;
+}
+
+.wa-voice-btn:hover {
+  background: rgba(0, 0, 0, 0.05) !important;
+  transform: scale(1.1) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+}
+
+.wa-voice-btn.delete:hover {
+  color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.08) !important;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.15) !important;
+}
+
+.wa-voice-btn.play:hover {
+  color: #3b4a54 !important;
+}
+
+/* View Once Button - Matching Style */
+.wa-view-once-btn {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  border-radius: 50% !important;
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+  appearance: none !important;
+}
+
+.wa-view-once-btn:hover {
+  background: rgba(0, 0, 0, 0.05) !important;
+  transform: scale(1.1) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+}
+
+.wa-view-once-btn.active .wa-view-once-circle {
+  border-color: #027EB5 !important;
+  background: rgba(2, 126, 181, 0.1);
+}
+
+.wa-view-once-circle {
+  border: 1.5px solid #54656f;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+/* Voice Recording Pulsing Dot Animation */
+@keyframes wa-pulse {
+  0% {
+    transform: scale(0.95);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.15);
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: scale(0.95);
+    opacity: 1;
+  }
+}
+
+.wa-recording-dot {
+  box-shadow: 0 0 10px rgba(2, 126, 181, 0.4);
+}
+
+@keyframes wa-slide-from-left {
+  0% {
+    transform: translateX(-400px);
+    opacity: 0;
+  }
+
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}

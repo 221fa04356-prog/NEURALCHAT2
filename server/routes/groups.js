@@ -34,21 +34,21 @@ const upload = multer({
             'application/pdf',         // PDF
             'application/msword',      // .doc
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
-            'audio/webm', 'audio/mp4', 'audio/mp3', 'audio/mpeg', 'audio/ogg', // Audio
-            'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm' // Videos
+            'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm', // Videos
+            'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/webm', 'audio/wav', 'audio/x-m4a' // Audio
         ];
         const ext = path.extname(file.originalname).toLowerCase();
-        const allowedExts = ['.jpg', '.jpeg', '.png', '.doc', '.docx', '.pdf', '.webm', '.mp3', '.m4a', '.ogg', '.mp4', '.avi', '.mkv', '.mov'];
+        const allowedExts = ['.jpg', '.jpeg', '.png', '.doc', '.docx', '.pdf', '.mp4', '.avi', '.mkv', '.mov', '.mp3', '.m4a', '.ogg', '.wav', '.webm'];
 
         const isAllowedType = allowedTypes.includes(file.mimetype) ||
-            file.mimetype.startsWith('audio/') ||
             file.mimetype.startsWith('video/') ||
-            file.mimetype.startsWith('image/');
+            file.mimetype.startsWith('image/') ||
+            file.mimetype.startsWith('audio/');
 
         if (isAllowedType && allowedExts.includes(ext)) {
             cb(null, true);
         } else {
-            cb(new Error(`Invalid file type (${file.mimetype}, ext: ${ext}). Only Images, PDFs, Word, Audio, and Video files are allowed.`));
+            cb(new Error(`Invalid file type (${file.mimetype}, ext: ${ext}). Only Images, PDFs, Word, Video, and Audio files are allowed.`));
         }
     }
 });
@@ -268,7 +268,7 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
     });
 }, async (req, res) => {
     try {
-        let { content, type, file_path, fileName, fileSize, duration, isForwarded, forward_count, is_view_once } = req.body;
+        let { content, type, file_path, fileName, fileSize, isForwarded, forward_count, is_view_once } = req.body;
         const senderId = req.user.id;
         const groupId = req.params.groupId;
         const file = req.file;
@@ -294,10 +294,10 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             fileName = file.originalname;
             fileSize = file.size;
 
-            if (req.body.type === 'audio' || file.mimetype.startsWith('audio/')) {
-                type = 'audio';
-            } else if (file.mimetype.startsWith('video/')) {
+            if (file.mimetype.startsWith('video/')) {
                 type = 'video';
+            } else if (file.mimetype.startsWith('audio/')) {
+                type = 'audio';
             } else if (file.mimetype.startsWith('image/')) {
                 type = 'image';
             } else {
@@ -313,7 +313,7 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             file_path: file_path || null,
             fileName: fileName || null,
             fileSize: fileSize || 0,
-            duration: duration || 0,
+            duration: req.body.duration,
             is_view_once: is_view_once === 'true' || is_view_once === true,
             is_forwarded: isForwarded === true || isForwarded === 'true',
             forward_count: forward_count || 0
