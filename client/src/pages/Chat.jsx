@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, memo } from 'react';
 import axios from 'axios';
 import logo from '../assets/logo.png';
 import { useNavigate } from 'react-router-dom';
 import {
     MessageSquare, CircleDashed, Users, MoreVertical, Plus, Megaphone,
-    Search, Settings, Phone, Video, Paperclip, Smile, Mic, Send,
+    Search, Settings, Phone, Video, Paperclip, Smile, Send, Mic, MicOff, Pause, PauseCircle, PlayCircle, StopCircle,
     ArrowLeft, CheckCheck, User as UserIcon, FileText, Calendar, X, Star, ChevronDown, ChevronRight, ChevronLeft, Bell,
     Info, Reply, Copy, Forward, Pin, CheckSquare, Download, Trash2, Archive, BellOff, HeartOff, XCircle, Lock, List, Heart, ThumbsDown, Share, Pencil, Image, StarOff, Camera, Link2 as LinkIcon,
     LayoutGrid, UserPlus, ArrowRight, Share2, Crop, Check, RotateCcw, Minus, Delete, User, Play, MapPin, IndianRupee, Sticker,
@@ -29,19 +29,545 @@ import { countryCodes } from '../utils/countryCodes';
 
 import NeuralBackground from '../components/NeuralBackground';
 import ConfirmModal from '../components/ConfirmModal';
-import VoiceMessagePlayer from '../components/VoiceMessagePlayer';
 import CountryCodeSelect from '../components/CountryCodeSelect';
 
 // --- Socket Link ---
 // --- Socket Link ---
 // --- Socket Link ---
-const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const SOCKET_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3000`;
 const socket = io(SOCKET_URL, {
     autoConnect: false, // Don't connect until we have a token
     transports: ['websocket', 'polling'], //  Try WebSocket first, then polling
     reconnection: true,
     reconnectionAttempts: 10,
     reconnectionDelay: 1000,
+});
+
+const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, userData, replyingTo, isMeMsg }) => {
+    const [isPaused, setIsPaused] = useState(false);
+    const [recordingTime, setRecordingTime] = useState(0);
+    const [audioBlob, setAudioBlob] = useState(null);
+    const [audioUrl, setAudioUrl] = useState(null);
+    const [isReviewing, setIsReviewing] = useState(false);
+    const [waveformPoints, setWaveformPoints] = useState([]);
+    const [isViewOnceVoice, setIsViewOnceVoice] = useState(false);
+    const [previewProgress, setPreviewProgress] = useState(0);
+    const [previewSeconds, setPreviewSeconds] = useState(0);
+    const [isPlayingPreview, setIsPlayingPreview] = useState(false);
+
+    const [isDragging, setIsDragging] = useState(false);
+    const mediaRecorderRef = useRef(null);
+    const audioChunksRef = useRef([]);
+    const timerRef = useRef(null);
+    const waveTimerRef = useRef(null);
+    const startTimeRef = useRef(null);
+    const accumulatedDurationRef = useRef(0);
+    const analyserRef = useRef(null);
+    const dataArrayRef = useRef(null);
+    const audioContextRef = useRef(null);
+    const waveformTimerHandler = useRef(null);
+    const previewAudioRef = useRef(null);
+    const mimeTypeRef = useRef('audio/webm');
+    const allWaveformPointsRef = useRef([]);
+    const waveformRef = useRef(null);
+    const isViewOnceRef = useRef(false);
+
+    useEffect(() => {
+        isViewOnceRef.current = isViewOnceVoice;
+    }, [isViewOnceVoice]);
+
+    const formatVoiceTime = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    const deleteRecording = (e) => {
+        if (e) e.stopPropagation();
+        if (audioContextRef.current) {
+            audioContextRef.current.close().catch(() => { });
+            audioContextRef.current = null;
+        }
+        if (waveTimerRef.current) clearInterval(waveTimerRef.current);
+
+        if (previewAudioRef.current) {
+            previewAudioRef.current.pause();
+            previewAudioRef.current = null;
+        }
+        setIsPlayingPreview(false);
+        setIsPaused(false);
+        setIsReviewing(false);
+        setAudioBlob(null);
+        setAudioUrl(null);
+        setRecordingTime(0);
+        setIsViewOnceVoice(false);
+        window.directSendRequested = false;
+        if (timerRef.current) clearInterval(timerRef.current);
+        if (mediaRecorderRef.current) {
+            try {
+                mediaRecorderRef.current.onstop = null;
+                mediaRecorderRef.current.ondataavailable = null;
+                if (mediaRecorderRef.current.state !== 'inactive') {
+                    mediaRecorderRef.current.stop();
+                }
+                const tracks = mediaRecorderRef.current.stream?.getTracks();
+                if (tracks) tracks.forEach(track => track.stop());
+            } catch (e) { }
+            mediaRecorderRef.current = null;
+        }
+        onCancel();
+    };
+
+    const startRecording = async () => {
+        setIsPaused(false);
+        setRecordingTime(0);
+        setIsReviewing(false);
+        setAudioUrl(null);
+        setAudioBlob(null);
+        setIsViewOnceVoice(false);
+        setWaveformPoints(new Array(65).fill(isMobile ? 1.5 : 2)); // Pre-fill silent baseline
+        setPreviewProgress(0);
+        setPreviewSeconds(0);
+        allWaveformPointsRef.current = [];
+
+        // Ensure AudioContext is available and resumed
+        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+            audioContextRef.current.resume();
+        }
+
+        if (timerRef.current) clearInterval(timerRef.current);
+        accumulatedDurationRef.current = 0;
+        startTimeRef.current = Date.now();
+        timerRef.current = setInterval(() => {
+            const elapsed = (accumulatedDurationRef.current + (Date.now() - startTimeRef.current)) / 1000;
+            setRecordingTime(elapsed);
+        }, 100);
+
+        try {
+            // Simplified constraints for maximum compatibility and reduced hardware jitter
+            const constraints = {
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+            let mimeType = 'audio/webm';
+            if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) mimeType = 'audio/webm;codecs=opus';
+            else if (MediaRecorder.isTypeSupported('audio/webm')) mimeType = 'audio/webm';
+            else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) mimeType = 'audio/ogg;codecs=opus';
+            else if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
+            mimeTypeRef.current = mimeType;
+
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            const audioContext = new AudioContext({ latencyHint: 'interactive' });
+            audioContextRef.current = audioContext;
+            if (audioContext.state === 'suspended') await audioContext.resume();
+
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 512;
+            analyserRef.current = analyser;
+
+            const source = audioContext.createMediaStreamSource(stream);
+
+            // --- Ultra Clarity Voice Processing Chain ---
+
+            // 1. Aggressive High-pass: Removes all low-frequency rumble, desk thumps, and background noise (below 150Hz)
+            const hpFilter = audioContext.createBiquadFilter();
+            hpFilter.type = 'highpass';
+            hpFilter.frequency.value = 150;
+            hpFilter.Q.value = 1.2;
+
+            // 2. Vocal Presence Peak: Boosts the 3kHz range where human speech clarity resides
+            const presenceFilter = audioContext.createBiquadFilter();
+            presenceFilter.type = 'peaking';
+            presenceFilter.frequency.value = 3000;
+            presenceFilter.gain.value = 6;
+
+            // 3. Low-pass filter: Sharp cut for high-frequency hiss (above 5000Hz)
+            const lpFilter = audioContext.createBiquadFilter();
+            lpFilter.type = 'lowpass';
+            lpFilter.frequency.value = 5000;
+            lpFilter.Q.value = 1;
+
+            // 4. Aggressive Dynamics Compressor: Clamps down on noise floor and limits peaks
+            const compressor = audioContext.createDynamicsCompressor();
+            compressor.threshold.setValueAtTime(-32, audioContext.currentTime);
+            compressor.knee.setValueAtTime(15, audioContext.currentTime);
+            compressor.ratio.setValueAtTime(16, audioContext.currentTime);
+            compressor.attack.setValueAtTime(0.002, audioContext.currentTime);
+            compressor.release.setValueAtTime(0.20, audioContext.currentTime);
+
+            // 5. Makeup Gain: Adjusts the output level for a firm, "grasped" sound
+            const outputGain = audioContext.createGain();
+            outputGain.gain.value = 1.4;
+
+            // 6. Destination for the processed audio recording
+            const destination = audioContext.createMediaStreamDestination();
+
+            // Link the chain: Mic -> HP -> Presence -> LP -> Compressor -> Gain -> (Analyser + Output Stream)
+            source.connect(hpFilter);
+            hpFilter.connect(presenceFilter);
+            presenceFilter.connect(lpFilter);
+            lpFilter.connect(compressor);
+            compressor.connect(outputGain);
+            outputGain.connect(destination);
+            outputGain.connect(analyser); // Waveform now shows the optimized "vocal" signal
+
+            // Initialize MediaRecorder - Use the PROCESSED stream for the final file
+            const mediaRecorder = new MediaRecorder(destination.stream, { mimeType });
+            mediaRecorderRef.current = mediaRecorder;
+            audioChunksRef.current = [];
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            dataArrayRef.current = dataArray;
+
+            const startWaveformTimer = () => {
+                if (waveTimerRef.current) clearInterval(waveTimerRef.current);
+                waveTimerRef.current = setInterval(() => {
+                    const analyser = analyserRef.current;
+                    const dataArray = dataArrayRef.current;
+                    if (audioContextRef.current && analyser && dataArray) {
+                        analyser.getByteFrequencyData(dataArray);
+
+                        let sum = 0;
+                        const startBin = 2; // Bass filter
+                        const endBin = 60;
+                        for (let i = startBin; i < endBin; i++) sum += dataArray[i];
+                        const avg = sum / (endBin - startBin);
+
+                        // Refined height logic for better visual clarity - matching the "ripple" feel
+                        let finalHeight = (isMobile ? 2 : 3);
+                        if (avg > 10) { 
+                            const sensitivity = 0.7; // Increased for more dynamic movement
+                            const peak = Math.pow((avg - 10) / (255 - 10), sensitivity) * 55; // Increased peak
+                            finalHeight = Math.max(3, peak);
+                        }
+
+                        if (avg > 14) finalHeight += Math.random() * 4;
+                        finalHeight = Math.min(36, finalHeight);
+
+                        allWaveformPointsRef.current.push(finalHeight);
+                        setWaveformPoints(prev => {
+                            const next = [...prev, finalHeight];
+                            if (next.length > 65) return next.slice(1);
+                            return next;
+                        });
+                    }
+                }, 60);
+            };
+
+            waveformTimerHandler.current = startWaveformTimer;
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) {
+                    audioChunksRef.current.push(e.data);
+                    // Whenever data is received (e.g., via requestData() on pause or at the end of recording),
+                    // update the preview blob and URL to ensure the user can play back the recording.
+                    const blob = new Blob(audioChunksRef.current, { type: mimeTypeRef.current });
+                    const url = URL.createObjectURL(blob);
+                    setAudioBlob(blob);
+                    setAudioUrl(url);
+                }
+            };
+
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(audioChunksRef.current, { type: mimeTypeRef.current });
+                const url = URL.createObjectURL(blob);
+                setAudioBlob(blob);
+                setAudioUrl(url);
+                setIsPaused(false);
+                if (timerRef.current) clearInterval(timerRef.current);
+                if (startTimeRef.current) {
+                    accumulatedDurationRef.current += (Date.now() - startTimeRef.current);
+                    startTimeRef.current = null;
+                }
+                const finalDuration = accumulatedDurationRef.current / 1000;
+                setRecordingTime(finalDuration);
+                if (audioContextRef.current) {
+                    audioContextRef.current.close().catch(() => { });
+                    audioContextRef.current = null;
+                }
+                if (waveTimerRef.current) clearInterval(waveTimerRef.current);
+
+                if (window.directSendRequested) {
+                    onSend(blob, finalDuration, isViewOnceRef.current);
+                } else {
+                    // Downsample full waveform for review
+                    const total = allWaveformPointsRef.current.length;
+                    const target = 65;
+                    if (total > 0) {
+                        const step = total / target;
+                        const downsampled = [];
+                        for (let i = 0; i < target; i++) {
+                            downsampled.push(allWaveformPointsRef.current[Math.floor(i * step)] || (isMobile ? 1.5 : 2));
+                        }
+                        setWaveformPoints(downsampled);
+                    }
+                    setIsReviewing(true);
+                }
+            };
+
+            // Start recording without timeslice to prevent chunk collision repetition
+            mediaRecorder.start();
+            if (waveformTimerHandler.current) waveformTimerHandler.current();
+
+        } catch (err) {
+            console.error("Mic error:", err);
+            onCancel();
+            setSnackbar({ message: "Microphone access denied.", type: 'error' });
+        }
+    };
+
+    const stopRecording = () => {
+        if (mediaRecorderRef.current && (mediaRecorderRef.current.state === 'recording' || mediaRecorderRef.current.state === 'paused')) {
+            mediaRecorderRef.current.stop();
+            mediaRecorderRef.current.stream?.getTracks().forEach(track => track.stop());
+        }
+    };
+
+    const pauseRecording = (e) => {
+        if (e) e.stopPropagation();
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            try {
+                // Manually request data only on pause to allow preview.
+                // This triggers ondataavailable which now safely handles the blob/url update.
+                mediaRecorderRef.current.requestData();
+                mediaRecorderRef.current.pause();
+                if (waveTimerRef.current) clearInterval(waveTimerRef.current);
+
+                setIsPaused(true);
+                if (timerRef.current) clearInterval(timerRef.current);
+                if (startTimeRef.current) {
+                    accumulatedDurationRef.current += (Date.now() - startTimeRef.current);
+                    startTimeRef.current = null;
+                }
+
+                // Downsample for static preview
+                const total = allWaveformPointsRef.current.length;
+                const target = 65;
+                if (total > 0) {
+                    const step = total / target;
+                    const downsampled = [];
+                    for (let i = 0; i < target; i++) {
+                        downsampled.push(allWaveformPointsRef.current[Math.floor(i * step)] || (isMobile ? 1.5 : 2));
+                    }
+                    setWaveformPoints(downsampled);
+                }
+            } catch (err) { }
+        }
+    };
+
+    const resumeRecording = (e) => {
+        if (e) e.stopPropagation();
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
+            try {
+                if (previewAudioRef.current) {
+                    previewAudioRef.current.ontimeupdate = null;
+                    previewAudioRef.current.onended = null;
+                    previewAudioRef.current.pause();
+                    previewAudioRef.current = null;
+                    setIsPlayingPreview(false);
+                }
+                mediaRecorderRef.current.resume();
+                setIsPaused(false);
+                setPreviewProgress(0);
+                setPreviewSeconds(recordingTime);
+                if (timerRef.current) clearInterval(timerRef.current);
+                startTimeRef.current = Date.now();
+                timerRef.current = setInterval(() => {
+                    const elapsed = (accumulatedDurationRef.current + (Date.now() - startTimeRef.current)) / 1000;
+                    setRecordingTime(elapsed);
+                }, 100);
+                if (waveformTimerHandler.current) waveformTimerHandler.current();
+            } catch (err) { }
+        }
+    };
+
+    const togglePreviewPlayback = () => {
+        if (!audioUrl) return;
+        if (isPlayingPreview) {
+            if (previewAudioRef.current) previewAudioRef.current.pause();
+            setIsPlayingPreview(false);
+        } else {
+            if (previewAudioRef.current) {
+                previewAudioRef.current.play().catch(console.error);
+                setIsPlayingPreview(true);
+            } else {
+                const audio = new Audio(audioUrl);
+                previewAudioRef.current = audio;
+
+                audio.onloadedmetadata = () => {
+                    const duration = (recordingTime > 0) ? recordingTime : ((audio.duration && isFinite(audio.duration)) ? audio.duration : 0);
+                    if (previewProgress > 0) {
+                        audio.currentTime = (previewProgress / 100) * duration;
+                    }
+                };
+                audio.ontimeupdate = () => {
+                    if (previewAudioRef.current !== audio) return;
+                    const duration = (recordingTime > 0) ? recordingTime : ((audio.duration && isFinite(audio.duration)) ? audio.duration : 0);
+                    setPreviewProgress((audio.currentTime / (duration || 1)) * 100);
+                    setPreviewSeconds(Math.floor(audio.currentTime));
+                };
+                audio.onended = () => {
+                    if (previewAudioRef.current !== audio) return;
+                    setIsPlayingPreview(false);
+                    setPreviewProgress(0);
+                    setPreviewSeconds(recordingTime);
+                    previewAudioRef.current = null;
+                };
+                audio.play().then(() => setIsPlayingPreview(true)).catch(() => setIsPlayingPreview(false));
+            }
+        }
+    };
+
+    useEffect(() => {
+        startRecording();
+        return () => {
+            if (waveTimerRef.current) clearInterval(waveTimerRef.current);
+            if (timerRef.current) clearInterval(timerRef.current);
+            if (previewAudioRef.current) previewAudioRef.current.pause();
+        };
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            if (audioUrl && audioUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(audioUrl);
+            }
+        };
+    }, [audioUrl]);
+
+    if (!isReviewing && !recordingTime && waveformPoints.length === 0 && !isPaused) {
+        // Optimization: don't render until first data point
+    }
+
+    const btnSize = isMobile ? '32px' : '40px';
+    const iconSize = isMobile ? 18 : 24;
+    const actionGap = isMobile ? '2px' : '16px';
+    const sendBtnSize = isMobile ? '38px' : '44px';
+
+    return (
+        <div style={{ display: 'flex', width: '100%', alignItems: 'center', gap: '8px' }}>
+            <div className="wa-input-pill" style={{
+                flex: 1, padding: isMobile ? '4px 6px' : '8px 12px 8px 16px',
+                minHeight: isMobile ? '44px' : '54px', borderRadius: '30px',
+                display: 'flex', alignItems: 'center', background: '#ffffff',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.08)', gap: isMobile ? '2px' : '16px',
+                overflow: 'hidden'
+            }}>
+                {!isMobile && <div style={{ flex: 1 }}></div>}
+                <div className="wa-voice-controls-cluster" style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '2px' : '16px', flex: isMobile ? 1 : 'unset', minWidth: 0, overflow: 'hidden' }}>
+                    <button onClick={deleteRecording} className="wa-voice-btn delete" data-tooltip="Delete" style={{ width: btnSize, height: btnSize, borderRadius: '50%', color: '#54656f', flexShrink: 0 }}>
+                        <Trash2 size={isMobile ? 16 : iconSize} />
+                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '4px' : '10px', flexShrink: 0 }}>
+                        {!isPaused && !isReviewing && <div className="wa-recording-dot" style={{ width: isMobile ? '7px' : '10px', height: isMobile ? '7px' : '10px', borderRadius: '50%', backgroundColor: '#ef4444', animation: 'wa-pulse 1.5s infinite ease-in-out' }} />}
+                        <span style={{ color: '#111b21', fontSize: isMobile ? '14px' : '18px', fontWeight: 500 }}>
+                            {(!isPaused && !isReviewing)
+                                ? formatVoiceTime(recordingTime)
+                                : (isPlayingPreview || previewProgress > 0 ? formatVoiceTime(previewSeconds) : formatVoiceTime(recordingTime))}
+                        </span>
+                    </div>
+                    <div
+                        ref={waveformRef}
+                        onMouseDown={(e) => {
+                            if (!isPaused && !isReviewing) return;
+                            const rect = waveformRef.current.getBoundingClientRect();
+
+                            const updateSeekFromEvent = (moveEvent) => {
+                                const x = moveEvent.clientX - rect.left;
+                                const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
+                                setPreviewProgress(percent);
+
+                                if (previewAudioRef.current) {
+                                    const audio = previewAudioRef.current;
+                                    const duration = (recordingTime > 0) ? recordingTime : ((audio.duration && isFinite(audio.duration)) ? audio.duration : 0);
+                                    audio.currentTime = (percent / 100) * (duration || 0);
+                                } else {
+                                    setPreviewSeconds(Math.floor((percent / 100) * recordingTime));
+                                }
+                            };
+
+                            const onMouseMove = (moveEvent) => {
+                                setIsDragging(true);
+                                updateSeekFromEvent(moveEvent);
+                            };
+
+                            const onMouseUp = () => {
+                                setIsDragging(false);
+                                window.removeEventListener('mousemove', onMouseMove);
+                                window.removeEventListener('mouseup', onMouseUp);
+                            };
+
+                            window.addEventListener('mousemove', onMouseMove);
+                            window.addEventListener('mouseup', onMouseUp);
+
+                            updateSeekFromEvent(e); // Seek immediately on click/down
+                        }}
+                        className="wa-recording-waveform"
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: isMobile ? '1px' : '2.5px',
+                            height: '36px',
+                            flex: 1,
+                            maxWidth: isMobile ? (window.innerWidth > 500 ? '280px' : '125px') : '260px',
+                            minWidth: 0,
+                            overflow: 'hidden',
+                            justifyContent: 'center',
+                            position: 'relative',
+                            cursor: (isPaused || isReviewing) ? 'grab' : 'default',
+                            flexShrink: 5
+                        }}
+                    >
+                        {waveformPoints.map((h, i) => (
+                            <div key={i} style={{
+                                height: `${isMobile ? h * 0.8 : h}px`,
+                                backgroundColor: '#027EB5',
+                                width: '2px',
+                                borderRadius: '1px',
+                                opacity: (isPaused || isReviewing) ? (i / waveformPoints.length < previewProgress / 100 ? 1 : 0.4) : 1,
+                                transition: 'height 0.12s'
+                            }} />
+                        ))}
+                        {(isPaused || isReviewing) && (
+                            <div style={{
+                                position: 'absolute',
+                                left: `${previewProgress}%`,
+                                width: '10px',
+                                height: '10px',
+                                backgroundColor: '#027EB5', // Theme Blue shade
+                                borderRadius: '50%',
+                                pointerEvents: 'none',
+                                transform: 'translateX(-50%)',
+                                zIndex: 10,
+                                transition: isDragging ? 'none' : 'left 0.1s linear'
+                            }} />
+                        )}
+                    </div>
+                </div>
+                {(isPaused || isReviewing) && (
+                    <button onClick={togglePreviewPlayback} className="wa-voice-btn play" data-tooltip={isPlayingPreview ? "Pause" : "Play"} style={{ width: btnSize, height: btnSize }}>
+                        {isPlayingPreview ? <div style={{ display: 'flex', gap: '3px', color: '#8696a0' }}><div style={{ width: '3px', height: '14px', background: 'currentColor' }}></div><div style={{ width: '3px', height: '14px', background: 'currentColor' }}></div></div> : <Play size={iconSize} fill="#8696a0" color="#8696a0" />}
+                    </button>
+                )}
+                <div style={{ display: 'flex', gap: isMobile ? '4px' : actionGap, alignItems: 'center', marginLeft: isMobile ? '0px' : '8px', flexShrink: 0 }}>
+                    <button onClick={(e) => isPaused ? resumeRecording(e) : (isReviewing ? null : pauseRecording(e))} className="wa-voice-btn hover-red" data-tooltip={isPaused ? "Resume" : (isReviewing ? "" : "Pause")} style={{ width: btnSize, height: btnSize, opacity: isReviewing ? 0.5 : 1 }}>
+                        {isPaused || isReviewing ? <Mic size={iconSize} color="#ef4444" /> : <div style={{ display: 'flex', gap: '3px', color: '#ef4444' }}><div style={{ width: '3.2px', height: '14px', background: 'currentColor' }}></div><div style={{ width: '3.2px', height: '14px', background: 'currentColor' }}></div></div>}
+                    </button>
+                    <button onClick={() => setIsViewOnceVoice(!isViewOnceVoice)} className={`wa-view-once-btn ${isViewOnceVoice ? 'active' : ''}`} data-tooltip="View once" style={{ width: btnSize, height: btnSize }}>
+                        <span className="wa-view-once-circle" style={{ borderColor: isViewOnceVoice ? '#027EB5' : '#54656f', color: isViewOnceVoice ? '#027EB5' : '#54656f' }}>1</span>
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); if (isReviewing) { onSend(audioBlob, recordingTime, isViewOnceVoice); } else { window.directSendRequested = true; stopRecording(); } }} className="wa-send-btn-inner" data-tooltip="Send" style={{ width: sendBtnSize, height: sendBtnSize, background: '#027EB5', borderRadius: '50%' }}>
+                        <Send size={isMobile ? 18 : 20} color="white" />
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
 });
 
 const getYouTubeVideoId = (url) => {
@@ -72,32 +598,27 @@ export default function Chat() {
     const [file, setFile] = useState(null);
     const fileInputRef = useRef(null);
 
-    // --- Voice Recording State ---
-    const [isRecording, setIsRecording] = useState(false);
-    const [recordingPaused, setRecordingPaused] = useState(false);
-    const [recordingTime, setRecordingTime] = useState(0);
-    const mediaRecorderRef = useRef(null);
-    const audioStreamRef = useRef(null);
-    const audioChunksRef = useRef([]);
-    const recordingTimerRef = useRef(null);
-    const [isViewOnce, setIsViewOnce] = useState(false);
-    const canvasRef = useRef(null);
-    const audioContextRef = useRef(null);
-    const analyserRef = useRef(null);
-    const animationFrameRef = useRef(null);
-    const recordingPausedRef = useRef(false);
-    const [isReviewPlaying, setIsReviewPlaying] = useState(false);
-    const [previewTime, setPreviewTime] = useState(0);
-    const previewTimerRef = useRef(null);
-    const previewTimeRef = useRef(0);
-    const recordingTimeRef = useRef(0);
-    const isReviewPlayingRef = useRef(false);
-    const audioWaveHistoryRef = useRef([]);
-    const audioPreviewRef = useRef(null);
     const [showViewOnceModal, setShowViewOnceModal] = useState(false);
     const [viewOnceMsg, setViewOnceMsg] = useState(null);
 
+    const [selfPlayedMsgs, setSelfPlayedMsgs] = useState(() => {
+        const saved = localStorage.getItem(`selfPlayedMsgs_${user.id || user._id}`);
+        return new Set(saved ? JSON.parse(saved) : []);
+    });
+
+    useEffect(() => {
+        const userId = user.id || user._id;
+        if (userId) {
+            localStorage.setItem(`selfPlayedMsgs_${userId}`, JSON.stringify(Array.from(selfPlayedMsgs)));
+        }
+    }, [selfPlayedMsgs, user.id, user._id]);
+
+    const markSelfPlayed = (msgId) => {
+        setSelfPlayedMsgs(prev => new Set([...prev, String(msgId)]));
+    };
+
     const handleJoinGroup = async (groupId) => {
+
         try {
             const token = localStorage.getItem('token');
             const res = await axios.post(`/api/groups/${groupId}/join`, {}, {
@@ -167,7 +688,9 @@ export default function Chat() {
     const [typingLinkPreview, setTypingLinkPreview] = useState(null); // For typing preview overlay
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [msgToDelete, setMsgToDelete] = useState(null);
-    const [adminConfirmModal, setAdminConfirmModal] = useState(null); // { type: 'add'|'remove', member: Object }
+    const msgToDeleteRef = useRef(null);
+    useEffect(() => { msgToDeleteRef.current = msgToDelete; }, [msgToDelete]);
+    const adminConfirmModal = useState(null)[0];
     const selectedUserRef = useRef(null);
     const userRef = useRef(user);
     const groupsRef = useRef([]);
@@ -453,7 +976,7 @@ export default function Chat() {
             const isRejected = selectedUser?.requestStatus === 'rejected';
             const isPending = selectedUser?.requestStatus === 'pending';
             const updatedAt = selectedUser?.requestUpdatedAt;
-            
+
             if (isPending) return true;
             if (isRejected && updatedAt && (new Date() - new Date(updatedAt)) < 24 * 60 * 60 * 1000) {
                 return true;
@@ -475,11 +998,11 @@ export default function Chat() {
 
                 // Fallback to community membership check
                 const commIdCheck = String(selectedGroup.community_id || selectedGroup.communityId || '');
-                let community = (communities || []).find(c => 
+                let community = (communities || []).find(c =>
                     String(c.announcements?._id || c.announcements) === String(selectedGroup._id) ||
                     (commIdCheck && String(c._id || c.id) === commIdCheck)
                 );
-                
+
                 if (!community && selectedCommunity && (
                     String(selectedCommunity.announcements?._id || selectedCommunity.announcements) === String(selectedGroup._id) ||
                     (commIdCheck && String(selectedCommunity._id || selectedCommunity.id) === commIdCheck)
@@ -493,7 +1016,7 @@ export default function Chat() {
                     const isCommAdmin = (community.admins || []).some(a => String(a?._id || a) === currentMyId);
 
                     if (isCommMem || isCommOwner || isCommAdmin) {
-                        return false; 
+                        return false;
                     }
                 }
                 return true; // Restricted if not in community
@@ -654,6 +1177,9 @@ export default function Chat() {
     const [communityInfoTab, setCommunityInfoTab] = useState('community'); // 'community' or 'announcements'
     const [pendingWhoCanAddGroups, setPendingWhoCanAddGroups] = useState('everyone');
     const [selectedCommunity, setSelectedCommunity] = useState(null);
+    const [activeViewOnceMsg, setActiveViewOnceMsg] = useState(null);
+    const [viewOnceElapsed, setViewOnceElapsed] = useState(0);
+    const [isMuting, setIsMuting] = useState(false);
     useEffect(() => { selectedCommunityRef.current = selectedCommunity; }, [selectedCommunity]);
     const [isCommunityDescDismissed, setIsCommunityDescDismissed] = useState(false);
     const [adminContextMenu, setAdminContextMenu] = useState(null); // { member, x, y, communityId, isAdmin }
@@ -664,7 +1190,11 @@ export default function Chat() {
     const [communityMemberSearchQuery, setCommunityMemberSearchQuery] = useState('');
     const [isCommunityMemberSearchOpen, setIsCommunityMemberSearchOpen] = useState(false);
 
-    // Communities are persisted in MongoDB; only pin/mute preferences remain in localStorage.
+    // --- Recording State ---
+    const [isRecording, setIsRecording] = useState(false);
+
+    const [playingAudioId, setPlayingAudioId] = useState(null);
+
 
     // Synchronize refs with state
     useEffect(() => {
@@ -962,7 +1492,7 @@ export default function Chat() {
         let contentToCopy = '';
         if (msg.type === 'text') {
             contentToCopy = msg.content || '';
-        } else if (msg.type === 'file' || msg.type === 'video' || msg.type === 'audio') {
+        } else if (msg.type === 'file' || msg.type === 'video') {
             // Copy URL and content if available
             const url = msg.file_path ? (msg.file_path.startsWith('http') ? msg.file_path : `${window.location.origin}${msg.file_path}`) : '';
             contentToCopy = msg.content ? `${msg.content}\n${url}` : url;
@@ -1207,7 +1737,7 @@ export default function Chat() {
     };
 
     const handleChatSelectionBulkDownload = async () => {
-        const mediaMsgs = forwardSelectedMsgs.filter(m => m.type === 'image' || m.type === 'video' || m.type === 'file' || m.type === 'audio');
+        const mediaMsgs = forwardSelectedMsgs.filter(m => m.type === 'image' || m.type === 'video' || m.type === 'file');
         if (mediaMsgs.length === 0) {
             setSnackbar({ message: 'No media messages selected', type: 'info' });
             return;
@@ -1439,7 +1969,7 @@ export default function Chat() {
                     if (data.type === 'text') previewText = data.content;
                     else if (data.type === 'image') previewText = '📷 Sent an image';
                     else if (data.type === 'video') previewText = '🎥 Video';
-                    else if (data.type === 'audio') previewText = '🎤 Voice message';
+                    else if (data.type === 'video') previewText = '🎥 Video';
                     else if (data.type === 'file') previewText = '📄 Sent a file';
 
                     if (previewText.length > 50) previewText = previewText.substring(0, 50) + '...';
@@ -1485,7 +2015,8 @@ export default function Chat() {
                         lastMessage: {
                             content: data.content,
                             created_at: new Date().toISOString(),
-                            type: data.type || 'text'
+                            type: data.type || 'text',
+                            is_view_once: data.is_view_once || false
                         }
                     };
                 }
@@ -1594,6 +2125,16 @@ export default function Chat() {
             setGroupMessages(updateMsgs);
         };
 
+        const onMessageViewed = (data) => {
+            const updateMsgs = prev => prev.map(msg =>
+                (String(msg._id) === String(data.messageId) || String(msg.id) === String(data.messageId))
+                    ? { ...msg, is_viewed: data.is_viewed }
+                    : msg
+            );
+            setMessages(updateMsgs);
+            setGroupMessages(updateMsgs);
+        };
+
         const onMessageDeleted = (data) => {
             console.log('Socket: message_deleted', data);
             setMessages(prev => prev.map(msg =>
@@ -1651,6 +2192,7 @@ export default function Chat() {
         socket.on('message_deleted', onMessageDeleted);
         socket.on('message_pinned', onMessagePinned);
         socket.on('message_opened', onMessageOpened);
+        socket.on('message_viewed', onMessageViewed);
         socket.on('user_profile_updated', onUserProfileUpdated);
 
         const onForceLogout = () => {
@@ -1689,14 +2231,14 @@ export default function Chat() {
             setSnackbar({ message: 'Your account has been locked due to multiple rejections.', type: 'error' });
         };
         socket.on('account_locked', onAccountLocked);
-        
+
         const onMessageRestrictionUpdated = (data) => {
             console.log('Socket: message_restriction_updated', data);
             const { targetId, status, updatedAt, rejectedBy } = data;
-            
-            setUsers(prev => prev.map(u => 
-                String(u._id) === String(targetId) 
-                    ? { ...u, requestStatus: status, requestUpdatedAt: updatedAt, requestRejectedBy: rejectedBy } 
+
+            setUsers(prev => prev.map(u =>
+                String(u._id) === String(targetId)
+                    ? { ...u, requestStatus: status, requestUpdatedAt: updatedAt, requestRejectedBy: rejectedBy }
                     : u
             ));
 
@@ -1751,20 +2293,20 @@ export default function Chat() {
         // Listen for community member removal notifications
         const onCommunityMemberRemoved = (data) => {
             console.log('Socket: community_member_removed', data);
-            
+
             // Only show snackbar if the removed member is ME
             const myId = userRef.current?.id || userRef.current?._id;
             const removedUserId = data.memberId || data.userId;
-            
+
             if (removedUserId && myId && String(removedUserId) === String(myId)) {
                 setSnackbar({ message: data.message || 'You were removed from the community', type: 'info', variant: 'system' });
             }
-            
+
             fetchCommunities();
             fetchGroups();
         };
         socket.on('community_member_removed', onCommunityMemberRemoved);
-        
+
         // Listen for community member added (being added to a community)
         const onCommunityMemberAdded = (data) => {
             console.log('Socket: community_member_added', data);
@@ -1787,11 +2329,11 @@ export default function Chat() {
             fetchCommunities();
             // If we are looking at this community's info, refresh it
             const commId = data.communityId || data.community?._id || data.community?.id;
-            
+
             if (data.community) {
                 const updatedComm = { ...data.community, id: data.community._id || data.community.id, is_community: true };
                 setCommunities(prev => prev.map(c => String(c._id || c.id) === String(commId) ? updatedComm : c));
-                
+
                 const currentSelected = selectedCommunityRef.current;
                 if (currentSelected && String(currentSelected._id || currentSelected.id) === String(commId)) {
                     setSelectedCommunity(updatedComm);
@@ -1807,7 +2349,7 @@ export default function Chat() {
                         headers: { 'Authorization': `Bearer ${token}` }
                     }).then(res => {
                         if (res.data) setSelectedGroup(prev => ({ ...prev, ...res.data }));
-                    }).catch(() => {});
+                    }).catch(() => { });
                 }
             }
         };
@@ -1816,7 +2358,7 @@ export default function Chat() {
         // Listen for new group messages
         const onGroupMessage = (data) => {
             console.log('[DEBUG] group_message received:', data);
-            fetchGroups(); 
+            fetchGroups();
             fetchCommunities(); // Added for unread counts & last message sync in communities
             const currentSelectedGroup = selectedGroupRef?.current;
             // Only consider it 'current' if we have an active selection AND we are looking at the chat
@@ -1885,6 +2427,7 @@ export default function Chat() {
                 _id: data.message?._id,
                 content: data.message?.content || '',
                 type: data.message?.type || 'text',
+                is_view_once: data.message?.is_view_once || false,
                 created_at: data.message?.created_at || new Date().toISOString(),
                 sender_id: data.message?.sender_id,
                 is_deleted_by_user: data.message?.is_deleted_by_user,
@@ -1909,7 +2452,7 @@ export default function Chat() {
                 const annId = String(c.announcements?._id || c.announcements?.id || c.announcements);
                 const isAnn = String(data.groupId) === annId;
                 const hasGroup = (c.groups || []).some(g => String(g._id || g.id || g) === String(data.groupId));
-                
+
                 if (hasGroup || isAnn) {
                     let updatedC = { ...c };
                     if (isAnn) {
@@ -1942,7 +2485,7 @@ export default function Chat() {
             if (String(data.readerId) === String(myId)) {
                 // If I'm the one who read the messages, sync sidebar unread count
                 setGroups(prev => prev.map(g => String(g._id) === String(data.groupId) ? { ...g, unreadCount: 0 } : g));
-                
+
                 const clearUnread = (c) => {
                     const annId = String(c.announcements?._id || c.announcements?.id || c.announcements);
                     if (String(data.groupId) === annId) return { ...c, unreadCount: 0 };
@@ -1981,7 +2524,7 @@ export default function Chat() {
             const myId = userRef.current?.id || userRef.current?._id;
             if (String(data.readerId) === String(myId)) {
                 setGroups(prev => prev.map(g => String(g._id) === String(data.groupId) ? { ...g, unreadCount: 0 } : g));
-                
+
                 const clearUnread = (c) => {
                     const annId = String(c.announcements?._id || c.announcements?.id || c.announcements);
                     if (String(data.groupId) === annId) return { ...c, unreadCount: 0 };
@@ -2035,7 +2578,7 @@ export default function Chat() {
 
         const onGroupAdminUpdated = (data) => {
             const { groupId, memberId, isAdmin } = data;
-            
+
             setGroups(prev => prev.map(g => {
                 if (String(g._id || g.id) === String(groupId)) {
                     let newAdmins = g.admins ? [...g.admins] : [];
@@ -2061,7 +2604,7 @@ export default function Chat() {
                 } else {
                     newAdmins = newAdmins.filter(a => String(a._id || a) !== String(memberId));
                 }
-                
+
                 const updatedMembers = currentSelectedGroup.members.map(member => {
                     return {
                         ...member,
@@ -2077,7 +2620,7 @@ export default function Chat() {
         const onGroupMembersUpdated = (data) => {
             const { groupId, members } = data;
             setGroups(prev => prev.map(g => String(g._id || g.id) === String(groupId) ? { ...g, members } : g));
-            
+
             const currentSelectedGroup = selectedGroupRef?.current;
             if (currentSelectedGroup && String(currentSelectedGroup._id || currentSelectedGroup.id) === String(groupId)) {
                 // Keep isAdmin flags if they were present or recalculate
@@ -2109,6 +2652,8 @@ export default function Chat() {
             socket.off('user_status_change', onStatusChange);
             socket.off('message_deleted', onMessageDeleted);
             socket.off('message_pinned', onMessagePinned);
+            socket.off('message_opened', onMessageOpened);
+            socket.off('message_viewed', onMessageViewed);
             socket.off('force_logout', onForceLogout);
             socket.off('new_message_request', onNewMessageRequest);
             socket.off('request_accepted', onRequestAccepted);
@@ -2397,7 +2942,7 @@ export default function Chat() {
     const fetchGroupMessages = async (groupId) => {
         // Clear previous messages to avoid showing stale data from other groups
         setGroupMessages([]);
-        
+
         try {
             const token = localStorage.getItem('token');
             const res = await axios.get(`/api/groups/${groupId}/messages`, {
@@ -3196,9 +3741,9 @@ export default function Chat() {
 
             // If we are currently viewing the community we just left/deleted, clear the view
             const isViewingThisCommunity = selectedCommunity && String(selectedCommunity.id || selectedCommunity._id) === String(targetId);
-            const isViewingCommunityAnnouncements = selectedGroup && 
-                                                    (selectedGroup.isCommunityAnnouncements || selectedGroup.isAnnouncementGroup) &&
-                                                    String(selectedGroup.communityId?._id || selectedGroup.communityId || selectedGroup.community_id?._id || selectedGroup.community_id || '') === String(targetId);
+            const isViewingCommunityAnnouncements = selectedGroup &&
+                (selectedGroup.isCommunityAnnouncements || selectedGroup.isAnnouncementGroup) &&
+                String(selectedGroup.communityId?._id || selectedGroup.communityId || selectedGroup.community_id?._id || selectedGroup.community_id || '') === String(targetId);
 
             if (type === 'delete' && (isViewingThisCommunity || isViewingCommunityAnnouncements)) {
                 setSelectedCommunity(null);
@@ -3228,7 +3773,7 @@ export default function Chat() {
         try {
             const token = localStorage.getItem('token');
             const comId = exitCommunityTarget.id || exitCommunityTarget._id;
-            
+
             await axios.post(`/api/communities/${comId}/transfer-ownership`, {
                 newOwnerId: member._id || member.id
             }, {
@@ -3237,11 +3782,11 @@ export default function Chat() {
 
             setSnackbar({ message: `Ownership transferred to ${member.name}`, type: 'success', variant: 'system' });
             setIsAssignNewOwnerOpen(false);
-            
+
             // Re-fetch or update local community state to reflect new owner
             // (Old owner remains as member)
             const updatedComm = { ...exitCommunityTarget };
-            updatedComm.creator = member; 
+            updatedComm.creator = member;
             // The server response usually includes the full updated community, 
             // but we can also rely on the socket event 'community_updated' 
             // which the server emits in the transfer-ownership route.
@@ -3255,9 +3800,9 @@ export default function Chat() {
     const isRemovedFromCommunity = (comm) => {
         if (!comm) return false;
         const myId = user.id || user._id;
-        const isMem = (comm.members || []).some(m => String(m._id || m) === String(myId)) || 
-                      String(comm.creator?._id || comm.creator) === String(myId) ||
-                      (comm.admins || []).some(a => String(a?._id || a) === String(myId));
+        const isMem = (comm.members || []).some(m => String(m._id || m) === String(myId)) ||
+            String(comm.creator?._id || comm.creator) === String(myId) ||
+            (comm.admins || []).some(a => String(a?._id || a) === String(myId));
         const isRem = (comm.removedMembers || []).some(m => String(m._id || m) === String(myId));
         return isRem && !isMem;
     };
@@ -3265,12 +3810,12 @@ export default function Chat() {
     const handleExitCommunity = (comm) => {
         const target = comm || selectedCommunity;
         if (!target) return;
-        
+
         setExitCommunityTarget(target);
-        
+
         const myId = user.id || user._id;
         const isOwner = String(target.creator?._id || target.creator) === String(myId);
-        
+
         if (isOwner) {
             setIsOwnerExitCommunityModalOpen(true);
         } else {
@@ -3328,6 +3873,138 @@ export default function Chat() {
         }
     };
 
+    // --- Voice Recording Functions ---
+
+
+    const startRecording = () => {
+        setIsRecording(true);
+    };
+
+    const formatVoiceTime = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    const audioInstanceRef = useRef(null);
+
+    const handlePlayAudio = async (msg, startTime = 0) => {
+        const audioUrlBase = msg.file_path || (typeof msg.content === 'string' && msg.content.includes('/uploads/') ? msg.content : null);
+        if (!audioUrlBase) return;
+
+        // Senders can now play view-once messages they sent
+        // No longer returning early for isMeMsg(msg)
+
+
+        // If view-once and already opened, stop
+        const isSelfPlayed = selfPlayedMsgs.has(String(msg._id));
+        if (msg.is_view_once && (msg.is_viewed || isSelfPlayed)) {
+            setSnackbar({ message: "This message has already been played.", type: 'info', variant: 'system' });
+            return;
+        }
+
+        // If clicking the same message that's already playing, and NOT seeking, stop it
+        if (playingAudioId === msg._id && startTime === 0) {
+            if (audioInstanceRef.current) {
+                audioInstanceRef.current.pause();
+                audioInstanceRef.current = null;
+            }
+            setPlayingAudioId(null);
+            return;
+        }
+
+        // Stop any currently playing audio
+        if (audioInstanceRef.current) {
+            audioInstanceRef.current.pause();
+            audioInstanceRef.current = null;
+        }
+
+        // Handle URL formatting (Relative vs Absolute)
+        let url = msg.file_path;
+        if (!url && typeof msg.content === 'string' && msg.content.includes('/uploads/')) {
+            url = msg.content;
+        }
+
+        // Strip hardcoded localhost for robust playback on other networks
+        if (url && url.includes('localhost:3000')) {
+            url = url.replace('http://localhost:3000', '');
+        }
+
+        if (url && !url.startsWith('http')) {
+            // Use the base API URL or window origin since we have proxy
+            url = `${window.location.protocol}//${window.location.host}${url.startsWith('/') ? '' : '/'}${url}`;
+        }
+
+        const audio = new Audio(url);
+        audioInstanceRef.current = audio;
+        setPlayingAudioId(msg._id);
+        setViewOnceElapsed(startTime);
+
+        audio.onloadedmetadata = () => {
+            if (startTime > 0) {
+                audio.currentTime = startTime;
+            }
+        };
+
+        audio.ontimeupdate = () => {
+            setViewOnceElapsed(audio.currentTime);
+        };
+
+        // Remove immediate markViewed - we do it on end or close
+
+        audio.onended = () => {
+            if (msg.is_view_once) {
+                if (!isMeMsg(msg)) {
+                    markMessageViewed(msg._id);
+                } else {
+                    markSelfPlayed(msg._id);
+                }
+            }
+            setPlayingAudioId(null);
+            audioInstanceRef.current = null;
+            setActiveViewOnceMsg(null);
+            setViewOnceElapsed(0);
+        };
+
+        audio.onerror = (e) => {
+            console.error("Audio playback error:", e);
+            setPlayingAudioId(null);
+            audioInstanceRef.current = null;
+            setActiveViewOnceMsg(null);
+            setSnackbar({ message: "Error playing audio.", type: 'error' });
+        };
+
+        if (msg.is_view_once) {
+            setActiveViewOnceMsg(msg);
+        }
+
+        try {
+            await audio.play();
+        } catch (err) {
+            console.error("Audio play failed:", err);
+            setPlayingAudioId(null);
+            audioInstanceRef.current = null;
+        }
+    };
+
+    const markMessageViewed = async (msgId) => {
+        try {
+            const token = localStorage.getItem('token');
+            await axios.post(`/api/chat/message/${msgId}/viewed`, {}, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            // Update local state
+            setMessages(prev => prev.map(m => String(m._id) === String(msgId) ? { ...m, is_viewed: true } : m));
+            setGroupMessages(prev => prev.map(m => String(m._id) === String(msgId) ? { ...m, is_viewed: true } : m));
+        } catch (err) {
+            console.error("Mark viewed failed", err);
+        }
+    };
+
+
+
+
+
     const handleFileSelect = (e) => {
         if (e.target.files && e.target.files[0]) {
             const selectedFile = e.target.files[0];
@@ -3362,353 +4039,14 @@ export default function Chat() {
         }
     };
 
-    const formatRecordingTime = (seconds) => {
-        const m = Math.floor(seconds / 60);
-        const s = seconds % 60;
-        return `${m}:${s < 10 ? '0' : ''}${s}`;
-    };
 
-    const startRecording = async () => {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            audioStreamRef.current = stream;
-
-            let options = {};
-            if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-                options = { mimeType: 'audio/webm;codecs=opus' };
-            } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-                options = { mimeType: 'audio/webm' };
-            }
-            const mediaRecorder = new MediaRecorder(stream, options);
-            mediaRecorderRef.current = mediaRecorder;
-            audioChunksRef.current = [];
-            audioWaveHistoryRef.current = [];
-            recordingTimeRef.current = 0;
-            setIsViewOnce(false);
-
-            try {
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                const audioCtx = new AudioContext();
-                audioContextRef.current = audioCtx;
-                const source = audioCtx.createMediaStreamSource(stream);
-                const analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 64;
-                source.connect(analyser);
-                analyserRef.current = analyser;
-
-                const bufferLength = analyser.frequencyBinCount;
-                const dataArray = new Uint8Array(bufferLength);
-
-                const draw = () => {
-                    if (!analyserRef.current || !canvasRef.current) return;
-                    animationFrameRef.current = requestAnimationFrame(draw);
-
-                    const canvas = canvasRef.current;
-                    const ctx = canvas.getContext('2d');
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                    const barWidth = 3;
-                    const gap = 2;
-                    const numBars = Math.floor(canvas.width / (barWidth + gap));
-
-                    if (audioWaveHistoryRef.current.length === 0) {
-                        const style = getComputedStyle(document.body);
-                        const c = style.getPropertyValue('--primary').trim();
-                        window.themePrimaryColor = c ? c : '#23D2EF';
-                    }
-
-                    if (recordingPausedRef.current && !isReviewPlayingRef.current) {
-                        for (let i = 0; i < numBars; i++) {
-                            ctx.fillStyle = '#8696a0';
-                            ctx.beginPath();
-                            ctx.roundRect((barWidth + gap) * i, (canvas.height - 2) / 2, barWidth, 2, 2);
-                            ctx.fill();
-                        }
-                    } else {
-                        analyserRef.current.getByteFrequencyData(dataArray);
-                        for (let i = 0; i < numBars; i++) {
-                            const dataIndex = Math.floor(i * (bufferLength / numBars));
-                            let value = dataArray[dataIndex];
-
-                            // Noise gate and exponential scaling for a snappy, synchronous EQ response
-                            let noiseThreshold = 10;
-                            let voiceValue = Math.max(0, value - noiseThreshold);
-                            let normalized = voiceValue / (255 - noiseThreshold);
-                            let barHeight = Math.max(2, Math.pow(normalized, 1.5) * canvas.height * 2.2);
-                            barHeight = Math.min(barHeight, canvas.height);
-
-                            ctx.fillStyle = isReviewPlayingRef.current ? window.themePrimaryColor : '#8696a0';
-                            ctx.beginPath();
-                            ctx.roundRect((barWidth + gap) * i, (canvas.height - barHeight) / 2, barWidth, barHeight, 2);
-                            ctx.fill();
-                        }
-                    }
-                };
-
-                // Wait for React to render the canvas before starting the draw loop
-                setTimeout(() => {
-                    if (canvasRef.current) {
-                        draw();
-                    }
-                }, 100);
-            } catch (e) {
-                console.error('Visualizer error:', e);
-            }
-
-            mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    audioChunksRef.current.push(event.data);
-                }
-            };
-
-            mediaRecorder.start(100);
-            setIsRecording(true);
-            setRecordingPaused(false); recordingPausedRef.current = false;
-            recordingPausedRef.current = false;
-            setRecordingTime(0);
-
-            recordingTimerRef.current = setInterval(() => {
-                setRecordingTime((prevTime) => {
-                    recordingTimeRef.current = prevTime + 1;
-                    return prevTime + 1;
-                });
-            }, 1000);
-        } catch (err) {
-            console.error('Error accessing microphone:', err);
-            setSnackbar({ message: 'Microphone permission denied.', type: 'error', variant: 'system' });
-        }
-    };
-
-    const pauseRecording = () => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-            mediaRecorderRef.current.requestData(); // trigger ondataavailable to get the chunks so far
-            mediaRecorderRef.current.pause();
-            setRecordingPaused(true); recordingPausedRef.current = true;
-            clearInterval(recordingTimerRef.current);
-        }
-    };
-
-    const playReview = () => {
-        if (audioPreviewRef.current) {
-            audioPreviewRef.current.pause();
-        }
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const blobUrl = URL.createObjectURL(audioBlob);
-        if (!audioPreviewRef.current) {
-            audioPreviewRef.current = new Audio();
-            try {
-                if (audioContextRef.current && analyserRef.current) {
-                    const source = audioContextRef.current.createMediaElementSource(audioPreviewRef.current);
-                    source.connect(analyserRef.current);
-                    source.connect(audioContextRef.current.destination);
-                }
-            } catch (err) {
-                console.error("Audio route error:", err);
-            }
-        }
-        audioPreviewRef.current.src = blobUrl;
-        audioPreviewRef.current.onended = () => {
-            setIsReviewPlaying(false);
-            isReviewPlayingRef.current = false;
-            if (previewTimerRef.current) clearInterval(previewTimerRef.current);
-            setPreviewTime(0);
-            previewTimeRef.current = 0;
-        };
-        audioPreviewRef.current.play();
-        setIsReviewPlaying(true);
-        isReviewPlayingRef.current = true;
-        setPreviewTime(0);
-        previewTimeRef.current = 0;
-        if (previewTimerRef.current) clearInterval(previewTimerRef.current);
-        previewTimerRef.current = setInterval(() => {
-            if (audioPreviewRef.current) {
-                setPreviewTime(Math.floor(audioPreviewRef.current.currentTime));
-                previewTimeRef.current = audioPreviewRef.current.currentTime;
-            }
-        }, 50);
-    };
-
-    const pauseReview = () => {
-        if (audioPreviewRef.current) {
-            audioPreviewRef.current.pause();
-        }
-        setIsReviewPlaying(false);
-        isReviewPlayingRef.current = false;
-        if (previewTimerRef.current) clearInterval(previewTimerRef.current);
-    };
-
-    const resumeRecording = () => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
-            mediaRecorderRef.current.resume();
-            setRecordingPaused(false); recordingPausedRef.current = false;
-            recordingTimerRef.current = setInterval(() => {
-                setRecordingTime((prevTime) => {
-                    recordingTimeRef.current = prevTime + 1;
-                    return prevTime + 1;
-                });
-            }, 1000);
-        }
-    };
-
-    const cancelRecording = () => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-            mediaRecorderRef.current.stop();
-        }
-        if (audioStreamRef.current) {
-            audioStreamRef.current.getTracks().forEach(track => track.stop());
-        }
-        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-        if (audioContextRef.current) { audioContextRef.current.close().catch(() => { }); audioContextRef.current = null; }
-        setIsRecording(false);
-        setRecordingPaused(false); recordingPausedRef.current = false;
-        setRecordingTime(0);
-        clearInterval(recordingTimerRef.current);
-        if (previewTimerRef.current) clearInterval(previewTimerRef.current);
-        if (audioPreviewRef.current) audioPreviewRef.current.pause();
-        setPreviewTime(0);
-        previewTimeRef.current = 0;
-        setIsReviewPlaying(false);
-        isReviewPlayingRef.current = false;
-        audioChunksRef.current = [];
-    };
-
-    const stopAndSendRecording = () => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-            mediaRecorderRef.current.onstop = async () => {
-                if (audioStreamRef.current) {
-                    audioStreamRef.current.getTracks().forEach(track => track.stop());
-                }
-                if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-                if (audioContextRef.current) { audioContextRef.current.close().catch(() => { }); audioContextRef.current = null; }
-
-                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-                const audioFile = new File([audioBlob], 'voice_message.webm', { type: 'audio/webm' });
-                const blobUrl = URL.createObjectURL(audioBlob);
-
-                const tempId = Date.now();
-                const tempMsg = {
-                    id: tempId,
-                    _id: tempId,
-                    sender_id: user.id || user._id,
-                    receiver_id: selectedUser ? selectedUser._id : null,
-                    group_id: selectedGroup ? selectedGroup._id : null,
-                    role: 'user',
-                    content: '',
-                    type: 'audio',
-                    file_path: blobUrl,
-                    fileName: 'Voice message',
-                    fileSize: audioBlob.size,
-                    duration: recordingTime,
-                    is_view_once: isViewOnce,
-                    created_at: new Date(),
-                    is_read: false
-                };
-
-                if (selectedGroup) {
-                    setGroupMessages(prev => [...prev, tempMsg]);
-                } else {
-                    setMessages(prev => [...prev, tempMsg]);
-                }
-
-                setIsRecording(false);
-                setRecordingPaused(false); recordingPausedRef.current = false;
-                setRecordingTime(0);
-                setIsViewOnce(false); // Reset the toggle back to normal state
-                clearInterval(recordingTimerRef.current);
-                if (previewTimerRef.current) clearInterval(previewTimerRef.current);
-                if (audioPreviewRef.current) audioPreviewRef.current.pause();
-                setPreviewTime(0);
-                setIsReviewPlaying(false);
-                audioChunksRef.current = [];
-                setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-
-                try {
-                    const formData = new FormData();
-                    formData.append('userId', user.id || user._id);
-                    if (selectedUser) formData.append('toUserId', selectedUser._id);
-                    formData.append('type', 'audio');
-                    formData.append('file', audioFile);
-                    formData.append('duration', tempMsg.duration); // optional duration
-                    formData.append('is_view_once', isViewOnce); // optional view once flag
-
-                    if (!socket.connected) socket.connect();
-
-                    const token = localStorage.getItem('token');
-                    const endpoint = selectedGroup ? `/api/groups/${selectedGroup._id}/send` : '/api/chat/send';
-
-                    const res = await axios.post(endpoint, formData, {
-                        headers: {
-                            'Authorization': `Bearer ${token}`
-                        }
-                    });
-
-                    const sentMsg = res.data.message || res.data.userMessage;
-
-                    if (selectedGroup) {
-                        setGroupMessages(prev => prev.map(m => m.id === tempId ? { ...sentMsg, is_view_once: m.is_view_once || (sentMsg && sentMsg.is_view_once), duration: m.duration || (sentMsg && sentMsg.duration), is_sent: true } : m));
-
-                        if (socket.connected && sentMsg) {
-                            socket.emit('group_message', {
-                                groupId: selectedGroup._id,
-                                message: {
-                                    ...sentMsg,
-                                    is_view_once: isViewOnce || sentMsg.is_view_once,
-                                    duration: tempMsg.duration || sentMsg.duration,
-                                    sender_id: { _id: user.id || user._id, name: user.name }
-                                }
-                            });
-                        }
-                        fetchGroups();
-                    } else {
-                        setMessages(prev => prev.map(m => m.id === tempId ? { ...sentMsg, is_view_once: m.is_view_once || (sentMsg && sentMsg.is_view_once), duration: m.duration || (sentMsg && sentMsg.duration), is_sent: true } : m));
-
-                        if (res.data.aiContent) {
-                            const aiMessage = {
-                                _id: 'ai-' + Date.now(),
-                                role: 'system',
-                                content: res.data.aiContent,
-                                created_at: new Date()
-                            };
-                            setMessages(prev => [...prev, aiMessage]);
-                        }
-
-                        if (socket.connected && sentMsg) {
-                            socket.emit('send_message', {
-                                _id: sentMsg._id, // Pass server ID
-                                sender_id: user.id || user._id,
-                                receiverId: selectedUser._id,
-                                content: sentMsg.content || '',
-                                type: sentMsg.type,
-                                file_path: sentMsg.file_path,
-                                duration: tempMsg.duration || sentMsg.duration,
-                                is_view_once: isViewOnce || sentMsg.is_view_once,
-                                created_at: sentMsg.created_at
-                            });
-                        }
-                        fetchUsers();
-                    }
-                } catch (error) {
-                    console.error('Failed to send voice message:', error);
-                    if (error.response) {
-                        console.error('Server responded with:', error.response.status, error.response.data);
-                    }
-                    setSnackbar({ message: 'Failed to send voice message', type: 'error', variant: 'system' });
-                    if (selectedGroup) {
-                        setGroupMessages(prev => prev.filter(m => m._id !== tempId));
-                    } else {
-                        setMessages(prev => prev.filter(m => m.id !== tempId));
-                    }
-                }
-            };
-            mediaRecorderRef.current.stop();
-        }
-    };
-
-    const handleSend = async (e, contentOverride = null) => {
+    const handleSend = async (e, contentOverride = null, voiceFile = null, voiceDuration = null, voiceIsViewOnce = null) => {
         if (e) e.preventDefault();
 
         const textToSend = contentOverride !== null ? contentOverride : input;
-        if ((!textToSend.trim() && !file) || (!selectedUser && !selectedGroup)) return;
+        const targetFile = voiceFile || file;
+
+        if ((!textToSend.trim() && !targetFile) || (!selectedUser && !selectedGroup)) return;
 
         // Optimistic UI Update (Temporary)
         const tempId = Date.now();
@@ -3720,13 +4058,15 @@ export default function Chat() {
             group_id: selectedGroup ? selectedGroup._id : null,
             role: 'user',
             content: textToSend,
-            type: file ? (file.type.startsWith('image/') ? 'image' : (file.type.startsWith('video/') ? 'video' : 'file')) : 'text',
-            file_path: file ? URL.createObjectURL(file) : null, // Local preview
-            fileName: file ? file.name : null,
-            fileSize: file ? file.size : null,
+            type: voiceFile ? 'audio' : (file ? (file.type.startsWith('image/') ? 'image' : (file.type.startsWith('video/') ? 'video' : 'file')) : 'text'),
+            file_path: targetFile ? URL.createObjectURL(targetFile) : null, // Local preview
+            fileName: targetFile ? targetFile.name : null,
+            fileSize: targetFile ? targetFile.size : null,
+            duration: voiceDuration || null,
             pageCount: 1, // Default for optimistic UI
             created_at: new Date(),
             is_read: false,
+            is_view_once: voiceFile ? (voiceIsViewOnce !== null ? voiceIsViewOnce : false) : false,
             reply_to: replyingTo // Store full object for rendering preview
         };
 
@@ -3750,9 +4090,15 @@ export default function Chat() {
             formData.append('userId', user.id || user._id);
             if (selectedUser) formData.append('toUserId', selectedUser._id);
             formData.append('content', textToSend);
-            if (file) formData.append('file', file);
+            if (targetFile) formData.append('file', targetFile);
             if (tempMsg.reply_to) {
                 formData.append('reply_to', tempMsg.reply_to._id);
+            }
+            if (tempMsg.is_view_once) {
+                formData.append('is_view_once', true);
+            }
+            if (voiceDuration) {
+                formData.append('duration', voiceDuration);
             }
 
             // Ensure socket is connected before potential emit
@@ -3810,6 +4156,7 @@ export default function Chat() {
                     content: sentMsg.content,
                     type: sentMsg.type,
                     file_path: sentMsg.file_path,
+                    is_view_once: sentMsg.is_view_once,
                     reply_to: tempMsg.reply_to // Pass full reply object if needed by client, or just ID
                 });
 
@@ -3818,7 +4165,7 @@ export default function Chat() {
 
         } catch (err) {
             console.error("Failed to send msg", err);
-            
+
             // REMOVE OPTIMISTIC MESSAGE ON FAILURE
             if (selectedGroup) {
                 setGroupMessages(prev => prev.filter(m => m.id !== tempId && m._id !== tempId));
@@ -4511,8 +4858,8 @@ export default function Chat() {
                     {/* Grouped Contacts */}
                     {letters.map(letter => {
                         const q = newChatSearchQuery.toLowerCase();
-                        const filtered = grouped[letter].filter(u => 
-                            u.name?.toLowerCase().includes(q) || 
+                        const filtered = grouped[letter].filter(u =>
+                            u.name?.toLowerCase().includes(q) ||
                             u.mobile?.toLowerCase().includes(q) ||
                             u.email?.toLowerCase().includes(q)
                         );
@@ -5801,7 +6148,7 @@ export default function Chat() {
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                                     <span style={{ fontSize: 16, fontWeight: 500, color: '#111b21' }}>Announcements</span>
                                     <span style={{ fontSize: 12, color: '#667781' }}>
-                                        {selectedCommunity.announcements?.lastMessage 
+                                        {selectedCommunity.announcements?.lastMessage
                                             ? formatTime(selectedCommunity.announcements.lastMessage.created_at)
                                             : formatTime(selectedCommunity.created_at)}
                                     </span>
@@ -5873,8 +6220,7 @@ export default function Chat() {
                                                             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Video size={14} /> Video</span>
                                                         ) : g.lastMessage.type === 'file' ? (
                                                             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><FileText size={14} /> File</span>
-                                                        ) : g.lastMessage.type === 'audio' ? (
-                                                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Mic size={14} /> Voice</span>
+
                                                         ) : g.lastMessage.is_system ? (
                                                             `${g.lastMessage.sender_id?.name || 'Someone'} ${g.lastMessage.content}`
                                                         ) : g.lastMessage.content}
@@ -5898,7 +6244,7 @@ export default function Chat() {
                         if (!(isMeOwner || isMeAdmin)) return null;
 
                         return (
-                             <div className="wa-chat-item" style={{ padding: '12px 16px', cursor: 'pointer' }} onClick={() => {
+                            <div className="wa-chat-item" style={{ padding: '12px 16px', cursor: 'pointer' }} onClick={() => {
                                 if (checkAddGroupPermission(selectedCommunity, true)) {
                                     setIsManageGroupsOpen(true);
                                     setIsCommunityHomeOpen(false);
@@ -6162,24 +6508,24 @@ export default function Chat() {
                                                     }
                                                 }}
                                             >
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', flexShrink: 0 }}>
-                                                    {m.image ? <img src={m.image} alt="mem" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#54656f', fontSize: 18 }}>{m.name?.charAt(0)}</span>}
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                                    <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', flexShrink: 0 }}>
+                                                        {m.image ? <img src={m.image} alt="mem" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#54656f', fontSize: 18 }}>{m.name?.charAt(0)}</span>}
+                                                    </div>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                                        <span style={{ color: textColor, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                            {isMe ? 'You' : m.name}
+                                                            {(m.name === 'Kiki' || m.name === 'Kothi') && <span style={{ fontSize: 14 }}>{m.name === 'Kiki' ? '🙄' : '🐒'}</span>}
+                                                        </span>
+                                                        <span style={{ color: subTextColor, fontSize: 14 }}>{m.about || (isMe ? 'Available' : 'Hey there! I am using WhatsApp.')}</span>
+                                                    </div>
                                                 </div>
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                                                    <span style={{ color: textColor, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                        {isMe ? 'You' : m.name}
-                                                        {(m.name === 'Kiki' || m.name === 'Kothi') && <span style={{ fontSize: 14 }}>{m.name === 'Kiki' ? '🙄' : '🐒'}</span>}
-                                                    </span>
-                                                    <span style={{ color: subTextColor, fontSize: 14 }}>{m.about || (isMe ? 'Available' : 'Hey there! I am using WhatsApp.')}</span>
-                                                </div>
-                                            </div>
 
-                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                                                {isGroupAdmin && <div style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: 'none', color: '#027EB5', background: '#e6f2f7', fontWeight: 500 }}>Group admin</div>}
-                                                {!isMe && phoneValue && <span style={{ color: subTextColor, fontSize: 13 }}>{phoneValue}</span>}
+                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                                                    {isGroupAdmin && <div style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: 'none', color: '#027EB5', background: '#e6f2f7', fontWeight: 500 }}>Group admin</div>}
+                                                    {!isMe && phoneValue && <span style={{ color: subTextColor, fontSize: 13 }}>{phoneValue}</span>}
+                                                </div>
                                             </div>
-                                        </div>
                                         );
                                     });
                                 })()}
@@ -7211,6 +7557,10 @@ export default function Chat() {
 
     const handleMsgDropdownOpen = (e, msgId, msgData) => {
         e.stopPropagation();
+        if (openDropdown && openDropdown.id === msgId && openDropdown.type === 'msg') {
+            setOpenDropdown(null);
+            return;
+        }
         setDropdownPos({ x: e.clientX, y: e.clientY });
         setOpenDropdown({
             type: 'msg',
@@ -7226,13 +7576,8 @@ export default function Chat() {
         const myId = user.id || user._id;
         const isMe = String(data.sender_id?._id || data.sender_id || data.user_id) === String(myId);
 
-        // Calculate positioning logic for fixed menu with zoom awareness
         const zoom = getAppZoom();
-        // Use accurate size approximations to prevent premature flips and misalignments
-        const estMenuWidth = type === 'msg' ? 220 : 190;
-        const estMenuHeight = type === 'msg' ? 330 : 260;
 
-        // Scale viewport dimensions for coordinate math
         const vWidth = window.innerWidth / zoom;
         const vHeight = window.innerHeight / zoom;
 
@@ -7240,19 +7585,19 @@ export default function Chat() {
         const mouseX = dropdownPos.x / zoom;
         const mouseY = dropdownPos.y / zoom;
 
+        // Use more realistic height estimates for flipping logic
+        const estMenuWidth = type === 'msg' ? 250 : 200;
+        const estMenuHeight = type === 'msg' ? 480 : 350;
+
         const menuStyle = {
             position: 'fixed',
             zIndex: 3000 // Very high
         };
-
         const padding = 15;
         let isFlippedUp = false;
-        
-        // Use a much larger height estimate to force flipping sooner on short screens
-        const flipTriggerHeight = type === 'msg' ? 450 : 350;
 
-        // Vertical positioning
-        if (mouseY + flipTriggerHeight > vHeight - padding) {
+        // Vertical flipping logic
+        if (mouseY + estMenuHeight > vHeight - padding) {
             isFlippedUp = true;
         }
 
@@ -7260,33 +7605,37 @@ export default function Chat() {
             // Anchor from the bottom
             const bottomPos = vHeight - mouseY + 5;
             menuStyle.bottom = Math.max(padding, bottomPos);
-            
-            // Limit height to available upper space so it doesn't clip off the top
-            const maxAvailableHeight = vHeight - bottomPos - padding;
-            menuStyle.maxHeight = `${maxAvailableHeight}px`;
         } else {
             // Anchor from the top
             const topPos = mouseY + (type === 'msg' ? 15 : 10);
             menuStyle.top = Math.max(padding, topPos);
-
-            // Limit height to available lower space so it doesn't clip off the bottom
-            const maxAvailableHeight = vHeight - topPos - padding;
-            menuStyle.maxHeight = `${maxAvailableHeight}px`;
         }
 
-        // Horizontal positioning: align to the right of the trigger point
-        // Using `right` avoids arbitrary width guessing and overlap issues
+        // Determine which side to anchor to based on cursor position and available width
+        // If we anchor to right, we need to ensure the menu doesn't overflow to the left
+        // If we anchor to left, we need to ensure it doesn't overflow to the right
         const rightOffset = type === 'msg' ? 25 : 30;
         let calculatedRight = vWidth - mouseX - rightOffset;
-        
-        // Ensure it doesn't push out of bounds or act weird on extreme narrow bounds
         calculatedRight = Math.max(padding, calculatedRight);
 
-        // Fallback to left side scaling if clicked very far left or on mobile
-        if (mouseX < 250) {
+        const viewportIsMobile = vWidth < 768;
+
+        if (viewportIsMobile) {
+            // Simplified mobile positioning: centered or clamped
+            if (mouseX < vWidth / 2) {
+                menuStyle.left = Math.max(padding, mouseX - 10);
+            } else {
+                menuStyle.right = Math.max(padding, vWidth - mouseX - rightOffset);
+            }
+        } else if (mouseX < 250) {
             menuStyle.left = Math.max(padding, mouseX - 10);
         } else {
             menuStyle.right = calculatedRight;
+        }
+
+        // Add minimum width for message dropdowns to accommodate the reaction bar
+        if (type === 'msg') {
+            menuStyle.minWidth = viewportIsMobile ? '230px' : '250px';
         }
 
 
@@ -7296,8 +7645,8 @@ export default function Chat() {
             const isDeleted = data.is_deleted_by_user || data.is_deleted_by_admin || (data.deleted_for && data.deleted_for.some(id => String(id) === String(currentUserId)));
             return (
                 <>
-                    <div 
-                        className="wa-dropdown-backdrop" 
+                    <div
+                        className="wa-dropdown-backdrop"
                         style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: 2999, background: 'transparent' }}
                         onClick={() => setOpenDropdown(null)}
                         onContextMenu={(e) => { e.preventDefault(); setOpenDropdown(null); }}
@@ -7307,82 +7656,82 @@ export default function Chat() {
                         style={menuStyle}
                         onClick={(e) => e.stopPropagation()}
                     >
-                    {!isDeleted && (
-                        <>
-                            <div className="wa-reactions-row">
-                                <span>👍</span><span>❤️</span><span>😂</span><span>😮</span><span>😢</span><span>🙏</span><Plus size={20} />
-                            </div>
-                            <div className="wa-dropdown-divider"></div>
-                        </>
-                    )}
-
-                    {!isDeleted && (
-                        <>
-                            {isMe && (
-                                <div className="wa-dropdown-item" onClick={(e) => { e.stopPropagation(); setInfoMessage(data); setOpenDropdown(null); }}>
-                                    <Info size={18} style={{ marginRight: 12 }} /> Message info
+                        {!isDeleted && (
+                            <>
+                                <div className="wa-reactions-row">
+                                    <span>👍</span><span>❤️</span><span>😂</span><span>😮</span><span>😢</span><span>🙏</span><Plus size={18} />
                                 </div>
-                            )}
-                            <div className="wa-dropdown-item" onClick={() => { setReplyingTo(data); setOpenDropdown(null); }}>
-                                <Reply size={18} style={{ marginRight: 12 }} /> Reply
-                            </div>
-                            <div className="wa-dropdown-item" onClick={() => handleCopyMessage(data)}>
-                                <Copy size={18} style={{ marginRight: 12 }} /> Copy
-                            </div>
-                            <div className="wa-dropdown-item" onClick={() => {
-                                setIsForwardingMode(true);
-                                setIsChatSelectionMode(false);
-                                setForwardSelectedMsgs([data]);
-                                setOpenDropdown(null);
-                            }}>
-                                <Forward size={18} style={{ marginRight: 12 }} /> Forward
-                            </div>
+                                <div className="wa-dropdown-divider"></div>
+                            </>
+                        )}
+
+                        {!isDeleted && (
+                            <>
+                                {isMe && (
+                                    <div className="wa-dropdown-item" onClick={(e) => { e.stopPropagation(); setInfoMessage(data); setOpenDropdown(null); }}>
+                                        <Info size={16} style={{ marginRight: 10 }} /> Message info
+                                    </div>
+                                )}
+                                <div className="wa-dropdown-item" onClick={() => { setReplyingTo(data); setOpenDropdown(null); }}>
+                                    <Reply size={16} style={{ marginRight: 10 }} /> Reply
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => handleCopyMessage(data)}>
+                                    <Copy size={16} style={{ marginRight: 10 }} /> Copy
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => {
+                                    setIsForwardingMode(true);
+                                    setIsChatSelectionMode(false);
+                                    setForwardSelectedMsgs([data]);
+                                    setOpenDropdown(null);
+                                }}>
+                                    <Forward size={16} style={{ marginRight: 10 }} /> Forward
+                                </div>
+                                <div className="wa-dropdown-item" onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenDropdown(null);
+                                    if (data.is_pinned) {
+                                        handleUnpinMessage(id);
+                                    } else {
+                                        setPinMessageModal(data);
+                                        setPinMessageDuration('30 days');
+                                    }
+                                }}>
+                                    <Pin size={18} style={{ marginRight: 12, transform: data.is_pinned ? 'rotate(45deg)' : 'none' }} /> {data.is_pinned ? 'Unpin' : 'Pin'}
+                                </div>
+
+                                <div className="wa-dropdown-item" onClick={() => handleToggleStar(id, data.is_starred)}>
+                                    <Star size={16} style={{ marginRight: 10 }} fill={data.is_starred ? "#8696a0" : "none"} /> {data.is_starred ? 'Unstar' : 'Star'}
+                                </div>
+
+                                <div className="wa-dropdown-divider"></div>
+                            </>
+                        )}
+
+                        <div className="wa-dropdown-item" onClick={() => {
+                            setIsForwardingMode(true);
+                            setIsChatSelectionMode(true);
+                            setForwardSelectedMsgs([data]);
+                            setOpenDropdown(null);
+                        }}>
+                            <CheckSquare size={16} style={{ marginRight: 10 }} /> Select
+                        </div>
+
+                        <div className="wa-dropdown-divider"></div>
+                        {!isMe && !isDeleted && <div className="wa-dropdown-item"><ThumbsDown size={16} style={{ marginRight: 10 }} /> Report</div>}
+                        {!isDeleted && (data.type === 'image' || data.type === 'file' || data.type === 'video') && (
                             <div className="wa-dropdown-item" onClick={(e) => {
                                 e.stopPropagation();
                                 setOpenDropdown(null);
-                                if (data.is_pinned) {
-                                    handleUnpinMessage(id);
-                                } else {
-                                    setPinMessageModal(data);
-                                    setPinMessageDuration('30 days');
-                                }
+                                handleDownload(data.file_path, data.fileName);
                             }}>
-                                <Pin size={18} style={{ marginRight: 12, transform: data.is_pinned ? 'rotate(45deg)' : 'none' }} /> {data.is_pinned ? 'Unpin' : 'Pin'}
+                                <Download size={16} style={{ marginRight: 10 }} /> Save as
                             </div>
+                        )}
 
-                            <div className="wa-dropdown-item" onClick={() => handleToggleStar(id, data.is_starred)}>
-                                <Star size={18} style={{ marginRight: 12 }} fill={data.is_starred ? "#8696a0" : "none"} /> {data.is_starred ? 'Unstar' : 'Star'}
-                            </div>
-
-                            <div className="wa-dropdown-divider"></div>
-                        </>
-                    )}
-
-                    <div className="wa-dropdown-item" onClick={() => {
-                        setIsForwardingMode(true);
-                        setIsChatSelectionMode(true);
-                        setForwardSelectedMsgs([data]);
-                        setOpenDropdown(null);
-                    }}>
-                        <CheckSquare size={18} style={{ marginRight: 12 }} /> Select
-                    </div>
-
-                    <div className="wa-dropdown-divider"></div>
-                    {!isMe && !isDeleted && <div className="wa-dropdown-item"><ThumbsDown size={18} style={{ marginRight: 12 }} /> Report</div>}
-                    {!isDeleted && (data.type === 'image' || data.type === 'file' || data.type === 'video' || data.type === 'audio') && (
-                        <div className="wa-dropdown-item" onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenDropdown(null);
-                            handleDownload(data.file_path, data.fileName);
-                        }}>
-                            <Download size={18} style={{ marginRight: 12 }} /> Save as
+                        <div className="wa-dropdown-item delete" onClick={() => handleDeleteClick(id)}>
+                            <Trash2 size={16} style={{ marginRight: 10 }} /> Delete
                         </div>
-                    )}
-
-                    <div className="wa-dropdown-item delete" onClick={() => handleDeleteClick(id)}>
-                        <Trash2 size={18} style={{ marginRight: 12 }} /> Delete
                     </div>
-                </div>
                 </>
             );
         }
@@ -7394,56 +7743,56 @@ export default function Chat() {
 
             return (
                 <>
-                    <div 
-                        className="wa-dropdown-backdrop" 
+                    <div
+                        className="wa-dropdown-backdrop"
                         style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: 2999, background: 'transparent' }}
                         onClick={() => setOpenDropdown(null)}
                         onContextMenu={(e) => { e.preventDefault(); setOpenDropdown(null); }}
                     />
                     <div className="wa-dropdown-menu contact-dropdown active-fixed" style={menuStyle} onClick={(e) => e.stopPropagation()}>
-                    {archivedChatIds.includes(id) ? (
-                        <div className="wa-dropdown-item" onClick={() => handleUnarchiveChat(id, displayName)}>
-                            <Archive size={18} style={{ marginRight: 12 }} /> {isCommunity ? 'Unarchive community' : (isGroup ? 'Unarchive group' : 'Unarchive chat')}
+                        {archivedChatIds.includes(id) ? (
+                            <div className="wa-dropdown-item" onClick={() => handleUnarchiveChat(id, displayName)}>
+                                <Archive size={16} style={{ marginRight: 10 }} /> {isCommunity ? 'Unarchive community' : (isGroup ? 'Unarchive group' : 'Unarchive chat')}
+                            </div>
+                        ) : (
+                            <div className="wa-dropdown-item" onClick={() => handleArchiveChat(id, displayName)}>
+                                <Archive size={16} style={{ marginRight: 10 }} /> {isCommunity ? 'Archive community' : (isGroup ? 'Archive group' : 'Archive chat')}
+                            </div>
+                        )}
+                        {data.isMuted ? (
+                            <div className="wa-dropdown-item" onClick={() => handleUnmuteAction(id, displayName)}>
+                                <BellOff size={18} style={{ marginRight: 12, color: '#8696a0' }} /> Unmute notifications
+                            </div>
+                        ) : (
+                            <div className="wa-dropdown-item" onClick={() => { setMuteTargetUser({ id, name: displayName }); setIsMuteModalOpen(true); setOpenDropdown(null); }}>
+                                <BellOff size={16} style={{ marginRight: 10 }} /> Mute notifications
+                            </div>
+                        )}
+                        <div className="wa-dropdown-item" onClick={() => handleTogglePinChat(id)}>
+                            <Pin size={18} style={{ marginRight: 12, transform: data.isPinned ? 'rotate(45deg)' : 'none' }} /> {data.isPinned ? (isCommunity ? 'Unpin community' : (isGroup ? 'Unpin group' : 'Unpin chat')) : (isCommunity ? 'Pin community' : (isGroup ? 'Pin group' : 'Pin chat'))}
                         </div>
-                    ) : (
-                        <div className="wa-dropdown-item" onClick={() => handleArchiveChat(id, displayName)}>
-                            <Archive size={18} style={{ marginRight: 12 }} /> {isCommunity ? 'Archive community' : (isGroup ? 'Archive group' : 'Archive chat')}
+                        {!isGroup && !isCommunity && (
+                            <div className="wa-dropdown-item" onClick={() => handleMarkAsUnread(id)}>
+                                <MessageSquare size={16} style={{ marginRight: 10 }} /> Mark as unread
+                            </div>
+                        )}
+                        {(isGroup || isCommunity) && (
+                            <div className="wa-dropdown-item" onClick={() => handleMarkAsUnread(id)}>
+                                <MessageSquare size={16} style={{ marginRight: 10 }} /> Mark as unread
+                            </div>
+                        )}
+                        <div className="wa-dropdown-item" onClick={() => handleToggleFavorite(id, data.isFavorite)}>
+                            {data.isFavorite ? <HeartOff size={16} style={{ marginRight: 10 }} /> : <Heart size={16} style={{ marginRight: 10 }} />}
+                            {data.isFavorite ? 'Remove favourite' : 'Add to favourites'}
                         </div>
-                    )}
-                    {data.isMuted ? (
-                        <div className="wa-dropdown-item" onClick={() => handleUnmuteAction(id, displayName)}>
-                            <BellOff size={18} style={{ marginRight: 12, color: '#8696a0' }} /> Unmute notifications
-                        </div>
-                    ) : (
-                        <div className="wa-dropdown-item" onClick={() => { setMuteTargetUser({ id, name: displayName }); setIsMuteModalOpen(true); setOpenDropdown(null); }}>
-                            <BellOff size={18} style={{ marginRight: 12 }} /> Mute notifications
-                        </div>
-                    )}
-                    <div className="wa-dropdown-item" onClick={() => handleTogglePinChat(id)}>
-                        <Pin size={18} style={{ marginRight: 12, transform: data.isPinned ? 'rotate(45deg)' : 'none' }} /> {data.isPinned ? (isCommunity ? 'Unpin community' : (isGroup ? 'Unpin group' : 'Unpin chat')) : (isCommunity ? 'Pin community' : (isGroup ? 'Pin group' : 'Pin chat'))}
-                    </div>
-                    {!isGroup && !isCommunity && (
-                        <div className="wa-dropdown-item" onClick={() => handleMarkAsUnread(id)}>
-                            <MessageSquare size={18} style={{ marginRight: 12 }} /> Mark as unread
-                        </div>
-                    )}
-                    {(isGroup || isCommunity) && (
-                        <div className="wa-dropdown-item" onClick={() => handleMarkAsUnread(id)}>
-                            <MessageSquare size={18} style={{ marginRight: 12 }} /> Mark as unread
-                        </div>
-                    )}
-                    <div className="wa-dropdown-item" onClick={() => handleToggleFavorite(id, data.isFavorite)}>
-                        {data.isFavorite ? <HeartOff size={18} style={{ marginRight: 12 }} /> : <Heart size={18} style={{ marginRight: 12 }} />}
-                        {data.isFavorite ? 'Remove favourite' : 'Add to favourites'}
-                    </div>
 
-                    <div className="wa-dropdown-item delete" onClick={() => {
-                        setDeleteTarget({ _id: id, id: id, name: displayName, isGroup, isCommunity: !!data.is_community });
-                        setIsDeleteChatConfirmOpen(true);
-                        setOpenDropdown(null);
-                    }}>
-                        <Trash2 size={18} style={{ marginRight: 12 }} /> {data.is_community ? 'Exit community' : (isGroup ? 'Clear group' : 'Delete chat')}
-                    </div>
+                        <div className="wa-dropdown-item delete" onClick={() => {
+                            setDeleteTarget({ _id: id, id: id, name: displayName, isGroup, isCommunity: !!data.is_community });
+                            setIsDeleteChatConfirmOpen(true);
+                            setOpenDropdown(null);
+                        }}>
+                            <Trash2 size={16} style={{ marginRight: 10 }} /> {data.is_community ? 'Exit community' : (isGroup ? 'Clear group' : 'Delete chat')}
+                        </div>
                     </div>
                 </>
             );
@@ -7465,8 +7814,8 @@ export default function Chat() {
 
             return (
                 <>
-                    <div 
-                        className="wa-dropdown-backdrop" 
+                    <div
+                        className="wa-dropdown-backdrop"
                         style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10001, background: 'transparent' }}
                         onClick={() => setOpenDropdown(null)}
                         onContextMenu={(e) => { e.preventDefault(); setOpenDropdown(null); }}
@@ -7477,23 +7826,23 @@ export default function Chat() {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="wa-dropdown-item" onClick={() => { setIsCommunityInfoOpen(true); setOpenDropdown(null); }}>
-                            <Info size={18} style={{ marginRight: 12, color: '#54656f' }} /> Community info
+                            <Info size={16} style={{ marginRight: 10, color: '#54656f' }} /> Community info
                         </div>
                         <div className="wa-dropdown-item" onClick={() => { setOpenDropdown(null); }}>
-                            <Users size={18} style={{ marginRight: 12, color: '#54656f' }} /> View members
+                            <Users size={16} style={{ marginRight: 10, color: '#54656f' }} /> View members
                         </div>
                         <div className="wa-dropdown-item" onClick={() => {
                             setIsCommunitySettingsOpen(true);
                             setOpenDropdown(null);
                         }}>
-                            <Settings size={18} style={{ marginRight: 12, color: '#54656f' }} /> Community settings
+                            <Settings size={16} style={{ marginRight: 10, color: '#54656f' }} /> Community settings
                         </div>
                         <div style={{ height: '1px', background: '#f0f2f5', margin: '4px 0' }}></div>
                         <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => {
                             handleExitCommunity(selectedCommunity);
                             setOpenDropdown(null);
                         }}>
-                            <LogOut size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Exit community
+                            <LogOut size={16} style={{ marginRight: 10, color: '#ea0038' }} /> Exit community
                         </div>
                     </div>
                 </>
@@ -8272,7 +8621,7 @@ export default function Chat() {
         const canIManage = isMeOwner || isMeAdmin;
 
         const onExitClick = () => {
-             handleExitCommunity(community);
+            handleExitCommunity(community);
         };
 
         return (
@@ -8369,29 +8718,29 @@ export default function Chat() {
                     <div style={{ borderBottom: thickDivider }}></div>
 
                     <div style={{ display: 'flex', borderBottom: thinDivider }}>
-                        <div 
-                            style={{ 
-                                flex: 1, 
-                                padding: '15px 0', 
-                                textAlign: 'center', 
-                                color: communityInfoTab === 'community' ? '#027EB5' : subTextColor, 
-                                borderBottom: communityInfoTab === 'community' ? '3px solid #027EB5' : 'none', 
-                                fontWeight: 500, 
-                                cursor: 'pointer' 
+                        <div
+                            style={{
+                                flex: 1,
+                                padding: '15px 0',
+                                textAlign: 'center',
+                                color: communityInfoTab === 'community' ? '#027EB5' : subTextColor,
+                                borderBottom: communityInfoTab === 'community' ? '3px solid #027EB5' : 'none',
+                                fontWeight: 500,
+                                cursor: 'pointer'
                             }}
                             onClick={() => setCommunityInfoTab('community')}
                         >
                             Community
                         </div>
-                        <div 
-                            style={{ 
-                                flex: 1, 
-                                padding: '15px 0', 
-                                textAlign: 'center', 
-                                color: communityInfoTab === 'announcements' ? '#027EB5' : subTextColor, 
-                                borderBottom: communityInfoTab === 'announcements' ? '3px solid #027EB5' : 'none', 
-                                fontWeight: 500, 
-                                cursor: 'pointer' 
+                        <div
+                            style={{
+                                flex: 1,
+                                padding: '15px 0',
+                                textAlign: 'center',
+                                color: communityInfoTab === 'announcements' ? '#027EB5' : subTextColor,
+                                borderBottom: communityInfoTab === 'announcements' ? '3px solid #027EB5' : 'none',
+                                fontWeight: 500,
+                                cursor: 'pointer'
                             }}
                             onClick={() => setCommunityInfoTab('announcements')}
                         >
@@ -8459,18 +8808,18 @@ export default function Chat() {
                                     </span>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: isCommunityMemberSearchOpen ? 1 : 'none', justifyContent: 'flex-end', marginLeft: 10 }}>
                                         {!isCommunityMemberSearchOpen ? (
-                                            <button 
+                                            <button
                                                 onClick={() => setIsCommunityMemberSearchOpen(true)}
                                                 style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center' }}
                                             >
                                                 <Search size={18} color="#54656f" />
                                             </button>
                                         ) : (
-                                            <div style={{ 
-                                                display: 'flex', 
-                                                alignItems: 'center', 
-                                                background: 'white', 
-                                                borderRadius: 8, 
+                                            <div style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                background: 'white',
+                                                borderRadius: 8,
                                                 padding: '0 2px 0 10px',
                                                 flex: 1,
                                                 maxWidth: 280,
@@ -8482,18 +8831,18 @@ export default function Chat() {
                                                 position: 'relative'
                                             }}>
                                                 <Search size={16} color="#027eb5" style={{ marginRight: 8, flexShrink: 0 }} />
-                                                <input 
+                                                <input
                                                     autoFocus
                                                     type="text"
                                                     placeholder="Search members..."
                                                     value={communityMemberSearchQuery}
                                                     onChange={(e) => setCommunityMemberSearchQuery(e.target.value)}
-                                                    style={{ 
-                                                        flex: 1, 
-                                                        border: 'none', 
-                                                        background: 'transparent', 
-                                                        outline: 'none', 
-                                                        fontSize: 14, 
+                                                    style={{
+                                                        flex: 1,
+                                                        border: 'none',
+                                                        background: 'transparent',
+                                                        outline: 'none',
+                                                        fontSize: 14,
                                                         padding: '8px 0',
                                                         color: '#111b21',
                                                         fontWeight: '500',
@@ -8501,21 +8850,21 @@ export default function Chat() {
                                                         paddingRight: 40
                                                     }}
                                                 />
-                                                <button 
+                                                <button
                                                     onClick={() => {
                                                         setIsCommunityMemberSearchOpen(false);
                                                         setCommunityMemberSearchQuery('');
                                                     }}
-                                                    style={{ 
-                                                        background: '#D1D7DB', 
-                                                        border: 'none', 
-                                                        cursor: 'pointer', 
-                                                        width: 18, 
-                                                        height: 18, 
-                                                        borderRadius: '50%', 
-                                                        display: 'flex', 
-                                                        alignItems: 'center', 
-                                                        justifyContent: 'center', 
+                                                    style={{
+                                                        background: '#D1D7DB',
+                                                        border: 'none',
+                                                        cursor: 'pointer',
+                                                        width: 18,
+                                                        height: 18,
+                                                        borderRadius: '50%',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
                                                         position: 'absolute',
                                                         right: 12,
                                                         top: '50%',
@@ -8543,7 +8892,7 @@ export default function Chat() {
                         {(() => {
                             const communityOwner = community.creator;
                             if (!communityOwner) return null;
-                            
+
                             // Filter logic
                             const ownerName = communityOwner.name || '';
                             const matchesSearch = ownerName.toLowerCase().includes(communityMemberSearchQuery.toLowerCase());
@@ -8577,7 +8926,7 @@ export default function Chat() {
                                 if (!m) return false;
                                 const ownerId = community.creator?._id || community.creator;
                                 if (String(m._id || m.id) === String(ownerId)) return false;
-                                
+
                                 if (communityMemberSearchQuery) {
                                     const name = m.name || '';
                                     return name.toLowerCase().includes(communityMemberSearchQuery.toLowerCase());
@@ -8590,7 +8939,7 @@ export default function Chat() {
                                 const isMeOwner = String(community.creator?._id || community.creator) === String(currentUserId);
                                 const isMeAdmin = (community.admins || []).some(a => String(a?._id || a) === String(currentUserId));
                                 const amIAdminOrOwner = isMeOwner || isMeAdmin;
-                                
+
                                 const isTargetOwner = String(community.creator?._id || community.creator) === String(member._id || member.id);
                                 const isTargetAdmin = (community.admins || []).some(a => String(a._id || a) === String(member._id || member.id));
 
@@ -8936,7 +9285,7 @@ export default function Chat() {
                         setIsChatSelectionMode(true);
                         setChatContextMenu(null);
                     }}>
-                        <CheckSquare size={18} style={{ marginRight: 12 }} /> Select messages
+                        <CheckSquare size={16} style={{ marginRight: 10 }} /> Select messages
                     </div>
                 )}
                 <div className="wa-dropdown-item" onClick={() => {
@@ -8949,7 +9298,7 @@ export default function Chat() {
                     setIsChatSelectionMode(false);
                     setForwardSelectedMsgs([]);
                 }}>
-                    <XCircle size={18} style={{ marginRight: 12 }} /> Close chat
+                    <XCircle size={16} style={{ marginRight: 10 }} /> Close chat
                 </div>
             </div>
         );
@@ -9227,18 +9576,18 @@ export default function Chat() {
             </div>
         );
     };
-    const totalUnread = users.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0) + 
+    const totalUnread = users.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0) +
         groups.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0) +
         communities.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0);
-    const totalActiveUnread = users.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id) ? 0 : (curr.unreadCount || 0)), 0) + 
-                             groups.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id || curr.id) ? 0 : (curr.unreadCount || 0)), 0) +
-                             communities.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id || curr.id) ? 0 : (curr.unreadCount || 0)), 0);
-    const totalUnreadArchived = users.filter(u => archivedChatIds.includes(u._id) && (u.unreadCount || 0) > 0).length + 
-                                groups.filter(g => archivedChatIds.includes(g._id) && (g.unreadCount || 0) > 0).length +
-                                communities.filter(c => archivedChatIds.includes(c.id || c._id) && (c.unreadCount || 0) > 0).length;
-    const totalFavorites = users.filter(u => u.isFavorite && !archivedChatIds.includes(u._id)).length + 
-                           groups.filter(g => g.isFavorite && !archivedChatIds.includes(g._id)).length +
-                           communities.filter(c => c.isFavorite && !archivedChatIds.includes(c.id || c._id)).length;
+    const totalActiveUnread = users.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id) ? 0 : (curr.unreadCount || 0)), 0) +
+        groups.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id || curr.id) ? 0 : (curr.unreadCount || 0)), 0) +
+        communities.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id || curr.id) ? 0 : (curr.unreadCount || 0)), 0);
+    const totalUnreadArchived = users.filter(u => archivedChatIds.includes(u._id) && (u.unreadCount || 0) > 0).length +
+        groups.filter(g => archivedChatIds.includes(g._id) && (g.unreadCount || 0) > 0).length +
+        communities.filter(c => archivedChatIds.includes(c.id || c._id) && (c.unreadCount || 0) > 0).length;
+    const totalFavorites = users.filter(u => u.isFavorite && !archivedChatIds.includes(u._id)).length +
+        groups.filter(g => g.isFavorite && !archivedChatIds.includes(g._id)).length +
+        communities.filter(c => c.isFavorite && !archivedChatIds.includes(c.id || c._id)).length;
 
 
     const renderNotificationDetails = () => {
@@ -9300,11 +9649,11 @@ export default function Chat() {
                                     setSelectedGroup(null);
                                     if (selectedUserRef) selectedUserRef.current = chat;
                                     if (selectedGroupRef) selectedGroupRef.current = null;
-                                    
+
                                     // Mark as read and update local state for immediate feedback
                                     markAsRead(chat._id);
                                     setUsers(prev => prev.map(u => u._id === chat._id ? { ...u, unreadCount: 0 } : u));
-                                    
+
                                     fetchP2PRequest(chat._id);
                                 }
                                 setShowNotificationDetails(false);
@@ -9496,11 +9845,11 @@ export default function Chat() {
                                             setIsCommunityHomeOpen(false);
                                             if (selectedUserRef) selectedUserRef.current = originalContact;
                                             if (selectedGroupRef) selectedGroupRef.current = null;
-                                            
+
                                             // Mark as read and update local state for immediate feedback
                                             markAsRead(originalContact._id);
                                             setUsers(prev => prev.map(u => u._id === originalContact._id ? { ...u, unreadCount: 0 } : u));
-                                            
+
                                             fetchP2PRequest(originalContact._id);
                                         }
                                     }}
@@ -9669,14 +10018,14 @@ export default function Chat() {
                                             </div>
                                             <p style={{ fontSize: '15px', color: '#111b21', marginBottom: '8px', fontWeight: '500' }}>No chats yet</p>
                                             <p style={{ fontSize: '13px', lineHeight: '1.5', marginBottom: '24px' }}>Start a fresh conversation with your colleagues or friends.</p>
-                                            <button 
-                                                className="wa-nav-icon-btn" 
-                                                style={{ 
-                                                    background: '#027EB5', 
-                                                    color: 'white', 
-                                                    borderRadius: '24px', 
-                                                    padding: '10px 24px', 
-                                                    fontSize: '14px', 
+                                            <button
+                                                className="wa-nav-icon-btn"
+                                                style={{
+                                                    background: '#027EB5',
+                                                    color: 'white',
+                                                    borderRadius: '24px',
+                                                    padding: '10px 24px',
+                                                    fontSize: '14px',
                                                     fontWeight: '600',
                                                     width: 'auto',
                                                     height: 'auto',
@@ -9803,18 +10152,21 @@ export default function Chat() {
                                                             <XCircle size={12} style={{ marginRight: 4 }} /> {t('chat_window.deleted_user_other')}
                                                         </span>
                                                     ) : (
-                                                        item.lastMessage?.type === 'audio' ? (
-                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                                                {String(item.lastMessage.sender_id) === String(user.id || user._id) && (
-                                                                    item.unreadCount === 0 ? <CheckCheck size={14} color="#53bdeb" /> : <Check size={14} color="#8696a0" />
-                                                                )}
-                                                                <Mic size={14} color={item.unreadCount === 0 && String(item.lastMessage.sender_id) === String(user.id || user._id) ? "#53bdeb" : "#027EB5"} />
-                                                                {item.lastMessage.duration ? formatDuration(item.lastMessage.duration) : 'Voice message'}
-                                                            </span>
-                                                        ) :
-                                                            item.lastMessage?.type === 'image' ? (isGroup ? '📷 Photo' : '📷 Image') :
-                                                                item.lastMessage?.type === 'video' ? '🎥 Video' :
-                                                                    item.lastMessage?.type === 'file' ? '📄 File' :
+
+                                                        item.lastMessage?.type === 'image' ? (isGroup ? '📷 Photo' : '📷 Image') :
+                                                            item.lastMessage?.type === 'video' ? '🎥 Video' :
+                                                                item.lastMessage?.type === 'file' ? '📄 File' :
+                                                                    item.lastMessage?.type === 'audio' ? (
+                                                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#667781' }}>
+                                                                            <Mic size={13} style={{ flexShrink: 0 }} />
+                                                                            <span>{formatVoiceTime(item.lastMessage.duration || 0)}</span>
+                                                                            {item.lastMessage.is_view_once && (
+                                                                                <div className={`wa-view-once-badge ${item.lastMessage.is_viewed ? 'spent' : ''}`} style={{ transform: 'scale(0.7)', marginLeft: -2 }}>
+                                                                                    <span className="wa-view-once-circle" style={{ borderColor: item.lastMessage.is_viewed ? '#8696a0' : '#027EB5', color: item.lastMessage.is_viewed ? '#8696a0' : '#027EB5' }}>1</span>
+                                                                                </div>
+                                                                            )}
+                                                                        </span>
+                                                                    ) :
                                                                         (item.lastMessage?.is_request_placeholder) ? (
                                                                             <span style={{ color: '#027EB5', fontWeight: '500' }}>{item.lastMessage.content}</span>
                                                                         ) : (item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000) ? (
@@ -10421,7 +10773,7 @@ export default function Chat() {
                     borderRight: (isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen) ? '1px solid #d1d7db' : 'none'
                 }}
             >
-                <NeuralBackground />
+                <NeuralBackground isRecording={isRecording} />
                 {selectedUser ? (
                     <>
                         {/* Header */}
@@ -10466,23 +10818,23 @@ export default function Chat() {
 
                         {/* Improved Restriction Banner (Under Header) */}
                         {selectedUser.requestStatus === 'rejected' && selectedUser.requestUpdatedAt && (new Date() - new Date(selectedUser.requestUpdatedAt)) < 24 * 60 * 60 * 1000 && (
-                            <div style={{ 
-                                background: '#fff5f6', 
-                                padding: '12px 20px', 
-                                borderBottom: '1px solid #fee2e2', 
-                                display: 'flex', 
-                                alignItems: 'center', 
+                            <div style={{
+                                background: '#fff5f6',
+                                padding: '12px 20px',
+                                borderBottom: '1px solid #fee2e2',
+                                display: 'flex',
+                                alignItems: 'center',
                                 gap: 12,
                                 borderTop: '1px solid rgba(0,0,0,0.05)',
                                 zIndex: 10
                             }}>
-                                <div style={{ 
-                                    width: 36, 
-                                    height: 36, 
-                                    borderRadius: '50%', 
-                                    background: '#fee2e2', 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
+                                <div style={{
+                                    width: 36,
+                                    height: 36,
+                                    borderRadius: '50%',
+                                    background: '#fee2e2',
+                                    display: 'flex',
+                                    alignItems: 'center',
                                     justifyContent: 'center',
                                     color: '#ef4444'
                                 }}>
@@ -10493,7 +10845,7 @@ export default function Chat() {
                                         Messaging Restricted
                                     </div>
                                     <p style={{ fontSize: '0.8rem', color: '#b91c1c', margin: 0, opacity: 0.9 }}>
-                                        {String(selectedUser.requestRejectedBy) === String(user.id || user._id) 
+                                        {String(selectedUser.requestRejectedBy) === String(user.id || user._id)
                                             ? `You rejected ${selectedUser.name}'s request. Mutual restriction active.`
                                             : `This chat was restricted by ${selectedUser.name}.`}
                                     </p>
@@ -10618,7 +10970,7 @@ export default function Chat() {
 
                         {/* Lock Banner (Independent of specific chat) */}
                         {accountLocked && selectedUser.requestStatus !== 'rejected' && (
-                             <div style={{ background: '#fff5f6', padding: '20px', borderBottom: '1px solid #fee2e2', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                            <div style={{ background: '#fff5f6', padding: '20px', borderBottom: '1px solid #fee2e2', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                                 <div style={{ color: '#ef4444', fontSize: '1.2rem', marginBottom: '4px' }}>
                                     <Shield size={24} />
                                 </div>
@@ -10805,35 +11157,146 @@ export default function Chat() {
                                                                             </div>
                                                                         </div>
                                                                     )}
-
                                                                     {/* Audio Rendering */}
                                                                     {msg.type === 'audio' && (
-                                                                        msg.is_view_once ? (
-                                                                            msg.is_opened ? (
-                                                                                <div className="wa-view-once-bubble opened" style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', background: isMe ? '#d9fdd3' : '#ffffff', borderRadius: '12px', opacity: 0.6 }}>
-                                                                                    <span style={{ fontSize: 13, marginRight: 10, color: '#8696a0', border: '2px dashed #8696a0', borderRadius: '50%', width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}></span>
-                                                                                    <span style={{ fontSize: 14, color: '#8696a0', fontStyle: 'italic', fontWeight: 500 }}>Opened</span>
+                                                                        <div
+                                                                            className={`wa-voice-bubble-content ${playingAudioId === msg._id ? 'wa-glassy-playing' : ''} ${msg.is_view_once ? 'wa-view-once-glassy' : ''} ${msg.is_view_once && msg.is_viewed ? 'spent' : ''}`}
+                                                                            onClick={(e) => {
+                                                                                if (isForwardingMode) return;
+                                                                                if (msg.is_view_once && msg.is_viewed && !isMeMsg(msg)) {
+                                                                                    setSnackbar({ message: "This voice message has already been played.", type: 'info', variant: 'system' });
+                                                                                    return;
+                                                                                }
+                                                                                e.stopPropagation();
+                                                                                handlePlayAudio(msg);
+                                                                            }}
+                                                                            style={{
+                                                                                background: 'rgba(255, 255, 255, 0.82)',
+                                                                                backdropFilter: 'blur(20px)',
+                                                                                WebkitBackdropFilter: 'blur(20px)',
+                                                                                borderRadius: '16px',
+                                                                                border: '1px solid rgba(2, 126, 181, 0.18)',
+                                                                                boxShadow: '0 4px 20px rgba(2, 126, 181, 0.06)',
+                                                                                padding: '10px 14px',
+                                                                                transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                                                                                margin: '2px 0',
+                                                                                display: 'flex',
+                                                                                alignItems: 'center',
+                                                                                gap: isMobile ? '8px' : '12px',
+                                                                                minWidth: isMobile ? '200px' : '280px'
+                                                                            }}
+                                                                        >
+                                                                            {msg.is_view_once && msg.is_viewed && !isMeMsg(msg) && playingAudioId !== msg._id ? (
+                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px' }}>
+                                                                                    <div className="wa-voice-bubble-avatar" style={{ opacity: 0.6, background: '#f0f2f5' }}>
+                                                                                        <Mic size={18} color="#8696a0" />
+                                                                                    </div>
+                                                                                    <div className="wa-voice-bubble-player">
+                                                                                        <div style={{ color: '#8696a0', fontSize: '15px', fontWeight: 500 }}>Voice message</div>
+                                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                                                            <div className="wa-view-once-badge spent">
+                                                                                                <span className="wa-view-once-circle" style={{ borderColor: '#8696a0', color: '#8696a0', transform: 'scale(0.8)' }}>1</span>
+                                                                                            </div>
+                                                                                            <span style={{ color: '#8696a0', fontSize: '13px' }}>Opened</span>
+                                                                                        </div>
+                                                                                    </div>
                                                                                 </div>
                                                                             ) : (
-                                                                                <div className="wa-view-once-bubble" onClick={(e) => {
-                                                                                    if (isForwardingMode) return;
-                                                                                    e.stopPropagation();
-                                                                                    setViewOnceMsg(msg);
-                                                                                }} style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', cursor: isForwardingMode ? 'default' : 'pointer', background: isMe ? '#d9fdd3' : '#ffffff', borderRadius: '12px' }}>
-                                                                                    <span style={{ fontSize: 13, marginRight: 10, color: isMe ? '#a1a1aa' : '#027EB5', border: `2px solid ${isMe ? '#a1a1aa' : '#027EB5'}`, borderRadius: '50%', width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>1</span>
-                                                                                    <span style={{ fontSize: 14, color: isMe ? '#a1a1aa' : '#111b21', fontStyle: 'italic', fontWeight: 500 }}>Voice message</span>
-                                                                                </div>
-                                                                            )
-                                                                        ) : (
-                                                                            <VoiceMessagePlayer
-                                                                                src={msg.file_path}
-                                                                                duration={msg.duration}
-                                                                                isMe={isMe}
-                                                                                userDataImage={userData.image}
-                                                                                selectedUserImage={selectedUser?.image}
-                                                                            />
-                                                                        )
+                                                                                <>
+                                                                                    <div className="wa-voice-bubble-avatar">
+                                                                                        {isMe ? (
+                                                                                            <img src={userData?.image || user?.profile_pic || user?.avatar || '/default-avatar.png'} alt="me" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                                                                        ) : (
+                                                                                            <img src={selectedUser?.profile_photo || selectedUser?.image || selectedUser?.profile_pic || selectedUser?.avatar || '/default-avatar.png'} alt="user" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                                                                        )}
+                                                                                        <div className="wa-voice-mic-badge">
+                                                                                            <Mic size={12} color={msg.is_read ? '#53bdeb' : (msg.is_view_once ? '#027EB5' : '#8696a0')} />
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div className="wa-voice-bubble-player" style={{ flex: 1, minWidth: 0 }}>
+                                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                                                            <button className="wa-voice-play-btn" style={{ background: 'none', border: 'none', color: (playingAudioId === msg._id || msg.is_view_once) ? '#027EB5' : '#54656f', padding: 0, cursor: 'pointer', transition: 'transform 0.2s' }}>
+                                                                                                {playingAudioId === msg._id ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
+                                                                                            </button>
+                                                                                            <div 
+                                                                                                className="wa-voice-waveform-static" 
+                                                                                                style={{ gap: '1px', display: 'flex', alignItems: 'center', height: '28px', position: 'relative', cursor: 'pointer', outline: 'none', width: '154px', flexShrink: 0, overflow: 'hidden' }}
+                                                                                                onMouseDown={(e) => {
+                                                                                                    e.stopPropagation();
+                                                                                                    const rect = e.currentTarget.getBoundingClientRect();
+                                                                                                    const updateSeek = (moveEvent) => {
+                                                                                                        const x = moveEvent.clientX - rect.left;
+                                                                                                        const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
+                                                                                                        if (playingAudioId === msg._id && audioInstanceRef.current) {
+                                                                                                            audioInstanceRef.current.currentTime = (percent / 100) * (msg.duration || 1);
+                                                                                                        } else {
+                                                                                                            handlePlayAudio(msg, (percent / 100) * (msg.duration || 1));
+                                                                                                        }
+                                                                                                    };
+                                                                                                    const onMouseMove = (moveEvent) => updateSeek(moveEvent);
+                                                                                                    const onMouseUp = () => {
+                                                                                                        window.removeEventListener('mousemove', onMouseMove);
+                                                                                                        window.removeEventListener('mouseup', onMouseUp);
+                                                                                                    };
+                                                                                                    window.addEventListener('mousemove', onMouseMove);
+                                                                                                    window.addEventListener('mouseup', onMouseUp);
+                                                                                                    updateSeek(e);
+                                                                                                }}
+                                                                                            >
+                                                                                                {[8, 12, 18, 24, 20, 16, 12, 14, 22, 28, 24, 18, 12, 10, 14, 20, 26, 22, 16, 12, 15, 22, 28, 24, 18, 12, 14, 20, 26, 22, 16, 12, 10, 15, 22, 28, 22, 16, 12, 8, 12, 18, 24, 20, 16, 12, 14, 22, 28, 24, 18, 12, 10, 14, 20, 26, 22, 16, 12, 8].map((h, i, arr) => {
+                                                                                                    const totalBars = arr.length;
+                                                                                                    const progress = (playingAudioId === msg._id) ? (viewOnceElapsed / (msg.duration || 1)) : 0;
+                                                                                                    const isPassed = (i / totalBars) <= progress;
+                                                                                                    
+                                                                                                    return (
+                                                                                                        <div key={i} className="wa-waveform-bar" style={{
+                                                                                                            width: '1.5px',
+                                                                                                            height: `${h}px`,
+                                                                                                            background: isPassed ? '#027EB5' : (msg.is_read ? '#53bdeb' : '#8696a0'),
+                                                                                                            opacity: (playingAudioId === msg._id && !isPassed) ? 0.4 : 1,
+                                                                                                            borderRadius: '1px',
+                                                                                                            transition: 'all 0.1s ease'
+                                                                                                        }} />
+                                                                                                    );
+                                                                                                })}
+                                                                                                {playingAudioId === msg._id && (
+                                                                                                    <div style={{
+                                                                                                        position: 'absolute',
+                                                                                                        left: `${(viewOnceElapsed / (msg.duration || 1)) * 100}%`,
+                                                                                                        width: '10px',
+                                                                                                        height: '10px',
+                                                                                                        backgroundColor: '#027EB5',
+                                                                                                        borderRadius: '50%',
+                                                                                                        transform: 'translateX(-50%)',
+                                                                                                        pointerEvents: 'none',
+                                                                                                        zIndex: 10
+                                                                                                    }} />
+                                                                                                )}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                        <div className="wa-voice-meta-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
+                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                                                                <span style={{ 
+                                                                                                    color: (playingAudioId === msg._id || (msg.is_view_once && !msg.is_viewed)) ? '#027EB5' : '#8696a0', 
+                                                                                                    fontSize: '12.5px', 
+                                                                                                    fontWeight: 500 
+                                                                                                }}>
+                                                                                                    {playingAudioId === msg._id ? formatVoiceTime(viewOnceElapsed) : formatVoiceTime(msg.duration || 0)}
+                                                                                                </span>
+                                                                                            </div>
+                                                                                            {msg.is_view_once && (
+                                                                                                <div className="wa-view-once-badge">
+                                                                                                    <span className="wa-view-once-circle" style={{ borderColor: msg.is_viewed ? '#8696a0' : '#027EB5', color: msg.is_viewed ? '#8696a0' : '#027EB5', fontSize: '10px', width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1.5px solid currentColor', fontWeight: 'bold' }}>1</span>
+                                                                                                </div>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </>
+                                                                            )}
+                                                                        </div>
                                                                     )}
+
+
                                                                     {/* Link Preview Card */}
                                                                     {msg.link_preview && msg.link_preview.title && (
                                                                         <div
@@ -10949,7 +11412,7 @@ export default function Chat() {
                                                 <Copy size={24} color="#ffffff" />
                                             </button>
                                             {/* Download - Only show if there's actual media to download */}
-                                            {forwardSelectedMsgs.some(m => m.type === 'image' || m.type === 'video' || m.type === 'file' || m.type === 'audio') && (
+                                            {forwardSelectedMsgs.some(m => m.type === 'image' || m.type === 'video' || m.type === 'file') && (
                                                 <button onClick={handleChatSelectionBulkDownload} title="Download media" style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
                                                     <Download size={24} color="#ffffff" />
                                                 </button>
@@ -11051,149 +11514,84 @@ export default function Chat() {
                                             })()}
                                         </div>
                                     ) : (
-                                        isRecording ? (
-                                                <div className="wa-recording-ui" style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                                                    <div style={{ flex: 1 }}></div>
 
-                                                    <div style={{ display: 'flex', alignItems: 'center' }}>
-                                                        <button className="wa-nav-icon-btn" style={{ padding: '0px', width: 'auto', marginRight: '24px' }} onClick={cancelRecording} title="Cancel">
-                                                            <Trash2 size={24} color="#8696a0" />
-                                                        </button>
-
-                                                        <div className="wa-recording-dot-wrap" style={{ marginRight: '32px' }}>
-                                                            {recordingPaused ? (
-                                                                <>
-                                                                    <button
-                                                                        className="wa-nav-icon-btn tooltip-wrapper"
-                                                                        style={{ padding: '0px', width: 'auto', marginRight: '16px', background: 'transparent' }}
-                                                                        onClick={isReviewPlaying ? pauseReview : playReview}
-                                                                        data-tooltip={isReviewPlaying ? "Pause" : "Play"}
-                                                                    >
-                                                                        {isReviewPlaying ? (
-                                                                            <svg viewBox="0 0 24 24" width="24" height="24" fill="#8696a0"><path d="M9 16h2V8H9v8zm4-8v8h2V8h-2z"></path></svg>
-                                                                        ) : (
-                                                                            <svg viewBox="0 0 24 24" width="24" height="24" fill="#8696a0"><path d="M8 5v14l11-7z"></path></svg>
-                                                                        )}
-                                                                    </button>
-
-                                                                    <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: 'var(--primary, #23D2EF)', marginRight: '4px' }}></div>
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <div className="wa-recording-red-dot pulse"></div>
-                                                                    <span className="wa-recording-time">{formatRecordingTime(recordingTime)}</span>
-                                                                </>
-                                                            )}
-                                                        </div>
-
-                                                        <div className="wa-recording-waves" style={{ marginRight: '16px' }}>
-                                                            <canvas ref={canvasRef} className="wa-audio-canvas" width="140" height="28"></canvas>
-                                                        </div>
-
-                                                        {recordingPaused && (
-                                                            <span className="wa-recording-time" style={{ marginRight: '24px', minWidth: '40px', color: '#8696a0' }}>
-                                                                {isReviewPlaying ? formatRecordingTime(previewTime) : formatRecordingTime(recordingTime)}
-                                                            </span>
-                                                        )}
-
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                                                            {!recordingPaused ? (
-                                                                <button className="wa-record-action-btn pause tooltip-wrapper" onClick={pauseRecording} data-tooltip="Pause recording" style={{ background: 'transparent' }}>
-                                                                    <svg viewBox="5 5 14 14" width="28" height="28" fill="#ef697a"><path d="M9 16h2V8H9v8zm4-8v8h2V8h-2z"></path></svg>
-                                                                </button>
-                                                            ) : (
-                                                                <button className="wa-record-action-btn resume tooltip-wrapper" onClick={resumeRecording} data-tooltip="Resume recording" style={{ background: 'transparent' }}>
-                                                                    <Mic size={24} color="#ef697a" />
-                                                                </button>
-                                                            )}
-                                                            <button
-                                                                onClick={() => {
-                                                                    setIsViewOnce(!isViewOnce);
-                                                                    setSnackbar({ message: !isViewOnce ? "Voice message set to view once" : "Voice message view once removed", type: 'info', variant: 'system' });
-                                                                }}
-                                                                style={{ background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                                                title="View once"
-                                                            >
-                                                                <div style={{
-                                                                    width: 24, height: 24, borderRadius: '50%', border: `1.5px dashed ${isViewOnce ? 'var(--primary, #23D2EF)' : '#8696a0'}`,
-                                                                    backgroundColor: isViewOnce ? 'var(--primary, #23D2EF)' : 'transparent',
-                                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                                    transition: 'all 0.2s',
-                                                                }}>
-                                                                    <span style={{ fontSize: 11, fontWeight: '700', color: isViewOnce ? '#111b21' : '#8696a0' }}>1</span>
-                                                                </div>
-                                                            </button>
-                                                            <button className="wa-send-btn-circle-inner recording" onClick={stopAndSendRecording}>
-                                                                <Send size={24} color="white" strokeWidth={2.5} />
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </div>
+                                        <div style={{ display: 'flex', width: '100%', alignItems: 'center' }}>
+                                            {isRecording ? (
+                                                <VoiceRecordingUI
+                                                    isMobile={isMobile}
+                                                    onSend={async (blob, duration, isViewOnce) => {
+                                                        const ext = 'webm';
+                                                        const filename = `voice_${Date.now()}.${ext}`;
+                                                        const fileObj = new File([blob], filename, { type: 'audio/webm' });
+                                                        await handleSend(null, null, fileObj, duration, isViewOnce);
+                                                        setIsRecording(false);
+                                                    }}
+                                                    onCancel={() => setIsRecording(false)}
+                                                    setSnackbar={setSnackbar}
+                                                    t={t}
+                                                    userData={userData}
+                                                    replyingTo={replyingTo}
+                                                    isMeMsg={isMeMsg}
+                                                />
                                             ) : (
-                                                <div style={{ display: 'flex', width: '100%', alignItems: 'center' }}>
-                                                    <div className="wa-input-pill">
-                                                        <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
-                                                            {renderAttachmentMenu()}
-                                                            <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
-                                                                <Paperclip size={22} color="#54656f" />
-                                                            </button>
-                                                            <input
-                                                                type="file"
-                                                                ref={fileInputRef}
-                                                                style={{ display: 'none' }}
-                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
-                                                                onChange={handleFileSelect}
-                                                            />
-                                                            <button className="wa-nav-icon-btn">
-                                                                <Smile size={22} color="#54656f" />
-                                                            </button>
-                                                        </div>
-                                                        <div className="wa-input-area">
-                                                            {file && (
-                                                                <div className="wa-file-preview-badge">
-                                                                    {file.name.substring(0, 15)}...
-                                                                    <button onClick={() => setFile(null)}>×</button>
-                                                                </div>
-                                                            )}
-                                                            <textarea
-                                                                id="p2p-message-input"
-                                                                name="message"
-                                                                aria-label="Type a message"
-                                                                className="wa-input-box"
-                                                                placeholder={t('chat_window.input_placeholder')}
-                                                                value={input}
-                                                                onChange={(e) => setInput(e.target.value)}
-                                                                onPaste={handlePaste}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                                                        e.preventDefault();
-                                                                        handleSend(e);
-                                                                    }
-                                                                }}
-                                                                rows={1}
-                                                                style={{ resize: 'none', overflowY: 'auto' }}
-                                                            />
-                                                        </div>
-                                                        {(!input.trim() && !file) && (
-                                                            <div className="wa-footer-right-icons">
-                                                                <div className="mic-wrapper" data-tooltip="Voice message">
-                                                                    <button className="wa-nav-icon-btn-pill mic-hover" onClick={startRecording}>
-                                                                        <Mic size={22} color="#54656f" className="mic-icon-svg" />
-                                                                    </button>
-                                                                </div>
+                                                <div className="wa-input-pill">
+                                                    <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
+                                                        {renderAttachmentMenu()}
+                                                        <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
+                                                            <Paperclip size={22} color="#54656f" />
+                                                        </button>
+                                                        <input
+                                                            type="file"
+                                                            ref={fileInputRef}
+                                                            style={{ display: 'none' }}
+                                                            accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
+                                                            onChange={handleFileSelect}
+                                                        />
+                                                        <button className="wa-nav-icon-btn">
+                                                            <Smile size={22} color="#54656f" />
+                                                        </button>
+                                                    </div>
+                                                    <div className="wa-input-area">
+                                                        {file && (
+                                                            <div className="wa-file-preview-badge">
+                                                                {file.name.substring(0, 15)}...
+                                                                <button onClick={() => setFile(null)}>×</button>
                                                             </div>
                                                         )}
+                                                        <textarea
+                                                            id="p2p-message-input"
+                                                            name="message"
+                                                            aria-label="Type a message"
+                                                            className="wa-input-box"
+                                                            placeholder={t('chat_window.input_placeholder')}
+                                                            value={input}
+                                                            onChange={(e) => setInput(e.target.value)}
+                                                            onPaste={handlePaste}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter' && !e.shiftKey) {
+                                                                    e.preventDefault();
+                                                                    handleSend(e);
+                                                                }
+                                                            }}
+                                                            rows={1}
+                                                            style={{ resize: 'none', overflowY: 'auto' }}
+                                                        />
                                                     </div>
-                                                    {(input.trim() || file) && (
-                                                        <div className="wa-footer-right-icons">
-                                                            <button onClick={handleSend} className="wa-send-btn-circle-inner">
-                                                                <Send size={24} color="white" strokeWidth={2.5} />
+                                                    <div className="wa-footer-right-icons-inner">
+                                                        {(input.trim() || file) ? (
+                                                            <button onClick={handleSend} className="wa-send-btn-inner" data-tooltip="Send">
+                                                                <Send size={30} color="white" strokeWidth={2.5} />
                                                             </button>
-                                                        </div>
-                                                    )}
+                                                        ) : (
+                                                            <button className="wa-mic-btn-idle" data-tooltip="Voice message" onClick={startRecording}>
+                                                                <Mic size={26} color="currentColor" />
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            )
-                                        )}
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -11506,7 +11904,7 @@ export default function Chat() {
                                                         if (String(msg.sender_id?._id || msg.sender_id) === String(myId)) {
                                                             remover = 'You';
                                                         }
-                                                        
+
                                                         // If I am the target
                                                         if (target === myName) {
                                                             target = 'you';
@@ -11518,7 +11916,7 @@ export default function Chat() {
                                                         } else {
                                                             displayContent = `${remover} removed ${target}`;
                                                         }
-                                                    } 
+                                                    }
                                                     // Handle adding: "AdminName added UserName"
                                                     else if (content.includes(' added ')) {
                                                         const parts = content.split(' added ');
@@ -11528,7 +11926,7 @@ export default function Chat() {
                                                         if (String(msg.sender_id?._id || msg.sender_id) === String(myId)) {
                                                             adder = 'You';
                                                         }
-                                                        
+
                                                         if (target === myName || target.includes(myName)) {
                                                             target = target.replace(myName, 'you');
                                                         }
@@ -11544,11 +11942,11 @@ export default function Chat() {
                                                         if (String(msg.sender_id?._id || msg.sender_id) === String(myId)) {
                                                             assigner = 'You';
                                                         }
-                                                        
+
                                                         if (target === myName) {
                                                             target = 'you';
                                                         }
-                                                        
+
                                                         if (assigner === 'You') {
                                                             displayContent = `You assigned ${target} as the new owner`;
                                                         } else {
@@ -11606,12 +12004,12 @@ export default function Chat() {
                                                                 <div style={{ fontSize: '17px', fontWeight: '500', marginBottom: '16px', lineHeight: '1.4' }}>
                                                                     {content}
                                                                 </div>
-                                                                <ul style={{ 
-                                                                    textAlign: 'left', 
-                                                                    listStyle: 'none', 
-                                                                    padding: 0, 
-                                                                    margin: '0 0 24px 0', 
-                                                                    fontSize: '14.5px', 
+                                                                <ul style={{
+                                                                    textAlign: 'left',
+                                                                    listStyle: 'none',
+                                                                    padding: 0,
+                                                                    margin: '0 0 24px 0',
+                                                                    fontSize: '14.5px',
                                                                     color: '#54656f',
                                                                     lineHeight: '1.6'
                                                                 }}>
@@ -11625,7 +12023,7 @@ export default function Chat() {
                                                                     </li>
                                                                 </ul>
                                                                 <div style={{ height: '1px', background: '#e9edef', margin: '0 -24px 20px -24px' }}></div>
-                                                                <div 
+                                                                <div
                                                                     onClick={async () => {
                                                                         if (!commId) return;
                                                                         try {
@@ -11639,7 +12037,7 @@ export default function Chat() {
                                                                                 const pinnedKey = `pinnedCommunities_${user.id || user._id}`;
                                                                                 const pinnedIds = JSON.parse(localStorage.getItem(pinnedKey)) || [];
                                                                                 const formatted = { ...comm, id, isPinned: pinnedIds.includes(id) };
-                                                                                
+
                                                                                 setSelectedCommunity(formatted);
                                                                                 setIsCommunityInfoOpen(true);
                                                                             }
@@ -11647,10 +12045,10 @@ export default function Chat() {
                                                                             console.error('Failed to open community from link:', e);
                                                                         }
                                                                     }}
-                                                                    style={{ 
-                                                                        color: '#027eb5', 
-                                                                        fontWeight: '600', 
-                                                                        fontSize: '14px', 
+                                                                    style={{
+                                                                        color: '#027eb5',
+                                                                        fontWeight: '600',
+                                                                        fontSize: '14px',
                                                                         cursor: 'pointer',
                                                                         display: 'inline-block',
                                                                         transition: 'color 0.2s'
@@ -11750,32 +12148,98 @@ export default function Chat() {
 
                                                                     {/* Audio Rendering */}
                                                                     {msg.type === 'audio' && (
-                                                                        msg.is_view_once ? (
-                                                                            msg.is_opened ? (
-                                                                                <div className="wa-view-once-bubble opened" style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', background: 'transparent', borderRadius: '12px', opacity: 0.6 }}>
-                                                                                    <span style={{ fontSize: 13, marginRight: 10, color: '#8696a0', border: '2px dashed #8696a0', borderRadius: '50%', width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}></span>
-                                                                                    <span style={{ fontSize: 14, color: '#8696a0', fontStyle: 'italic', fontWeight: 500 }}>Opened</span>
-                                                                                </div>
+                                                                        <div
+                                                                            id={`audio-${msg._id}`}
+                                                                            className={`wa-voice-bubble-content ${msg.is_view_once ? 'view-once' : ''}`}
+                                                                            onClick={(e) => {
+                                                                                if (isForwardingMode) return;
+                                                                                e.stopPropagation();
+                                                                                handlePlayAudio(msg);
+                                                                            }}
+                                                                            style={{
+                                                                                cursor: (msg.is_view_once && (msg.is_viewed || selfPlayedMsgs.has(String(msg._id)))) ? 'default' : 'pointer'
+                                                                            }}
+                                                                        >
+                                                                            {!msg.is_view_once ? (
+                                                                                <>
+                                                                                    <div className="wa-voice-bubble-avatar">
+                                                                                        {isMeMsg(msg) ? (
+                                                                                            <img src={user?.profile_pic || user?.avatar || '/default-avatar.png'} alt="me" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                                                                        ) : (
+                                                                                            <img src={msg.sender_id?.profile_pic || msg.sender_id?.avatar || '/default-avatar.png'} alt="user" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                                                                        )}
+                                                                                        <div className="wa-voice-mic-badge">
+                                                                                            <Mic size={12} color={msg.is_read ? '#53bdeb' : '#8696a0'} />
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div className="wa-voice-bubble-player">
+                                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                                            <button className="wa-voice-play-btn" style={{ background: 'none', border: 'none', color: '#54656f', padding: 0, cursor: 'pointer' }}>
+                                                                                                {playingAudioId === msg._id ? <Pause size={22} fill="currentColor" /> : <Play size={22} fill="currentColor" />}
+                                                                                            </button>
+                                                                                            <div className="wa-voice-waveform-static">
+                                                                                                {[...Array(15)].map((_, i) => (
+                                                                                                    <div key={i} className="wa-waveform-bar" style={{ height: `${[10, 15, 8, 12, 6, 18, 10, 14, 8, 12, 16, 9, 13, 7, 11][i % 15]}px`, background: msg.is_read ? '#53bdeb' : '#8696a0' }} />
+                                                                                                ))}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                        <div className="wa-voice-meta-row">
+                                                                                            <span>Voice message</span>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </>
                                                                             ) : (
-                                                                                <div className="wa-view-once-bubble" onClick={(e) => {
-                                                                                    if (isForwardingMode) return;
-                                                                                    e.stopPropagation();
-                                                                                    setViewOnceMsg(msg);
-                                                                                }} style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', cursor: isForwardingMode ? 'default' : 'pointer', background: isMe ? '#d9fdd3' : '#ffffff', borderRadius: '12px' }}>
-                                                                                    <span style={{ fontSize: 13, marginRight: 10, color: isMe ? '#a1a1aa' : '#027EB5', border: `2px solid ${isMe ? '#a1a1aa' : '#027EB5'}`, borderRadius: '50%', width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>1</span>
-                                                                                    <span style={{ fontSize: 14, color: isMe ? '#a1a1aa' : '#111b21', fontStyle: 'italic', fontWeight: 500 }}>Voice message</span>
+                                                                                <div style={{
+                                                                                    display: 'flex',
+                                                                                    alignItems: 'center',
+                                                                                    gap: '12px',
+                                                                                    padding: '8px 12px',
+                                                                                    minWidth: '180px'
+                                                                                }}>
+                                                                                    <div style={{
+                                                                                        width: '40px',
+                                                                                        height: '40px',
+                                                                                        borderRadius: '50%',
+                                                                                        background: '#f0f2f5',
+                                                                                        display: 'flex',
+                                                                                        alignItems: 'center',
+                                                                                        justifyContent: 'center',
+                                                                                        flexShrink: 0
+                                                                                    }}>
+                                                                                        <Mic size={20} color="#8696a0" />
+                                                                                    </div>
+                                                                                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                                                        <div style={{
+                                                                                            fontSize: '16px',
+                                                                                            color: '#8696a0',
+                                                                                            fontWeight: '400'
+                                                                                        }}>
+                                                                                            Voice message
+                                                                                        </div>
+                                                                                        <div style={{
+                                                                                            display: 'flex',
+                                                                                            alignItems: 'center',
+                                                                                            gap: '6px',
+                                                                                            fontSize: '14px',
+                                                                                            color: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#027EB5'
+                                                                                        }}>
+                                                                                            <span className="wa-view-once-circle" style={{
+                                                                                                borderColor: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#027EB5',
+                                                                                                color: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#027EB5',
+                                                                                                width: '18px',
+                                                                                                height: '18px',
+                                                                                                fontSize: '10px',
+                                                                                                display: 'inline-flex'
+                                                                                            }}>1</span>
+                                                                                            <span>{(msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? 'Opened' : 'Voice message'}</span>
+                                                                                        </div>
+                                                                                    </div>
                                                                                 </div>
-                                                                            )
-                                                                        ) : (
-                                                                            <VoiceMessagePlayer
-                                                                                src={msg.file_path}
-                                                                                duration={msg.duration}
-                                                                                isMe={isMe}
-                                                                                userDataImage={userData.image}
-                                                                                selectedUserImage={msg.sender_id?.image} /* Pass sender's image */
-                                                                            />
-                                                                        )
+                                                                            )}
+                                                                        </div>
                                                                     )}
+
+
 
                                                                     {msg.link_preview && (
                                                                         <div
@@ -11888,7 +12352,7 @@ export default function Chat() {
                                             <button onClick={handleChatSelectionBulkCopy} title="Copy messages" style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
                                                 <Copy size={24} color="#ffffff" />
                                             </button>
-                                            {forwardSelectedMsgs.some(m => m.type === 'image' || m.type === 'video' || m.type === 'file' || m.type === 'audio') && (
+                                            {forwardSelectedMsgs.some(m => m.type === 'image' || m.type === 'video' || m.type === 'file') && (
                                                 <button onClick={handleChatSelectionBulkDownload} title="Download media" style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
                                                     <Download size={24} color="#ffffff" />
                                                 </button>
@@ -11948,14 +12412,14 @@ export default function Chat() {
                                             Messaging is temporarily restricted.
                                         </div>
                                     ) : isMessagingRestricted() ? (
-                                        <div style={{ 
-                                            width: '100%', 
-                                            padding: '12px 20px', 
-                                            background: '#f8fafc', 
-                                            borderRadius: '12px', 
-                                            textAlign: 'center', 
-                                            color: '#54656f', 
-                                            fontSize: '0.95rem', 
+                                        <div style={{
+                                            width: '100%',
+                                            padding: '12px 20px',
+                                            background: '#f8fafc',
+                                            borderRadius: '12px',
+                                            textAlign: 'center',
+                                            color: '#54656f',
+                                            fontSize: '0.95rem',
                                             border: '1px solid #e2e8f0',
                                             display: 'flex',
                                             flexDirection: 'column',
@@ -11968,7 +12432,7 @@ export default function Chat() {
                                             {(() => {
                                                 const myIdVal = userRef.current?._id || userRef.current?.id || user?._id || user?.id;
                                                 const currentMyId = String(myIdVal);
-                                                
+
                                                 // Community membership check for announcements
                                                 if (selectedGroup?.isCommunityAnnouncements || selectedGroup?.isAnnouncementGroup) {
                                                     const commIdCheck = String(selectedGroup.community_id || selectedGroup.communityId || '');
@@ -11986,7 +12450,7 @@ export default function Chat() {
                                                 const isMem = (selectedGroup?.members || []).some(m => String(m._id || m) === currentMyId);
                                                 const isOwner = String(selectedGroup?.admin?._id || selectedGroup?.admin || selectedGroup?.creator_id || selectedGroup?.creatorId) === currentMyId;
                                                 const isAdmin = (selectedGroup?.admins || []).some(a => String(a?._id || a) === currentMyId);
-                                                
+
                                                 if (!isMem && !isOwner && !isAdmin) {
                                                     // If it's a community group, show join option
                                                     const commId = selectedGroup?.community_id || selectedGroup?.communityId;
@@ -11994,14 +12458,14 @@ export default function Chat() {
                                                         return (
                                                             <>
                                                                 <div style={{ fontWeight: 500 }}>You cannot message in this group since you are not a member</div>
-                                                                <button 
-                                                                    className="wa-nav-icon-btn" 
-                                                                    style={{ 
-                                                                        background: '#027EB5', 
-                                                                        color: 'white', 
-                                                                        borderRadius: '24px', 
-                                                                        padding: '8px 24px', 
-                                                                        fontSize: '14px', 
+                                                                <button
+                                                                    className="wa-nav-icon-btn"
+                                                                    style={{
+                                                                        background: '#027EB5',
+                                                                        color: 'white',
+                                                                        borderRadius: '24px',
+                                                                        padding: '8px 24px',
+                                                                        fontSize: '14px',
                                                                         fontWeight: '600',
                                                                         width: 'auto',
                                                                         height: 'auto',
@@ -12026,153 +12490,88 @@ export default function Chat() {
                                             })()}
                                         </div>
                                     ) : (
-                                        isRecording ? (
-                                            <div className="wa-recording-ui" style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                                                <div style={{ flex: 1 }}></div>
 
-                                                <div style={{ display: 'flex', alignItems: 'center' }}>
-                                                    <button className="wa-nav-icon-btn" style={{ padding: '0px', width: 'auto', marginRight: '24px' }} onClick={cancelRecording} title="Cancel">
-                                                        <Trash2 size={24} color="#8696a0" />
-                                                    </button>
-
-                                                    <div className="wa-recording-dot-wrap" style={{ marginRight: '32px' }}>
-                                                        {recordingPaused ? (
-                                                            <>
-                                                                <button
-                                                                    className="wa-nav-icon-btn tooltip-wrapper"
-                                                                    style={{ padding: '0px', width: 'auto', marginRight: '16px', background: 'transparent' }}
-                                                                    onClick={isReviewPlaying ? pauseReview : playReview}
-                                                                    data-tooltip={isReviewPlaying ? "Pause" : "Play"}
-                                                                >
-                                                                    {isReviewPlaying ? (
-                                                                        <svg viewBox="0 0 24 24" width="24" height="24" fill="#8696a0"><path d="M9 16h2V8H9v8zm4-8v8h2V8h-2z"></path></svg>
-                                                                    ) : (
-                                                                        <svg viewBox="0 0 24 24" width="24" height="24" fill="#8696a0"><path d="M8 5v14l11-7z"></path></svg>
-                                                                    )}
-                                                                </button>
-
-                                                                <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: 'var(--primary, #23D2EF)', marginRight: '4px' }}></div>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <div className="wa-recording-red-dot pulse"></div>
-                                                                <span className="wa-recording-time">{formatRecordingTime(recordingTime)}</span>
-                                                            </>
-                                                        )}
+                                        <div style={{ display: 'flex', width: '100%', alignItems: 'center' }}>
+                                            {isRecording ? (
+                                                <VoiceRecordingUI
+                                                    isMobile={isMobile}
+                                                    onSend={async (blob, duration, isViewOnce) => {
+                                                        const ext = 'webm';
+                                                        const filename = `voice_${Date.now()}.${ext}`;
+                                                        const fileObj = new File([blob], filename, { type: 'audio/webm' });
+                                                        await handleSend(null, null, fileObj, duration, isViewOnce);
+                                                        setIsRecording(false);
+                                                    }}
+                                                    onCancel={() => setIsRecording(false)}
+                                                    setSnackbar={setSnackbar}
+                                                    t={t}
+                                                    userData={userData}
+                                                    replyingTo={replyingTo}
+                                                    isMeMsg={isMeMsg}
+                                                />
+                                            ) : (
+                                                <div className="wa-input-pill">
+                                                    <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
+                                                        {renderAttachmentMenu()}
+                                                        <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
+                                                            <Paperclip size={22} color="#54656f" />
+                                                        </button>
+                                                        <input
+                                                            type="file"
+                                                            ref={fileInputRef}
+                                                            style={{ display: 'none' }}
+                                                            accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
+                                                            onChange={handleFileSelect}
+                                                        />
+                                                        <button className="wa-nav-icon-btn">
+                                                            <Smile size={22} color="#54656f" />
+                                                        </button>
                                                     </div>
-
-                                                    <div className="wa-recording-waves" style={{ marginRight: '16px' }}>
-                                                        <canvas ref={canvasRef} className="wa-audio-canvas" width="140" height="28"></canvas>
-                                                    </div>
-
-                                                    {recordingPaused && (
-                                                        <span className="wa-recording-time" style={{ marginRight: '24px', minWidth: '40px', color: '#8696a0' }}>
-                                                            {isReviewPlaying ? formatRecordingTime(previewTime) : formatRecordingTime(recordingTime)}
-                                                        </span>
-                                                    )}
-
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                                                        {!recordingPaused ? (
-                                                            <button className="wa-record-action-btn pause tooltip-wrapper" onClick={pauseRecording} data-tooltip="Pause recording" style={{ background: 'transparent' }}>
-                                                                <svg viewBox="5 5 14 14" width="28" height="28" fill="#ef697a"><path d="M9 16h2V8H9v8zm4-8v8h2V8h-2z"></path></svg>
-                                                            </button>
-                                                        ) : (
-                                                            <button className="wa-record-action-btn resume tooltip-wrapper" onClick={resumeRecording} data-tooltip="Resume recording" style={{ background: 'transparent' }}>
-                                                                <Mic size={24} color="#ef697a" />
-                                                            </button>
+                                                    <div className="wa-input-area">
+                                                        {file && (
+                                                            <div className="wa-file-preview-badge">
+                                                                {file.name.substring(0, 15)}...
+                                                                <button onClick={() => setFile(null)}>×</button>
+                                                            </div>
                                                         )}
-                                                        <button
-                                                            onClick={() => {
-                                                                setIsViewOnce(!isViewOnce);
-                                                                setSnackbar({ message: !isViewOnce ? "Voice message set to view once" : "Voice message view once removed", type: 'info', variant: 'system' });
+                                                        <textarea
+                                                            id="p2p-message-input"
+                                                            name="message"
+                                                            aria-label="Type a message"
+                                                            className="wa-input-box"
+                                                            placeholder={t('chat_window.input_placeholder')}
+                                                            value={input}
+                                                            onChange={(e) => setInput(e.target.value)}
+                                                            onPaste={handlePaste}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter' && !e.shiftKey) {
+                                                                    e.preventDefault();
+                                                                    handleSend(e);
+                                                                }
                                                             }}
-                                                            style={{ background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                                            title="View once"
-                                                        >
-                                                            <div style={{
-                                                                width: 24, height: 24, borderRadius: '50%', border: `1.5px dashed ${isViewOnce ? 'var(--primary, #23D2EF)' : '#8696a0'}`,
-                                                                backgroundColor: isViewOnce ? 'var(--primary, #23D2EF)' : 'transparent',
-                                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                                transition: 'all 0.2s',
-                                                            }}>
-                                                                <span style={{ fontSize: 11, fontWeight: '700', color: isViewOnce ? '#111b21' : '#8696a0' }}>1</span>
-                                                            </div>
-                                                        </button>
-                                                        <button className="wa-send-btn-circle-inner recording" onClick={stopAndSendRecording}>
-                                                            <Send size={24} color="white" strokeWidth={2.5} />
-                                                        </button>
+                                                            rows={1}
+                                                            style={{ resize: 'none', overflowY: 'auto' }}
+                                                        />
                                                     </div>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                                <div style={{ display: 'flex', width: '100%', alignItems: 'center' }}>
-                                                    <div className="wa-input-pill">
-                                                        <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
-                                                            {renderAttachmentMenu()}
-                                                            <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
-                                                                <Paperclip size={22} color="#54656f" />
+                                                    <div className="wa-footer-right-icons-inner">
+                                                        {(input.trim() || file) ? (
+                                                            <button onClick={handleSend} className="wa-send-btn-inner" data-tooltip="Send">
+                                                                <Send size={30} color="white" strokeWidth={2.5} />
                                                             </button>
-                                                            <input
-                                                                type="file"
-                                                                ref={fileInputRef}
-                                                                style={{ display: 'none' }}
-                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
-                                                                onChange={handleFileSelect}
-                                                            />
-                                                            <button className="wa-nav-icon-btn">
-                                                                <Smile size={22} color="#54656f" />
+                                                        ) : (
+                                                            <button className="wa-mic-btn-idle" data-tooltip="Voice message" onClick={startRecording}>
+                                                                <Mic size={26} color="currentColor" />
                                                             </button>
-                                                        </div>
-                                                        <div className="wa-input-area">
-                                                            {file && (
-                                                                <div className="wa-file-preview-badge">
-                                                                    {file.name.substring(0, 15)}...
-                                                                    <button onClick={() => setFile(null)}>×</button>
-                                                                </div>
-                                                            )}
-                                                            <textarea
-                                                                id="p2p-message-input"
-                                                                name="message"
-                                                                aria-label="Type a message"
-                                                                className="wa-input-box"
-                                                                placeholder={t('chat_window.input_placeholder')}
-                                                                value={input}
-                                                                onChange={(e) => setInput(e.target.value)}
-                                                                onPaste={handlePaste}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                                                        e.preventDefault();
-                                                                        handleSend(e);
-                                                                    }
-                                                                }}
-                                                                rows={1}
-                                                                style={{ resize: 'none', overflowY: 'auto' }}
-                                                            />
-                                                        </div>
-                                                        {(!input.trim() && !file) && (
-                                                            <div className="wa-footer-right-icons">
-                                                                <div className="mic-wrapper" data-tooltip="Voice message">
-                                                                    <button className="wa-nav-icon-btn-pill mic-hover" onClick={startRecording}>
-                                                                        <Mic size={22} color="#54656f" className="mic-icon-svg" />
-                                                                    </button>
-                                                                </div>
-                                                            </div>
                                                         )}
                                                     </div>
-                                                    {(input.trim() || file) && (
-                                                        <div className="wa-footer-right-icons">
-                                                            <button onClick={handleSend} className="wa-send-btn-circle-inner">
-                                                                <Send size={24} color="white" strokeWidth={2.5} />
-                                                            </button>
-                                                        </div>
-                                                    )}
                                                 </div>
-                                            )
-                                        )}
-                                    </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
-                            )}
-                        </>
+                            </div>
+                        )}
+                    </>
                 ) : (
                     <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#41525d' }}>
                         <h2>Neural Chat</h2>
@@ -12317,31 +12716,31 @@ export default function Chat() {
                             Cancel
                         </button>
                         <button
-                                onClick={async () => {
-                                    const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
-                                    if (community) {
-                                        try {
-                                            const token = localStorage.getItem('token');
-                                            const res = await axios.patch(`/api/communities/${community.id || community._id}`, {
-                                                whoCanAddGroups: pendingWhoCanAddGroups
-                                            }, {
-                                                headers: { 'Authorization': `Bearer ${token}` }
-                                            });
-                                            
-                                            if (res.data.community) {
-                                                const updated = { ...res.data.community, id: res.data.community._id, is_community: true };
-                                                const comId = (c) => String(c.id || c._id);
-                                                setCommunities(prev => prev.map(c => comId(c) === comId(community) ? updated : c));
-                                                setSelectedCommunity(updated);
-                                                setSnackbar({ message: 'Permissions updated', type: 'success', variant: 'system' });
-                                            }
-                                        } catch (err) {
-                                            console.error('Update community failed:', err);
-                                            setSnackbar({ message: 'Failed to update permissions', type: 'error', variant: 'system' });
+                            onClick={async () => {
+                                const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
+                                if (community) {
+                                    try {
+                                        const token = localStorage.getItem('token');
+                                        const res = await axios.patch(`/api/communities/${community.id || community._id}`, {
+                                            whoCanAddGroups: pendingWhoCanAddGroups
+                                        }, {
+                                            headers: { 'Authorization': `Bearer ${token}` }
+                                        });
+
+                                        if (res.data.community) {
+                                            const updated = { ...res.data.community, id: res.data.community._id, is_community: true };
+                                            const comId = (c) => String(c.id || c._id);
+                                            setCommunities(prev => prev.map(c => comId(c) === comId(community) ? updated : c));
+                                            setSelectedCommunity(updated);
+                                            setSnackbar({ message: 'Permissions updated', type: 'success', variant: 'system' });
                                         }
+                                    } catch (err) {
+                                        console.error('Update community failed:', err);
+                                        setSnackbar({ message: 'Failed to update permissions', type: 'error', variant: 'system' });
                                     }
-                                    setIsWhoCanAddGroupsModalOpen(false);
-                                }}
+                                }
+                                setIsWhoCanAddGroupsModalOpen(false);
+                            }}
                             style={{ background: '#027EB5', border: 'none', color: '#111b21', padding: '10px 24px', borderRadius: '24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
                         >
                             Confirm
@@ -12363,7 +12762,7 @@ export default function Chat() {
         const allCandidates = [
             ...(community.members || []),
             ...(community.admins || [])
-        ].filter((m, index, self) => 
+        ].filter((m, index, self) =>
             String(m._id || m.id || m) !== String(ownerId) &&
             self.findIndex(t => String(t._id || t.id || t) === String(m._id || m.id || m)) === index
         );
@@ -12387,26 +12786,26 @@ export default function Chat() {
         return (
             <div className={`wa-contact-info-panel ${isSelectOwnerPanelOpen ? 'active' : ''}`}>
                 <div className="wa-contact-info-header" style={{ padding: '0 16px' }}>
-                     <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 10, height: '100%' }}>
-                        <button 
-                            onClick={() => { 
-                                setIsSelectOwnerPanelOpen(false); 
-                                setIsCommunityInfoOpen(true); 
+                    <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 10, height: '100%' }}>
+                        <button
+                            onClick={() => {
+                                setIsSelectOwnerPanelOpen(false);
+                                setIsCommunityInfoOpen(true);
                                 setSelectOwnerSearchQuery('');
-                            }} 
+                            }}
                             style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#027EB5', fontSize: 16, padding: '8px 0' }}
                         >
                             Cancel
                         </button>
                         <span style={{ fontSize: 19, fontWeight: 500, color: textColor, flex: 1, textAlign: 'center', paddingRight: 40 }}>Select new owner</span>
-                     </div>
+                    </div>
                 </div>
 
                 <div className="wa-contact-info-body" style={{ background: '#f0f2f5', padding: 0, overflowY: 'auto' }}>
                     <div style={{ padding: '12px 16px' }}>
                         <div style={{ background: '#ffffff', borderRadius: '8px', display: 'flex', alignItems: 'center', padding: '0 12px', height: 40 }}>
                             <Search size={18} color="#8696a0" />
-                            <input 
+                            <input
                                 type="text"
                                 placeholder="Search"
                                 value={selectOwnerSearchQuery}
@@ -12417,7 +12816,7 @@ export default function Chat() {
                     </div>
 
                     <div style={{ padding: '0 24px 20px', fontSize: 13, color: '#667781', textAlign: 'center', lineHeight: '1.4' }}>
-                         You can only assign community admins as new owners.
+                        You can only assign community admins as new owners.
                     </div>
 
                     <div style={{ background: 'white', minHeight: '100%' }}>
@@ -12428,7 +12827,7 @@ export default function Chat() {
                                 <div key={initial}>
                                     <div style={{ padding: '20px 24px 10px', fontSize: 14, color: '#027EB5', fontWeight: 500 }}>{initial}</div>
                                     {grouped[initial].map(member => (
-                                        <div 
+                                        <div
                                             key={member._id || member.id}
                                             onClick={() => {
                                                 setAssignOwnerTarget({ member, communityId: community._id || community.id });
@@ -12467,7 +12866,7 @@ export default function Chat() {
         return (
             <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 40000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <div style={{ background: '#ffffff', borderRadius: '24px', padding: '32px', width: '420px', maxWidth: '90%', color: '#111b21', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', boxShadow: '0 10px 40px rgba(0,0,0,0.2)', position: 'relative' }}>
-                    
+
                     <button onClick={() => setIsAssignOwnerModalOpen(false)} style={{ alignSelf: 'flex-end', background: 'none', border: 'none', cursor: 'pointer', padding: 0, position: 'absolute', top: 20, right: 20 }}>
                         <X size={28} color="#54656f" />
                     </button>
@@ -12515,17 +12914,17 @@ export default function Chat() {
                                 }, {
                                     headers: { 'Authorization': `Bearer ${token}` }
                                 });
-                                
+
                                 if (res.data?.status === 'success') {
                                     const updatedComm = res.data.community;
                                     const cId = String(communityId);
                                     const normalized = { ...updatedComm, id: updatedComm._id, is_community: true };
-                                    
+
                                     setCommunities(prev => prev.map(c => String(c._id || c.id) === cId ? normalized : c));
                                     if (selectedCommunity && String(selectedCommunity._id || selectedCommunity.id) === cId) {
                                         setSelectedCommunity(normalized);
                                     }
-                                    
+
                                     setSnackbar({ message: `Ownership transferred to ${member.name}`, type: 'success' });
                                     setIsAssignOwnerModalOpen(false);
                                     setAssignOwnerTarget(null);
@@ -13366,8 +13765,8 @@ export default function Chat() {
 
             {infoMessage && renderMessageInfo()}
 
-                    {/* Global Dropdown Menu */}
-                    {openDropdown && renderDropdownMenu(openDropdown.type, openDropdown.id, openDropdown.data)}
+            {/* Global Dropdown Menu */}
+            {openDropdown && renderDropdownMenu(openDropdown.type, openDropdown.id, openDropdown.data)}
             {isMuteModalOpen && renderMuteModal()}
             {pinReplaceModal && renderPinReplaceModal()}
             {isForwardModalOpen && renderForwardModal()}
@@ -13594,7 +13993,7 @@ export default function Chat() {
                                     try {
                                         const m = adminConfirmModal.member;
                                         const action = adminConfirmModal.type === 'add' ? 'add' : 'remove';
-                                        
+
                                         // Optioally show a loading state here or just rely on API speed
                                         const res = await axios.patch(`/api/groups/${selectedGroup._id || selectedGroup.id}/admin`, {
                                             memberId: m._id || m.id,
@@ -13602,14 +14001,14 @@ export default function Chat() {
                                         }, {
                                             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
                                         });
-                                        
+
                                         if (res.data.status === 'success') {
                                             const updatedGroup = res.data.group;
-                                            
+
                                             // Update local selectedGroup's admins array for immediate UI
                                             const activeTarget = selectedGroup;
                                             const newAdmins = updatedGroup.admins || [];
-                                            
+
                                             // Make sure the "isAdmin" property correctly updates locally 
                                             // based on whether they are now in the admins array
                                             const updatedMembers = activeTarget.members.map(member => {
@@ -13618,9 +14017,9 @@ export default function Chat() {
                                                     isAdmin: newAdmins.some(adminId => String(adminId) === String(member._id || member.id))
                                                 };
                                             });
-                                            
+
                                             setSelectedGroup({ ...activeTarget, members: updatedMembers, admins: newAdmins });
-                                            
+
                                             // Update groups list globally as well
                                             setGroups(prev => prev.map(g => {
                                                 if (String(g._id || g.id) === String(activeTarget._id || activeTarget.id)) {
@@ -13628,7 +14027,7 @@ export default function Chat() {
                                                 }
                                                 return g;
                                             }));
-                                            
+
                                             setSnackbar({ message: `Successfully ${action === 'add' ? 'added' : 'removed'} admin`, type: 'success', variant: 'system' });
                                         }
                                     } catch (err) {
@@ -13793,7 +14192,7 @@ export default function Chat() {
                                 </p>
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                <div 
+                                <div
                                     onClick={() => handleExitCommunityAction('exit')}
                                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderRadius: '12px', cursor: 'pointer', background: 'transparent', transition: 'background 0.2s' }}
                                     className="wa-exit-option"
@@ -13802,7 +14201,7 @@ export default function Chat() {
                                     <LogOut size={20} color="#111b21" style={{ transform: 'rotate(180deg)' }} />
                                 </div>
                                 <div style={{ height: '1px', background: '#f0f2f5', margin: '0 20px' }}></div>
-                                <div 
+                                <div
                                     onClick={() => handleExitCommunityAction('delete')}
                                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderRadius: '12px', cursor: 'pointer', background: 'transparent', transition: 'background 0.2s' }}
                                     className="wa-exit-option"
@@ -13823,14 +14222,14 @@ export default function Chat() {
                             As the owner, you'll need to assign a new owner to exit the community.
                         </p>
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '20px', alignItems: 'center' }}>
-                            <button 
+                            <button
                                 onClick={() => { setIsOwnerExitCommunityModalOpen(false); setIsAssignNewOwnerOpen(true); }}
                                 style={{ background: 'none', border: 'none', color: '#027EB5', fontSize: '16px', fontWeight: 600, cursor: 'pointer', padding: 0 }}
                                 className="assign-owner-link"
                             >
                                 Assign new owner
                             </button>
-                            <button 
+                            <button
                                 onClick={() => setIsOwnerExitCommunityModalOpen(false)}
                                 style={{ background: '#027EB5', color: 'white', border: 'none', borderRadius: '24px', padding: '10px 24px', fontSize: '16px', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
                             >
@@ -13859,17 +14258,7 @@ export default function Chat() {
                             <span style={{ border: '2px solid white', borderRadius: '50%', width: 24, height: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 'bold' }}>1</span>
                             View once message
                         </div>
-                        {viewOnceMsg.type === 'audio' && (
-                            <div style={{ width: '100%', padding: '20px 0' }}>
-                                <VoiceMessagePlayer
-                                    src={viewOnceMsg.file_path}
-                                    duration={viewOnceMsg.duration}
-                                    isMe={false}
-                                    userDataImage={userData?.image}
-                                    selectedUserImage={viewOnceMsg.sender_id?.image || selectedUser?.image}
-                                />
-                            </div>
-                        )}
+
                         <button
                             onClick={() => {
                                 handleMarkOpened(viewOnceMsg._id || viewOnceMsg.id);
@@ -13940,31 +14329,31 @@ export default function Chat() {
                         )}
 
                         <div style={{ padding: '4px 20px 16px' }}>
-                             <button
-                                 onClick={() => {
-                                     setAssignOwnerTarget({ member: adminContextMenu.member, communityId: adminContextMenu.communityId });
-                                     setIsAssignOwnerModalOpen(true);
-                                     setAdminContextMenu(null);
-                                 }}
-                                 style={{
-                                     width: '100%',
-                                     padding: '10px',
-                                     background: '#f0f2f5',
-                                     border: 'none',
-                                     borderRadius: '8px',
-                                     color: '#027EB5',
-                                     fontSize: 14,
-                                     fontWeight: 500,
-                                     cursor: 'pointer',
-                                     display: 'flex',
-                                     alignItems: 'center',
-                                     justifyContent: 'center',
-                                     gap: 8
-                                 }}
-                             >
-                                 <UserPlus size={18} />
-                                 Assign as new community owner
-                             </button>
+                            <button
+                                onClick={() => {
+                                    setAssignOwnerTarget({ member: adminContextMenu.member, communityId: adminContextMenu.communityId });
+                                    setIsAssignOwnerModalOpen(true);
+                                    setAdminContextMenu(null);
+                                }}
+                                style={{
+                                    width: '100%',
+                                    padding: '10px',
+                                    background: '#f0f2f5',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    color: '#027EB5',
+                                    fontSize: 14,
+                                    fontWeight: 500,
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: 8
+                                }}
+                            >
+                                <UserPlus size={18} />
+                                Assign as new community owner
+                            </button>
                         </div>
 
                         {/* Actions */}
@@ -14028,7 +14417,7 @@ export default function Chat() {
                                 }}
                             >
                                 Yes
-                             </button>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -14063,10 +14452,10 @@ export default function Chat() {
 
                     <div style={{ flex: 1, overflowY: 'auto', background: '#f0f2f5' }}>
                         {(() => {
-                            const adminsExceptMe = (exitCommunityTarget.admins || []).filter(admin => 
+                            const adminsExceptMe = (exitCommunityTarget.admins || []).filter(admin =>
                                 String(admin._id || admin.id) !== String(user.id || user._id)
                             );
-                            
+
                             if (adminsExceptMe.length === 0) {
                                 return (
                                     <div style={{ padding: '60px 20px', textAlign: 'center' }}>
@@ -14091,47 +14480,47 @@ export default function Chat() {
                                                     setOwnershipTransferTarget(admin);
                                                     setIsTransferOwnershipConfirmOpen(true);
                                                 }}
-                                            style={{
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                padding: '14px 20px',
-                                                background: 'white',
-                                                borderBottom: '1px solid #f0f2f5',
-                                                cursor: 'pointer',
-                                                transition: 'background 0.15s',
-                                                gap: 14
-                                            }}
-                                        >
-                                            <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                                {admin.avatar || admin.image || admin.profile_photo ? (
-                                                    <img src={admin.avatar || admin.image || admin.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                ) : (
-                                                    <UserIcon size={22} color="#8696a0" />
-                                                )}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    padding: '14px 20px',
+                                                    background: 'white',
+                                                    borderBottom: '1px solid #f0f2f5',
+                                                    cursor: 'pointer',
+                                                    transition: 'background 0.15s',
+                                                    gap: 14
+                                                }}
+                                            >
+                                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                    {admin.avatar || admin.image || admin.profile_photo ? (
+                                                        <img src={admin.avatar || admin.image || admin.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                    ) : (
+                                                        <UserIcon size={22} color="#8696a0" />
+                                                    )}
+                                                </div>
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <div style={{ color: '#111b21', fontWeight: 500, fontSize: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{admin.name}</div>
+                                                    <div style={{ color: '#667781', fontSize: 13, marginTop: 2 }}>Community Admin</div>
+                                                </div>
+                                                <ChevronRight size={18} color="#8696a0" />
                                             </div>
-                                            <div style={{ flex: 1, minWidth: 0 }}>
-                                                <div style={{ color: '#111b21', fontWeight: 500, fontSize: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{admin.name}</div>
-                                                <div style={{ color: '#667781', fontSize: 13, marginTop: 2 }}>Community Admin</div>
-                                            </div>
-                                            <ChevronRight size={18} color="#8696a0" />
-                                        </div>
-                                    );
-                                })}
-                            </div>
+                                        );
+                                    })}
+                                </div>
                             );
                         })()}
                     </div>
                 </div>
             )}
             {isTransferOwnershipConfirmOpen && ownershipTransferTarget && (
-                <div 
-                    className="wa-mute-modal-overlay" 
-                    onClick={() => setIsTransferOwnershipConfirmOpen(false)} 
+                <div
+                    className="wa-mute-modal-overlay"
+                    onClick={() => setIsTransferOwnershipConfirmOpen(false)}
                     style={{ zIndex: 31000, background: 'rgba(11,20,26,0.85)', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 >
-                    <div 
-                        className="wa-mute-modal" 
-                        onClick={(e) => e.stopPropagation()} 
+                    <div
+                        className="wa-mute-modal"
+                        onClick={(e) => e.stopPropagation()}
                         style={{ maxWidth: '450px', width: '90%', borderRadius: '16px', padding: 0, background: '#ffffff', boxShadow: '0 17px 50px 0 rgba(0,0,0,0.19)', overflow: 'hidden' }}
                     >
                         <div style={{ padding: '24px' }}>
@@ -14162,6 +14551,69 @@ export default function Chat() {
                                 </button>
                             </div>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* View Once Fullscreen Player Overlay */}
+            {activeViewOnceMsg && (
+                <div className="wa-view-once-fullscreen">
+                    <div className="wa-view-once-content">
+                        <div className="wa-view-once-header">
+                            <h2 style={{ fontSize: '28px', color: '#027EB5', marginBottom: '8px' }}>{activeViewOnceMsg.sender_id?.name || selectedUser?.name || 'Voice Message'}</h2>
+                        </div>
+
+                        <div className="wa-view-once-player-body">
+                            <div className="wa-fullscreen-waveform">
+                                {[...Array(24)].map((_, i) => (
+                                    <div key={i} className={`wa-waveform-bar-large ${playingAudioId === (activeViewOnceMsg._id || activeViewOnceMsg.id) ? 'animating' : ''}`} style={{
+                                        height: `${[20, 35, 18, 28, 16, 45, 22, 32, 18, 26, 38, 20, 30, 16, 25, 42, 19, 29, 17, 34, 21, 31, 23, 27][i % 24]}px`,
+                                        animationDelay: `${i * 0.05}s`
+                                    }} />
+                                ))}
+                            </div>
+                            <div className="wa-play-control-large">
+                                <button className="wa-action-btn" onClick={() => {
+                                    const mId = activeViewOnceMsg._id || activeViewOnceMsg.id;
+                                    if (audioInstanceRef.current) {
+                                        if (playingAudioId === mId) {
+                                            audioInstanceRef.current.pause();
+                                            setPlayingAudioId(null);
+                                        } else {
+                                            audioInstanceRef.current.play();
+                                            setPlayingAudioId(mId);
+                                        }
+                                    }
+                                }}>
+                                    {playingAudioId === (activeViewOnceMsg._id || activeViewOnceMsg.id) ? <Pause size={32} fill="currentColor" /> : <Play size={32} fill="currentColor" />}
+                                </button>
+                                <span className="wa-fullscreen-timer">
+                                    {formatVoiceTime(viewOnceElapsed)}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="wa-view-once-footer">
+                            <Lock size={14} style={{ marginRight: 6 }} />
+                            <span>This message will disappear after playback.</span>
+                        </div>
+                        <button className="wa-fullscreen-close-text" onClick={() => {
+                            if (audioInstanceRef.current) audioInstanceRef.current.pause();
+                            // Mark as opened ONLY when closed or finished
+                            if (activeViewOnceMsg) {
+                                const mId = activeViewOnceMsg._id || activeViewOnceMsg.id;
+                                if (!isMeMsg(activeViewOnceMsg)) {
+                                    markMessageViewed(mId);
+                                } else {
+                                    markSelfPlayed(mId);
+                                }
+                            }
+                            setActiveViewOnceMsg(null);
+                            setPlayingAudioId(null);
+                            setViewOnceElapsed(0);
+                        }}>
+                            Close
+                        </button>
                     </div>
                 </div>
             )}

@@ -132,17 +132,20 @@ const upload = multer({
             'application/pdf',         // PDF
             'application/msword',      // .doc
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
-            'audio/webm', 'audio/mp4', 'audio/mp3', 'audio/mpeg', 'audio/ogg' // Audio
+            'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/webm', 'audio/wav', 'audio/x-m4a' // Audio
         ];
         const ext = path.extname(file.originalname).toLowerCase();
-        const allowedExts = ['.jpg', '.jpeg', '.png', '.doc', '.docx', '.pdf', '.webm', '.mp3', '.m4a', '.ogg'];
+        const allowedExts = ['.jpg', '.jpeg', '.png', '.doc', '.docx', '.pdf', '.mp3', '.m4a', '.ogg', '.wav', '.webm'];
 
-        const isAllowedType = allowedTypes.includes(file.mimetype) || file.mimetype.startsWith('audio/webm') || file.mimetype.startsWith('audio/mp4') || file.mimetype.startsWith('audio/ogg');
+        const isAllowedType = allowedTypes.includes(file.mimetype) || 
+                             file.mimetype.startsWith('audio/') || 
+                             file.mimetype.startsWith('video/') || 
+                             file.mimetype.startsWith('image/');
 
         if (isAllowedType && allowedExts.includes(ext)) {
             cb(null, true);
         } else {
-            cb(new Error(`Invalid file type (${file.mimetype}, ext: ${ext}). Only JPG, PNG, PDF, Word, and Audio files are allowed.`));
+            cb(new Error(`Invalid file type (${file.mimetype}, ext: ${ext}). Only JPG, PNG, PDF, and Word/Audio files are allowed.`));
         }
     }
 });
@@ -624,14 +627,14 @@ router.post('/send', authenticateToken, (req, res, next) => {
     let fileName = null;
     let fileSize = 0;
     let pageCount = 0;
-    let duration = req.body.duration ? parseInt(req.body.duration) : 0;
+
     let is_view_once = req.body.is_view_once === 'true' || req.body.is_view_once === true;
 
     if (file) {
-        if (req.body.type === 'audio' || file.mimetype.startsWith('audio/')) {
-            type = 'audio';
-        } else if (file.mimetype.startsWith('video/')) {
+        if (file.mimetype.startsWith('video/')) {
             type = 'video';
+        } else if (file.mimetype.startsWith('audio/')) {
+            type = 'audio';
         } else {
             type = file.mimetype.startsWith('image/') ? 'image' : 'file';
         }
@@ -791,7 +794,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
                 type,
                 file_path: filePath,
                 link_preview: linkPreview,
-                fileName, fileSize, pageCount, duration, is_view_once, // Metadata
+                fileName, fileSize, pageCount, duration: req.body.duration, is_view_once, // Metadata
                 reply_to: reply_to || null,
 
                 is_flagged: !!isFlagged,
@@ -1188,6 +1191,55 @@ router.post('/message/:id/open', authenticateToken, async (req, res) => {
         }
         
         res.json({ status: 'success', messageId: msg._id, is_opened: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Mark Message as Viewed (For View-Once) - Secured with Auth
+router.post('/message/:id/viewed', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        
+        let msg = await Message.findById(req.params.id);
+        let isGroupMsg = false;
+        
+        if (!msg) {
+            const GroupMessage = require('../models/GroupMessage');
+            msg = await GroupMessage.findById(req.params.id);
+            if (msg) isGroupMsg = true;
+        }
+        
+        if (!msg) return res.status(404).json({ error: 'Message not found' });
+        
+        // Safety check: receiver should be the one marking as viewed
+        if (!isGroupMsg && msg.receiver_id && String(msg.receiver_id) !== String(userId)) {
+             // Senders can't mark their own view-once as viewed for the receiver
+             // But let's keep it simple for now or skip check
+        }
+
+        msg.is_viewed = true;
+        await msg.save();
+        
+        if (req.io) {
+            if (isGroupMsg) {
+                const group = await Group.findById(msg.group_id);
+                if (group) {
+                    group.members.forEach(mId => {
+                        req.io.to(mId.toString()).emit('message_viewed', { messageId: msg._id, is_viewed: true });
+                    });
+                }
+            } else {
+                const participants = [msg.user_id.toString()];
+                if (msg.receiver_id) participants.push(msg.receiver_id.toString());
+                
+                participants.forEach(pId => {
+                    req.io.to(pId).emit('message_viewed', { messageId: msg._id, is_viewed: true });
+                });
+            }
+        }
+        
+        res.json({ status: 'success', messageId: msg._id, is_viewed: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

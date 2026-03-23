@@ -2358,12 +2358,7 @@ export default function AdminDashboard() {
                                                                                 {msg.is_view_once && <div style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>View Once {msg.is_opened ? '(Opened)' : ''}</div>}
                                                                             </div>
                                                                         )}
-                                                                        {msg.type === 'audio' && msg.file_path && (
-                                                                            <div style={{ marginTop: '8px', background: 'rgba(0,0,0,0.05)', padding: '8px 12px', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                                                                <audio controls src={msg.file_path} style={{ width: '100%', height: '35px' }} />
-                                                                                {msg.is_view_once && <span style={{ fontSize: 10, alignSelf: 'flex-end', background: '#e9ecef', color: '#525f7f', padding: '2px 6px', borderRadius: 4 }}>View Once Voice {msg.is_opened ? '(Opened)' : ''}</span>}
-                                                                            </div>
-                                                                        )}
+
                                                                         {msg.type === 'file' && msg.file_path && (
                                                                             <div style={{ marginTop: '8px', background: 'rgba(0,0,0,0.05)', padding: '8px 12px', borderRadius: '8px' }}>
                                                                                 <a href={msg.file_path} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#0A7C8F', textDecoration: 'none', fontWeight: 'bold' }}>📄 {msg.fileName || 'Download File'}</a>

@@ -5,13 +5,14 @@ const groupMessageSchema = new mongoose.Schema({
     sender_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     role: { type: String, default: 'user' },
     content: { type: String, default: '' },
-    type: { type: String, enum: ['text', 'image', 'file', 'system', 'audio', 'video', 'community_link'], default: 'text' },
+    type: { type: String, enum: ['text', 'image', 'file', 'system', 'video', 'community_link', 'audio'], default: 'text' },
+    duration: { type: Number }, // in seconds
     metadata: { type: mongoose.Schema.Types.Mixed },
     file_path: { type: String },
     fileName: { type: String },
     fileSize: { type: Number },
-    duration: { type: Number }, // Optional, for Audio
     is_view_once: { type: Boolean, default: false },
+    is_viewed: { type: Boolean, default: false },
     is_opened: { type: Boolean, default: false },
     is_system: { type: Boolean, default: false }, // For "You created this group" type messages
     is_pinned: { type: Boolean, default: false },
