@@ -11,7 +11,53 @@ const fs = require('fs');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'neural_secret_77';
 const { handleMembershipJoin, handleMembershipExit } = require('../utils/membership');
+const axios = require('axios');
 
+// --- Link Preview Helper ---
+const fetchLinkPreview = async (url) => {
+    try {
+        // Special handling for YouTube
+        const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
+        if (isYouTube) {
+            const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+            const res = await axios.get(oembedUrl, { timeout: 5000 });
+            return {
+                title: res.data.title,
+                description: res.data.author_name,
+                image: res.data.thumbnail_url,
+                url: url,
+                domain: 'youtube.com'
+            };
+        }
+
+        // Generic Metadata Extraction
+        const response = await axios.get(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            timeout: 5000
+        });
+        const html = response.data;
+
+        const getMetaTag = (html, property) => {
+            const regex = new RegExp(`<meta[^>]*property=["']${property}["'][^>]*content=["']([^"']*)["']`, 'i');
+            let match = html.match(regex);
+            if (!match) {
+                const regexName = new RegExp(`<meta[^>]*name=["']${property}["'][^>]*content=["']([^"']*)["']`, 'i');
+                match = html.match(regexName);
+            }
+            return match ? match[1] : null;
+        };
+
+        const title = getMetaTag(html, 'og:title') || getMetaTag(html, 'twitter:title') || (html.match(/<title>(.*?)<\/title>/i) || [])[1];
+        const description = getMetaTag(html, 'og:description') || getMetaTag(html, 'twitter:description') || getMetaTag(html, 'description');
+        const image = getMetaTag(html, 'og:image') || getMetaTag(html, 'twitter:image');
+        const domain = new URL(url).hostname;
+
+        return { title, description, image, url, domain };
+    } catch (err) {
+        console.error('Link preview error:', err.message);
+        return null;
+    }
+};
 // --- Multer Configuration (Sync with chat.js) ---
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -305,6 +351,14 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             }
         }
 
+        // Detect URL for preview
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        const urlMatch = content ? content.match(urlRegex) : null;
+        let linkPreview = null;
+        if (urlMatch && type !== 'image' && type !== 'video') {
+            linkPreview = await fetchLinkPreview(urlMatch[0]);
+        }
+
         const msg = await GroupMessage.create({
             group_id: groupId,
             sender_id: senderId,
@@ -313,6 +367,7 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             file_path: file_path || null,
             fileName: fileName || null,
             fileSize: fileSize || 0,
+            link_preview: linkPreview,
             duration: req.body.duration,
             is_view_once: is_view_once === 'true' || is_view_once === true,
             is_forwarded: isForwarded === true || isForwarded === 'true',
