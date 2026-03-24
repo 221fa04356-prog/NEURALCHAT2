@@ -125,7 +125,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
         setAudioUrl(null);
         setAudioBlob(null);
         setIsViewOnceVoice(false);
-        setWaveformPoints(new Array(65).fill(isMobile ? 1.5 : 2)); // Pre-fill silent baseline
+        setWaveformPoints(new Array(30).fill(3)); // Pre-fill silent baseline
         setPreviewProgress(0);
         setPreviewSeconds(0);
         allWaveformPointsRef.current = [];
@@ -177,8 +177,8 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
             // 1. Aggressive High-pass: Removes all low-frequency rumble, desk thumps, and background noise (below 150Hz)
             const hpFilter = audioContext.createBiquadFilter();
             hpFilter.type = 'highpass';
-            hpFilter.frequency.value = 150;
-            hpFilter.Q.value = 1.2;
+            hpFilter.frequency.value = 250; // Higher cutoff for noise
+            hpFilter.Q.value = 1.5;
 
             // 2. Vocal Presence Peak: Boosts the 3kHz range where human speech clarity resides
             const presenceFilter = audioContext.createBiquadFilter();
@@ -207,14 +207,17 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
             // 6. Destination for the processed audio recording
             const destination = audioContext.createMediaStreamDestination();
 
-            // Link the chain: Mic -> HP -> Presence -> LP -> Compressor -> Gain -> (Analyser + Output Stream)
+            // Link the chain: Mic -> HP -> Presence -> LP -> Compressor -> Gain -> Destination (Output Stream)
             source.connect(hpFilter);
             hpFilter.connect(presenceFilter);
             presenceFilter.connect(lpFilter);
             lpFilter.connect(compressor);
             compressor.connect(outputGain);
             outputGain.connect(destination);
-            outputGain.connect(analyser); // Waveform now shows the optimized "vocal" signal
+
+            // IMPORTANT: Connect analyser to the high-passed (but uncompressed) signal 
+            // so the microphone visualizer preserves dynamic peaks!
+            hpFilter.connect(analyser);
 
             // Initialize MediaRecorder - Use the PROCESSED stream for the final file
             const mediaRecorder = new MediaRecorder(destination.stream, { mimeType });
@@ -233,30 +236,34 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                         analyser.getByteFrequencyData(dataArray);
 
                         let sum = 0;
-                        const startBin = 2; // Bass filter
+                        const startBin = 6; // Filter out low-end hum and rumble
                         const endBin = 60;
                         for (let i = startBin; i < endBin; i++) sum += dataArray[i];
                         const avg = sum / (endBin - startBin);
 
-                        // Refined height logic for better visual clarity - matching the "ripple" feel
-                        let finalHeight = (isMobile ? 2 : 3);
-                        if (avg > 10) { 
-                            const sensitivity = 0.7; // Increased for more dynamic movement
-                            const peak = Math.pow((avg - 10) / (255 - 10), sensitivity) * 55; // Increased peak
-                            finalHeight = Math.max(3, peak);
+                        const time = Date.now() / 400;
+                        let finalHeight = 3; // Baseline flat dot when silence
+
+                        // Noise Floor & Detection
+                        const noiseFloor = 40; // Increased heavily so it ONLY triggers on actual voice
+                        if (avg > noiseFloor) {
+                            // Scale peaks gently so waves are smaller/more elegant
+                            const peak = ((avg - noiseFloor) / 120) * 22;
+                            finalHeight += peak;
                         }
 
-                        if (avg > 14) finalHeight += Math.random() * 4;
-                        finalHeight = Math.min(36, finalHeight);
+                        // Add tiny organic variation ONLY when talking
+                        if (avg > noiseFloor + 10) finalHeight += (Math.random() - 0.5) * 3;
+                        finalHeight = Math.min(24, Math.max(3, finalHeight));
 
                         allWaveformPointsRef.current.push(finalHeight);
                         setWaveformPoints(prev => {
                             const next = [...prev, finalHeight];
-                            if (next.length > 65) return next.slice(1);
+                            if (next.length > 30) return next.slice(1);
                             return next;
                         });
                     }
-                }, 60);
+                }, 100); // 100ms interval for a relaxed, normal speed
             };
 
             waveformTimerHandler.current = startWaveformTimer;
@@ -297,12 +304,12 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                 } else {
                     // Downsample full waveform for review
                     const total = allWaveformPointsRef.current.length;
-                    const target = 65;
+                    const target = 30;
                     if (total > 0) {
                         const step = total / target;
                         const downsampled = [];
                         for (let i = 0; i < target; i++) {
-                            downsampled.push(allWaveformPointsRef.current[Math.floor(i * step)] || (isMobile ? 1.5 : 2));
+                            downsampled.push(allWaveformPointsRef.current[Math.floor(i * step)] || 3);
                         }
                         setWaveformPoints(downsampled);
                     }
@@ -347,12 +354,12 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
 
                 // Downsample for static preview
                 const total = allWaveformPointsRef.current.length;
-                const target = 65;
+                const target = 30;
                 if (total > 0) {
                     const step = total / target;
                     const downsampled = [];
                     for (let i = 0; i < target; i++) {
-                        downsampled.push(allWaveformPointsRef.current[Math.floor(i * step)] || (isMobile ? 1.5 : 2));
+                        downsampled.push(allWaveformPointsRef.current[Math.floor(i * step)] || 3);
                     }
                     setWaveformPoints(downsampled);
                 }
@@ -429,6 +436,20 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
             if (waveTimerRef.current) clearInterval(waveTimerRef.current);
             if (timerRef.current) clearInterval(timerRef.current);
             if (previewAudioRef.current) previewAudioRef.current.pause();
+
+            // Critical: stop recorder and tracks when component unmounts
+            if (mediaRecorderRef.current) {
+                try {
+                    mediaRecorderRef.current.onstop = null;
+                    mediaRecorderRef.current.ondataavailable = null;
+                    if (mediaRecorderRef.current.state !== 'inactive') {
+                        mediaRecorderRef.current.stop();
+                    }
+                    const tracks = mediaRecorderRef.current.stream?.getTracks();
+                    if (tracks) tracks.forEach(track => track.stop());
+                } catch (e) { }
+                mediaRecorderRef.current = null;
+            }
         };
     }, []);
 
@@ -456,11 +477,11 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                 minHeight: isMobile ? '44px' : '54px', borderRadius: '30px',
                 display: 'flex', alignItems: 'center', background: '#ffffff',
                 boxShadow: '0 1px 3px rgba(0,0,0,0.08)', gap: isMobile ? '2px' : '16px',
-                overflow: 'hidden'
+                overflow: 'visible'
             }}>
                 {!isMobile && <div style={{ flex: 1 }}></div>}
-                <div className="wa-voice-controls-cluster" style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '2px' : '16px', flex: isMobile ? 1 : 'unset', minWidth: 0, overflow: 'hidden' }}>
-                    <button onClick={deleteRecording} className="wa-voice-btn delete" data-tooltip="Delete" style={{ width: btnSize, height: btnSize, borderRadius: '50%', color: '#54656f', flexShrink: 0 }}>
+                <div className="wa-voice-controls-cluster" style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '2px' : '16px', flex: isMobile ? 1 : 'unset', minWidth: 0, overflow: 'visible' }}>
+                    <button onClick={deleteRecording} className="wa-voice-btn delete" data-tooltip="Delete" data-tooltip-pos="center" style={{ width: btnSize, height: btnSize, borderRadius: '50%', color: '#54656f', flexShrink: 0 }}>
                         <Trash2 size={isMobile ? 16 : iconSize} />
                     </button>
                     <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '4px' : '10px', flexShrink: 0 }}>
@@ -511,10 +532,14 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                         style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: isMobile ? '1px' : '2.5px',
+                            gap: '2.5px',
                             height: '36px',
                             flex: 1,
-                            maxWidth: isMobile ? (window.innerWidth > 500 ? '280px' : '125px') : '260px',
+                            maxWidth: isMobile
+                                ? ((isPaused || isReviewing)
+                                    ? (window.innerWidth > 500 ? '130px' : '90px')
+                                    : (window.innerWidth > 500 ? '220px' : '150px'))
+                                : '180px',
                             minWidth: 0,
                             overflow: 'hidden',
                             justifyContent: 'center',
@@ -525,12 +550,14 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                     >
                         {waveformPoints.map((h, i) => (
                             <div key={i} style={{
-                                height: `${isMobile ? h * 0.8 : h}px`,
-                                backgroundColor: '#027EB5',
-                                width: '2px',
-                                borderRadius: '1px',
-                                opacity: (isPaused || isReviewing) ? (i / waveformPoints.length < previewProgress / 100 ? 1 : 0.4) : 1,
-                                transition: 'height 0.12s'
+                                height: `${h}px`,
+                                backgroundColor: (isPaused || isReviewing)
+                                    ? (i / waveformPoints.length < previewProgress / 100 ? '#027EB5' : '#8696a0')
+                                    : '#8696a0',
+                                width: '3px',
+                                borderRadius: '3px',
+                                transition: 'height 0.1s ease',
+                                transform: 'scaleY(1)' // Centralized growth due to flex align-center
                             }} />
                         ))}
                         {(isPaused || isReviewing) && (
@@ -550,18 +577,18 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                     </div>
                 </div>
                 {(isPaused || isReviewing) && (
-                    <button onClick={togglePreviewPlayback} className="wa-voice-btn play" data-tooltip={isPlayingPreview ? "Pause" : "Play"} style={{ width: btnSize, height: btnSize }}>
+                    <button onClick={togglePreviewPlayback} className="wa-voice-btn play" data-tooltip={isPlayingPreview ? "Pause" : "Play"} data-tooltip-pos="center" style={{ width: btnSize, height: btnSize, flexShrink: 0 }}>
                         {isPlayingPreview ? <div style={{ display: 'flex', gap: '3px', color: '#8696a0' }}><div style={{ width: '3px', height: '14px', background: 'currentColor' }}></div><div style={{ width: '3px', height: '14px', background: 'currentColor' }}></div></div> : <Play size={iconSize} fill="#8696a0" color="#8696a0" />}
                     </button>
                 )}
                 <div style={{ display: 'flex', gap: isMobile ? '4px' : actionGap, alignItems: 'center', marginLeft: isMobile ? '0px' : '8px', flexShrink: 0 }}>
-                    <button onClick={(e) => isPaused ? resumeRecording(e) : (isReviewing ? null : pauseRecording(e))} className="wa-voice-btn hover-red" data-tooltip={isPaused ? "Resume" : (isReviewing ? "" : "Pause")} style={{ width: btnSize, height: btnSize, opacity: isReviewing ? 0.5 : 1 }}>
+                    <button onClick={(e) => isPaused ? resumeRecording(e) : (isReviewing ? null : pauseRecording(e))} className="wa-voice-btn hover-red" data-tooltip={isPaused ? "Resume" : (isReviewing ? "" : "Pause")} data-tooltip-pos="center" style={{ width: btnSize, height: btnSize, opacity: isReviewing ? 0.5 : 1 }}>
                         {isPaused || isReviewing ? <Mic size={iconSize} color="#ef4444" /> : <div style={{ display: 'flex', gap: '3px', color: '#ef4444' }}><div style={{ width: '3.2px', height: '14px', background: 'currentColor' }}></div><div style={{ width: '3.2px', height: '14px', background: 'currentColor' }}></div></div>}
                     </button>
-                    <button onClick={() => setIsViewOnceVoice(!isViewOnceVoice)} className={`wa-view-once-btn ${isViewOnceVoice ? 'active' : ''}`} data-tooltip="View once" style={{ width: btnSize, height: btnSize }}>
+                    <button onClick={() => setIsViewOnceVoice(!isViewOnceVoice)} className={`wa-view-once-btn ${isViewOnceVoice ? 'active' : ''}`} data-tooltip="View once" data-tooltip-pos="center" style={{ width: btnSize, height: btnSize }}>
                         <span className="wa-view-once-circle" style={{ borderColor: isViewOnceVoice ? '#027EB5' : '#54656f', color: isViewOnceVoice ? '#027EB5' : '#54656f' }}>1</span>
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); if (isReviewing) { onSend(audioBlob, recordingTime, isViewOnceVoice); } else { window.directSendRequested = true; stopRecording(); } }} className="wa-send-btn-inner" data-tooltip="Send" style={{ width: sendBtnSize, height: sendBtnSize, background: '#027EB5', borderRadius: '50%' }}>
+                    <button onClick={(e) => { e.stopPropagation(); if (isReviewing) { onSend(audioBlob, recordingTime, isViewOnceVoice); } else { window.directSendRequested = true; stopRecording(); } }} className="wa-send-btn-inner" data-tooltip="Send" data-tooltip-pos="center" style={{ width: sendBtnSize, height: sendBtnSize, background: '#027EB5', borderRadius: '50%' }}>
                         <Send size={isMobile ? 18 : 20} color="white" />
                     </button>
                 </div>
@@ -1194,6 +1221,7 @@ export default function Chat() {
     const [isRecording, setIsRecording] = useState(false);
 
     const [playingAudioId, setPlayingAudioId] = useState(null);
+    const [playbackSpeed, setPlaybackSpeed] = useState(1);
 
 
     // Synchronize refs with state
@@ -3164,6 +3192,13 @@ export default function Chat() {
         }
     }, [users]);
 
+    // --- Reset Recording State when Switching Chats ---
+    useEffect(() => {
+        if (isRecording) {
+            setIsRecording(false);
+        }
+    }, [selectedUser?._id, selectedUser?.id, selectedGroup?._id, selectedGroup?.id, selectedCommunity?._id, selectedCommunity?.id]);
+
     // --- Fetch Data on Panel Open ---
     useEffect(() => {
         if (isContactInfoOpen) {
@@ -3904,7 +3939,7 @@ export default function Chat() {
         }
 
         // If clicking the same message that's already playing, and NOT seeking, stop it
-        if (playingAudioId === msg._id && startTime === 0) {
+        if (String(playingAudioId) === String(msg._id || msg.id) && startTime === 0) {
             if (audioInstanceRef.current) {
                 audioInstanceRef.current.pause();
                 audioInstanceRef.current = null;
@@ -3937,7 +3972,9 @@ export default function Chat() {
 
         const audio = new Audio(url);
         audioInstanceRef.current = audio;
-        setPlayingAudioId(msg._id);
+        audio.playbackRate = playbackSpeed;
+        const currentMsgId = String(msg._id || msg.id); // Force string for comparison
+        setPlayingAudioId(currentMsgId);
         setViewOnceElapsed(startTime);
 
         audio.onloadedmetadata = () => {
@@ -3984,6 +4021,15 @@ export default function Chat() {
             console.error("Audio play failed:", err);
             setPlayingAudioId(null);
             audioInstanceRef.current = null;
+        }
+    };
+
+    const togglePlaybackSpeed = (e) => {
+        if (e) e.stopPropagation();
+        const nextSpeed = playbackSpeed === 1 ? 1.5 : (playbackSpeed === 1.5 ? 2 : 1);
+        setPlaybackSpeed(nextSpeed);
+        if (audioInstanceRef.current) {
+            audioInstanceRef.current.playbackRate = nextSpeed;
         }
     };
 
@@ -6374,7 +6420,7 @@ export default function Chat() {
 
                                     // Prioritize: Images > Links > Docs
                                     const images = chatMsgs.filter(m => m.type === 'image' || m.type === 'video').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                                    const links = chatMsgs.filter(m => (m.link_preview && m.link_preview.url) && m.type !== 'image' && m.type !== 'video').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                                    const links = chatMsgs.filter(m => (m.link_preview?.url || /(https?:\/\/[^\s]+)/.test(m.content)) && m.type !== 'image' && m.type !== 'video').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                                     const docs = chatMsgs.filter(m => m.type === 'file').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
                                     const previewItems = [...images, ...links, ...docs].slice(0, 4);
@@ -6407,8 +6453,9 @@ export default function Chat() {
                                                         </div>
                                                     );
                                                 }
+                                                const fallbackLink = m.link_preview?.url || m.content?.match(/(https?:\/\/[^\s]+)/)?.[0];
                                                 return (
-                                                    <div key={i} style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); window.open(m.link_preview?.url, '_blank'); }}>
+                                                    <div key={i} style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); if (fallbackLink) window.open(fallbackLink, '_blank'); }}>
                                                         <LinkIcon size={24} color="#8696a0" />
                                                     </div>
                                                 );
@@ -7585,55 +7632,74 @@ export default function Chat() {
         const mouseX = dropdownPos.x / zoom;
         const mouseY = dropdownPos.y / zoom;
 
-        // Use more realistic height estimates for flipping logic
-        const estMenuWidth = type === 'msg' ? 250 : 200;
-        const estMenuHeight = type === 'msg' ? 480 : 350;
+        // ── Chat area left boundary ──────────────────────────────────────────
+        // Prevent the dropdown from crossing into the contact/nav panel on
+        // desktop and tablet. We read the actual DOM rect so the boundary is
+        // always correct regardless of panel width or sidebar visibility.
+        const chatWrapperEl =
+            document.querySelector('.wa-main-chat-wrapper') ||
+            document.querySelector('.wa-main-chat');
+        const chatAreaLeft = chatWrapperEl
+            ? chatWrapperEl.getBoundingClientRect().left / zoom
+            : 0;
+
+        // ── Accurate menu size estimates ─────────────────────────────────────
+        // These are upper-bound estimates; the flip logic uses them so we never
+        // need to cap maxHeight and force a scrollbar.
+        const estMenuWidth = type === 'msg' ? 260 : 220;
+        const estMenuHeight = type === 'msg' ? 400 : 310;
+
+        const padding = 10;
+
+        // ── Vertical: pick the side with MORE space ──────────────────────────
+        const spaceBelow = vHeight - mouseY - padding;
+        const spaceAbove = mouseY - padding;
+        const isFlippedUp = spaceAbove > spaceBelow; // go where there is more room
 
         const menuStyle = {
             position: 'fixed',
-            zIndex: 3000 // Very high
+            zIndex: 3000,
+            overflowY: 'visible', // no scrollbar – items always fully visible
         };
-        const padding = 15;
-        let isFlippedUp = false;
-
-        // Vertical flipping logic
-        if (mouseY + estMenuHeight > vHeight - padding) {
-            isFlippedUp = true;
-        }
 
         if (isFlippedUp) {
-            // Anchor from the bottom
-            const bottomPos = vHeight - mouseY + 5;
-            menuStyle.bottom = Math.max(padding, bottomPos);
+            // Anchor bottom edge just above the cursor
+            menuStyle.bottom = Math.max(padding, vHeight - mouseY + 5);
         } else {
-            // Anchor from the top
-            const topPos = mouseY + (type === 'msg' ? 15 : 10);
-            menuStyle.top = Math.max(padding, topPos);
+            // Anchor top edge just below the cursor
+            menuStyle.top = Math.max(padding, mouseY + (type === 'msg' ? 15 : 10));
         }
 
-        // Determine which side to anchor to based on cursor position and available width
-        // If we anchor to right, we need to ensure the menu doesn't overflow to the left
-        // If we anchor to left, we need to ensure it doesn't overflow to the right
+        // ── Horizontal positioning ───────────────────────────────────────────
         const rightOffset = type === 'msg' ? 25 : 30;
-        let calculatedRight = vWidth - mouseX - rightOffset;
-        calculatedRight = Math.max(padding, calculatedRight);
-
         const viewportIsMobile = vWidth < 768;
 
         if (viewportIsMobile) {
-            // Simplified mobile positioning: centered or clamped
+            // Mobile: follow cursor side, stay within screen
             if (mouseX < vWidth / 2) {
                 menuStyle.left = Math.max(padding, mouseX - 10);
             } else {
                 menuStyle.right = Math.max(padding, vWidth - mouseX - rightOffset);
             }
-        } else if (mouseX < 250) {
-            menuStyle.left = Math.max(padding, mouseX - 10);
         } else {
-            menuStyle.right = calculatedRight;
+            // Desktop / tablet ─────────────────────────────────────────────────
+            // Preferred: right-anchor near cursor
+            const preferredRight = vWidth - mouseX - rightOffset;
+            const clampedRight = Math.max(padding, preferredRight);
+
+            // Where would the left edge of the menu land?
+            const menuLeftEdge = vWidth - clampedRight - estMenuWidth;
+
+            if (menuLeftEdge < chatAreaLeft + padding) {
+                // Menu would cross into the contact panel → left-anchor it
+                // to the start of the chat area instead
+                menuStyle.left = Math.max(chatAreaLeft + padding, mouseX - 10);
+            } else {
+                menuStyle.right = clampedRight;
+            }
         }
 
-        // Add minimum width for message dropdowns to accommodate the reaction bar
+        // Minimum width so the reactions row never wraps
         if (type === 'msg') {
             menuStyle.minWidth = viewportIsMobile ? '230px' : '250px';
         }
@@ -8761,6 +8827,77 @@ export default function Chat() {
                         </div>
                     </div>
 
+                    <div style={{ width: '100%', borderBottom: thickDivider }}></div>
+
+                    <div style={{ background: '#ffffff' }}>
+                        {(() => {
+                            const isAnnouncementsActive = selectedGroup && (selectedGroup.isCommunityAnnouncements || String(selectedGroup._id) === String(community.announcements?._id || community.announcements));
+                            const cChatMsgs = isAnnouncementsActive ? (groupMessages || []) : (community.announcements?.messages || groupMessages || []);
+                            const cActiveMsgs = cChatMsgs.filter(m => !m.is_deleted_by_user && !m.is_deleted_by_admin);
+                            const cImages = cActiveMsgs.filter(m => m.type === 'image' || m.type === 'video').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                            const cLinks = cActiveMsgs.filter(m => (m.link_preview?.url || /(https?:\/\/[^\s]+)/.test(m.content)) && m.type !== 'image' && m.type !== 'video').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                            const cDocs = cActiveMsgs.filter(m => m.type === 'file').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                            const cPreviewItems = [...cImages, ...cLinks, ...cDocs].slice(0, 4);
+
+                            return (
+                                <>
+                                    <div className="clickable" onClick={() => setIsSharedMediaOpen(true)} style={{ padding: '14px 30px', display: 'flex', flexDirection: 'column', cursor: 'pointer' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ color: textColor, fontSize: 16 }}>Media, links and docs</span>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                <span style={{ color: subTextColor, fontSize: 15 }}>{cImages.length + cLinks.length + cDocs.length}</span>
+                                                <ChevronRight size={20} color={subTextColor} />
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12, color: subTextColor, fontSize: 14 }}>
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Image size={16} /> {cImages.length} Media</span>
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><LinkIcon size={16} /> {cLinks.length} Links</span>
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><FileText size={16} /> {cDocs.length} Docs</span>
+                                        </div>
+                                    </div>
+
+                                    <div style={{ padding: '0 30px 14px 30px', display: 'flex', gap: 6, overflowX: 'auto' }}>
+                                        {cPreviewItems.map((m, i) => {
+                                            if (m.type === 'image' || m.type === 'video') {
+                                                return (
+                                                    <div key={i} className="wa-media-thumb" onClick={(e) => { e.stopPropagation(); setViewingImage(m); }} style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }}>
+                                                        <img src={m.file_path} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                    </div>
+                                                );
+                                            }
+                                            if (m.type === 'file') {
+                                                return (
+                                                    <div key={i} className="wa-media-thumb" style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px', overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDownload(m.file_path, m.fileName); }}>
+                                                        <FileText size={24} color="#8696a0" />
+                                                        <div style={{ fontSize: 10, color: '#667781', textAlign: 'center', marginTop: 4, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                            {m.fileName || 'Doc'}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+                                            if (m.link_preview && m.link_preview.image) {
+                                                return (
+                                                    <div key={i} className="wa-media-thumb" style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }} onClick={(e) => { e.stopPropagation(); window.open(m.link_preview.url, '_blank'); }}>
+                                                        <img src={m.link_preview.image} alt="link" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                    </div>
+                                                );
+                                            }
+                                            const fallbackLink = m.link_preview?.url || m.content?.match(/(https?:\/\/[^\s]+)/)?.[0];
+                                            return (
+                                                <div key={i} className="wa-media-thumb" style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); if (fallbackLink) window.open(fallbackLink, '_blank'); }}>
+                                                    <LinkIcon size={24} color="#8696a0" />
+                                                </div>
+                                            );
+                                        })}
+                                        {[...Array(Math.max(0, 4 - cPreviewItems.length))].map((_, i) => (
+                                            <div key={`empty-${i}`} className="wa-media-thumb" style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', flexShrink: 0 }}></div>
+                                        ))}
+                                    </div>
+                                </>
+                            );
+                        })()}
+                    </div>
+
                     <div style={{ borderBottom: thickDivider }}>
                         {[
                             ...(canIManage ? [
@@ -9310,18 +9447,24 @@ export default function Chat() {
         const isGroup = !!selectedGroup;
 
         // Filter messages for this chat
-        const chatMsgs = isGroup
-            ? messages.filter(m => String(m.group_id) === String(selectedGroup._id))
-            : messages.filter(m =>
-                (String(m.sender_id) === String(selectedUser._id) && String(m.receiver_id) === String(user.id || user._id)) ||
-                (String(m.sender_id) === String(user.id || user._id) && String(m.receiver_id) === String(selectedUser._id)) ||
-                (String(m.user_id) === String(user.id || user._id) && String(m.receiver_id) === String(selectedUser._id)) ||
-                (String(m.user_id) === String(selectedUser._id) && String(m.receiver_id) === String(user.id || user._id))
+        let chatMsgs = [];
+        if (isGroup) {
+            const isAnnouncementsTarget = selectedGroup && selectedCommunity && (selectedGroup.isCommunityAnnouncements || String(selectedGroup._id) === String(selectedCommunity.announcements?._id || selectedCommunity.announcements));
+            chatMsgs = (isCommunityInfoOpen && !isAnnouncementsTarget)
+                ? (selectedCommunity?.announcements?.messages || groupMessages || [])
+                : (groupMessages || []);
+        } else {
+            chatMsgs = messages.filter(m =>
+                (String(m.sender_id) === String(selectedUser?._id) && String(m.receiver_id) === String(user?.id || user?._id)) ||
+                (String(m.sender_id) === String(user?.id || user?._id) && String(m.receiver_id) === String(selectedUser?._id)) ||
+                (String(m.user_id) === String(user?.id || user?._id) && String(m.receiver_id) === String(selectedUser?._id)) ||
+                (String(m.user_id) === String(selectedUser?._id) && String(m.receiver_id) === String(user?.id || user?._id))
             );
+        }
 
         const mediaMsgs = chatMsgs.filter(m => m.type === 'image' || m.type === 'video');
         const docMsgs = chatMsgs.filter(m => m.type === 'file');
-        const linkMsgs = chatMsgs.filter(m => m.link_preview && m.link_preview.url);
+        const linkMsgs = chatMsgs.filter(m => (m.link_preview?.url || /(https?:\/\/[^\s]+)/.test(m.content)) && m.type !== 'image' && m.type !== 'video' && m.type !== 'file');
 
         const currentItems = sharedMediaTab === 'media' ? mediaMsgs : (sharedMediaTab === 'docs' ? docMsgs : linkMsgs);
         const isSelectionMode = selectedMediaMsgs.length > 0;
@@ -9505,69 +9648,72 @@ export default function Chat() {
 
                             {sharedMediaTab === 'links' && (
                                 <div className="wa-links-list">
-                                    {currentItems.map(msg => (
-                                        <div key={msg._id} className="wa-link-list-item">
-                                            <div
-                                                className={`wa-doc-select-box ${selectedMediaMsgs.find(m => m._id === msg._id) ? 'active' : ''}`}
-                                                onClick={(e) => { e.stopPropagation(); toggleSelection(msg); }}
-                                                style={{ cursor: 'pointer' }}
-                                            >
-                                                {selectedMediaMsgs.find(m => m._id === msg._id) ? (
-                                                    <CheckCheck size={18} color="#fff" />
-                                                ) : (
-                                                    <div className="wa-doc-checkbox-placeholder" />
-                                                )}
-                                            </div>
-                                            <a
-                                                className={`wa-link-card-small ${getYouTubeVideoId(msg.link_preview?.url || msg.content) ? 'youtube' : ''}`}
-                                                href={msg.link_preview?.url || msg.content}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                onClick={(e) => {
-                                                    // If they clicked the blue URL text directly, DON'T redirect, just open immediately.
-                                                    if (e.target.closest('.wa-link-url-small')) {
-                                                        return; // Let native <a> behavior handle it
-                                                    }
-
-                                                    // Desktop: Redirect THEN Open Link.
-                                                    if (window.innerWidth > 768) {
-                                                        e.preventDefault();
-                                                        handleSearchClick(msg._id);
-                                                        setTimeout(() => window.open(msg.link_preview?.url || msg.content, '_blank'), 600);
-                                                    }
-                                                }}
-                                                style={{ cursor: 'pointer', textDecoration: 'none', display: 'block' }}
-                                            >
-                                                <div className="wa-link-header-small">
-                                                    <span className="wa-link-author">{msg.sender_id === user.id || msg.user_id === user.id ? 'You' : (selectedUser.name || 'User')}</span>
-                                                    <span className="wa-link-time-small">{formatSharedMediaTimestamp(msg.created_at)}</span>
-                                                </div>
-                                                <div style={{ display: 'flex', gap: 10 }}>
-                                                    {msg.link_preview.image && (
-                                                        <div className="wa-link-thumb-small-wrapper">
-                                                            <img src={msg.link_preview.image} alt="preview" className="wa-link-thumb-small" />
-                                                            {getYouTubeVideoId(msg.link_preview?.url || msg.content) && (
-                                                                <div
-                                                                    className="wa-yt-preview-overlay-small"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        e.preventDefault();
-                                                                        setPreviewVideoUrl(msg.link_preview?.url || msg.content);
-                                                                    }}
-                                                                >
-                                                                    <Play size={16} color="white" fill="white" />
-                                                                </div>
-                                                            )}
-                                                        </div>
+                                    {currentItems.map(msg => {
+                                        const actualUrl = msg.link_preview?.url || msg.content?.match(/(https?:\/\/[^\s]+)/)?.[0];
+                                        return (
+                                            <div key={msg._id} className="wa-link-list-item">
+                                                <div
+                                                    className={`wa-doc-select-box ${selectedMediaMsgs.find(m => m._id === msg._id) ? 'active' : ''}`}
+                                                    onClick={(e) => { e.stopPropagation(); toggleSelection(msg); }}
+                                                    style={{ cursor: 'pointer' }}
+                                                >
+                                                    {selectedMediaMsgs.find(m => m._id === msg._id) ? (
+                                                        <CheckCheck size={18} color="#fff" />
+                                                    ) : (
+                                                        <div className="wa-doc-checkbox-placeholder" />
                                                     )}
-                                                    <div className="wa-link-details-small">
-                                                        <div className="wa-link-title-small">{msg.link_preview?.title}</div>
-                                                        <div className="wa-link-url-small" style={{ wordBreak: 'break-all' }}>{msg.link_preview?.url || msg.content}</div>
-                                                    </div>
                                                 </div>
-                                            </a>
-                                        </div>
-                                    ))}
+                                                <a
+                                                    className={`wa-link-card-small ${getYouTubeVideoId(actualUrl) ? 'youtube' : ''}`}
+                                                    href={actualUrl}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    onClick={(e) => {
+                                                        // If they clicked the blue URL text directly, DON'T redirect, just open immediately.
+                                                        if (e.target.closest('.wa-link-url-small')) {
+                                                            return; // Let native <a> behavior handle it
+                                                        }
+
+                                                        // Desktop: Redirect THEN Open Link.
+                                                        if (window.innerWidth > 768) {
+                                                            e.preventDefault();
+                                                            handleSearchClick(msg._id);
+                                                            setTimeout(() => window.open(actualUrl, '_blank'), 600);
+                                                        }
+                                                    }}
+                                                    style={{ cursor: 'pointer', textDecoration: 'none', display: 'block' }}
+                                                >
+                                                    <div className="wa-link-header-small">
+                                                        <span className="wa-link-author">{msg.sender_id === user.id || msg.user_id === user.id ? 'You' : (selectedUser?.name || 'User')}</span>
+                                                        <span className="wa-link-time-small">{formatSharedMediaTimestamp(msg.created_at)}</span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: 10 }}>
+                                                        {msg.link_preview?.image && (
+                                                            <div className="wa-link-thumb-small-wrapper">
+                                                                <img src={msg.link_preview.image} alt="preview" className="wa-link-thumb-small" />
+                                                                {getYouTubeVideoId(actualUrl) && (
+                                                                    <div
+                                                                        className="wa-yt-preview-overlay-small"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            e.preventDefault();
+                                                                            setPreviewVideoUrl(actualUrl);
+                                                                        }}
+                                                                    >
+                                                                        <Play size={16} color="white" fill="white" />
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                        <div className="wa-link-details-small">
+                                                            {msg.link_preview?.title && <div className="wa-link-title-small">{msg.link_preview.title}</div>}
+                                                            <div className="wa-link-url-small" style={{ wordBreak: 'break-all' }}>{actualUrl}</div>
+                                                        </div>
+                                                    </div>
+                                                </a>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
@@ -11160,7 +11306,7 @@ export default function Chat() {
                                                                     {/* Audio Rendering */}
                                                                     {msg.type === 'audio' && (
                                                                         <div
-                                                                            className={`wa-voice-bubble-content ${playingAudioId === msg._id ? 'wa-glassy-playing' : ''} ${msg.is_view_once ? 'wa-view-once-glassy' : ''} ${msg.is_view_once && msg.is_viewed ? 'spent' : ''}`}
+                                                                            className={`wa-voice-bubble-content ${String(playingAudioId) === String(msg._id || msg.id) ? 'wa-glassy-playing' : ''} ${msg.is_view_once ? 'wa-view-once-glassy' : ''} ${msg.is_view_once && msg.is_viewed ? 'spent' : ''}`}
                                                                             onClick={(e) => {
                                                                                 if (isForwardingMode) return;
                                                                                 if (msg.is_view_once && msg.is_viewed && !isMeMsg(msg)) {
@@ -11186,7 +11332,7 @@ export default function Chat() {
                                                                                 minWidth: isMobile ? '200px' : '280px'
                                                                             }}
                                                                         >
-                                                                            {msg.is_view_once && msg.is_viewed && !isMeMsg(msg) && playingAudioId !== msg._id ? (
+                                                                            {msg.is_view_once && msg.is_viewed && !isMeMsg(msg) && String(playingAudioId) !== String(msg._id || msg.id) ? (
                                                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px' }}>
                                                                                     <div className="wa-voice-bubble-avatar" style={{ opacity: 0.6, background: '#f0f2f5' }}>
                                                                                         <Mic size={18} color="#8696a0" />
@@ -11203,11 +11349,36 @@ export default function Chat() {
                                                                                 </div>
                                                                             ) : (
                                                                                 <>
-                                                                                    <div className="wa-voice-bubble-avatar">
-                                                                                        {isMe ? (
-                                                                                            <img src={userData?.image || user?.profile_pic || user?.avatar || '/default-avatar.png'} alt="me" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                                                                    <div className="wa-voice-bubble-avatar" style={{ position: 'relative' }}>
+                                                                                        {String(playingAudioId) === String(msg._id || msg.id) ? (
+                                                                                            <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
+                                                                                                {playbackSpeed}x
+                                                                                            </div>
                                                                                         ) : (
-                                                                                            <img src={selectedUser?.profile_photo || selectedUser?.image || selectedUser?.profile_pic || selectedUser?.avatar || '/default-avatar.png'} alt="user" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                                                                            <>
+                                                                                                {isMe ? (
+                                                                                                    (userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo) ? (
+                                                                                                        <img 
+                                                                                                            src={userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo} 
+                                                                                                            alt="me" 
+                                                                                                            style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} 
+                                                                                                            onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'; }}
+                                                                                                        />
+                                                                                                    ) : null
+                                                                                                ) : (
+                                                                                                    (msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar) ? (
+                                                                                                        <img
+                                                                                                            src={msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar}
+                                                                                                            alt="user"
+                                                                                                            style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                                                                                                            onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'; }}
+                                                                                                        />
+                                                                                                    ) : null
+                                                                                                )}
+                                                                                                <div className="wa-avatar-letter" style={{ display: (isMe ? (userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo) : (msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar)) ? 'none' : 'flex' }}>
+                                                                                                    {isMe ? (userData?.name || user?.name || 'M')[0].toUpperCase() : (msg.sender_id?.name || selectedUser?.name || 'U')[0].toUpperCase()}
+                                                                                                </div>
+                                                                                            </>
                                                                                         )}
                                                                                         <div className="wa-voice-mic-badge">
                                                                                             <Mic size={12} color={msg.is_read ? '#53bdeb' : (msg.is_view_once ? '#027EB5' : '#8696a0')} />
@@ -11215,19 +11386,30 @@ export default function Chat() {
                                                                                     </div>
                                                                                     <div className="wa-voice-bubble-player" style={{ flex: 1, minWidth: 0 }}>
                                                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                                                            <button className="wa-voice-play-btn" style={{ background: 'none', border: 'none', color: (playingAudioId === msg._id || msg.is_view_once) ? '#027EB5' : '#54656f', padding: 0, cursor: 'pointer', transition: 'transform 0.2s' }}>
-                                                                                                {playingAudioId === msg._id ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
+                                                                                            <button className="wa-voice-play-btn" style={{ background: 'none', border: 'none', color: (String(playingAudioId) === String(msg._id || msg.id) || msg.is_view_once) ? '#027EB5' : '#54656f', padding: 0, cursor: 'pointer', transition: 'transform 0.2s' }}>
+                                                                                                {String(playingAudioId) === String(msg._id || msg.id) ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
                                                                                             </button>
-                                                                                            <div 
-                                                                                                className="wa-voice-waveform-static" 
-                                                                                                style={{ gap: '1px', display: 'flex', alignItems: 'center', height: '28px', position: 'relative', cursor: 'pointer', outline: 'none', width: '154px', flexShrink: 0, overflow: 'hidden' }}
+                                                                                            <div
+                                                                                                className="wa-voice-waveform-static"
+                                                                                                style={{
+                                                                                                    display: 'flex',
+                                                                                                    alignItems: 'center',
+                                                                                                    height: '24px',
+                                                                                                    position: 'relative',
+                                                                                                    cursor: 'pointer',
+                                                                                                    outline: 'none',
+                                                                                                    width: '144px',
+                                                                                                    flexShrink: 0,
+                                                                                                    overflow: 'hidden',
+                                                                                                    padding: '0 2px'
+                                                                                                }}
                                                                                                 onMouseDown={(e) => {
                                                                                                     e.stopPropagation();
                                                                                                     const rect = e.currentTarget.getBoundingClientRect();
                                                                                                     const updateSeek = (moveEvent) => {
                                                                                                         const x = moveEvent.clientX - rect.left;
                                                                                                         const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
-                                                                                                        if (playingAudioId === msg._id && audioInstanceRef.current) {
+                                                                                                        if (String(playingAudioId) === String(msg._id || msg.id) && audioInstanceRef.current) {
                                                                                                             audioInstanceRef.current.currentTime = (percent / 100) * (msg.duration || 1);
                                                                                                         } else {
                                                                                                             handlePlayAudio(msg, (percent / 100) * (msg.duration || 1));
@@ -11243,23 +11425,33 @@ export default function Chat() {
                                                                                                     updateSeek(e);
                                                                                                 }}
                                                                                             >
-                                                                                                {[8, 12, 18, 24, 20, 16, 12, 14, 22, 28, 24, 18, 12, 10, 14, 20, 26, 22, 16, 12, 15, 22, 28, 24, 18, 12, 14, 20, 26, 22, 16, 12, 10, 15, 22, 28, 22, 16, 12, 8, 12, 18, 24, 20, 16, 12, 14, 22, 28, 24, 18, 12, 10, 14, 20, 26, 22, 16, 12, 8].map((h, i, arr) => {
-                                                                                                    const totalBars = arr.length;
-                                                                                                    const progress = (playingAudioId === msg._id) ? (viewOnceElapsed / (msg.duration || 1)) : 0;
-                                                                                                    const isPassed = (i / totalBars) <= progress;
-                                                                                                    
-                                                                                                    return (
-                                                                                                        <div key={i} className="wa-waveform-bar" style={{
-                                                                                                            width: '1.5px',
-                                                                                                            height: `${h}px`,
-                                                                                                            background: isPassed ? '#027EB5' : (msg.is_read ? '#53bdeb' : '#8696a0'),
-                                                                                                            opacity: (playingAudioId === msg._id && !isPassed) ? 0.4 : 1,
-                                                                                                            borderRadius: '1px',
-                                                                                                            transition: 'all 0.1s ease'
-                                                                                                        }} />
-                                                                                                    );
-                                                                                                })}
-                                                                                                {playingAudioId === msg._id && (
+                                                                                                {/* WAVEFORM BARS BASES (GRAY) */}
+                                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '3px', width: '100%', justifyContent: 'space-between', opacity: 0.3 }}>
+                                                                                                    {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
+                                                                                                        <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#8696a0', borderRadius: '4px' }} />
+                                                                                                    ))}
+                                                                                                </div>
+
+                                                                                                {/* WAVEFORM PROGRESS (BLUE) - SMOOTH CLIPPING */}
+                                                                                                <div style={{
+                                                                                                    display: 'flex',
+                                                                                                    alignItems: 'center',
+                                                                                                    gap: '3px',
+                                                                                                    width: '100%',
+                                                                                                    justifyContent: 'space-between',
+                                                                                                    position: 'absolute',
+                                                                                                    left: 2,
+                                                                                                    right: 2,
+                                                                                                    clipPath: `inset(0 ${100 - ((String(playingAudioId) === String(msg._id || msg.id) ? viewOnceElapsed : 0) / (msg.duration || 1)) * 100}% 0 0)`,
+                                                                                                    transition: String(playingAudioId) === String(msg._id || msg.id) ? 'none' : 'clip-path 0.3s ease'
+                                                                                                }}>
+                                                                                                    {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
+                                                                                                        <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#027EB5', borderRadius: '4px' }} />
+                                                                                                    ))}
+                                                                                                </div>
+
+                                                                                                {/* PLAYHEAD CIRCULAR DOT (THUMB) */}
+                                                                                                {String(playingAudioId) === String(msg._id || msg.id) && (
                                                                                                     <div style={{
                                                                                                         position: 'absolute',
                                                                                                         left: `${(viewOnceElapsed / (msg.duration || 1)) * 100}%`,
@@ -11267,21 +11459,22 @@ export default function Chat() {
                                                                                                         height: '10px',
                                                                                                         backgroundColor: '#027EB5',
                                                                                                         borderRadius: '50%',
-                                                                                                        transform: 'translateX(-50%)',
-                                                                                                        pointerEvents: 'none',
-                                                                                                        zIndex: 10
+                                                                                                        transform: 'translate(-50%, -50%)',
+                                                                                                        top: '50%',
+                                                                                                        zIndex: 11,
+                                                                                                        boxShadow: '0 0 4px rgba(2, 126, 181, 0.4)'
                                                                                                     }} />
                                                                                                 )}
                                                                                             </div>
                                                                                         </div>
                                                                                         <div className="wa-voice-meta-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
                                                                                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                                                                                <span style={{ 
-                                                                                                    color: (playingAudioId === msg._id || (msg.is_view_once && !msg.is_viewed)) ? '#027EB5' : '#8696a0', 
-                                                                                                    fontSize: '12.5px', 
-                                                                                                    fontWeight: 500 
+                                                                                                <span style={{
+                                                                                                    color: (String(playingAudioId) === String(msg._id || msg.id) || (msg.is_view_once && !msg.is_viewed)) ? '#027EB5' : '#8696a0',
+                                                                                                    fontSize: '12.5px',
+                                                                                                    fontWeight: 500
                                                                                                 }}>
-                                                                                                    {playingAudioId === msg._id ? formatVoiceTime(viewOnceElapsed) : formatVoiceTime(msg.duration || 0)}
+                                                                                                    {String(playingAudioId) === String(msg._id || msg.id) ? formatVoiceTime(viewOnceElapsed) : formatVoiceTime(msg.duration || 0)}
                                                                                                 </span>
                                                                                             </div>
                                                                                             {msg.is_view_once && (
@@ -12150,41 +12343,141 @@ export default function Chat() {
                                                                     {msg.type === 'audio' && (
                                                                         <div
                                                                             id={`audio-${msg._id}`}
-                                                                            className={`wa-voice-bubble-content ${msg.is_view_once ? 'view-once' : ''}`}
+                                                                            className={`wa-voice-bubble-content ${String(playingAudioId) === String(msg._id || msg.id) ? 'wa-glassy-playing' : ''} ${msg.is_view_once ? 'view-once' : ''}`}
                                                                             onClick={(e) => {
                                                                                 if (isForwardingMode) return;
                                                                                 e.stopPropagation();
                                                                                 handlePlayAudio(msg);
                                                                             }}
                                                                             style={{
-                                                                                cursor: (msg.is_view_once && (msg.is_viewed || selfPlayedMsgs.has(String(msg._id)))) ? 'default' : 'pointer'
+                                                                                cursor: (msg.is_view_once && (msg.is_viewed || selfPlayedMsgs.has(String(msg._id)))) ? 'default' : 'pointer',
+                                                                                background: 'rgba(255, 255, 255, 0.82)',
+                                                                                backdropFilter: 'blur(20px)',
+                                                                                WebkitBackdropFilter: 'blur(20px)',
+                                                                                borderRadius: '16px',
+                                                                                border: '1px solid rgba(2, 126, 181, 0.18)',
+                                                                                boxShadow: '0 4px 20px rgba(2, 126, 181, 0.06)',
+                                                                                padding: '10px 14px',
+                                                                                transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                                                                                display: 'flex',
+                                                                                alignItems: 'center',
+                                                                                gap: isMobile ? '8px' : '12px',
+                                                                                minWidth: isMobile ? '200px' : '280px'
                                                                             }}
                                                                         >
                                                                             {!msg.is_view_once ? (
                                                                                 <>
-                                                                                    <div className="wa-voice-bubble-avatar">
-                                                                                        {isMeMsg(msg) ? (
-                                                                                            <img src={user?.profile_pic || user?.avatar || '/default-avatar.png'} alt="me" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                                                                    <div className="wa-voice-bubble-avatar" style={{ position: 'relative' }}>
+                                                                                        {String(playingAudioId) === String(msg._id || msg.id) ? (
+                                                                                            <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
+                                                                                                {playbackSpeed}x
+                                                                                            </div>
                                                                                         ) : (
-                                                                                            <img src={msg.sender_id?.profile_pic || msg.sender_id?.avatar || '/default-avatar.png'} alt="user" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                                                                            <>
+                                                                                                {isMeMsg(msg) ? (
+                                                                                                    <img src={user?.profile_pic || user?.avatar || '/default-avatar.png'} alt="me" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                                                                                ) : (
+                                                                                                    <img src={msg.sender_id?.profile_pic || msg.sender_id?.avatar || '/default-avatar.png'} alt="user" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                                                                                )}
+                                                                                            </>
                                                                                         )}
                                                                                         <div className="wa-voice-mic-badge">
                                                                                             <Mic size={12} color={msg.is_read ? '#53bdeb' : '#8696a0'} />
                                                                                         </div>
                                                                                     </div>
-                                                                                    <div className="wa-voice-bubble-player">
-                                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                                            <button className="wa-voice-play-btn" style={{ background: 'none', border: 'none', color: '#54656f', padding: 0, cursor: 'pointer' }}>
-                                                                                                {playingAudioId === msg._id ? <Pause size={22} fill="currentColor" /> : <Play size={22} fill="currentColor" />}
+                                                                                    <div className="wa-voice-bubble-player" style={{ flex: 1, minWidth: 0 }}>
+                                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                                                            <button className="wa-voice-play-btn" style={{ background: 'none', border: 'none', color: (String(playingAudioId) === String(msg._id || msg.id)) ? '#027EB5' : '#54656f', padding: 0, cursor: 'pointer', transition: 'transform 0.2s' }}>
+                                                                                                {String(playingAudioId) === String(msg._id || msg.id) ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
                                                                                             </button>
-                                                                                            <div className="wa-voice-waveform-static">
-                                                                                                {[...Array(15)].map((_, i) => (
-                                                                                                    <div key={i} className="wa-waveform-bar" style={{ height: `${[10, 15, 8, 12, 6, 18, 10, 14, 8, 12, 16, 9, 13, 7, 11][i % 15]}px`, background: msg.is_read ? '#53bdeb' : '#8696a0' }} />
-                                                                                                ))}
+                                                                                            <div
+                                                                                                className="wa-voice-waveform-static"
+                                                                                                style={{
+                                                                                                    display: 'flex',
+                                                                                                    alignItems: 'center',
+                                                                                                    height: '24px',
+                                                                                                    position: 'relative',
+                                                                                                    cursor: 'pointer',
+                                                                                                    outline: 'none',
+                                                                                                    width: '144px',
+                                                                                                    flexShrink: 0,
+                                                                                                    overflow: 'hidden',
+                                                                                                    padding: '0 2px'
+                                                                                                }}
+                                                                                                onMouseDown={(e) => {
+                                                                                                    e.stopPropagation();
+                                                                                                    const rect = e.currentTarget.getBoundingClientRect();
+                                                                                                    const updateSeek = (moveEvent) => {
+                                                                                                        const x = moveEvent.clientX - rect.left;
+                                                                                                        const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
+                                                                                                        if (String(playingAudioId) === String(msg._id || msg.id) && audioInstanceRef.current) {
+                                                                                                            audioInstanceRef.current.currentTime = (percent / 100) * (msg.duration || 1);
+                                                                                                        } else {
+                                                                                                            handlePlayAudio(msg, (percent / 100) * (msg.duration || 1));
+                                                                                                        }
+                                                                                                    };
+                                                                                                    const onMouseMove = (moveEvent) => updateSeek(moveEvent);
+                                                                                                    const onMouseUp = () => {
+                                                                                                        window.removeEventListener('mousemove', onMouseMove);
+                                                                                                        window.removeEventListener('mouseup', onMouseUp);
+                                                                                                    };
+                                                                                                    window.addEventListener('mousemove', onMouseMove);
+                                                                                                    window.addEventListener('mouseup', onMouseUp);
+                                                                                                    updateSeek(e);
+                                                                                                }}
+                                                                                            >
+                                                                                                {/* WAVEFORM BARS BASES (GRAY) */}
+                                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '3px', width: '100%', justifyContent: 'space-between', opacity: 0.3 }}>
+                                                                                                    {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
+                                                                                                        <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#8696a0', borderRadius: '4px' }} />
+                                                                                                    ))}
+                                                                                                </div>
+
+                                                                                                {/* WAVEFORM PROGRESS (BLUE) - SMOOTH CLIPPING */}
+                                                                                                <div style={{
+                                                                                                    display: 'flex',
+                                                                                                    alignItems: 'center',
+                                                                                                    gap: '3px',
+                                                                                                    width: '100%',
+                                                                                                    justifyContent: 'space-between',
+                                                                                                    position: 'absolute',
+                                                                                                    left: 2,
+                                                                                                    right: 2,
+                                                                                                    clipPath: `inset(0 ${100 - ((String(playingAudioId) === String(msg._id || msg.id) ? viewOnceElapsed : 0) / (msg.duration || 1)) * 100}% 0 0)`,
+                                                                                                    transition: String(playingAudioId) === String(msg._id || msg.id) ? 'none' : 'clip-path 0.3s ease'
+                                                                                                }}>
+                                                                                                    {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
+                                                                                                        <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#027EB5', borderRadius: '4px' }} />
+                                                                                                    ))}
+                                                                                                </div>
+
+                                                                                                {/* PLAYHEAD CIRCULAR DOT (THUMB) */}
+                                                                                                {String(playingAudioId) === String(msg._id || msg.id) && (
+                                                                                                    <div style={{
+                                                                                                        position: 'absolute',
+                                                                                                        left: `${(viewOnceElapsed / (msg.duration || 1)) * 100}%`,
+                                                                                                        width: '10px',
+                                                                                                        height: '10px',
+                                                                                                        backgroundColor: '#027EB5',
+                                                                                                        borderRadius: '50%',
+                                                                                                        transform: 'translate(-50%, -50%)',
+                                                                                                        top: '50%',
+                                                                                                        zIndex: 11,
+                                                                                                        boxShadow: '0 0 4px rgba(2, 126, 181, 0.4)'
+                                                                                                    }} />
+                                                                                                )}
                                                                                             </div>
                                                                                         </div>
-                                                                                        <div className="wa-voice-meta-row">
-                                                                                            <span>Voice message</span>
+                                                                                        <div className="wa-voice-meta-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
+                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                                                                <span style={{
+                                                                                                    color: (String(playingAudioId) === String(msg._id || msg.id)) ? '#027EB5' : '#8696a0',
+                                                                                                    fontSize: '12.5px',
+                                                                                                    fontWeight: 500
+                                                                                                }}>
+                                                                                                    {String(playingAudioId) === String(msg._id || msg.id) ? formatVoiceTime(viewOnceElapsed) : formatVoiceTime(msg.duration || 0)}
+                                                                                                </span>
+                                                                                            </div>
                                                                                         </div>
                                                                                     </div>
                                                                                 </>
