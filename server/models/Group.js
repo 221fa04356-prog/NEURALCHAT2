@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { fieldEncryption } = require('mongoose-field-encryption');
 
 const groupSchema = new mongoose.Schema({
     name: { type: String, default: '' }, // Optional group name
@@ -25,6 +26,13 @@ const groupSchema = new mongoose.Schema({
 }, {
     toJSON: { virtuals: true },
     toObject: { virtuals: true }
+});
+
+// App-level Field Encryption
+groupSchema.plugin(fieldEncryption, {
+    fields: ["name"],
+    secret: process.env.DEFAULT_ENCRYPTION_SECRET,
+    salt: process.env.DEFAULT_ENCRYPTION_SALT
 });
 
 groupSchema.virtual('isAnnouncement').get(function() {

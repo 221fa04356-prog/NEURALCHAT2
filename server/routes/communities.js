@@ -68,8 +68,7 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
             if (c.announcements?._id) {
                 lastMsg = await GroupMessage.findOne({ group_id: c.announcements._id })
                     .sort({ created_at: -1 })
-                    .populate('sender_id', 'name _id')
-                    .lean();
+                    .populate('sender_id', 'name _id');
 
                 // Find user's visibleFrom for this group
                 const history = (c.userHistory || []).find(h => String(h.user) === String(userId));
@@ -95,8 +94,7 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
                     deleted_for: { $ne: userId }
                 })
                     .sort({ created_at: -1 })
-                    .populate('sender_id', 'name')
-                    .lean();
+                    .populate('sender_id', 'name');
 
                 const gUnreadCount = await GroupMessage.countDocuments({
                     group_id: g._id,
@@ -183,8 +181,7 @@ router.post('/create', authenticateToken, async (req, res) => {
 
         const lastMsg = await GroupMessage.findOne({ group_id: announcementsGroup._id })
             .sort({ created_at: -1 })
-            .populate('sender_id', 'name _id')
-            .lean();
+            .populate('sender_id', 'name _id');
 
         res.json({
             status: 'created',
@@ -297,8 +294,7 @@ router.patch('/:communityId/members', authenticateToken, async (req, res) => {
         if (updated.announcements?._id) {
             lastMsg = await GroupMessage.findOne({ group_id: updated.announcements._id })
                 .sort({ created_at: -1 })
-                .populate('sender_id', 'name _id')
-                .lean();
+                .populate('sender_id', 'name _id');
         }
 
         // Notify all members that they have been added to the community

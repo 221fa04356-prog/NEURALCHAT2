@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { fieldEncryption } = require('mongoose-field-encryption');
 
 const groupMessageSchema = new mongoose.Schema({
     group_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Group', required: true },
@@ -35,6 +36,20 @@ const groupMessageSchema = new mongoose.Schema({
 }, {
     toJSON: { virtuals: true },
     toObject: { virtuals: true }
+});
+
+// Always select encryption flags to trigger transparency
+groupMessageSchema.add({
+    __enc_content: { type: Boolean, select: true, default: false },
+    __enc_file_path: { type: Boolean, select: true, default: false },
+    __enc_fileName: { type: Boolean, select: true, default: false }
+});
+
+// App-level Field Encryption
+groupMessageSchema.plugin(fieldEncryption, {
+    fields: ["content", "file_path", "fileName"],
+    secret: process.env.DEFAULT_ENCRYPTION_SECRET,
+    salt: process.env.DEFAULT_ENCRYPTION_SALT
 });
 
 module.exports = mongoose.model('GroupMessage', groupMessageSchema);

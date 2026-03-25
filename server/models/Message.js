@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { fieldEncryption } = require('mongoose-field-encryption');
 
 const messageSchema = new mongoose.Schema({
     user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -43,9 +44,23 @@ const messageSchema = new mongoose.Schema({
     toObject: { virtuals: true }
 });
 
+// Ensure encryption flags are always selected for transparent decryption
+messageSchema.add({
+    __enc_content: { type: Boolean, select: true, default: false },
+    __enc_file_path: { type: Boolean, select: true, default: false },
+    __enc_fileName: { type: Boolean, select: true, default: false }
+});
+
+// App-level Field Encryption
+messageSchema.plugin(fieldEncryption, {
+    fields: ["content", "file_path", "fileName"],
+    secret: process.env.DEFAULT_ENCRYPTION_SECRET,
+    salt: process.env.DEFAULT_ENCRYPTION_SALT
+});
+
 // Add compound indexes for faster aggregation queries when pulling contact list
 messageSchema.index({ user_id: 1, receiver_id: 1 });
 messageSchema.index({ receiver_id: 1, user_id: 1 });
 messageSchema.index({ created_at: -1 });
 
-module.exports = mongoose.model('Message', messageSchema);
+module.exports = mongoose.model('Message', messageSchema);

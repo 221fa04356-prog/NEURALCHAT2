@@ -57,17 +57,17 @@ export default defineConfig(({ mode }) => {
       },
       proxy: {
         '/api': {
-          target: 'http://localhost:3000',
+          target: 'http://127.0.0.1:3000',
           changeOrigin: true,
           secure: false, // Ensure proxy handles self-signed certs if backend was HTTPS (it's HTTP here so fine)
         },
         '/socket.io': {
-          target: 'http://localhost:3000',
+          target: 'http://127.0.0.1:3000',
           ws: true,
           secure: false,
         },
         '/uploads': {
-          target: 'http://localhost:3000',
+          target: 'http://127.0.0.1:3000',
           changeOrigin: true,
           secure: false,
         }

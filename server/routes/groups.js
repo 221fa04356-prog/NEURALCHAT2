@@ -208,8 +208,7 @@ router.get('/my-groups', authenticateToken, async (req, res) => {
                 deleted_for: { $ne: userId }
             })
                 .sort({ created_at: -1 })
-                .populate('sender_id', 'name')
-                .lean();
+                .populate('sender_id', 'name');
 
             const userIdObj = new mongoose.Types.ObjectId(userId);
             
@@ -377,17 +376,20 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
         const populated = await GroupMessage.findById(msg._id)
             .populate('sender_id', 'name _id');
 
+        // Re-fetch to guarantee decryption before sending to socket/response
+        const decryptedPopulated = await GroupMessage.findById(msg._id).populate('sender_id', 'name _id');
+
         // Emit to all group members
         if (req.io) {
             group.members.forEach(memberId => {
                 req.io.to(memberId.toString()).emit('group_message', {
                     groupId,
-                    message: populated
+                    message: decryptedPopulated.toObject()
                 });
             });
         }
 
-        res.json({ status: 'sent', message: populated });
+        res.json({ status: 'sent', message: decryptedPopulated.toObject() });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

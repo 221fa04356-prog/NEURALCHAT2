@@ -14,7 +14,15 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: ["https://chatneural2-frontend.onrender.com"], // Client URLs
+        origin: [
+            "https://chatneural2-frontend.onrender.com", 
+            "http://localhost:5173", 
+            "https://localhost:5173",
+            "http://127.0.0.1:5173", 
+            "https://127.0.0.1:5173",
+            "http://172.21.43.52:5173",
+            "https://172.21.43.52:5173"
+        ],
         methods: ["GET", "POST"]
     }
 });
