@@ -8,7 +8,8 @@ import {
     Users, UserCheck, Trash2, MessageSquare, Key, LogOut,
     Eye, EyeOff, Menu, AlertTriangle, ArrowLeft, Smile,
     User as UserIcon, Search, Bell, Settings, LayoutDashboard,
-    TrendingUp, Calendar, ChevronRight, X, Layers, Check, RefreshCw, Forward, ChevronDown, XCircle
+    TrendingUp, Calendar, ChevronRight, X, Layers, Check, RefreshCw, Forward, ChevronDown, XCircle,
+    Mic, Pause, Play
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import {
@@ -160,6 +161,27 @@ export default function AdminDashboard() {
     const [loginIds, setLoginIds] = useState({});
     const [showPass, setShowPass] = useState({});
     const [showPassRe, setShowPassRe] = useState({});
+
+    // Audio Playback State
+    const [playingAudioId, setPlayingAudioId] = useState(null);
+    const audioInstanceRef = useRef(null);
+
+    const handlePlayAudio = (msgId, filePath) => {
+        if (playingAudioId === msgId) {
+            audioInstanceRef.current?.pause();
+            setPlayingAudioId(null);
+        } else {
+            if (audioInstanceRef.current) {
+                audioInstanceRef.current.pause();
+                audioInstanceRef.current.onended = null;
+            }
+            const audio = new Audio(filePath);
+            audioInstanceRef.current = audio;
+            setPlayingAudioId(msgId);
+            audio.play().catch(err => console.error("Audio playback error:", err));
+            audio.onended = () => setPlayingAudioId(null);
+        }
+    };
 
 
 
@@ -767,6 +789,13 @@ export default function AdminDashboard() {
         });
     };
 
+    const formatVoiceTime = (seconds) => {
+        if (!seconds) return '0:00';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
     const renderContent = (content) => {
         if (!content) return content;
         const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -903,9 +932,15 @@ export default function AdminDashboard() {
                                     <div style={{
                                         fontSize: '0.75rem', color: '#8898aa',
                                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                                        fontStyle: 'italic'
+                                        fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '4px'
                                     }}>
-                                        "{alert.contentSnippet || alert.content}"
+                                        {alert.type === 'audio' ? (
+                                            <>
+                                                <Mic size={12} /> Voice Message ({formatVoiceTime(alert.duration)})
+                                            </>
+                                        ) : (
+                                            `"${alert.contentSnippet || alert.content}"`
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -2291,11 +2326,11 @@ export default function AdminDashboard() {
                                                                     <div
                                                                         className="wa-message-bubble"
                                                                         style={{
-                                                                            padding: '0.75rem 1rem', borderRadius: '1.2rem',
-                                                                            background: isMe ? '#0B8195' : 'white',
-                                                                            color: isMe ? 'white' : '#32325d',
-                                                                            boxShadow: isSelected ? '0 0 0 3px rgba(15, 181, 208, 0.3)' : '0 4px 6px rgba(50,50,93,0.1)',
-                                                                            border: isMe ? 'none' : '1px solid #e9ecef',
+                                                                            padding: '0.8rem 1.1rem', borderRadius: '1.25rem',
+                                                                            background: msg.type === 'audio' ? 'transparent' : (isMe ? 'linear-gradient(135deg, #0A7C8F 0%, #0FB5D0 100%)' : '#ffffff'),
+                                                                            color: isMe ? '#ffffff' : '#32325d',
+                                                                            boxShadow: isSelected ? '0 0 0 3px rgba(15, 181, 208, 0.35)' : (isMe ? '0 4px 15px rgba(10, 124, 143, 0.2)' : '0 2px 8px rgba(0,0,0,0.06)'),
+                                                                            border: isMe ? 'none' : '1px solid rgba(15, 181, 208, 0.12)',
                                                                             borderBottomRightRadius: isMe ? '0' : '1.2rem',
                                                                             borderBottomLeftRadius: isMe ? '1.2rem' : '0',
                                                                             position: 'relative',
@@ -2334,12 +2369,12 @@ export default function AdminDashboard() {
                                                                             </div>
                                                                         )}
                                                                         {msg.is_flagged && !isDeleted && (
-                                                                            <div style={{ fontSize: '0.75rem', marginBottom: '6px', display: 'flex', alignItems: 'center', color: '#7D1802', fontWeight: '700', whiteSpace: 'nowrap' }}>
+                                                                            <div style={{ fontSize: '0.75rem', marginBottom: '6px', display: 'flex', alignItems: 'center', color: isMe ? '#fff176' : '#7D1802', fontWeight: '700', whiteSpace: 'nowrap' }}>
                                                                                 <AlertTriangle size={12} style={{ marginRight: '4px' }} /> Unethical: {msg.flag_reason || 'Flagged'}
                                                                             </div>
                                                                         )}
                                                                         {msg.is_deleted_by_user && (
-                                                                            <div style={{ fontSize: '0.85rem', marginBottom: '6px', display: 'flex', alignItems: 'center', color: isMe ? 'rgba(255,255,255,0.9)' : '#8898aa', fontWeight: '600', whiteSpace: 'nowrap' }}>
+                                                                            <div style={{ fontSize: '0.85rem', marginBottom: '6px', display: 'flex', alignItems: 'center', color: isMe ? 'rgba(255,255,255,0.85)' : '#8898aa', fontWeight: '600', whiteSpace: 'nowrap' }}>
                                                                                 <XCircle size={14} style={{ marginRight: '4px' }} /> Deleted by User
                                                                             </div>
                                                                         )}
@@ -2362,6 +2397,58 @@ export default function AdminDashboard() {
                                                                         {msg.type === 'file' && msg.file_path && (
                                                                             <div style={{ marginTop: '8px', background: 'rgba(0,0,0,0.05)', padding: '8px 12px', borderRadius: '8px' }}>
                                                                                 <a href={msg.file_path} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#0A7C8F', textDecoration: 'none', fontWeight: 'bold' }}>📄 {msg.fileName || 'Download File'}</a>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {msg.type === 'audio' && msg.file_path && (
+                                                                            <div style={{ marginTop: '8px', position: 'relative' }}>
+                                                                                <div style={{ 
+                                                                                    display: 'flex', 
+                                                                                    alignItems: 'center', 
+                                                                                    gap: '12px', 
+                                                                                    background: isMe ? 'rgba(13, 159, 183, 0.12)' : 'rgba(13, 159, 183, 0.05)', 
+                                                                                    padding: '12px 16px', 
+                                                                                    borderRadius: '16px',
+                                                                                    minWidth: '220px',
+                                                                                    boxShadow: isMe ? 'none' : 'inset 0 1px 3px rgba(0,0,0,0.05)'
+                                                                                }}>
+                                                                                    <div 
+                                                                                        onClick={() => handlePlayAudio(msgId, msg.file_path)}
+                                                                                        style={{ 
+                                                                                            width: '40px', 
+                                                                                            height: '40px', 
+                                                                                            borderRadius: '50%', 
+                                                                                            background: '#0d9fb7', 
+                                                                                            display: 'flex', 
+                                                                                            alignItems: 'center', 
+                                                                                            justifyContent: 'center', 
+                                                                                            cursor: 'pointer',
+                                                                                            boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
+                                                                                            flexShrink: 0
+                                                                                        }}
+                                                                                    >
+                                                                                        {playingAudioId === msgId ? (
+                                                                                            <Pause size={20} color="white" />
+                                                                                        ) : (
+                                                                                            <Play size={20} color="white" style={{ marginLeft: '3px' }} />
+                                                                                        )}
+                                                                                    </div>
+                                                                                    
+                                                                                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                                                            <Mic size={14} color={isMe ? '#0d9fb7' : '#57b1be'} />
+                                                                                            <span style={{ fontSize: '12px', fontWeight: '600', color: '#525f7f' }}>
+                                                                                                Voice Message
+                                                                                            </span>
+                                                                                        </div>
+                                                                                        {msg.duration && (
+                                                                                            <div style={{ fontSize: '11px', opacity: 0.8, color: '#0d9fb7' }}>
+                                                                                                {formatVoiceTime(msg.duration)}
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+                                                                                </div>
+                                                                                {msg.is_view_once && <div style={{ position: 'absolute', top: -14, right: 0, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>View Once {msg.is_opened ? '(Opened)' : ''}</div>}
                                                                             </div>
                                                                         )}
 
@@ -2494,8 +2581,15 @@ export default function AdminDashboard() {
                                                     onMouseOver={e => e.currentTarget.style.transform = 'translateY(-2px)'}
                                                     onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}
                                                 >
-                                                    <div style={{ fontSize: '0.9rem', color: '#32325d', marginBottom: '6px', fontWeight: '500' }}>
-                                                        {alert.content.length > 60 ? alert.content.substring(0, 60) + '...' : alert.content}
+                                                    <div style={{ fontSize: '0.9rem', color: '#32325d', marginBottom: '6px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                        {alert.type === 'audio' ? (
+                                                            <>
+                                                                <Mic size={14} color="#0A7C8F" />
+                                                                Voice Message ({formatVoiceTime(alert.duration)})
+                                                            </>
+                                                        ) : (
+                                                            alert.content && (alert.content.length > 60 ? alert.content.substring(0, 60) + '...' : alert.content)
+                                                        )}
                                                     </div>
                                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                                         <div style={{ fontSize: '0.75rem', color: '#525f7f', fontWeight: '600' }}>

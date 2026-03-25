@@ -210,7 +210,7 @@ router.get('/users', authenticateToken, async (req, res) => {
                     { user_id: new mongoose.Types.ObjectId(u._id), receiver_id: new mongoose.Types.ObjectId(currentUserId) }
                 ],
                 deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
-            }).sort({ created_at: -1 }).select('content created_at type sender_id duration is_deleted_by_admin is_deleted_by_user deleted_for').lean();
+            }).sort({ created_at: -1 }).select('content created_at type sender_id duration is_deleted_by_admin is_deleted_by_user deleted_for __enc_content __enc_file_path __enc_fileName');
 
             // 2. Get Unread Count
             const unreadCount = await Message.countDocuments({
@@ -811,13 +811,16 @@ router.post('/send', authenticateToken, (req, res, next) => {
                     userName: req.user.name || "Unknown",
                     messageId: msg._id,
                     content: content,
+                    type: type,
+                    duration: msg.duration,
                     reason: flagReason,
                     createdAt: msg.created_at,
                     receiverId: toUserId || null
                 });
             }
 
-            return res.json({ status: 'sent', message: msg });
+            const decryptedMsg = await Message.findById(msg._id);
+            return res.json({ status: 'sent', message: decryptedMsg.toObject() });
         }
 
         // --- AI LOGIC BELOW (Only if no toUserId) ---

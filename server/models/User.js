@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { fieldEncryption } = require('mongoose-field-encryption');
 
 const userSchema = new mongoose.Schema({
     name: { type: String, required: true },
@@ -24,6 +25,22 @@ const userSchema = new mongoose.Schema({
 }, {
     toJSON: { virtuals: true },
     toObject: { virtuals: true }
+});
+
+// Ensure user profile flags are always selected
+userSchema.add({
+    __enc_name: { type: Boolean, select: true, default: false },
+    __enc_email: { type: Boolean, select: true, default: false },
+    __enc_mobile: { type: Boolean, select: true, default: false },
+    __enc_about: { type: Boolean, select: true, default: false },
+    __enc_designation: { type: Boolean, select: true, default: false }
+});
+
+// App-level Field Encryption
+userSchema.plugin(fieldEncryption, {
+    fields: ["name", "email", "mobile", "about", "designation"],
+    secret: process.env.DEFAULT_ENCRYPTION_SECRET,
+    salt: process.env.DEFAULT_ENCRYPTION_SALT
 });
 
 module.exports = mongoose.model('User', userSchema);

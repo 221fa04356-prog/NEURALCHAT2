@@ -150,7 +150,13 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: true,
-                    autoGainControl: true
+                    autoGainControl: true,
+                    channelCount: 1,
+                    googNoiseSuppression: true,
+                    googAutoGainControl: true,
+                    googEchoCancellation: true,
+                    googHighpassFilter: true,
+                    googTypingNoiseDetection: true
                 }
             };
             const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -173,52 +179,63 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
 
             const source = audioContext.createMediaStreamSource(stream);
 
-            // --- Ultra Clarity Voice Processing Chain ---
+            // --- "Silent Zero-Air" High-Clarity Engine (Total Hiss Neutralization) ---
 
-            // 1. Aggressive High-pass: Removes all low-frequency rumble, desk thumps, and background noise (below 150Hz)
-            const hpFilter = audioContext.createBiquadFilter();
-            hpFilter.type = 'highpass';
-            hpFilter.frequency.value = 250; // Higher cutoff for noise
-            hpFilter.Q.value = 1.5;
+            // 1. Triple-Stage Brick-Wall High-pass (3x 180Hz): Deletes mechanical floor rumble
+            const hp1 = audioContext.createBiquadFilter(); hp1.type = 'highpass'; hp1.frequency.value = 180;
+            const hp2 = audioContext.createBiquadFilter(); hp2.type = 'highpass'; hp2.frequency.value = 180;
+            const hp3 = audioContext.createBiquadFilter(); hp3.type = 'highpass'; hp3.frequency.value = 180;
 
-            // 2. Vocal Presence Peak: Boosts the 3kHz range where human speech clarity resides
-            const presenceFilter = audioContext.createBiquadFilter();
-            presenceFilter.type = 'peaking';
-            presenceFilter.frequency.value = 3000;
-            presenceFilter.gain.value = 6;
+            // 2. Presence & Crispness Focus EQ (Focussing on human speech range only)
+            const presenceBoost = audioContext.createBiquadFilter();
+            presenceBoost.type = 'peaking';
+            presenceBoost.frequency.value = 3500;
+            presenceBoost.gain.value = 10;
+            presenceBoost.Q.value = 1.2;
 
-            // 3. Low-pass filter: Sharp cut for high-frequency hiss (above 5000Hz)
-            const lpFilter = audioContext.createBiquadFilter();
-            lpFilter.type = 'lowpass';
-            lpFilter.frequency.value = 5000;
-            lpFilter.Q.value = 1;
+            const clarityBoost = audioContext.createBiquadFilter();
+            clarityBoost.type = 'peaking';
+            clarityBoost.frequency.value = 1500;
+            clarityBoost.gain.value = 6;
+            clarityBoost.Q.value = 1.0;
 
-            // 4. Aggressive Dynamics Compressor: Clamps down on noise floor and limits peaks
+            // 3. Quad-Stage Extreme Low-pass (4x 6000Hz): Aggressive 48dB/Octave Wall against Air Hiss
+            const lp1 = audioContext.createBiquadFilter(); lp1.type = 'lowpass'; lp1.frequency.value = 6000;
+            const lp2 = audioContext.createBiquadFilter(); lp2.type = 'lowpass'; lp2.frequency.value = 6000;
+            const lp3 = audioContext.createBiquadFilter(); lp3.type = 'lowpass'; lp3.frequency.value = 6000;
+            const lp4 = audioContext.createBiquadFilter(); lp4.type = 'lowpass'; lp4.frequency.value = 6000;
+
+            // 4. Professional Studio Leveler (Gentle 4:1 Ratio to avoid lifting noise floor)
             const compressor = audioContext.createDynamicsCompressor();
-            compressor.threshold.setValueAtTime(-32, audioContext.currentTime);
-            compressor.knee.setValueAtTime(15, audioContext.currentTime);
-            compressor.ratio.setValueAtTime(16, audioContext.currentTime);
-            compressor.attack.setValueAtTime(0.002, audioContext.currentTime);
+            compressor.threshold.setValueAtTime(-26, audioContext.currentTime);
+            compressor.ratio.setValueAtTime(4, audioContext.currentTime);
+            compressor.attack.setValueAtTime(0.003, audioContext.currentTime);
             compressor.release.setValueAtTime(0.20, audioContext.currentTime);
 
-            // 5. Makeup Gain: Adjusts the output level for a firm, "grasped" sound
+            // 5. Clean Natural Gain (1.2x): Minimizes digital noise amplification
             const outputGain = audioContext.createGain();
-            outputGain.gain.value = 1.4;
+            outputGain.gain.value = 1.2;
 
             // 6. Destination for the processed audio recording
             const destination = audioContext.createMediaStreamDestination();
 
-            // Link the chain: Mic -> HP -> Presence -> LP -> Compressor -> Gain -> Destination (Output Stream)
-            source.connect(hpFilter);
-            hpFilter.connect(presenceFilter);
-            presenceFilter.connect(lpFilter);
-            lpFilter.connect(compressor);
+            // Link the Direct Brick-Wall Chain:
+            // Mic -> HP chain -> EQ -> LP chain -> Leveler -> Gain -> Destination
+            source.connect(hp1);
+            hp1.connect(hp2);
+            hp2.connect(hp3);
+            hp3.connect(presenceBoost);
+            presenceBoost.connect(clarityBoost);
+            clarityBoost.connect(lp1);
+            lp1.connect(lp2);
+            lp2.connect(lp3);
+            lp3.connect(lp4);
+            lp4.connect(compressor);
             compressor.connect(outputGain);
             outputGain.connect(destination);
 
-            // IMPORTANT: Connect analyser to the high-passed (but uncompressed) signal 
-            // so the microphone visualizer preserves dynamic peaks!
-            hpFilter.connect(analyser);
+            // Connect analyser for visual feedback
+            outputGain.connect(analyser);
 
             // Initialize MediaRecorder - Use the PROCESSED stream for the final file
             const mediaRecorder = new MediaRecorder(destination.stream, { mimeType });
@@ -481,17 +498,31 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                 overflow: 'visible'
             }}>
                 {!isMobile && <div style={{ flex: 1 }}></div>}
-                <div className="wa-voice-controls-cluster" style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '2px' : '16px', flex: isMobile ? 1 : 'unset', minWidth: 0, overflow: 'visible' }}>
+                <div className="wa-voice-controls-cluster" style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '4px' : '16px', flex: isMobile ? 1 : 'unset', minWidth: 0, overflow: 'visible' }}>
                     <button onClick={deleteRecording} className="wa-voice-btn delete" data-tooltip="Delete" data-tooltip-pos="center" style={{ width: btnSize, height: btnSize, borderRadius: '50%', color: '#54656f', flexShrink: 0 }}>
                         <Trash2 size={isMobile ? 16 : iconSize} />
                     </button>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '4px' : '10px', flexShrink: 0 }}>
-                        {!isPaused && !isReviewing && <div className="wa-recording-dot" style={{ width: isMobile ? '7px' : '10px', height: isMobile ? '7px' : '10px', borderRadius: '50%', backgroundColor: '#ef4444', animation: 'wa-pulse 1.5s infinite ease-in-out' }} />}
-                        <span style={{ color: '#111b21', fontSize: isMobile ? '14px' : '18px', fontWeight: 500 }}>
-                            {(!isPaused && !isReviewing)
-                                ? formatVoiceTime(recordingTime)
-                                : (isPlayingPreview || previewProgress > 0 ? formatVoiceTime(previewSeconds) : formatVoiceTime(recordingTime))}
-                        </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', flexShrink: 0, minWidth: isMobile ? '45px' : '60px' }}>
+                        <div className="wa-voice-bubble-avatar" style={{ width: isMobile ? '30px' : '36px', height: isMobile ? '30px' : '36px', position: 'relative', margin: 0, background: '#dfe5e7', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                            {(userData?.image || userData?.avatar) ? (
+                                <img src={userData.image || userData.avatar} alt="me" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                            ) : (
+                                <div style={{ fontSize: isMobile ? '12px' : '14px', fontWeight: 'bold', color: '#54656f' }}>
+                                    {(userData?.name || 'M')[0].toUpperCase()}
+                                </div>
+                            )}
+                            <div className="wa-voice-mic-badge" style={{ position: 'absolute', bottom: '-2px', right: '-2px', width: '14px', height: '14px', background: 'white', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>
+                                <Mic size={10} color="#8696a0" />
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            {!isPaused && !isReviewing && <div className="wa-recording-dot" style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ef4444', animation: 'wa-pulse 1.5s infinite ease-in-out' }} />}
+                            <span style={{ color: '#111b21', fontSize: isMobile ? '11px' : '12px', fontWeight: 500 }}>
+                                {(!isPaused && !isReviewing)
+                                    ? formatVoiceTime(recordingTime)
+                                    : (isPlayingPreview || previewProgress > 0 ? formatVoiceTime(previewSeconds) : formatVoiceTime(recordingTime))}
+                            </span>
+                        </div>
                     </div>
                     <div
                         ref={waveformRef}
@@ -1224,6 +1255,7 @@ export default function Chat() {
 
     const [playingAudioId, setPlayingAudioId] = useState(null);
     const [playbackSpeed, setPlaybackSpeed] = useState(1);
+    const [viewOncePlaybackSpeed, setViewOncePlaybackSpeed] = useState(1);
 
 
     // Synchronize refs with state
@@ -3974,7 +4006,10 @@ export default function Chat() {
 
         const audio = new Audio(url);
         audioInstanceRef.current = audio;
-        audio.playbackRate = playbackSpeed;
+        // Always reset speed to 1x for new audio
+        setPlaybackSpeed(1);
+        setViewOncePlaybackSpeed(1);
+        audio.playbackRate = 1;
         const currentMsgId = String(msg._id || msg.id); // Force string for comparison
         setPlayingAudioId(currentMsgId);
         setViewOnceElapsed(startTime);
@@ -3992,6 +4027,8 @@ export default function Chat() {
         // Remove immediate markViewed - we do it on end or close
 
         audio.onended = () => {
+            setPlaybackSpeed(1);
+            setViewOncePlaybackSpeed(1);
             if (msg.is_view_once) {
                 if (!isMeMsg(msg)) {
                     markMessageViewed(msg._id);
@@ -4028,10 +4065,22 @@ export default function Chat() {
 
     const togglePlaybackSpeed = (e) => {
         if (e) e.stopPropagation();
-        const nextSpeed = playbackSpeed === 1 ? 1.5 : (playbackSpeed === 1.5 ? 2 : 1);
-        setPlaybackSpeed(nextSpeed);
-        if (audioInstanceRef.current) {
-            audioInstanceRef.current.playbackRate = nextSpeed;
+        
+        // Prioritize updating the audio element's playbackRate first for instant response
+        const currentAudio = audioInstanceRef.current;
+        
+        if (activeViewOnceMsg) {
+            const nextSpeed = viewOncePlaybackSpeed === 1 ? 1.5 : (viewOncePlaybackSpeed === 1.5 ? 2 : 1);
+            if (currentAudio) {
+                currentAudio.playbackRate = nextSpeed;
+            }
+            setViewOncePlaybackSpeed(nextSpeed);
+        } else {
+            const nextSpeed = playbackSpeed === 1 ? 1.5 : (playbackSpeed === 1.5 ? 2 : 1);
+            if (currentAudio) {
+                currentAudio.playbackRate = nextSpeed;
+            }
+            setPlaybackSpeed(nextSpeed);
         }
     };
 
@@ -7707,10 +7756,13 @@ export default function Chat() {
             // Where would the left edge of the menu land?
             const menuLeftEdge = vWidth - clampedRight - estMenuWidth;
 
-            if (menuLeftEdge < chatAreaLeft + padding) {
-                // Menu would cross into the contact panel → left-anchor it
+            if (type === 'msg' && menuLeftEdge < chatAreaLeft + padding) {
+                // Message menu would cross into the contact panel → left-anchor it
                 // to the start of the chat area instead
                 menuStyle.left = Math.max(chatAreaLeft + padding, mouseX - 10);
+            } else if (type === 'contact' && menuLeftEdge < padding) {
+                // Contact menu would go off-screen left → clamp to screen edge
+                menuStyle.left = padding;
             } else {
                 menuStyle.right = clampedRight;
             }
@@ -11395,40 +11447,50 @@ export default function Chat() {
                                                                                 </div>
                                                                             ) : (
                                                                                 <>
-                                                                                    <div className="wa-voice-bubble-avatar" style={{ position: 'relative' }}>
-                                                                                        {String(playingAudioId) === String(msg._id || msg.id) ? (
-                                                                                            <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
-                                                                                                {playbackSpeed}x
-                                                                                            </div>
-                                                                                        ) : (
-                                                                                            <>
-                                                                                                {isMe ? (
-                                                                                                    (userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo) ? (
-                                                                                                        <img 
-                                                                                                            src={userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo} 
-                                                                                                            alt="me" 
-                                                                                                            style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} 
-                                                                                                            onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'; }}
-                                                                                                        />
-                                                                                                    ) : null
-                                                                                                ) : (
-                                                                                                    (msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar) ? (
-                                                                                                        <img
-                                                                                                            src={msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar}
-                                                                                                            alt="user"
-                                                                                                            style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
-                                                                                                            onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'; }}
-                                                                                                        />
-                                                                                                    ) : null
-                                                                                                )}
-                                                                                                <div className="wa-avatar-letter" style={{ display: (isMe ? (userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo) : (msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar)) ? 'none' : 'flex' }}>
-                                                                                                    {isMe ? (userData?.name || user?.name || 'M')[0].toUpperCase() : (msg.sender_id?.name || selectedUser?.name || 'U')[0].toUpperCase()}
+                                                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+                                                                                        <div className="wa-voice-bubble-avatar" style={{ position: 'relative', margin: 0 }}>
+                                                                                            {String(playingAudioId) === String(msg._id || msg.id) ? (
+                                                                                                <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
+                                                                                                    {msg.is_view_once ? viewOncePlaybackSpeed : playbackSpeed}x
                                                                                                 </div>
-                                                                                            </>
-                                                                                        )}
-                                                                                        <div className="wa-voice-mic-badge">
-                                                                                            <Mic size={12} color={msg.is_read ? '#53bdeb' : (msg.is_view_once ? '#027EB5' : '#8696a0')} />
+                                                                                            ) : (
+                                                                                                <>
+                                                                                                    {isMe ? (
+                                                                                                        (userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo) ? (
+                                                                                                            <img 
+                                                                                                                src={userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo} 
+                                                                                                                alt="me" 
+                                                                                                                style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} 
+                                                                                                                onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'; }}
+                                                                                                            />
+                                                                                                        ) : null
+                                                                                                    ) : (
+                                                                                                        (msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar) ? (
+                                                                                                            <img
+                                                                                                                src={msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar}
+                                                                                                                alt="user"
+                                                                                                                style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                                                                                                                onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'; }}
+                                                                                                            />
+                                                                                                        ) : null
+                                                                                                    )}
+                                                                                                    <div className="wa-avatar-letter" style={{ display: (isMe ? (userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo) : (msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar)) ? 'none' : 'flex' }}>
+                                                                                                        {isMe ? (userData?.name || user?.name || 'M')[0].toUpperCase() : (msg.sender_id?.name || selectedUser?.name || 'U')[0].toUpperCase()}
+                                                                                                    </div>
+                                                                                                </>
+                                                                                            )}
+                                                                                            <div className="wa-voice-mic-badge">
+                                                                                                <Mic size={12} color={msg.is_read ? '#53bdeb' : (msg.is_view_once ? '#027EB5' : '#8696a0')} />
+                                                                                            </div>
                                                                                         </div>
+                                                                                        <span style={{
+                                                                                            color: (String(playingAudioId) === String(msg._id || msg.id) || (msg.is_view_once && !msg.is_viewed)) ? '#027EB5' : '#8696a0',
+                                                                                            fontSize: '11px',
+                                                                                            fontWeight: 500,
+                                                                                            marginTop: '2px'
+                                                                                        }}>
+                                                                                            {String(playingAudioId) === String(msg._id || msg.id) ? formatVoiceTime(viewOnceElapsed) : formatVoiceTime(msg.duration || 0)}
+                                                                                        </span>
                                                                                     </div>
                                                                                     <div className="wa-voice-bubble-player" style={{ flex: 1, minWidth: 0 }}>
                                                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -11513,16 +11575,7 @@ export default function Chat() {
                                                                                                 )}
                                                                                             </div>
                                                                                         </div>
-                                                                                        <div className="wa-voice-meta-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
-                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                                                                                <span style={{
-                                                                                                    color: (String(playingAudioId) === String(msg._id || msg.id) || (msg.is_view_once && !msg.is_viewed)) ? '#027EB5' : '#8696a0',
-                                                                                                    fontSize: '12.5px',
-                                                                                                    fontWeight: 500
-                                                                                                }}>
-                                                                                                    {String(playingAudioId) === String(msg._id || msg.id) ? formatVoiceTime(viewOnceElapsed) : formatVoiceTime(msg.duration || 0)}
-                                                                                                </span>
-                                                                                            </div>
+                                                                                        <div className="wa-voice-meta-row" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: '2px' }}>
                                                                                             {msg.is_view_once && (
                                                                                                 <div className="wa-view-once-badge">
                                                                                                     <span className="wa-view-once-circle" style={{ borderColor: msg.is_viewed ? '#8696a0' : '#027EB5', color: msg.is_viewed ? '#8696a0' : '#027EB5', fontSize: '10px', width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1.5px solid currentColor', fontWeight: 'bold' }}>1</span>
@@ -12413,23 +12466,33 @@ export default function Chat() {
                                                                         >
                                                                             {!msg.is_view_once ? (
                                                                                 <>
-                                                                                    <div className="wa-voice-bubble-avatar" style={{ position: 'relative' }}>
-                                                                                        {String(playingAudioId) === String(msg._id || msg.id) ? (
-                                                                                            <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
-                                                                                                {playbackSpeed}x
+                                                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+                                                                                        <div className="wa-voice-bubble-avatar" style={{ position: 'relative', margin: 0 }}>
+                                                                                            {String(playingAudioId) === String(msg._id || msg.id) ? (
+                                                                                                <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
+                                                                                                    {msg.is_view_once ? viewOncePlaybackSpeed : playbackSpeed}x
+                                                                                                </div>
+                                                                                            ) : (
+                                                                                                <>
+                                                                                                    {isMeMsg(msg) ? (
+                                                                                                        <img src={user?.profile_pic || user?.avatar || '/default-avatar.png'} alt="me" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                                                                                    ) : (
+                                                                                                        <img src={msg.sender_id?.profile_pic || msg.sender_id?.avatar || '/default-avatar.png'} alt="user" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                                                                                    )}
+                                                                                                </>
+                                                                                            )}
+                                                                                            <div className="wa-voice-mic-badge">
+                                                                                                <Mic size={12} color={msg.is_read ? '#53bdeb' : '#8696a0'} />
                                                                                             </div>
-                                                                                        ) : (
-                                                                                            <>
-                                                                                                {isMeMsg(msg) ? (
-                                                                                                    <img src={user?.profile_pic || user?.avatar || '/default-avatar.png'} alt="me" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
-                                                                                                ) : (
-                                                                                                    <img src={msg.sender_id?.profile_pic || msg.sender_id?.avatar || '/default-avatar.png'} alt="user" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
-                                                                                                )}
-                                                                                            </>
-                                                                                        )}
-                                                                                        <div className="wa-voice-mic-badge">
-                                                                                            <Mic size={12} color={msg.is_read ? '#53bdeb' : '#8696a0'} />
                                                                                         </div>
+                                                                                        <span style={{
+                                                                                            color: (String(playingAudioId) === String(msg._id || msg.id)) ? '#027EB5' : '#8696a0',
+                                                                                            fontSize: '11px',
+                                                                                            fontWeight: 500,
+                                                                                            marginTop: '2px'
+                                                                                        }}>
+                                                                                            {String(playingAudioId) === String(msg._id || msg.id) ? formatVoiceTime(viewOnceElapsed) : formatVoiceTime(msg.duration || 0)}
+                                                                                        </span>
                                                                                     </div>
                                                                                     <div className="wa-voice-bubble-player" style={{ flex: 1, minWidth: 0 }}>
                                                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -12514,16 +12577,7 @@ export default function Chat() {
                                                                                                 )}
                                                                                             </div>
                                                                                         </div>
-                                                                                        <div className="wa-voice-meta-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
-                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                                                                                <span style={{
-                                                                                                    color: (String(playingAudioId) === String(msg._id || msg.id)) ? '#027EB5' : '#8696a0',
-                                                                                                    fontSize: '12.5px',
-                                                                                                    fontWeight: 500
-                                                                                                }}>
-                                                                                                    {String(playingAudioId) === String(msg._id || msg.id) ? formatVoiceTime(viewOnceElapsed) : formatVoiceTime(msg.duration || 0)}
-                                                                                                </span>
-                                                                                            </div>
+                                                                                        <div className="wa-voice-meta-row" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: '2px' }}>
                                                                                         </div>
                                                                                     </div>
                                                                                 </>
@@ -12543,9 +12597,16 @@ export default function Chat() {
                                                                                         display: 'flex',
                                                                                         alignItems: 'center',
                                                                                         justifyContent: 'center',
-                                                                                        flexShrink: 0
+                                                                                        flexShrink: 0,
+                                                                                        position: 'relative'
                                                                                     }}>
-                                                                                        <Mic size={20} color="#8696a0" />
+                                                                                        {String(playingAudioId) === String(msg._id || msg.id) ? (
+                                                                                            <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
+                                                                                                {viewOncePlaybackSpeed}x
+                                                                                            </div>
+                                                                                        ) : (
+                                                                                            <Mic size={20} color="#8696a0" />
+                                                                                        )}
                                                                                     </div>
                                                                                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                                                                         <div style={{
@@ -14914,21 +14975,43 @@ export default function Chat() {
                             <div className="wa-play-control-large">
                                 <button className="wa-action-btn" onClick={() => {
                                     const mId = activeViewOnceMsg._id || activeViewOnceMsg.id;
-                                    if (audioInstanceRef.current) {
-                                        if (playingAudioId === mId) {
-                                            audioInstanceRef.current.pause();
-                                            setPlayingAudioId(null);
-                                        } else {
-                                            audioInstanceRef.current.play();
-                                            setPlayingAudioId(mId);
-                                        }
+                                    const audio = audioInstanceRef.current;
+                                    if (!audio) return;
+                                    
+                                    if (playingAudioId === mId) {
+                                        audio.pause();
+                                        setPlayingAudioId(null);
+                                    } else {
+                                        audio.play();
+                                        setPlayingAudioId(mId);
                                     }
                                 }}>
                                     {playingAudioId === (activeViewOnceMsg._id || activeViewOnceMsg.id) ? <Pause size={32} fill="currentColor" /> : <Play size={32} fill="currentColor" />}
                                 </button>
-                                <span className="wa-fullscreen-timer">
-                                    {formatVoiceTime(viewOnceElapsed)}
-                                </span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                    <span className="wa-fullscreen-timer">
+                                        {formatVoiceTime(viewOnceElapsed)}
+                                    </span>
+                                    <div 
+                                        className="wa-playback-speed-badge" 
+                                        onClick={togglePlaybackSpeed}
+                                        style={{
+                                            position: 'static',
+                                            width: '38px',
+                                            height: '38px',
+                                            fontSize: '13px',
+                                            background: 'rgba(2, 126, 181, 0.05)',
+                                            color: '#027EB5',
+                                            border: '1px solid rgba(2, 126, 181, 0.3)',
+                                            inset: 'unset',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}
+                                    >
+                                        {viewOncePlaybackSpeed}x
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
