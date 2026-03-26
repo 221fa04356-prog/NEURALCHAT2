@@ -3170,8 +3170,14 @@ export default function Chat() {
             const filteredUsers = res.data; // Include all database users as requested
 
             // Get Pinned & Muted Chats (contacts use their own key)
-            const pinnedKey = `pinnedContacts_${user.id}`;
-            const mutedKey = `mutedChats_${user.id}`;
+            const userId = user.id || user._id || user.uid;
+            if (!userId) {
+                console.error("fetchUsers: No userId found");
+                return;
+            }
+
+            const pinnedKey = `pinnedContacts_${userId}`;
+            const mutedKey = `mutedChats_${userId}`;
             const pinnedIds = JSON.parse(localStorage.getItem(pinnedKey)) || [];
             const mutedMap = JSON.parse(localStorage.getItem(mutedKey)) || {};
 
@@ -4874,7 +4880,8 @@ export default function Chat() {
 
         // Group by letter
         const grouped = sortedUsers.reduce((acc, u) => {
-            const letter = (u.name?.[0] || "#").toUpperCase();
+            const name = String(u.name || u.firstName || u.lastName || "").trim();
+            const letter = (name ? name[0] : "#").toUpperCase();
             if (!acc[letter]) acc[letter] = [];
             acc[letter].push(u);
             return acc;
@@ -9941,7 +9948,11 @@ export default function Chat() {
                             {totalUnread > 0 && <span className="wa-bell-badge">{totalUnread}</span>}
                         </button>
                     </div>
-                    <button className="wa-nav-icon-btn" title="New Chat" onClick={(e) => { e.stopPropagation(); setIsNewChatOpen(true); }}><Plus size={20} /></button>
+                    <button className="wa-nav-icon-btn" title="New Chat" onClick={(e) => { 
+                        e.stopPropagation(); 
+                        if (users.length === 0) fetchUsers();
+                        setIsNewChatOpen(true); 
+                    }}><Plus size={20} /></button>
                     <button
                         className="wa-nav-icon-btn"
                         title="Menu"
@@ -10249,7 +10260,11 @@ export default function Chat() {
                                                     gap: '8px',
                                                     boxShadow: '0 4px 12px rgba(2, 126, 181, 0.2)'
                                                 }}
-                                                onClick={(e) => { e.stopPropagation(); setIsNewChatOpen(true); }}
+                                                onClick={(e) => { 
+                                                    e.stopPropagation(); 
+                                                    if (users.length === 0) fetchUsers();
+                                                    setIsNewChatOpen(true); 
+                                                }}
                                             >
                                                 <Plus size={18} />
                                                 Start Chat
