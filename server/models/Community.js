@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const { fieldEncryption } = require('mongoose-field-encryption');
 
 const communitySchema = new mongoose.Schema({
     name: { type: String, required: true },
@@ -24,12 +23,7 @@ const communitySchema = new mongoose.Schema({
     toObject: { virtuals: true }
 });
 
-// App-level Field Encryption
-communitySchema.plugin(fieldEncryption, {
-    fields: ["name", "description"],
-    secret: process.env.DEFAULT_ENCRYPTION_SECRET,
-    salt: process.env.DEFAULT_ENCRYPTION_SALT
-});
+
 
 module.exports = mongoose.model('Community', communitySchema, 'chatcommunities');
 
