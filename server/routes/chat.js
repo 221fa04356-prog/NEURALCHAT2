@@ -191,8 +191,10 @@ router.get('/users', authenticateToken, async (req, res) => {
         }
 
         const users = await User.find(query).select('name email mobile _id role about isOnline lastSeen');
+        console.log(`[DEBUG] /users: Found ${users.length} raw users for requester ${currentUserId} (Role: ${currentUserRole})`);
 
         if (!currentUserId) {
+            console.log(`[DEBUG] /users: No currentUserId, returning raw users`);
             return res.json(users);
         }
 
@@ -203,78 +205,91 @@ router.get('/users', authenticateToken, async (req, res) => {
         const enhancedUsers = await Promise.all(users.map(async (u) => {
             if (u._id.toString() === currentUserId) return null;
 
-            // 1. Get Last Message
-            const lastMsg = await Message.findOne({
-                $or: [
-                    { user_id: new mongoose.Types.ObjectId(currentUserId), receiver_id: new mongoose.Types.ObjectId(u._id) },
-                    { user_id: new mongoose.Types.ObjectId(u._id), receiver_id: new mongoose.Types.ObjectId(currentUserId) }
-                ],
-                deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
-            }).sort({ created_at: -1 }).select('content created_at type sender_id duration is_deleted_by_admin is_deleted_by_user deleted_for __enc_content __enc_file_path __enc_fileName');
+            try {
+                // 1. Get Last Message
+                const lastMsg = await Message.findOne({
+                    $or: [
+                        { user_id: new mongoose.Types.ObjectId(currentUserId), receiver_id: new mongoose.Types.ObjectId(u._id) },
+                        { user_id: new mongoose.Types.ObjectId(u._id), receiver_id: new mongoose.Types.ObjectId(currentUserId) }
+                    ],
+                    deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
+                }).sort({ created_at: -1 }).select('content created_at type sender_id duration is_deleted_by_admin is_deleted_by_user deleted_for __enc_content __enc_file_path __enc_fileName');
 
-            // 2. Get Unread Count
-            const unreadCount = await Message.countDocuments({
-                user_id: new mongoose.Types.ObjectId(u._id),
-                receiver_id: new mongoose.Types.ObjectId(currentUserId),
-                is_read: false,
-                deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
-            });
+                // 2. Get Unread Count
+                const unreadCount = await Message.countDocuments({
+                    user_id: new mongoose.Types.ObjectId(u._id),
+                    receiver_id: new mongoose.Types.ObjectId(currentUserId),
+                    is_read: false,
+                    deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
+                });
 
-            // 3. Get Media, Docs, and Links counts
-            const baseQuery = {
-                $or: [
-                    { user_id: new mongoose.Types.ObjectId(currentUserId), receiver_id: new mongoose.Types.ObjectId(u._id) },
-                    { user_id: new mongoose.Types.ObjectId(u._id), receiver_id: new mongoose.Types.ObjectId(currentUserId) }
-                ],
-                deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
-            };
+                // 3. Get Media, Docs, and Links counts
+                const baseQuery = {
+                    $or: [
+                        { user_id: new mongoose.Types.ObjectId(currentUserId), receiver_id: new mongoose.Types.ObjectId(u._id) },
+                        { user_id: new mongoose.Types.ObjectId(u._id), receiver_id: new mongoose.Types.ObjectId(currentUserId) }
+                    ],
+                    deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
+                };
 
-            const [mediaCount, docCount, linkCount] = await Promise.all([
-                Message.countDocuments({ ...baseQuery, type: { $in: ['image', 'video'] } }),
-                Message.countDocuments({ ...baseQuery, type: 'file' }),
-                Message.countDocuments({ ...baseQuery, 'link_preview.url': { $exists: true, $ne: null } })
-            ]);
+                const [mediaCount, docCount, linkCount] = await Promise.all([
+                    Message.countDocuments({ ...baseQuery, type: { $in: ['image', 'video'] } }),
+                    Message.countDocuments({ ...baseQuery, type: 'file' }),
+                    Message.countDocuments({ ...baseQuery, 'link_preview.url': { $exists: true, $ne: null } })
+                ]);
 
-            // 4. Check for message request status
-            const request = await MessageRequest.findOne({
-                $or: [
-                    { sender_id: u._id, receiver_id: currentUserId },
-                    { sender_id: currentUserId, receiver_id: u._id }
-                ]
-            }).lean();
+                // 4. Check for message request status
+                const request = await MessageRequest.findOne({
+                    $or: [
+                        { sender_id: u._id, receiver_id: currentUserId },
+                        { sender_id: currentUserId, receiver_id: u._id }
+                    ]
+                }).lean();
 
-            const isAccepted = request && request.status === 'accepted';
-            const isPendingForMe = request && request.status === 'pending' && String(request.receiver_id) === String(currentUserId);
-            const isPendingFromMe = request && request.status === 'pending' && String(request.sender_id) === String(currentUserId);
+                const isAccepted = request && request.status === 'accepted';
+                const isPendingForMe = request && request.status === 'pending' && String(request.receiver_id) === String(currentUserId);
+                const isPendingFromMe = request && request.status === 'pending' && String(request.sender_id) === String(currentUserId);
 
-            let effectiveLastMsg = lastMsg;
+                let effectiveLastMsg = lastMsg;
 
-            // If it's a pending request, show a placeholder if no real history exists
-            if (!effectiveLastMsg && request && request.status === 'pending') {
-                effectiveLastMsg = {
-                    content: isPendingForMe ? 'New Message Request' : 'Message Request Sent',
-                    created_at: request.updated_at || request.created_at,
-                    type: 'text',
-                    is_request_placeholder: true
+                // If it's a pending request, show a placeholder if no real history exists
+                if (!effectiveLastMsg && request && request.status === 'pending') {
+                    effectiveLastMsg = {
+                        content: isPendingForMe ? 'New Message Request' : 'Message Request Sent',
+                        created_at: request.updated_at || request.created_at,
+                        type: 'text',
+                        is_request_placeholder: true
+                    };
+                }
+
+                return {
+                    ...u.toObject(),
+                    lastMessage: effectiveLastMsg,
+                    unreadCount: isAccepted ? unreadCount : (isPendingForMe ? 1 : 0),
+                    mediaCount: isAccepted ? mediaCount : 0,
+                    docCount: isAccepted ? docCount : 0,
+                    linkCount: isAccepted ? linkCount : 0,
+                    isFavorite: userFavorites.some(favId => String(favId) === String(u._id)),
+                    hasPendingRequest: isPendingForMe,
+                    requestStatus: request ? request.status : 'none',
+                    requestUpdatedAt: request ? request.updated_at : null,
+                    requestRejectedBy: (request && request.status === 'rejected') ? request.receiver_id : null
+                };
+            } catch (userErr) {
+                console.error(`[DEBUG] /users: Error processing user ${u._id}:`, userErr.message);
+                // Return basic user object so the list doesn't break
+                return {
+                    ...u.toObject(),
+                    lastMessage: null,
+                    unreadCount: 0,
+                    error: true
                 };
             }
-
-            return {
-                ...u.toObject(),
-                lastMessage: effectiveLastMsg, 
-                unreadCount: isAccepted ? unreadCount : (isPendingForMe ? 1 : 0),
-                mediaCount: isAccepted ? mediaCount : 0,
-                docCount: isAccepted ? docCount : 0,
-                linkCount: isAccepted ? linkCount : 0,
-                isFavorite: userFavorites.some(favId => String(favId) === String(u._id)),
-                hasPendingRequest: isPendingForMe,
-                requestStatus: request ? request.status : 'none',
-                requestUpdatedAt: request ? request.updated_at : null,
-                requestRejectedBy: (request && request.status === 'rejected') ? request.receiver_id : null
-            };
         }));
 
         const result = enhancedUsers.filter(u => u !== null);
+        console.log(`[DEBUG] /users: Returning ${result.length} enhanced users for ${currentUserId}`);
+        
         result.sort((a, b) => {
             const timeA = a.lastMessage?.created_at ? new Date(a.lastMessage.created_at).getTime() : 0;
             const timeB = b.lastMessage?.created_at ? new Date(b.lastMessage.created_at).getTime() : 0;
