@@ -6,7 +6,7 @@ const messageSchema = new mongoose.Schema({
     receiver_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // Added for P2P
     role: { type: String, required: true }, // 'user', 'ai' (model)
     content: { type: String },
-    type: { type: String, enum: ['text', 'image', 'file', 'video', 'audio'], default: 'text' },
+    type: { type: String, enum: ['text', 'image', 'file', 'video', 'audio', 'contact'], default: 'text' },
     duration: { type: Number }, // in seconds
     file_path: { type: String },
     fileName: { type: String },
@@ -49,6 +49,8 @@ const messageSchema = new mongoose.Schema({
         signedPreKeyId: { type: Number }
     },
     
+    is_edited: { type: Boolean, default: false },
+    edited_at: { type: Date, default: null },
     created_at: { type: Date, default: Date.now }
 }, {
     toJSON: { virtuals: true },
@@ -75,4 +77,4 @@ messageSchema.index({ user_id: 1, receiver_id: 1 });
 messageSchema.index({ receiver_id: 1, user_id: 1 });
 messageSchema.index({ created_at: -1 });
 
-module.exports = mongoose.model('Message', messageSchema);
+module.exports = mongoose.model('Message', messageSchema);

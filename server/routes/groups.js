@@ -298,7 +298,13 @@ router.get('/:groupId/messages', authenticateToken, async (req, res) => {
             .populate('read_details.user_id', 'name image _id')
             .sort({ created_at: 1 });
 
-        res.json(messages);
+        const enriched = messages.map(msg => {
+            const m = msg.toObject();
+            m.is_starred = (msg.starred_by || []).some(id => String(id) === String(userId));
+            m.is_edited = msg.is_edited || false;
+            return m;
+        });
+        res.json(enriched);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -473,6 +479,55 @@ router.post('/message/:id/toggle', authenticateToken, async (req, res) => {
 
         await msg.save();
         res.json({ status: 'success', is_starred: msg.starred_by.includes(userId) });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+
+// Edit Group Message - Secured with Auth
+router.post('/message/:id/edit', authenticateToken, async (req, res) => {
+    const userId = req.user.id;
+    const { content } = req.body;
+
+    if (!content) return res.status(400).json({ error: 'Content is required' });
+
+    try {
+        const msg = await GroupMessage.findById(req.params.id);
+        if (!msg) return res.status(404).json({ error: 'Group message not found' });
+
+        // Permission check: only sender can edit
+        if (msg.sender_id.toString() !== userId) {
+            return res.status(403).json({ error: 'Unauthorized to edit this message' });
+        }
+
+        // Permission check: removed read restriction for now
+
+        msg.content = content;
+        msg.is_edited = true;
+        msg.edited_at = new Date();
+        await msg.save();
+
+        // Notify participants via socket
+        if (req.io) {
+            const updatedMsg = await GroupMessage.findById(msg._id);
+            group.members.forEach(mId => {
+                req.io.to(mId.toString()).emit('group_message_edited', {
+                    groupId: msg.group_id,
+                    messageId: msg._id,
+                    content: updatedMsg.content,
+                    is_edited: true,
+                    edited_at: msg.edited_at
+                });
+            });
+        }
+
+        res.json({
+            status: 'success',
+            messageId: msg._id,
+            is_edited: true,
+            content: msg.content
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

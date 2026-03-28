@@ -226,6 +226,40 @@ io.on('connection', async (socket) => {
         }
     });
 
+    socket.on('typing', async (data) => {
+        const { receiverId, isGroup } = data;
+        if (isGroup) {
+            const Group = require('./models/Group');
+            const group = await Group.findById(receiverId);
+            if (group) {
+                group.members.forEach(memberId => {
+                    if (memberId.toString() !== userId) {
+                        io.to(memberId.toString()).emit('user_typing', { userId, groupId: receiverId });
+                    }
+                });
+            }
+        } else {
+            io.to(receiverId).emit('user_typing', { userId });
+        }
+    });
+
+    socket.on('stop_typing', async (data) => {
+        const { receiverId, isGroup } = data;
+        if (isGroup) {
+            const Group = require('./models/Group');
+            const group = await Group.findById(receiverId);
+            if (group) {
+                group.members.forEach(memberId => {
+                    if (memberId.toString() !== userId) {
+                        io.to(memberId.toString()).emit('user_stop_typing', { userId, groupId: receiverId });
+                    }
+                });
+            }
+        } else {
+            io.to(receiverId).emit('user_stop_typing', { userId });
+        }
+    });
+
     socket.on('disconnect', async (reason) => {
         console.log(`[SOCKET] User disconnected: ${userId} (Reason: ${reason})`);
 

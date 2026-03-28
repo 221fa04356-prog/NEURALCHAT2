@@ -7535,3 +7535,4 @@ html {
 
 
 
+@keyframes wa-status-loop { 0% { opacity: 0.5; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-1px); } 100% { opacity: 0.5; transform: translateY(0); } } .wa-status-animation { animation: wa-status-loop 3s infinite ease-in-out; display: inline-block; }
