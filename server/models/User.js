@@ -21,7 +21,21 @@ const userSchema = new mongoose.Schema({
     created_at: { type: Date, default: Date.now },
     bannedUntil: { type: Date, default: null },       // Temporary ban on sending requests
     rejectionCount: { type: Number, default: 0 },     // Strike counter (banned after each rejection, locked after 3)
-    adminLock: { type: Boolean, default: false }       // Locked by admin after 3 strikes
+    adminLock: { type: Boolean, default: false },       // Locked by admin after 3 strikes
+    
+    // E2EE (Signal Protocol) Keys
+    signal_keys: {
+        identityKey: { type: String },
+        signedPreKey: {
+            id: { type: Number },
+            publicKey: { type: String },
+            signature: { type: String }
+        },
+        oneTimePreKeys: [{
+            id: { type: Number },
+            publicKey: { type: String }
+        }]
+    }
 }, {
     toJSON: { virtuals: true },
     toObject: { virtuals: true }

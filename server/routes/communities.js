@@ -40,15 +40,15 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
         const communities = await Community.find({
             $or: [{ creator: userObjId }, { members: userObjId }, { removedMembers: userObjId }]
         })
-            .populate('creator', 'name mobile countryCode _id')
-            .populate('members', 'name mobile countryCode _id about')
-            .populate('admins', 'name mobile countryCode _id about')
+            .populate('creator', 'name mobile countryCode _id __enc_name __enc_mobile')
+            .populate('members', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
+            .populate('admins', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
             .populate({
                 path: 'announcements',
                 select: 'name icon _id members admin admins removedMembers isAnnouncementGroup userHistory',
                 populate: {
                     path: 'members',
-                    select: 'name about mobile image'
+                    select: 'name about mobile image __enc_name __enc_about __enc_mobile'
                 }
             })
             .populate({
@@ -56,11 +56,11 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
                 select: 'name icon _id members admin admins removedMembers community_id userHistory',
                 populate: {
                     path: 'members',
-                    select: 'name about mobile image'
+                    select: 'name about mobile image __enc_name __enc_about __enc_mobile'
                 }
             })
             .sort({ created_at: -1 })
-            .lean();
+            .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         const enriched = await Promise.all((communities || []).map(async (c) => {
             let lastMsg = null;
@@ -68,7 +68,8 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
             if (c.announcements?._id) {
                 lastMsg = await GroupMessage.findOne({ group_id: c.announcements._id })
                     .sort({ created_at: -1 })
-                    .populate('sender_id', 'name _id');
+                    .populate('sender_id', 'name _id __enc_name')
+                    .then(r => r ? (typeof r.toObject === 'function' ? r.toObject() : r) : null);
 
                 // Find user's visibleFrom for this group
                 const history = (c.userHistory || []).find(h => String(h.user) === String(userId));
@@ -94,7 +95,8 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
                     deleted_for: { $ne: userId }
                 })
                     .sort({ created_at: -1 })
-                    .populate('sender_id', 'name');
+                    .populate('sender_id', 'name __enc_name')
+                    .then(r => r ? (typeof r.toObject === 'function' ? r.toObject() : r) : null);
 
                 const gUnreadCount = await GroupMessage.countDocuments({
                     group_id: g._id,
@@ -173,15 +175,16 @@ router.post('/create', authenticateToken, async (req, res) => {
         await announcementsGroup.save();
 
         const populated = await Community.findById(community._id)
-            .populate('creator', 'name mobile countryCode _id')
-            .populate('members', 'name mobile countryCode _id about')
-            .populate('admins', 'name mobile countryCode _id about')
+            .populate('creator', 'name mobile countryCode _id __enc_name __enc_mobile')
+            .populate('members', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
+            .populate('admins', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
             .populate('announcements', 'name icon _id members admin removedMembers')
-            .lean();
+            .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         const lastMsg = await GroupMessage.findOne({ group_id: announcementsGroup._id })
             .sort({ created_at: -1 })
-            .populate('sender_id', 'name _id');
+            .populate('sender_id', 'name _id __enc_name')
+            .then(r => r ? (typeof r.toObject === 'function' ? r.toObject() : r) : null);
 
         res.json({
             status: 'created',
@@ -235,7 +238,7 @@ router.patch('/:communityId/members', authenticateToken, async (req, res) => {
             // Log announcement
             const User = require('../models/User');
             const adminUser = await User.findById(req.user.id);
-            const addedUsers = await User.find({ _id: { $in: idsToAdd } }).select('name');
+            const addedUsers = await User.find({ _id: { $in: idsToAdd } }).select('name __enc_name');
             const names = addedUsers.map(u => u.name);
             const adminName = adminUser ? adminUser.name : 'Admin';
             
@@ -269,15 +272,15 @@ router.patch('/:communityId/members', authenticateToken, async (req, res) => {
         }
 
         const updated = await Community.findById(communityId)
-            .populate('creator', 'name mobile countryCode _id')
-            .populate('members', 'name mobile countryCode _id about')
-            .populate('admins', 'name mobile countryCode _id about')
+            .populate('creator', 'name mobile countryCode _id __enc_name __enc_mobile')
+            .populate('members', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
+            .populate('admins', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
             .populate({
                 path: 'announcements',
                 select: 'name icon _id members admin admins removedMembers isAnnouncementGroup',
                 populate: {
                     path: 'members',
-                    select: 'name about mobile image'
+                    select: 'name about mobile image __enc_name __enc_about __enc_mobile'
                 }
             })
             .populate({
@@ -285,16 +288,17 @@ router.patch('/:communityId/members', authenticateToken, async (req, res) => {
                 select: 'name icon _id members admin admins removedMembers',
                 populate: {
                     path: 'members',
-                    select: 'name about mobile image'
+                    select: 'name about mobile image __enc_name __enc_about __enc_mobile'
                 }
             })
-            .lean();
+            .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         let lastMsg = null;
         if (updated.announcements?._id) {
             lastMsg = await GroupMessage.findOne({ group_id: updated.announcements._id })
                 .sort({ created_at: -1 })
-                .populate('sender_id', 'name _id');
+                .populate('sender_id', 'name _id __enc_name')
+                .then(r => r ? (typeof r.toObject === 'function' ? r.toObject() : r) : null);
         }
 
         // Notify all members that they have been added to the community
@@ -506,8 +510,8 @@ router.patch('/:communityId/groups', authenticateToken, async (req, res) => {
                     });
 
                     // Populate for socket emission
-                    const populatedAnnMsg = await GroupMessage.findById(annMsg._id).populate('sender_id', 'name _id');
-                    const populatedGroupMsg = await GroupMessage.findById(groupMsg._id).populate('sender_id', 'name _id');
+                    const populatedAnnMsg = await GroupMessage.findById(annMsg._id).populate('sender_id', 'name _id __enc_name');
+                    const populatedGroupMsg = await GroupMessage.findById(groupMsg._id).populate('sender_id', 'name _id __enc_name');
 
                     if (req.io) {
                         // Notify announcements group
@@ -532,15 +536,15 @@ router.patch('/:communityId/groups', authenticateToken, async (req, res) => {
         }
 
         const updated = await Community.findById(communityId)
-            .populate('creator', 'name mobile countryCode _id')
-            .populate('members', 'name mobile countryCode _id about')
-            .populate('admins', 'name mobile countryCode _id about')
+            .populate('creator', 'name mobile countryCode _id __enc_name __enc_mobile')
+            .populate('members', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
+            .populate('admins', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
             .populate({
                 path: 'announcements',
                 select: 'name icon _id members admin admins removedMembers isAnnouncementGroup',
                 populate: {
                     path: 'members',
-                    select: 'name about mobile image'
+                    select: 'name about mobile image __enc_name __enc_about __enc_mobile'
                 }
             })
             .populate({
@@ -548,10 +552,10 @@ router.patch('/:communityId/groups', authenticateToken, async (req, res) => {
                 select: 'name icon _id members admin admins removedMembers',
                 populate: {
                     path: 'members',
-                    select: 'name about mobile image'
+                    select: 'name about mobile image __enc_name __enc_about __enc_mobile'
                 }
             })
-            .lean();
+            .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         // Enrich groups with last message and unread count
         if (updated) {
@@ -567,8 +571,8 @@ router.patch('/:communityId/groups', authenticateToken, async (req, res) => {
                     deleted_for: { $ne: userId }
                 })
                     .sort({ created_at: -1 })
-                    .populate('sender_id', 'name')
-                    .lean();
+                    .populate('sender_id', 'name __enc_name')
+                    .then(r => r ? (typeof r.toObject === 'function' ? r.toObject() : r) : null);
 
                 const gUnreadCount = await GroupMessage.countDocuments({
                     group_id: g._id,
@@ -589,8 +593,8 @@ router.patch('/:communityId/groups', authenticateToken, async (req, res) => {
             if (updated.announcements) {
                 const lastMsg = await GroupMessage.findOne({ group_id: updated.announcements._id })
                     .sort({ created_at: -1 })
-                    .populate('sender_id', 'name _id')
-                    .lean();
+                    .populate('sender_id', 'name _id __enc_name')
+                    .then(r => r ? (typeof r.toObject === 'function' ? r.toObject() : r) : null);
 
                 const history = (updated.userHistory || []).find(h => String(h.user) === String(userId));
                 const visibleFrom = history?.visibleFrom || new Date(0);
@@ -691,11 +695,11 @@ router.delete('/:communityId/groups/:groupId', authenticateToken, async (req, re
 
         const updated = await Community.findById(communityId)
             .populate('creator', 'name mobile countryCode _id')
-            .populate('members', 'name mobile countryCode _id about')
-            .populate('admins', 'name mobile countryCode _id about')
+            .populate('members', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
+            .populate('admins', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
             .populate('announcements', 'name icon _id members admin removedMembers')
             .populate('groups')
-            .lean();
+            .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         res.json({ status: 'removed', community: updated });
     } catch (err) {
@@ -740,12 +744,12 @@ router.post('/:communityId/admins/toggle', authenticateToken, async (req, res) =
         }
 
         const updated = await Community.findById(communityId)
-            .populate('creator', 'name mobile countryCode _id')
-            .populate('members', 'name mobile countryCode _id about')
-            .populate('admins', 'name mobile countryCode _id about')
+            .populate('creator', 'name mobile countryCode _id __enc_name __enc_mobile')
+            .populate('members', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
+            .populate('admins', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
             .populate('announcements', 'name icon _id members admin removedMembers')
             .populate('groups')
-            .lean();
+            .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         // Notify everyone
         if (req.io) {
@@ -813,7 +817,7 @@ router.post('/:communityId/transfer-ownership', authenticateToken, async (req, r
         if (community.announcements) {
             const User = require('../models/User');
             const adminUser = await User.findById(currentUserId);
-            const newOwnerUser = await User.findById(newOwnerId);
+            const newOwnerUser = await User.findById(newOwnerId).select('name __enc_name');
             const adminName = adminUser ? adminUser.name : 'Owner';
             const newOwnerName = newOwnerUser ? newOwnerUser.name : 'User';
 
@@ -838,12 +842,12 @@ router.post('/:communityId/transfer-ownership', authenticateToken, async (req, r
         }
 
         const updated = await Community.findById(communityId)
-            .populate('creator', 'name mobile countryCode _id')
-            .populate('members', 'name mobile countryCode _id about')
-            .populate('admins', 'name mobile countryCode _id about')
+            .populate('creator', 'name mobile countryCode _id __enc_name __enc_mobile')
+            .populate('members', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
+            .populate('admins', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
             .populate('announcements', 'name icon _id members admin removedMembers')
             .populate('groups')
-            .lean();
+            .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         // Notify everyone to refresh
         if (req.io) {
@@ -887,12 +891,12 @@ router.patch('/:communityId', authenticateToken, async (req, res) => {
         await community.save();
 
         const updated = await Community.findById(communityId)
-            .populate('creator', 'name mobile countryCode _id')
-            .populate('members', 'name mobile countryCode _id about')
-            .populate('admins', 'name mobile countryCode _id about')
+            .populate('creator', 'name mobile countryCode _id __enc_name __enc_mobile')
+            .populate('members', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
+            .populate('admins', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
             .populate('announcements', 'name icon _id members admin removedMembers')
             .populate('groups')
-            .lean();
+            .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         if (req.io) {
             const allMembers = [
@@ -987,12 +991,12 @@ router.post('/:communityId/transfer-ownership', authenticateToken, async (req, r
         );
 
         const updated = await Community.findById(communityId)
-            .populate('creator', 'name mobile countryCode _id')
-            .populate('members', 'name mobile countryCode _id about')
-            .populate('admins', 'name mobile countryCode _id about')
+            .populate('creator', 'name mobile countryCode _id __enc_name __enc_mobile')
+            .populate('members', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
+            .populate('admins', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
             .populate('announcements', 'name icon _id members admin removedMembers')
             .populate('groups')
-            .lean();
+            .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         // Notify all members
         if (req.io) {

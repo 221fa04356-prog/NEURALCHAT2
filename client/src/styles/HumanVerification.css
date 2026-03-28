@@ -162,7 +162,7 @@
 
 .hv-tab.active {
     background: white;
-    color: #0D9BB3;
+    color: #0EA5BE;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
@@ -191,7 +191,7 @@
 }
 
 .hv-input:focus {
-    border-color: #0D9BB3;
+    border-color: #0EA5BE;
 }
 
 .hv-submit-btn {
@@ -286,7 +286,7 @@
 
 .hv-icon-btn:hover {
     background: #f1f5f9;
-    color: #0D9BB3;
+    color: #0EA5BE;
     border-color: #cbd5e1;
 }
 
@@ -309,7 +309,7 @@
 }
 
 .hv-input-wrapper:focus-within {
-    border-color: #0D9BB3;
+    border-color: #0EA5BE;
 }
 
 .hv-country-code {
@@ -355,15 +355,15 @@
     align-items: center;
     text-align: center;
     gap: 12px;
-    background: rgba(2, 126, 181, 0.05);
-    /* Tint of #027EB5 */
+    background: rgba(14, 165, 190, 0.05);
+    /* Tint of #0EA5BE */
     padding: 16px;
     border-radius: 12px;
-    border: 1px solid rgba(2, 126, 181, 0.2);
+    border: 1px solid rgba(14, 165, 190, 0.2);
 }
 
 .hv-call-msg {
-    color: #027EB5;
+    color: #0EA5BE;
     font-size: 0.95rem;
     font-weight: 500;
 }
@@ -371,7 +371,7 @@
 .hv-resend-link {
     background: transparent;
     border: none;
-    color: #027EB5;
+    color: #0EA5BE;
     font-size: 0.9rem;
     font-weight: 600;
     text-decoration: underline;
@@ -392,9 +392,9 @@
     right: 24px;
     left: auto;
     transform: none;
-    background: #027EB5;
+    background: #0EA5BE;
     color: #ffffff;
-    border: 1px solid #027EB5;
+    border: 1px solid #0EA5BE;
     padding: 12px 16px;
     border-radius: 8px;
     font-size: 0.85rem;
@@ -481,7 +481,7 @@
 
 .hv-rotate-btn:hover {
     background: #e2e8f0;
-    color: #0D9BB3;
+    color: #0EA5BE;
     border-color: #94a3b8;
 }
 

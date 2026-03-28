@@ -34,7 +34,7 @@
 .wa-settings-section-title {
     font-size: 11px;
     font-weight: 900;
-    color: #4f46e5;
+    color: #0EA5BE;
     /* Accent color for section titles */
     text-transform: uppercase;
     letter-spacing: 0.15em;
@@ -69,7 +69,7 @@
 }
 
 .wa-settings-list-action:hover {
-    border-color: #4f46e5 !important;
+    border-color: #0EA5BE !important;
     background: #1e1e22 !important;
     transform: translateY(-2px);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
@@ -136,8 +136,8 @@
 }
 
 .wa-settings-toggle input:checked+.wa-settings-toggle-slider {
-    background-color: #4f46e5;
-    /* Using the purple/indigo accent */
+    background-color: #0EA5BE;
+    /* Using the new brand accent */
 }
 
 .wa-settings-toggle input:checked+.wa-settings-toggle-slider:before {
@@ -152,7 +152,7 @@
 }
 
 .wa-settings-list-action:hover .lucide {
-    color: #4f46e5;
+    color: #0EA5BE;
 }
 
 /* Responsive Grid */
@@ -212,7 +212,7 @@
 }
 
 .wa-settings-theme-card.active {
-    border-color: #4f46e5;
+    border-color: #0EA5BE;
     background: #1c1c1f;
 }
 

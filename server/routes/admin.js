@@ -23,7 +23,7 @@ const generateSignature = (password) => {
 // Get all users
 router.get('/users', async (req, res) => {
     try {
-        const users = await User.find().select('-password').lean();
+        const users = await User.find().select('-password -password_signature').then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         // Add flagged count for each user
         const usersWithFlags = await Promise.all(users.map(async (u) => {
@@ -276,10 +276,10 @@ router.get('/chat/contacts/:userId', async (req, res) => {
         const contactIds = [...new Set([...sentTo.map(id => id.toString()), ...receivedFrom.map(id => id.toString())])];
 
         // Fetch user details for these contacts
-        const contacts = await User.find({ _id: { $in: contactIds } }).select('name email');
+        const contacts = await User.find({ _id: { $in: contactIds } }).select('name email __enc_name __enc_email');
 
         // Fetch groups this user is a member of
-        const groups = await Group.find({ members: new mongoose.Types.ObjectId(userId) }).select('name').lean();
+        const groups = await Group.find({ members: new mongoose.Types.ObjectId(userId) }).select('name').then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         // Check if user has AI messages
         const hasAI = await Message.exists({ user_id: userId, receiver_id: null });
@@ -290,7 +290,7 @@ router.get('/chat/contacts/:userId', async (req, res) => {
                 { groups: { $in: groupIds } },
                 { announcements: { $in: groupIds } }
             ]
-        }).populate('groups', 'name').select('name groups announcements').lean();
+        }).populate('groups', 'name').select('name groups announcements').then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         const result = [
             ...contacts.map(c => ({ id: c._id, name: c.name, email: c.email, type: 'user', subtext: 'Peer-to-Peer Chat' })),
@@ -585,7 +585,7 @@ router.get('/chat/history-filtered', async (req, res) => {
             const isGroup = await Group.exists({ _id: otherUserId });
             if (isGroup) {
                 query.group_id = otherUserId;
-                const groupMsgs = await GroupMessage.find(query).sort({ created_at: 1 }).populate('sender_id', 'name');
+                const groupMsgs = await GroupMessage.find(query).sort({ created_at: 1 }).populate('sender_id', 'name __enc_name');
                 messages = groupMsgs.map(m => {
                     const obj = m.toObject();
                     obj.user_id = m.sender_id?._id || m.sender_id;
@@ -605,7 +605,7 @@ router.get('/chat/history-filtered', async (req, res) => {
         const deletions = await ChatDeletion.find({
             userId: userId,
             contactId: otherUserId
-        }).populate('userId', 'name').sort({ deletedAt: 1 });
+        }).populate('userId', 'name __enc_name').sort({ deletedAt: 1 });
 
         const enrichedMessages = [...messages];
 

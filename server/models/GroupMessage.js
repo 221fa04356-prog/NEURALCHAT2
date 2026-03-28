@@ -12,6 +12,8 @@ const groupMessageSchema = new mongoose.Schema({
     file_path: { type: String },
     fileName: { type: String },
     fileSize: { type: Number },
+    pageCount: { type: Number, default: 0 },
+    thumbnail_path: { type: String },
     is_view_once: { type: Boolean, default: false },
     is_viewed: { type: Boolean, default: false },
     is_opened: { type: Boolean, default: false },
@@ -32,6 +34,11 @@ const groupMessageSchema = new mongoose.Schema({
     is_forwarded: { type: Boolean, default: false },
     forward_count: { type: Number, default: 0 },
     is_read: { type: Boolean, default: false },
+    
+    // E2EE specific fields
+    ciphertext: { type: String }, // Encrypted with Sender Key
+    sender_key_id: { type: String }, // To identify which key to use
+    
     is_edited: { type: Boolean, default: false },
     edited_at: { type: Date, default: null },
     created_at: { type: Date, default: Date.now }
@@ -44,12 +51,13 @@ const groupMessageSchema = new mongoose.Schema({
 groupMessageSchema.add({
     __enc_content: { type: Boolean, select: true, default: false },
     __enc_file_path: { type: Boolean, select: true, default: false },
-    __enc_fileName: { type: Boolean, select: true, default: false }
+    __enc_fileName: { type: Boolean, select: true, default: false },
+    __enc_thumbnail_path: { type: Boolean, select: true, default: false }
 });
 
 // App-level Field Encryption
 groupMessageSchema.plugin(fieldEncryption, {
-    fields: ["content", "file_path", "fileName"],
+    fields: ["content", "file_path", "fileName", "thumbnail_path"],
     secret: process.env.DEFAULT_ENCRYPTION_SECRET,
     salt: process.env.DEFAULT_ENCRYPTION_SALT
 });

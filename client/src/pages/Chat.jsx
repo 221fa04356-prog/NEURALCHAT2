@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useRef, memo } from 'react';
+﻿import React, { useEffect, useState, useRef, memo } from 'react';
 import axios from 'axios';
 import ImageEditorModal from '../components/ImageEditorModal';
 import logo from '../assets/logo.png';
 import { useNavigate } from 'react-router-dom';
+import { SignalService } from '../utils/signalService';
 import {
     MessageSquare, CircleDashed, Users, MoreVertical, Plus, Megaphone,
     Search, Settings, Phone, Video, Paperclip, Smile, Send, Mic, MicOff, Pause, PauseCircle, PlayCircle, StopCircle,
@@ -11,7 +12,7 @@ import {
     LayoutGrid, UserPlus, ArrowRight, Share2, Crop, Check, RotateCcw, Minus, Delete, User, Play, MapPin, IndianRupee, Sticker,
     ShieldCheck, Monitor, BellRing, Laptop, LogOut, Globe, Clock, Building2, Mail, Briefcase, ExternalLink,
     ShieldAlert, Fingerprint, HardDrive, Keyboard, HelpCircle, Settings2, Volume2, MonitorSmartphone, Shield,
-    AlertCircle, UserCheck
+    AlertCircle, UserCheck, Loader2
 } from 'lucide-react';
 
 const searchSlideStyles = `
@@ -584,7 +585,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                             <div key={i} style={{
                                 height: `${h}px`,
                                 backgroundColor: (isPaused || isReviewing)
-                                    ? (i / waveformPoints.length < previewProgress / 100 ? '#027EB5' : '#8696a0')
+                                    ? (i / waveformPoints.length < previewProgress / 100 ? '#0EA5BE' : '#8696a0')
                                     : '#8696a0',
                                 width: '3px',
                                 borderRadius: '3px',
@@ -598,7 +599,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                                 left: `${previewProgress}%`,
                                 width: '10px',
                                 height: '10px',
-                                backgroundColor: '#027EB5', // Theme Blue shade
+                                backgroundColor: '#0EA5BE', // Theme Blue shade
                                 borderRadius: '50%',
                                 pointerEvents: 'none',
                                 transform: 'translateX(-50%)',
@@ -618,9 +619,9 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                         {isPaused || isReviewing ? <Mic size={iconSize} color="#ef4444" /> : <div style={{ display: 'flex', gap: '3px', color: '#ef4444' }}><div style={{ width: '3.2px', height: '14px', background: 'currentColor' }}></div><div style={{ width: '3.2px', height: '14px', background: 'currentColor' }}></div></div>}
                     </button>
                     <button onClick={() => setIsViewOnceVoice(!isViewOnceVoice)} className={`wa-view-once-btn ${isViewOnceVoice ? 'active' : ''}`} data-tooltip="View once" data-tooltip-pos="center" style={{ width: btnSize, height: btnSize }}>
-                        <span className="wa-view-once-circle" style={{ borderColor: isViewOnceVoice ? '#027EB5' : '#54656f', color: isViewOnceVoice ? '#027EB5' : '#54656f' }}>1</span>
+                        <span className="wa-view-once-circle" style={{ borderColor: isViewOnceVoice ? '#0EA5BE' : '#54656f', color: isViewOnceVoice ? '#0EA5BE' : '#54656f' }}>1</span>
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); if (isReviewing) { onSend(audioBlob, recordingTime, isViewOnceVoice); } else { window.directSendRequested = true; stopRecording(); } }} className="wa-send-btn-inner" data-tooltip="Send" data-tooltip-pos="center" style={{ width: sendBtnSize, height: sendBtnSize, background: '#027EB5', borderRadius: '50%' }}>
+                    <button onClick={(e) => { e.stopPropagation(); if (isReviewing) { onSend(audioBlob, recordingTime, isViewOnceVoice); } else { window.directSendRequested = true; stopRecording(); } }} className="wa-send-btn-inner" data-tooltip="Send" data-tooltip-pos="center" style={{ width: sendBtnSize, height: sendBtnSize, background: '#0EA5BE', borderRadius: '50%' }}>
                         <Send size={isMobile ? 18 : 20} color="white" />
                     </button>
                 </div>
@@ -776,7 +777,7 @@ export default function Chat() {
     const [editFirstName, setEditFirstName] = useState('');
     const [editLastName, setEditLastName] = useState('');
     const [editPhone, setEditPhone] = useState('');
-    const [editCountry, setEditCountry] = useState({ name: 'India', code: 'IN', dial: '+91', flag: '🇮🇳' });
+    const [editCountry, setEditCountry] = useState({ name: 'India', code: 'IN', dial: '+91', flag: 'Ã°Å¸â€¡Â®Ã°Å¸â€¡Â³' });
     const [isSyncEnabled, setIsSyncEnabled] = useState(true);
     const [isCountryDropdownOpen, setIsCountryDropdownOpen] = useState(false);
 
@@ -1097,9 +1098,235 @@ export default function Chat() {
         return false;
     };
 
-    // Derive translator from the currently selected language (re-computed on every render,
+    const [searchTarget, setSearchTarget] = useState(null); // { type: 'p2p'|'group', id: string }
+    const [openingFile, setOpeningFile] = useState(null);
+    const [fileToOpenConfirm, setFileToOpenConfirm] = useState(null); // { filePath, fileName }
+    const [appNotFoundInfo, setAppNotFoundInfo] = useState(null); // { ext, filePath }
+    const mouseFollowerRef = useRef(null);
+    const [isWaitingForApp, setIsWaitingForApp] = useState(false);
+
+    useEffect(() => {
+        if (!isWaitingForApp) return;
+        const moveHandler = (e) => {
+            if (mouseFollowerRef.current) {
+                // Direct style update for 60fps movement without React lag
+                mouseFollowerRef.current.style.left = e.clientX + 'px';
+                mouseFollowerRef.current.style.top = e.clientY + 'px';
+            }
+        };
+        window.addEventListener('mousemove', moveHandler);
+        return () => window.removeEventListener('mousemove', moveHandler);
+    }, [isWaitingForApp]);
+
+    // Get current translator based on selected language
+    // (This is called on every render, but translations are simple objects,
     // so after a reload the correct translations are immediately active).
     const t = getTranslator(getLangCode(selectedLanguage));
+
+    const truncateFileName = (name) => {
+        if (!name) return 'File';
+        // Split by characters that usually separate words or extension and pick the first non-empty one
+        const firstWord = name.split(/[\s_\-\.]/).filter(Boolean)[0] || 'File';
+        // Requirement: 1 word or 5 letters
+        const base = firstWord.length > 5 ? firstWord.substring(0, 5) : firstWord;
+        return base + '...';
+    };
+
+    const formatFileSize = (bytes) => {
+        if (!bytes) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'kB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    };
+
+    const isDocument = (fileName) => {
+        if (!fileName) return false;
+        const ext = fileName.split('.').pop().toLowerCase();
+        return ['pdf', 'doc', 'docx', 'docm', 'dotx', 'dot', 'rtf', 'odt', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xltx', 'xlt', 'ods', 'ppt', 'pptx', 'pptm', 'potx', 'pot', 'ppsx', 'pps', 'odp', 'txt', 'csv'].includes(ext);
+    };
+
+    const getDocIcon = (fileName) => {
+        if (!fileName) return <FileText size={40} color="#8696a0" />;
+        const ext = fileName.split('.').pop().toLowerCase();
+        if (ext === 'pdf') {
+            return (
+                <div style={{ width: 42, height: 48, backgroundColor: '#f40f02', borderRadius: '4px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', fontSize: '10px' }}>
+                    <div style={{ position: 'absolute', bottom: 4, transform: 'scale(0.8)' }}>PDF</div>
+                    <FileText size={20} color="white" />
+                </div>
+            );
+        }
+        if (['xls', 'xlsx', 'csv'].includes(ext)) {
+            return (
+                <div style={{ width: 42, height: 48, backgroundColor: '#107c41', borderRadius: '4px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', fontSize: '10px' }}>
+                    <div style={{ position: 'absolute', bottom: 4, transform: 'scale(0.8)' }}>EXCEL</div>
+                    <FileText size={20} color="white" />
+                </div>
+            );
+        }
+        if (['ppt', 'pptx'].includes(ext)) {
+            return (
+                <div style={{ width: 42, height: 48, backgroundColor: '#d14424', borderRadius: '4px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', fontSize: '10px' }}>
+                    <div style={{ position: 'absolute', bottom: 4, transform: 'scale(0.8)' }}>PPT</div>
+                    <FileText size={20} color="white" />
+                </div>
+            );
+        }
+        return (
+            <div style={{ width: 42, height: 48, backgroundColor: '#0EA5BE', borderRadius: '4px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', fontSize: '10px' }}>
+                <div style={{ position: 'absolute', bottom: 4, transform: 'scale(0.8)' }}>DOC</div>
+                <FileText size={20} color="white" />
+            </div>
+        );
+    };
+
+    const handleOpenFile = (filePath, fileName) => {
+        const safeExtensions = ['pdf', 'docx', 'doc', 'docm', 'dotx', 'dot', 'rtf', 'odt', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xltx', 'xlt', 'ods', 'ppt', 'pptx', 'pptm', 'potx', 'pot', 'ppsx', 'pps', 'odp', 'txt', 'jpg', 'jpeg', 'png', 'gif', 'mp4', 'mov', 'avi', 'mp3', 'wav', 'csv'];
+        const ext = fileName.split('.').pop().toLowerCase();
+
+        // If the file is a "Safe" known type, skip the confirmation modal
+        if (safeExtensions.includes(ext)) {
+            handleOpenFileActual(filePath, fileName);
+        } else {
+            // Only show the confirmation for suspicious file types (exe, bat, sh, etc.)
+            setFileToOpenConfirm({ filePath, fileName });
+        }
+    };
+
+    const handleOpenFileActual = (filePath, fileName) => {
+        setOpeningFile(fileName);
+        // Hide status after 3 seconds
+        setTimeout(() => setOpeningFile(null), 3500);
+
+        const ext = fileName.split('.').pop().toLowerCase();
+        const microsoftProtocols = {
+            'docx': 'ms-word:ofe|u|',
+            'doc': 'ms-word:ofe|u|',
+            'docm': 'ms-word:ofe|u|',
+            'dotx': 'ms-word:ofe|u|',
+            'dot': 'ms-word:ofe|u|',
+            'rtf': 'ms-word:ofe|u|',
+            'xlsx': 'ms-excel:ofe|u|',
+            'xls': 'ms-excel:ofe|u|',
+            'xlsm': 'ms-excel:ofe|u|',
+            'xlsb': 'ms-excel:ofe|u|',
+            'xltx': 'ms-excel:ofe|u|',
+            'xlt': 'ms-excel:ofe|u|',
+            'pptx': 'ms-powerpoint:ofe|u|',
+            'ppt': 'ms-powerpoint:ofe|u|',
+            'pptm': 'ms-powerpoint:ofe|u|',
+            'potx': 'ms-powerpoint:ofe|u|',
+            'pot': 'ms-powerpoint:ofe|u|',
+            'ppsx': 'ms-powerpoint:ofe|u|',
+            'pps': 'ms-powerpoint:ofe|u|',
+            'pdf': 'ms-pdf:'
+        };
+
+        if (microsoftProtocols[ext]) {
+            // Force absolute URL if needed for protocol handlers
+            let absolutePath = filePath;
+            if (!filePath.startsWith('http')) {
+                absolutePath = window.location.origin + filePath;
+            }
+
+            // Attempt to open with protocol
+            const protocolUrl = microsoftProtocols[ext] + absolutePath;
+
+            // Reliability improvement: use blur check to detect protocol success
+            let hasBlurred = false;
+            const handleBlur = () => {
+                hasBlurred = true;
+                setIsWaitingForApp(false);
+                window.removeEventListener('blur', handleBlur);
+            };
+            window.addEventListener('blur', handleBlur);
+
+            // Delay the mouse-following loader so it only appears after the notification disappears
+            setTimeout(() => {
+                if (!hasBlurred) {
+                    setIsWaitingForApp(true);
+                }
+            }, 3500);
+
+            // Execute protocol
+            window.location.href = protocolUrl;
+
+            // Increase timeout and check if blur happened. 
+            // If focus remains after 8s AND no blur happened, it's likely not found.
+            // This longer timeout allows for browser prompts ("Open this in Word?")
+            setTimeout(() => {
+                window.removeEventListener('blur', handleBlur);
+                setIsWaitingForApp(false);
+                if (!hasBlurred && document.hasFocus() && !document.hidden) {
+                    setAppNotFoundInfo({ ext, filePath });
+                }
+            }, 8000);
+        } else {
+            window.open(filePath, '_blank');
+        }
+    };
+
+    const renderLastMessagePreview = (msg, isGroup = false, defaultText = 'No messages yet') => {
+        if (!msg) return defaultText;
+
+        if (msg.is_deleted_by_admin) {
+            return (
+                <span style={{ fontStyle: 'italic', opacity: 0.7, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Trash2 size={12} /> {t('chat_window.deleted_admin')}
+                </span>
+            );
+        }
+
+        if (msg.deleted_for && msg.deleted_for.includes(user.id || user._id)) {
+            return (
+                <span style={{ fontStyle: 'italic', opacity: 0.7, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <XCircle size={12} /> {t('chat_window.deleted_user_me')}
+                </span>
+            );
+        }
+
+        if (msg.is_deleted_by_user) {
+            return (
+                <span style={{ fontStyle: 'italic', opacity: 0.7, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <XCircle size={12} /> {t('chat_window.deleted_user_other')}
+                </span>
+            );
+        }
+
+        switch (msg.type) {
+            case 'image':
+                return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Camera size={14} /> {isGroup ? 'Photo' : 'Image'}</span>;
+            case 'video':
+                return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Video size={14} /> Video</span>;
+            case 'file':
+                return (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <FileText size={14} /> {msg.fileName ? truncateFileName(msg.fileName) : 'File'}
+                    </span>
+                );
+            case 'audio':
+                return (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#667781' }}>
+                        <Mic size={13} style={{ flexShrink: 0 }} />
+                        <span>{formatVoiceTime(msg.duration || 0)}</span>
+                        {msg.is_view_once && (
+                            <div className={`wa-view-once-badge ${msg.is_viewed ? 'spent' : ''}`} style={{ transform: 'scale(0.7)', marginLeft: -2 }}>
+                                <span className="wa-view-once-circle" style={{ borderColor: msg.is_viewed ? '#8696a0' : '#0EA5BE', color: msg.is_viewed ? '#8696a0' : '#0EA5BE' }}>1</span>
+                            </div>
+                        )}
+                    </span>
+                );
+            default:
+                if (msg.is_request_placeholder) {
+                    return <span style={{ color: '#0EA5BE', fontWeight: '500' }}>{msg.content}</span>;
+                }
+                if (msg.is_system) {
+                    return `${msg.sender_id?.name || 'Someone'} ${msg.content}`;
+                }
+                return msg.content || defaultText;
+        }
+    };
 
     const getAppZoom = () => {
         if (window.innerWidth <= 768) return 1;
@@ -1354,14 +1581,14 @@ export default function Chat() {
 
 
     const countries = [
-        { name: 'India', code: 'IN', dial: '+91', flag: '🇮🇳' },
-        { name: 'Indonesia', code: 'ID', dial: '+62', flag: '🇮🇩' },
-        { name: 'Iran', code: 'IR', dial: '+98', flag: '🇮🇷' },
-        { name: 'Iraq', code: 'IQ', dial: '+964', flag: '🇮🇶' },
-        { name: 'Ireland', code: 'IE', dial: '+353', flag: '🇮🇪' },
-        { name: 'Isle of Man', code: 'IM', dial: '+44', flag: '🇮🇲' },
-        { name: 'Israel', code: 'IL', dial: '+972', flag: '🇮🇱' },
-        { name: 'Italy', code: 'IT', dial: '+39', flag: '🇮🇹' },
+        { name: 'India', code: 'IN', dial: '+91', flag: 'Ã°Å¸â€¡Â®Ã°Å¸â€¡Â³' },
+        { name: 'Indonesia', code: 'ID', dial: '+62', flag: 'Ã°Å¸â€¡Â®Ã°Å¸â€¡Â©' },
+        { name: 'Iran', code: 'IR', dial: '+98', flag: 'Ã°Å¸â€¡Â®Ã°Å¸â€¡Â·' },
+        { name: 'Iraq', code: 'IQ', dial: '+964', flag: 'Ã°Å¸â€¡Â®Ã°Å¸â€¡Â¶' },
+        { name: 'Ireland', code: 'IE', dial: '+353', flag: 'Ã°Å¸â€¡Â®Ã°Å¸â€¡Âª' },
+        { name: 'Isle of Man', code: 'IM', dial: '+44', flag: 'Ã°Å¸â€¡Â®Ã°Å¸â€¡Â²' },
+        { name: 'Israel', code: 'IL', dial: '+972', flag: 'Ã°Å¸â€¡Â®Ã°Å¸â€¡Â±' },
+        { name: 'Italy', code: 'IT', dial: '+39', flag: 'Ã°Å¸â€¡Â®Ã°Å¸â€¡Â¹' },
         // ... add more as needed
     ];
 
@@ -1426,7 +1653,7 @@ export default function Chat() {
                         target="_blank"
                         rel="noopener noreferrer"
                         style={{
-                            color: '#027eb5',
+                            color: '#0EA5BE',
                             textDecoration: 'underline',
                             cursor: 'pointer'
                         }}
@@ -1555,7 +1782,7 @@ export default function Chat() {
                         selection.removeAllRanges();
 
                         if (successful) {
-                            console.log('✅ Image copied using HTTP fallback');
+                            console.log('Ã¢Å“â€¦ Image copied using HTTP fallback');
                             setSnackbar({ message: 'Image copied to clipboard!', type: 'success', variant: 'system' });
                             setOpenDropdown(null);
                             return;
@@ -1595,7 +1822,7 @@ export default function Chat() {
                         })
                     ]);
 
-                    console.log('✅ Image copied successfully');
+                    console.log('Ã¢Å“â€¦ Image copied successfully');
                     setSnackbar({ message: 'Image copied to clipboard!', type: 'success', variant: 'system' });
                     setOpenDropdown(null);
                     return;
@@ -1939,7 +2166,7 @@ export default function Chat() {
             <div className="wa-grammar-bar">
                 <div className="wa-grammar-header">
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: '#027eb5' }}>Neural Chat AI</span>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: '#0EA5BE' }}>Neural Chat AI</span>
                         {isGrammarLoading && <div className="wa-grammar-loader" />}
                     </div>
                     <X size={16} style={{ cursor: 'pointer', color: '#667781' }} onClick={() => setShowGrammarBar(false)} />
@@ -2076,8 +2303,24 @@ export default function Chat() {
             setSnackbar({ message: `Reconnecting... (${err.message})`, type: 'info' });
         };
 
-        const onReceiveMessage = (data) => {
+        const onReceiveMessage = async (data) => {
             console.log('[DEBUG] Socket: receive_message', data);
+
+            // Decrypt incoming E2EE messages
+            if (data.ciphertext) {
+                try {
+                    const decrypted = await SignalService.decrypt(data.sender_id || data.user_id, {
+                        body: data.ciphertext,
+                        type: data.session_header?.type,
+                        registrationId: data.session_header?.registrationId
+                    });
+                    data.content = decrypted;
+                } catch (e2eeErr) {
+                    console.error('[E2EE] Real-time decryption failed:', e2eeErr);
+                    data.content = '<<< Encrypted Message >>>';
+                }
+            }
+
             const senderId = data.sender_id || data.user_id;
             const currentSelected = selectedUserRef.current;
             const myId = userRef.current?.id || userRef.current?._id;
@@ -2113,10 +2356,10 @@ export default function Chat() {
 
                     let previewText = 'Sent a message';
                     if (data.type === 'text') previewText = data.content;
-                    else if (data.type === 'image') previewText = '📷 Sent an image';
-                    else if (data.type === 'video') previewText = '🎥 Video';
-                    else if (data.type === 'video') previewText = '🎥 Video';
-                    else if (data.type === 'file') previewText = '📄 Sent a file';
+                    else if (data.type === 'image') previewText = 'Ã°Å¸â€œÂ· Sent an image';
+                    else if (data.type === 'video') previewText = 'Ã°Å¸Å½Â¥ Video';
+                    else if (data.type === 'video') previewText = 'Ã°Å¸Å½Â¥ Video';
+                    else if (data.type === 'file') previewText = `Ã°Å¸â€œâ€ž ${data.fileName ? truncateFileName(data.fileName) : 'Sent a file'}`;
 
                     if (previewText.length > 50) previewText = previewText.substring(0, 50) + '...';
 
@@ -2162,7 +2405,10 @@ export default function Chat() {
                             content: data.content,
                             created_at: new Date().toISOString(),
                             type: data.type || 'text',
-                            is_view_once: data.is_view_once || false
+                            is_view_once: data.is_view_once || false,
+                            fileName: data.fileName,
+                            ciphertext: data.ciphertext,
+                            session_header: data.session_header
                         }
                     };
                 }
@@ -2605,9 +2851,9 @@ export default function Chat() {
                     const groupName = groupInfo?.name || 'Group';
 
                     let previewText = data.message.content || 'Sent a message';
-                    if (data.message.type === 'image') previewText = isGroup ? '📷 Photo' : '📷 Image';
-                    else if (data.message.type === 'video') previewText = '🎥 Video';
-                    else if (data.message.type === 'file') previewText = '📄 File';
+                    if (data.message.type === 'image') previewText = isGroup ? 'Ã°Å¸â€œÂ· Photo' : 'Ã°Å¸â€œÂ· Image';
+                    else if (data.message.type === 'video') previewText = 'Ã°Å¸Å½Â¥ Video';
+                    else if (data.message.type === 'file') previewText = `Ã°Å¸â€œâ€ž ${data.message.fileName ? truncateFileName(data.message.fileName) : 'File'}`;
 
                     setSnackbar({
                         senderName: `${senderName} @ ${groupName}`,
@@ -2626,6 +2872,7 @@ export default function Chat() {
                 content: data.message?.content || '',
                 type: data.message?.type || 'text',
                 is_view_once: data.message?.is_view_once || false,
+                fileName: data.message?.fileName,
                 created_at: data.message?.created_at || new Date().toISOString(),
                 sender_id: data.message?.sender_id,
                 is_deleted_by_user: data.message?.is_deleted_by_user,
@@ -2633,6 +2880,8 @@ export default function Chat() {
                 deleted_for: data.message?.deleted_for,
                 duration: data.message?.duration,
                 is_system: data.message?.is_system,
+                ciphertext: data.message?.ciphertext,
+                sender_key_id: data.message?.sender_key_id
             };
 
             // 1. Update regular groups list
@@ -3048,15 +3297,23 @@ export default function Chat() {
             });
             const pinnedGroupsKey = `pinnedGroups_${user.id}`;
             const pinnedGroupIds = JSON.parse(localStorage.getItem(pinnedGroupsKey)) || [];
-            const processedGroups = (res.data || []).map(g => ({
-                ...g,
-                isPinned: pinnedGroupIds.includes(g._id)
-            })).sort((a, b) => {
+            const processedGroups = await Promise.all((res.data || []).map(async (g) => {
+                let lastMessage = g.lastMessage;
+                if (lastMessage && (lastMessage.ciphertext || lastMessage.sender_key_id)) {
+                    // Note: Group decryption not yet fully implemented for preview
+                    // lastMessage.content = await SignalService.decryptGroup(g._id, lastMessage.ciphertext, lastMessage.sender_key_id);
+                }
+                return {
+                    ...g,
+                    lastMessage,
+                    isPinned: pinnedGroupIds.includes(g._id)
+                };
+            }));
+            setGroups(processedGroups.sort((a, b) => {
                 if (a.isPinned && !b.isPinned) return -1;
                 if (!a.isPinned && b.isPinned) return 1;
                 return 0;
-            });
-            setGroups(processedGroups);
+            }));
         } catch (err) {
             console.error('fetchGroups error:', err);
         }
@@ -3075,15 +3332,32 @@ export default function Chat() {
             const pinnedIds = JSON.parse(localStorage.getItem(pinnedKey)) || [];
             const mutedMap = JSON.parse(localStorage.getItem(mutedKey)) || {};
 
-            const processed = (res.data || []).map(c => {
+            const processed = await Promise.all((res.data || []).map(async (c) => {
                 const id = String(c.id || c._id);
+
+                // Decrypt announcements preview
+                if (c.announcements?.lastMessage?.ciphertext) {
+                    // c.announcements.lastMessage.content = ...
+                }
+
+                // Decrypt group previews
+                if (c.groups) {
+                    await Promise.all(c.groups.map(async (g) => {
+                        if (g.lastMessage?.ciphertext) {
+                            // g.lastMessage.content = ...
+                        }
+                    }));
+                }
+
                 return {
                     ...c,
                     id,
                     isPinned: pinnedIds.includes(id),
                     isMuted: !!mutedMap[id]
                 };
-            }).sort((a, b) => {
+            }));
+
+            processed.sort((a, b) => {
                 if (a.isPinned && !b.isPinned) return -1;
                 if (!a.isPinned && b.isPinned) return 1;
                 return 0;
@@ -3292,6 +3566,28 @@ export default function Chat() {
         }
     };
 
+    useEffect(() => {
+        if (userData && userData.id) {
+            const checkAndRegisterSignal = async () => {
+                const isRegistered = localStorage.getItem(`signal_registered_${userData.id}`);
+                if (!isRegistered) {
+                    try {
+                        console.log('[E2EE] Registering for Signal Protocol...');
+                        await SignalService.register(userData.id);
+                        console.log('[E2EE] Signal Protocol Registration Successful');
+                    } catch (err) {
+                        console.error('[E2EE] Registration Failed:', err);
+                    }
+                } else {
+                    // Already registered, just initialize the store
+                    SignalService.initStore(userData.id);
+                }
+            };
+            checkAndRegisterSignal();
+        }
+    }, [userData]);
+
+    // FETCH DATA
     const fetchUsers = async () => {
 
         try {
@@ -3319,8 +3615,8 @@ export default function Chat() {
 
             const now = Date.now();
 
-            // Process users with Pin & Mute status
-            const processedUsers = filteredUsers.map(u => {
+            // Process users with Pin & Mute status and decrypt E2EE previews
+            const processedUsers = await Promise.all(filteredUsers.map(async (u) => {
                 let isMuted = false;
                 const muteUntil = mutedMap[u._id]; // Timestamp or 'Always'
 
@@ -3330,13 +3626,35 @@ export default function Chat() {
                     isMuted = true;
                 }
 
+                // Decrypt Last Message Content if E2EE
+                let lastMessage = u.lastMessage;
+                if (lastMessage && lastMessage.ciphertext) {
+                    const isSender = String(lastMessage.sender_id) === String(userId) || String(lastMessage.user_id) === String(userId);
+                    if (!isSender) {
+                        try {
+                            const decrypted = await SignalService.decrypt(u._id, {
+                                body: lastMessage.ciphertext,
+                                type: lastMessage.session_header?.type,
+                                registrationId: lastMessage.session_header?.registrationId
+                            });
+                            lastMessage.content = decrypted;
+                        } catch (e2eeErr) {
+                            console.warn('[E2EE] Sidebar preview decryption failed:', e2eeErr);
+                            lastMessage.content = '<<< Encrypted >>>';
+                        }
+                    } else {
+                        lastMessage.content = 'Secure Message Sent';
+                    }
+                }
+
                 return {
                     ...u,
+                    lastMessage,
                     isPinned: pinnedIds.includes(u._id),
                     isMuted,
                     muteUntil
                 };
-            });
+            }));
 
             // Sort: Pinned first, then by last message time (descending)
             const sortedUsers = processedUsers.sort((a, b) => {
@@ -3406,7 +3724,7 @@ export default function Chat() {
             });
             setOpenDropdown(null);
         } else if (pinnedIds.length >= 5) {
-            // Limit reached — open replacement modal
+            // Limit reached Ã¢â‚¬â€ open replacement modal
             setPinReplaceModal({ newId: contactId, isGroup, pinnedIds });
             setOpenDropdown(null);
         } else {
@@ -3479,7 +3797,32 @@ export default function Chat() {
             const res = await axios.get(`/api/chat/p2p/${user.id}/${otherId}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            setMessages(res.data);
+
+            // Decrypt E2EE messages
+            const decryptedMessages = await Promise.all(res.data.map(async (msg) => {
+                if (msg.ciphertext) {
+                    const isSender = String(msg.sender_id || msg.user_id) === String(user.id || user._id);
+                    if (!isSender) {
+                        try {
+                            const senderId = msg.sender_id || msg.user_id;
+                            const decrypted = await SignalService.decrypt(senderId, {
+                                body: msg.ciphertext,
+                                type: msg.session_header?.type,
+                                registrationId: msg.session_header?.registrationId
+                            });
+                            return { ...msg, content: decrypted };
+                        } catch (e2eeErr) {
+                            console.error('[E2EE] Decryption failed for history message:', e2eeErr);
+                            return { ...msg, content: '<<< Encrypted Message >>>' };
+                        }
+                    } else {
+                        return { ...msg, content: 'Secure Message Sent' };
+                    }
+                }
+                return msg;
+            }));
+
+            setMessages(decryptedMessages);
             setTimeout(() => {
                 if (chatMessagesRef.current) {
                     chatMessagesRef.current.scrollTo({
@@ -3531,7 +3874,7 @@ export default function Chat() {
             setOpenDropdown(null);
         } catch (err) {
             console.error("Pin toggle failed", err);
-            alert("Error: " + (err.response?.data?.error || err.message));
+            setSnackbar({ message: "Error: " + (err.response?.data?.error || err.message), type: 'error', variant: 'system' });
         }
     };
 
@@ -4229,10 +4572,10 @@ export default function Chat() {
 
     const togglePlaybackSpeed = (e) => {
         if (e) e.stopPropagation();
-        
+
         // Prioritize updating the audio element's playbackRate first for instant response
         const currentAudio = audioInstanceRef.current;
-        
+
         if (activeViewOnceMsg) {
             const nextSpeed = viewOncePlaybackSpeed === 1 ? 1.5 : (viewOncePlaybackSpeed === 1.5 ? 2 : 1);
             if (currentAudio) {
@@ -4422,7 +4765,25 @@ export default function Chat() {
             const formData = new FormData();
             formData.append('userId', user.id || user._id);
             if (selectedUser) formData.append('toUserId', selectedUser._id);
-            formData.append('content', textToSend);
+
+            // --- E2EE (Signal Protocol) Encryption ---
+            let textToSubmit = textToSend;
+            if (selectedUser) {
+                try {
+                    const encrypted = await SignalService.encrypt(selectedUser._id, textToSend);
+                    formData.append('ciphertext', encrypted.body);
+                    formData.append('session_header', JSON.stringify({
+                        type: encrypted.type,
+                        registrationId: encrypted.registrationId
+                    }));
+                    textToSubmit = ''; // DON'T send plaintext content to server
+                } catch (e2eeErr) {
+                    console.warn('[E2EE] Encryption failed, falling back to server-side encryption:', e2eeErr);
+                }
+            }
+            // -----------------------------------------
+
+            formData.append('content', textToSubmit);
             if (targetFile) formData.append('file', targetFile);
             if (tempMsg.reply_to) {
                 formData.append('reply_to', tempMsg.reply_to._id);
@@ -4487,8 +4848,11 @@ export default function Chat() {
                     sender_id: user.id || user._id,
                     receiverId: selectedUser._id,
                     content: sentMsg.content,
+                    ciphertext: sentMsg.ciphertext,
+                    session_header: sentMsg.session_header,
                     type: sentMsg.type,
                     file_path: sentMsg.file_path,
+                    fileName: sentMsg.fileName,
                     is_view_once: sentMsg.is_view_once,
                     reply_to: tempMsg.reply_to // Pass full reply object if needed by client, or just ID
                 });
@@ -5010,7 +5374,7 @@ export default function Chat() {
             if (navigator.permissions) {
                 const permissionStatus = await navigator.permissions.query({ name: 'camera' });
                 if (permissionStatus.state === 'granted') {
-                    // Permission already granted — skip the dialog and open camera directly
+                    // Permission already granted Ã¢â‚¬â€ skip the dialog and open camera directly
                     startCamera();
                     return;
                 } else if (permissionStatus.state === 'denied') {
@@ -5020,7 +5384,7 @@ export default function Chat() {
                 }
             }
         } catch (err) {
-            // Permissions API not supported in this browser — fall through to permission screen
+            // Permissions API not supported in this browser Ã¢â‚¬â€ fall through to permission screen
             console.log('Permissions API not available, showing permission modal');
         }
 
@@ -5039,7 +5403,7 @@ export default function Chat() {
             ctx.drawImage(videoRef.current, 0, 0);
 
             setCapturedImage(canvas.toDataURL('image/png'));
-            
+
             if (cameraPurpose === 'chat') {
                 setCameraModal('editor');
             } else {
@@ -5063,7 +5427,7 @@ export default function Chat() {
             const blob = await res.blob();
             const fileObj = new File([blob], "camera_capture.png", { type: "image/png" });
             setFile(fileObj);
-        } catch(e) { console.error("Editor commit error", e); }
+        } catch (e) { console.error("Editor commit error", e); }
     };
 
     const handleImageDragStart = (e) => {
@@ -5314,7 +5678,7 @@ export default function Chat() {
                         <div className="wa-section-label" style={{ color: '#54656f', fontSize: 13, marginBottom: 4 }}>{t('profile_drawer.name_label')}</div>
                         <div className="wa-section-value-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 40 }}>
                             {isEditingProfileName ? (
-                                <div style={{ borderBottom: '2px solid #027EB5', flex: 1, display: 'flex', alignItems: 'center' }}>
+                                <div style={{ borderBottom: '2px solid #0EA5BE', flex: 1, display: 'flex', alignItems: 'center' }}>
                                     <input
                                         autoFocus
                                         className="wa-profile-edit-input"
@@ -5344,7 +5708,7 @@ export default function Chat() {
                         <div className="wa-section-label" style={{ color: '#54656f', fontSize: 13, marginBottom: 4 }}>{t('profile_drawer.about_label')}</div>
                         <div className="wa-section-value-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 40 }}>
                             {isEditingProfileAbout ? (
-                                <div style={{ borderBottom: '2px solid #027EB5', flex: 1, display: 'flex', alignItems: 'center' }}>
+                                <div style={{ borderBottom: '2px solid #0EA5BE', flex: 1, display: 'flex', alignItems: 'center' }}>
                                     <input
                                         autoFocus
                                         className="wa-profile-edit-input"
@@ -5459,18 +5823,18 @@ export default function Chat() {
                     {/* Action Items */}
                     <div className="wa-new-chat-actions">
                         <div className="wa-new-chat-action-item" onClick={(e) => { e.stopPropagation(); setIsNewGroupOpen(true); setIsNewChatOpen(false); }}>
-                            <div className="wa-action-icon-circle" style={{ background: '#027EB5' }}><Users size={20} color="white" /></div>
+                            <div className="wa-action-icon-circle" style={{ background: '#0EA5BE' }}><Users size={20} color="white" /></div>
                             <span>{t('new_chat.new_group')}</span>
                         </div>
 
 
                         <div className="wa-new-chat-action-item" onClick={(e) => { e.stopPropagation(); setIsNewCommunityOpen(true); setIsNewChatOpen(false); setCommunityStep(0); }}>
-                            <div className="wa-action-icon-circle" style={{ background: '#027EB5' }}><Users size={20} color="white" /></div>
+                            <div className="wa-action-icon-circle" style={{ background: '#0EA5BE' }}><Users size={20} color="white" /></div>
                             <span>{t('new_chat.new_community')}</span>
                         </div>
                     </div>
 
-                    <div style={{ padding: '15px 16px 10px', color: '#027EB5', fontSize: 13, fontWeight: 500 }}>
+                    <div style={{ padding: '15px 16px 10px', color: '#0EA5BE', fontSize: 13, fontWeight: 500 }}>
                         {t('new_chat.contacts_title')}
                     </div>
 
@@ -5552,7 +5916,7 @@ export default function Chat() {
                 <div className="wa-drawer-content" style={{ background: 'white', display: 'flex', flexDirection: 'column', height: '100%' }}>
                     {/* Input area with Green Bottom Border - Always visible */}
                     <div style={{ padding: '20px 30px' }}>
-                        <div style={{ borderBottom: '2px solid #027EB5', paddingBottom: '10px' }}>
+                        <div style={{ borderBottom: '2px solid #0EA5BE', paddingBottom: '10px' }}>
                             <input
                                 type="text"
                                 value={phoneNumberInput}
@@ -5745,9 +6109,7 @@ export default function Chat() {
                                         </div>
                                         <div className="wa-chat-row-bottom">
                                             <span className="wa-chat-last-msg">
-                                                {item.lastMessage?.type === 'image' ? '📷 Photo' :
-                                                    item.lastMessage?.type === 'file' ? '📄 File' :
-                                                        item.lastMessage?.content || 'No messages'}
+                                                {renderLastMessagePreview(item.lastMessage, isGroup, 'No messages')}
                                             </span>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                                 {item.isMuted && <BellOff size={14} color="#8696a0" />}
@@ -6140,7 +6502,7 @@ export default function Chat() {
         return (
             <div className={`${rootClass} wa-new-group-drawer ${isOpen ? 'active' : ''}`} style={extraStyle}>
                 <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'white', borderBottom: 'none', gap: 0 }}>
-                    <button onClick={() => { if (isRightSide) setIsCommunityNewGroupOpen(false); else setIsNewGroupOpen(false); setSelectedGroupMembers([]); setNewGroupStep(1); setGroupSubject(''); }} style={{ background: 'none', border: 'none', color: '#027EB5', cursor: 'pointer', display: 'flex', alignItems: 'center', fontSize: 16, fontWeight: 500, padding: 0 }}>
+                    <button onClick={() => { if (isRightSide) setIsCommunityNewGroupOpen(false); else setIsNewGroupOpen(false); setSelectedGroupMembers([]); setNewGroupStep(1); setGroupSubject(''); }} style={{ background: 'none', border: 'none', color: '#0EA5BE', cursor: 'pointer', display: 'flex', alignItems: 'center', fontSize: 16, fontWeight: 500, padding: 0 }}>
                         Close
                     </button>
                     <div style={{ flex: 1, display: 'flex', justifyContent: 'center', marginRight: 40 }}>
@@ -6216,7 +6578,7 @@ export default function Chat() {
                             width: 55,
                             height: 55,
                             borderRadius: '50%',
-                            background: '#027EB5',
+                            background: '#0EA5BE',
                             color: 'white',
                             border: 'none',
                             boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
@@ -6320,10 +6682,10 @@ export default function Chat() {
                         color: '#111b21',
                         border: '1px solid #d1d7db'
                     }}>
-                        <div style={{ fontSize: 48, marginBottom: 16 }}>📄</div>
+                        <div style={{ fontSize: 48, marginBottom: 16 }}>Ã°Å¸â€œâ€ž</div>
                         <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8, color: '#111b21' }}>{file?.name}</div>
                         <div style={{ fontSize: 14, color: '#54656f' }}>
-                            {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} • {file?.type?.split('/').pop().toUpperCase()}
+                            {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} Ã¢â‚¬Â¢ {file?.type?.split('/').pop().toUpperCase()}
                         </div>
                     </div>
                 )}
@@ -6375,7 +6737,7 @@ export default function Chat() {
                             width: 44,
                             height: 44,
                             borderRadius: '50%',
-                            background: '#027EB5',
+                            background: '#0EA5BE',
                             border: 'none',
                             display: 'flex',
                             alignItems: 'center',
@@ -6403,7 +6765,7 @@ export default function Chat() {
                             setIsContactInfoOpen(true);
                         }
                     }}
-                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#027EB5', justifySelf: 'start' }}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#0EA5BE', justifySelf: 'start' }}
                 >
                     <span style={{ fontSize: 16, fontWeight: 500 }}>{t('lang_confirm.cancel')}</span>
                 </button>
@@ -6478,7 +6840,7 @@ export default function Chat() {
                             <ArrowLeft size={24} />
                         </button>
                         <div style={{ flex: 1, textAlign: 'center' }}>
-                            <span style={{ fontSize: 19, fontWeight: 500, color: '#027EB5', whiteSpace: 'nowrap' }}>New community</span>
+                            <span style={{ fontSize: 19, fontWeight: 500, color: '#0EA5BE', whiteSpace: 'nowrap' }}>New community</span>
                         </div>
                     </div>
 
@@ -6490,12 +6852,12 @@ export default function Chat() {
                                     <div style={{ width: 10, height: 10, background: '#e9edef', borderRadius: '50%' }}></div>
                                 </div>
                                 <div style={{ padding: '15px' }}>
-                                    <div style={{ height: 25, width: '30%', background: '#027EB5', opacity: 0.8, borderRadius: 4, marginBottom: 8 }}></div>
-                                    <div style={{ height: 25, width: '70%', background: '#027EB5', opacity: 0.8, borderRadius: 4, marginBottom: 12 }}></div>
+                                    <div style={{ height: 25, width: '30%', background: '#0EA5BE', opacity: 0.8, borderRadius: 4, marginBottom: 8 }}></div>
+                                    <div style={{ height: 25, width: '70%', background: '#0EA5BE', opacity: 0.8, borderRadius: 4, marginBottom: 12 }}></div>
                                     <div style={{ height: 25, width: '50%', background: '#aedc6e', opacity: 0.8, borderRadius: 4 }}></div>
                                 </div>
                             </div>
-                            <div style={{ position: 'absolute', bottom: 35, right: 35, width: 64, height: 64, background: '#027EB5', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #f8f9fa', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}>
+                            <div style={{ position: 'absolute', bottom: 35, right: 35, width: 64, height: 64, background: '#0EA5BE', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #f8f9fa', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}>
                                 <Users size={32} color="white" />
                             </div>
                         </div>
@@ -6504,14 +6866,14 @@ export default function Chat() {
                         <p style={{ fontSize: 14, color: '#667781', lineHeight: '1.6', marginBottom: 24, maxWidth: '280px' }}>
                             Bring together a neighbourhood, school or more. Create topic-based groups for members, and easily send them admin announcements.
                         </p>
-                        <a href="#" style={{ color: '#027EB5', fontSize: 14, textDecoration: 'none', fontWeight: 500 }} onClick={(e) => e.preventDefault()}>See example communities</a>
+                        <a href="#" style={{ color: '#0EA5BE', fontSize: 14, textDecoration: 'none', fontWeight: 500 }} onClick={(e) => e.preventDefault()}>See example communities</a>
 
                         <div style={{ flex: 1 }}></div>
 
                         <button
                             onClick={() => setCommunityStep(1)}
                             style={{
-                                background: '#027EB5',
+                                background: '#0EA5BE',
                                 border: 'none',
                                 color: 'white',
                                 padding: '12px 60px',
@@ -6539,7 +6901,7 @@ export default function Chat() {
                         <ArrowLeft size={24} />
                     </button>
                     <div style={{ flex: 1, textAlign: 'center' }}>
-                        <span style={{ fontSize: 19, fontWeight: 500, color: '#027EB5', whiteSpace: 'nowrap' }}>New community</span>
+                        <span style={{ fontSize: 19, fontWeight: 500, color: '#0EA5BE', whiteSpace: 'nowrap' }}>New community</span>
                     </div>
                 </div>
 
@@ -6577,7 +6939,7 @@ export default function Chat() {
                                     </>
                                 )}
 
-                                <div style={{ position: 'absolute', bottom: -10, right: -10, width: 40, height: 40, background: '#027EB5', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid white', boxShadow: '0 2px 5px rgba(0,0,0,0.1)' }}>
+                                <div style={{ position: 'absolute', bottom: -10, right: -10, width: 40, height: 40, background: '#0EA5BE', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid white', boxShadow: '0 2px 5px rgba(0,0,0,0.1)' }}>
                                     <RotateCcw size={20} color="white" />
                                 </div>
                             </div>
@@ -6602,7 +6964,7 @@ export default function Chat() {
 
                         {/* Inputs */}
                         <div style={{ width: '100%', marginBottom: 35 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', borderBottom: '2px solid #027EB5', paddingBottom: 8 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', borderBottom: '2px solid #0EA5BE', paddingBottom: 8 }}>
                                 <input
                                     type="text"
                                     placeholder="Community name"
@@ -6615,7 +6977,7 @@ export default function Chat() {
                         </div>
 
                         <div style={{ width: '100%', background: '#f8f9fa', borderRadius: '8px', padding: '16px', position: 'relative', border: '1px solid #e9edef' }}>
-                            <div style={{ color: '#027EB5', fontSize: 13, marginBottom: 8 }}>Community description</div>
+                            <div style={{ color: '#0EA5BE', fontSize: 13, marginBottom: 8 }}>Community description</div>
                             <textarea
                                 placeholder="Hi everyone! This community is for members to chat in topic-based groups and get important announcements."
                                 value={communityDescription}
@@ -6645,7 +7007,7 @@ export default function Chat() {
                             disabled={!communityName.trim()}
                             style={{
                                 width: '100%',
-                                background: communityName.trim() ? '#027EB5' : '#dfe5e7',
+                                background: communityName.trim() ? '#0EA5BE' : '#dfe5e7',
                                 color: communityName.trim() ? 'white' : '#667781',
                                 border: 'none',
                                 padding: '14px',
@@ -6784,7 +7146,7 @@ export default function Chat() {
                         }}
                     >
                         <div style={{ display: 'flex', gap: 15, alignItems: 'center' }}>
-                            <div style={{ width: 48, height: 48, background: '#027EB5', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <div style={{ width: 48, height: 48, background: '#0EA5BE', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                 <Megaphone size={24} color="white" />
                             </div>
                             <div style={{ flex: 1, overflow: 'hidden' }}>
@@ -6798,7 +7160,7 @@ export default function Chat() {
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div style={{ fontSize: 14, color: '#667781', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
-                                        {selectedCommunity.announcements?.lastMessage?.content || 'Welcome to your community!'}
+                                        {renderLastMessagePreview(selectedCommunity.announcements?.lastMessage, true, 'Welcome to your community!')}
                                     </div>
                                     {selectedCommunity.unreadCount > 0 && (
                                         <div className="wa-unread-badge" style={{ position: 'static', marginLeft: 8 }}>{selectedCommunity.unreadCount}</div>
@@ -6855,20 +7217,7 @@ export default function Chat() {
                                         </div>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                             <div style={{ fontSize: 14, color: '#667781', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
-                                                {g.lastMessage ? (
-                                                    <span>
-                                                        {g.lastMessage.type === 'image' ? (
-                                                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Camera size={14} /> Photo</span>
-                                                        ) : g.lastMessage.type === 'video' ? (
-                                                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Video size={14} /> Video</span>
-                                                        ) : g.lastMessage.type === 'file' ? (
-                                                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><FileText size={14} /> File</span>
-
-                                                        ) : g.lastMessage.is_system ? (
-                                                            `${g.lastMessage.sender_id?.name || 'Someone'} ${g.lastMessage.content}`
-                                                        ) : g.lastMessage.content}
-                                                    </span>
-                                                ) : `${(g.members?.length || 0)} members`}
+                                                {renderLastMessagePreview(g.lastMessage, true, `${(g.members?.length || 0)} members`)}
                                             </div>
                                             {g.unreadCount > 0 && (
                                                 <div className="wa-unread-badge" style={{ position: 'static', marginLeft: 8 }}>{g.unreadCount}</div>
@@ -6940,7 +7289,7 @@ export default function Chat() {
                 <div className={`wa-contact-info-panel wa-group-info ${isContactInfoOpen ? 'active' : ''}`} style={{ background: bgColor, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
                     <div className="wa-contact-info-header" style={{ position: 'relative', height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: headerBgColor, color: textColor, flexShrink: 0 }}>
                         <button className="wa-contact-info-close-btn" onClick={() => setIsContactInfoOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 24, padding: '0 8px' }}>
-                            <span style={{ fontSize: 16, color: '#027EB5', fontWeight: 500 }}>Close</span>
+                            <span style={{ fontSize: 16, color: '#0EA5BE', fontWeight: 500 }}>Close</span>
                             <span style={{ fontSize: 16, fontWeight: 500, color: textColor, whiteSpace: 'nowrap' }}>Group info</span>
                         </button>
                     </div>
@@ -6965,16 +7314,16 @@ export default function Chat() {
                                 )}
                             </div>
                             <div style={{ fontSize: 16, color: subTextColor, marginTop: 8 }}>
-                                {activeTarget.isCommunityAnnouncements ? 'Announcements' : 'Group'} · <span style={{ color: '#027EB5' }}>{membersCount} members</span>
+                                {activeTarget.isCommunityAnnouncements ? 'Announcements' : 'Group'} Ã‚Â· <span style={{ color: '#0EA5BE' }}>{membersCount} members</span>
                             </div>
 
                             <div style={{ display: 'flex', gap: 12, marginTop: 24, width: '100%', justifyContent: 'center' }}>
                                 <div style={{ flex: 1, padding: '12px 0', border: '1px solid #e9edef', borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, cursor: 'pointer', maxWidth: 160 }} onClick={() => { setIsGroupAddMemberOpen(true); }}>
-                                    <UserPlus size={24} color="#027EB5" />
+                                    <UserPlus size={24} color="#0EA5BE" />
                                     <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Add</span>
                                 </div>
                                 <div style={{ flex: 1, padding: '12px 0', border: '1px solid #e9edef', borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, cursor: 'pointer', maxWidth: 160 }} onClick={() => { setIsContactInfoOpen(false); setIsMessageSearchOpen(true); searchSource.current = 'contact_info'; }}>
-                                    <Search size={24} color="#027EB5" />
+                                    <Search size={24} color="#0EA5BE" />
                                     <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Search</span>
                                 </div>
                             </div>
@@ -6984,7 +7333,7 @@ export default function Chat() {
 
                         <div style={{ background: itemBgColor, padding: '14px 30px' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
-                                <span style={{ color: '#027EB5', fontSize: 15 }}>{activeTarget.description || 'Add group description'}</span>
+                                <span style={{ color: '#0EA5BE', fontSize: 15 }}>{activeTarget.description || 'Add group description'}</span>
                                 {!activeTarget.isCommunityAnnouncements && <Pencil size={20} color={'#54656f'} />}
                             </div>
                             <div style={{ color: subTextColor, fontSize: 14, marginTop: 12, lineHeight: 1.4 }}>
@@ -7094,13 +7443,13 @@ export default function Chat() {
                             </div>
 
                             <div style={{ padding: '0 30px', display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, cursor: 'pointer' }} onClick={() => setIsGroupAddMemberOpen(true)}>
-                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#027EB5', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
+                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#0EA5BE', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
                                     <UserPlus size={20} color="#ffffff" />
                                 </div>
                                 <span style={{ color: textColor, fontSize: 16, fontWeight: 400 }}>Add member</span>
                             </div>
                             <div style={{ padding: '0 30px', display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, cursor: 'pointer' }}>
-                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#027EB5', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
+                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#0EA5BE', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
                                     <LinkIcon size={20} color="#ffffff" />
                                 </div>
                                 <span style={{ color: textColor, fontSize: 16, fontWeight: 400 }}>Invite to group via link</span>
@@ -7159,14 +7508,14 @@ export default function Chat() {
                                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                                                         <span style={{ color: textColor, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                                                             {isMe ? 'You' : m.name}
-                                                            {(m.name === 'Kiki' || m.name === 'Kothi') && <span style={{ fontSize: 14 }}>{m.name === 'Kiki' ? '🙄' : '🐒'}</span>}
+                                                            {(m.name === 'Kiki' || m.name === 'Kothi') && <span style={{ fontSize: 14 }}>{m.name === 'Kiki' ? 'Ã°Å¸â„¢â€ž' : 'Ã°Å¸Ââ€™'}</span>}
                                                         </span>
                                                         <span style={{ color: subTextColor, fontSize: 14 }}>{m.about || (isMe ? 'Available' : 'Hey there! I am using WhatsApp.')}</span>
                                                     </div>
                                                 </div>
 
                                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                                                    {isGroupAdmin && <div style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: 'none', color: '#027EB5', background: '#e6f2f7', fontWeight: 500 }}>Group admin</div>}
+                                                    {isGroupAdmin && <div style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: 'none', color: '#0EA5BE', background: '#e6f2f7', fontWeight: 500 }}>Group admin</div>}
                                                     {!isMe && phoneValue && <span style={{ color: subTextColor, fontSize: 13 }}>{phoneValue}</span>}
                                                 </div>
                                             </div>
@@ -7180,7 +7529,7 @@ export default function Chat() {
 
                         <div style={{ background: itemBgColor, padding: '14px 0' }}>
                             <div className="wa-setting-item clickable" style={{ padding: '14px 30px', display: 'flex', alignItems: 'center' }}>
-                                <span style={{ color: '#027EB5', fontSize: 16, width: '100%' }}>View past members</span>
+                                <span style={{ color: '#0EA5BE', fontSize: 16, width: '100%' }}>View past members</span>
                             </div>
                             <div className="wa-setting-item clickable" style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 24 }}>
                                 <Heart size={24} color={subTextColor} />
@@ -7219,7 +7568,7 @@ export default function Chat() {
                 <div className="wa-contact-info-header" style={{ position: 'relative', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px', borderBottom: '1px solid #e9edef', background: 'white' }}>
 
                     <button className="wa-contact-info-close-btn" onClick={() => setIsContactInfoOpen(false)} style={{ position: 'absolute', left: 16, zIndex: 10, background: 'none', border: 'none', cursor: 'pointer' }}>
-                        <span style={{ fontSize: 16, color: '#027EB5', fontWeight: 500 }}>{t('lang_confirm.cancel')}</span>
+                        <span style={{ fontSize: 16, color: '#0EA5BE', fontWeight: 500 }}>{t('lang_confirm.cancel')}</span>
                     </button>
 
                     <span className="wa-contact-info-title" style={{ position: 'absolute', left: 0, right: 0, textAlign: 'center', fontSize: 22, fontWeight: 500, color: '#3b4a54', pointerEvents: 'none' }}>
@@ -7237,7 +7586,7 @@ export default function Chat() {
                             setIsEditContactOpen(true);
                         }}
                     >
-                        <span style={{ fontSize: 16, color: '#027EB5', fontWeight: 500 }}>Edit</span>
+                        <span style={{ fontSize: 16, color: '#0EA5BE', fontWeight: 500 }}>Edit</span>
                     </button>
                 </div>
 
@@ -7266,15 +7615,15 @@ export default function Chat() {
                                 searchSource.current = 'contact_info'; // Set source
                                 // Search query for selectedUser is already handled by renderSearchSidebar logic using selectedUser
                             }}>
-                                <div className="wa-action-icon-box"><Search size={20} color="#027EB5" /></div>
+                                <div className="wa-action-icon-box"><Search size={20} color="#0EA5BE" /></div>
                                 <span>Search</span>
                             </div>
                             <div className="wa-contact-action-btn">
-                                <div className="wa-action-icon-box"><Video size={20} color="#027EB5" /></div>
+                                <div className="wa-action-icon-box"><Video size={20} color="#0EA5BE" /></div>
                                 <span>Video</span>
                             </div>
                             <div className="wa-contact-action-btn">
-                                <div className="wa-action-icon-box"><Phone size={20} color="#027EB5" /></div>
+                                <div className="wa-action-icon-box"><Phone size={20} color="#0EA5BE" /></div>
                                 <span>Voice</span>
                             </div>
                         </div>
@@ -7514,7 +7863,7 @@ export default function Chat() {
                             setIsStarredMessagesOpen(false);
                             if (selectedCommunity) setIsCommunityInfoOpen(true);
                             else setIsContactInfoOpen(true);
-                        }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#027EB5', fontSize: '16px', fontWeight: 500, padding: 0, paddingLeft: '12px', zIndex: 10 }}>
+                        }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#0EA5BE', fontSize: '16px', fontWeight: 500, padding: 0, paddingLeft: '12px', zIndex: 10 }}>
                             Back
                         </button>
                         <span className="wa-panel-title" style={{ position: 'absolute', left: 0, right: 0, textAlign: 'center', fontSize: 17, fontWeight: 500, color: '#3b4a54', pointerEvents: 'none' }}>Starred messages</span>
@@ -7659,7 +8008,7 @@ export default function Chat() {
                                     <FileText size={32} color="#8696a0" />
                                     <div className="wa-file-info">
                                         <p>{infoMessage.fileName}</p>
-                                        <span>{infoMessage.fileSize} bytes • PDF</span>
+                                        <span>{infoMessage.fileSize} bytes Ã¢â‚¬Â¢ PDF</span>
                                     </div>
                                 </div>
                             ) : infoMessage.type === 'contact' ? (() => {
@@ -7848,7 +8197,7 @@ export default function Chat() {
                                                 <>
                                                     {formatDateForInfo(infoMessage.read_at)} {formatTime(infoMessage.read_at)}
                                                 </>
-                                            ) : '—'}
+                                            ) : 'Ã¢â‚¬â€'}
                                         </div>
                                     </div>
                                 </div>
@@ -8186,7 +8535,7 @@ export default function Chat() {
                         {isCropping ? (
                             <>
                                 <button className="wa-viewer-btn" onClick={applyCrop} title="Apply Crop">
-                                    <Check size={20} color="#027EB5" />
+                                    <Check size={20} color="#0EA5BE" />
                                 </button>
                                 <button className="wa-viewer-btn" onClick={cancelCrop} title="Cancel Crop">
                                     <X size={20} color="#ef5350" />
@@ -8290,7 +8639,7 @@ export default function Chat() {
         const mouseX = dropdownPos.x / zoom;
         const mouseY = dropdownPos.y / zoom;
 
-        // ── Chat area left boundary ──────────────────────────────────────────
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Chat area left boundary Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         // Prevent the dropdown from crossing into the contact/nav panel on
         // desktop and tablet. We read the actual DOM rect so the boundary is
         // always correct regardless of panel width or sidebar visibility.
@@ -8301,7 +8650,7 @@ export default function Chat() {
             ? chatWrapperEl.getBoundingClientRect().left / zoom
             : 0;
 
-        // ── Accurate menu size estimates ─────────────────────────────────────
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Accurate menu size estimates Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         // These are upper-bound estimates; the flip logic uses them so we never
         // need to cap maxHeight and force a scrollbar.
         const estMenuWidth = type === 'msg' ? 260 : 220;
@@ -8309,7 +8658,7 @@ export default function Chat() {
 
         const padding = 10;
 
-        // ── Vertical: pick the side with MORE space ──────────────────────────
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Vertical: pick the side with MORE space Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         const spaceBelow = vHeight - mouseY - padding;
         const spaceAbove = mouseY - padding;
         const isFlippedUp = spaceAbove > spaceBelow; // go where there is more room
@@ -8317,7 +8666,7 @@ export default function Chat() {
         const menuStyle = {
             position: 'fixed',
             zIndex: 3000,
-            overflowY: 'visible', // no scrollbar – items always fully visible
+            overflowY: 'visible', // no scrollbar Ã¢â‚¬â€œ items always fully visible
         };
 
         if (isFlippedUp) {
@@ -8328,7 +8677,7 @@ export default function Chat() {
             menuStyle.top = Math.max(padding, mouseY + (type === 'msg' ? 15 : 10));
         }
 
-        // ── Horizontal positioning ───────────────────────────────────────────
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Horizontal positioning Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         const rightOffset = type === 'msg' ? 25 : 30;
         const viewportIsMobile = vWidth < 768;
 
@@ -8340,7 +8689,7 @@ export default function Chat() {
                 menuStyle.right = Math.max(padding, vWidth - mouseX - rightOffset);
             }
         } else {
-            // Desktop / tablet ─────────────────────────────────────────────────
+            // Desktop / tablet Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
             // Preferred: right-anchor near cursor
             const preferredRight = vWidth - mouseX - rightOffset;
             const clampedRight = Math.max(padding, preferredRight);
@@ -8349,11 +8698,11 @@ export default function Chat() {
             const menuLeftEdge = vWidth - clampedRight - estMenuWidth;
 
             if (type === 'msg' && menuLeftEdge < chatAreaLeft + padding) {
-                // Message menu would cross into the contact panel → left-anchor it
+                // Message menu would cross into the contact panel Ã¢â€ â€™ left-anchor it
                 // to the start of the chat area instead
                 menuStyle.left = Math.max(chatAreaLeft + padding, mouseX - 10);
             } else if (type === 'contact' && menuLeftEdge < padding) {
-                // Contact menu would go off-screen left → clamp to screen edge
+                // Contact menu would go off-screen left Ã¢â€ â€™ clamp to screen edge
                 menuStyle.left = padding;
             } else {
                 menuStyle.right = clampedRight;
@@ -8386,7 +8735,7 @@ export default function Chat() {
                         {!isDeleted && (
                             <>
                                 <div className="wa-reactions-row">
-                                    <span>👍</span><span>❤️</span><span>😂</span><span>😮</span><span>😢</span><span>🙏</span><Plus size={18} />
+                                    <span>Ã°Å¸â€˜Â</span><span>Ã¢ÂÂ¤Ã¯Â¸Â</span><span>Ã°Å¸Ëœâ€š</span><span>Ã°Å¸ËœÂ®</span><span>Ã°Å¸ËœÂ¢</span><span>Ã°Å¸â„¢Â</span><Plus size={18} />
                                 </div>
                                 <div className="wa-dropdown-divider"></div>
                             </>
@@ -8609,7 +8958,7 @@ export default function Chat() {
                                     setIsManageGroupsOpen(true);
                                 }}
                             >
-                                <div style={{ width: 40, height: 40, background: '#027EB5', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <div style={{ width: 40, height: 40, background: '#0EA5BE', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                     <Plus size={20} color="white" />
                                 </div>
                                 <span style={{ fontSize: 16, color: textColor }}>Add group</span>
@@ -8633,7 +8982,7 @@ export default function Chat() {
                                 setGroupMessages([...(community.announcements?.messages || [])]);
                             }}
                         >
-                            <div style={{ width: 44, height: 44, background: '#027EB5', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <div style={{ width: 44, height: 44, background: '#0EA5BE', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                 <Megaphone size={22} color="white" />
                             </div>
                             <div style={{ flex: 1, minWidth: 0 }}>
@@ -8719,7 +9068,7 @@ export default function Chat() {
                                 setNewGroupStep(1);
                             }}
                         >
-                            <div style={{ width: 40, height: 40, background: '#027EB5', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <div style={{ width: 40, height: 40, background: '#0EA5BE', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <Plus size={20} color="white" />
                             </div>
                             <span style={{ fontSize: 16, color: textColor }}>Create new group</span>
@@ -8734,7 +9083,7 @@ export default function Chat() {
                                 setIsAddExistingGroupsOpen(true);
                             }}
                         >
-                            <div style={{ width: 40, height: 40, background: '#027EB5', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <div style={{ width: 40, height: 40, background: '#0EA5BE', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <Users size={20} color="white" />
                             </div>
                             <span style={{ fontSize: 16, color: textColor }}>Add existing groups</span>
@@ -8744,12 +9093,12 @@ export default function Chat() {
                     {community.groups && community.groups.length > 0 ? (
                         <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 20 }}>
                             <div style={{ padding: '20px', fontSize: 13, color: subTextColor, lineHeight: '1.6' }}>
-                                Members can suggest existing groups for admin approval and add new groups directly. View in <span style={{ color: '#027EB5', cursor: 'pointer', fontWeight: 500 }}>community settings</span>
+                                Members can suggest existing groups for admin approval and add new groups directly. View in <span style={{ color: '#0EA5BE', cursor: 'pointer', fontWeight: 500 }}>community settings</span>
                             </div>
                             <div style={{ padding: '10px 20px', fontSize: 14, color: '#111b21', fontWeight: 500, marginBottom: 10 }}>Groups in this community</div>
 
                             <div className="wa-manage-groups-item" style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer' }}>
-                                <div style={{ width: 44, height: 44, background: '#027EB5', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                <div style={{ width: 44, height: 44, background: '#0EA5BE', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                     <Megaphone size={22} color="white" />
                                 </div>
                                 <span style={{ fontSize: 16, color: textColor, flex: 1 }}>Announcements</span>
@@ -8798,8 +9147,8 @@ export default function Chat() {
                                         <div style={{ width: 10, height: 10, background: '#e9edef', borderRadius: '50%' }}></div>
                                     </div>
                                     <div style={{ padding: '15px' }}>
-                                        <div style={{ height: 15, width: '40%', background: '#027EB5', opacity: 0.8, borderRadius: 2, marginBottom: 5 }}></div>
-                                        <div style={{ height: 15, width: '80%', background: '#027EB5', opacity: 0.8, borderRadius: 2, marginBottom: 10 }}></div>
+                                        <div style={{ height: 15, width: '40%', background: '#0EA5BE', opacity: 0.8, borderRadius: 2, marginBottom: 5 }}></div>
+                                        <div style={{ height: 15, width: '80%', background: '#0EA5BE', opacity: 0.8, borderRadius: 2, marginBottom: 10 }}></div>
                                         <div style={{ height: 15, width: '60%', background: '#aedc6e', opacity: 0.8, borderRadius: 2 }}></div>
                                     </div>
                                 </div>
@@ -8887,8 +9236,8 @@ export default function Chat() {
                                         width: 20,
                                         height: 20,
                                         borderRadius: '50%',
-                                        border: `2px solid ${selectedGroupsToAdd.find(item => item._id === g._id) ? '#027EB5' : '#adb5bd'}`,
-                                        background: selectedGroupsToAdd.find(item => item._id === g._id) ? '#027EB5' : 'transparent',
+                                        border: `2px solid ${selectedGroupsToAdd.find(item => item._id === g._id) ? '#0EA5BE' : '#adb5bd'}`,
+                                        background: selectedGroupsToAdd.find(item => item._id === g._id) ? '#0EA5BE' : 'transparent',
                                         display: 'flex',
                                         alignItems: 'center',
                                         justifyContent: 'center'
@@ -8908,7 +9257,7 @@ export default function Chat() {
                         <div style={{ padding: '20px', display: 'flex', justifyContent: 'center' }}>
                             <button
                                 onClick={() => setIsConfirmAddGroupsOpen(true)}
-                                style={{ width: 60, height: 60, borderRadius: '50%', background: '#027EB5', border: 'none', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}
+                                style={{ width: 60, height: 60, borderRadius: '50%', background: '#0EA5BE', border: 'none', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}
                             >
                                 <ArrowRight size={28} />
                             </button>
@@ -8958,7 +9307,7 @@ export default function Chat() {
 
                     <div style={{ padding: '20px 30px', background: '#f0f2f5', borderTop: '1px solid #e9edef' }}>
                         <button
-                            style={{ width: '100%', background: '#027EB5', color: 'white', border: 'none', padding: '12px', borderRadius: '24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                            style={{ width: '100%', background: '#0EA5BE', color: 'white', border: 'none', padding: '12px', borderRadius: '24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
                             onClick={async () => {
                                 try {
                                     const token = localStorage.getItem('token');
@@ -9008,7 +9357,7 @@ export default function Chat() {
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '16px', alignItems: 'center' }}>
                         <span
                             onClick={() => setIsConfirmCommunityAddMembersOpen(false)}
-                            style={{ color: '#027EB5', fontSize: 14, fontWeight: '500', cursor: 'pointer' }}
+                            style={{ color: '#0EA5BE', fontSize: 14, fontWeight: '500', cursor: 'pointer' }}
                         >
                             Cancel
                         </span>
@@ -9068,7 +9417,7 @@ export default function Chat() {
                                     setSnackbar({ message: errorMsg, type: 'error', variant: 'system' });
                                 }
                             }}
-                            style={{ padding: '10px 24px', background: '#027EB5', color: '#111b21', borderRadius: '24px', fontSize: 14, fontWeight: '500', cursor: 'pointer' }}
+                            style={{ padding: '10px 24px', background: '#0EA5BE', color: '#111b21', borderRadius: '24px', fontSize: 14, fontWeight: '500', cursor: 'pointer' }}
                         >
                             Add member
                         </div>
@@ -9115,7 +9464,7 @@ export default function Chat() {
                         </div>
                     </div>
 
-                    <div style={{ padding: '8px 24px', fontSize: '13px', color: '#027EB5', fontWeight: '500' }}>Contacts</div>
+                    <div style={{ padding: '8px 24px', fontSize: '13px', color: '#0EA5BE', fontWeight: '500' }}>Contacts</div>
 
                     <div style={{ flex: 1, overflowY: 'auto' }}>
                         {filteredContacts.map(u => {
@@ -9138,8 +9487,8 @@ export default function Chat() {
                                         width: 20,
                                         height: 20,
                                         borderRadius: '4px',
-                                        border: `2px solid ${isSelected ? '#027EB5' : '#8696a0'}`,
-                                        background: isSelected ? '#027EB5' : 'transparent',
+                                        border: `2px solid ${isSelected ? '#0EA5BE' : '#8696a0'}`,
+                                        background: isSelected ? '#0EA5BE' : 'transparent',
                                         display: 'flex',
                                         alignItems: 'center',
                                         justifyContent: 'center'
@@ -9161,7 +9510,7 @@ export default function Chat() {
                         <div style={{ padding: '16px', background: '#ffffff', display: 'flex', justifyContent: 'center' }}>
                             <div
                                 onClick={() => { setIsConfirmGroupAddMembersOpen(true); }}
-                                style={{ width: 44, height: 44, borderRadius: '50%', background: '#027EB5', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}
+                                style={{ width: 44, height: 44, borderRadius: '50%', background: '#0EA5BE', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}
                             >
                                 <ArrowRight size={24} color="#ffffff" />
                             </div>
@@ -9184,7 +9533,7 @@ export default function Chat() {
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '16px', alignItems: 'center' }}>
                         <span
                             onClick={() => setIsConfirmGroupAddMembersOpen(false)}
-                            style={{ color: '#027EB5', fontSize: 14, fontWeight: '500', cursor: 'pointer' }}
+                            style={{ color: '#0EA5BE', fontSize: 14, fontWeight: '500', cursor: 'pointer' }}
                         >
                             Cancel
                         </span>
@@ -9230,7 +9579,7 @@ export default function Chat() {
                                     setSnackbar({ message: errorMsg, type: 'error' });
                                 }
                             }}
-                            style={{ padding: '10px 24px', background: '#027EB5', color: '#111b21', borderRadius: '24px', fontSize: 14, fontWeight: '500', cursor: 'pointer' }}
+                            style={{ padding: '10px 24px', background: '#0EA5BE', color: '#111b21', borderRadius: '24px', fontSize: 14, fontWeight: '500', cursor: 'pointer' }}
                         >
                             Add member
                         </div>
@@ -9277,7 +9626,7 @@ export default function Chat() {
                         </div>
                     </div>
 
-                    <div style={{ padding: '8px 24px', fontSize: '13px', color: '#027EB5', fontWeight: '500' }}>Contacts</div>
+                    <div style={{ padding: '8px 24px', fontSize: '13px', color: '#0EA5BE', fontWeight: '500' }}>Contacts</div>
 
                     <div style={{ flex: 1, overflowY: 'auto' }}>
                         {filteredContacts.map(u => {
@@ -9300,8 +9649,8 @@ export default function Chat() {
                                         width: 20,
                                         height: 20,
                                         borderRadius: '4px',
-                                        border: `2px solid ${isSelected ? '#027EB5' : '#8696a0'}`,
-                                        background: isSelected ? '#027EB5' : 'transparent',
+                                        border: `2px solid ${isSelected ? '#0EA5BE' : '#8696a0'}`,
+                                        background: isSelected ? '#0EA5BE' : 'transparent',
                                         display: 'flex',
                                         alignItems: 'center',
                                         justifyContent: 'center'
@@ -9323,7 +9672,7 @@ export default function Chat() {
                         <div style={{ padding: '16px', background: '#ffffff', display: 'flex', justifyContent: 'center' }}>
                             <div
                                 onClick={() => { setIsConfirmCommunityAddMembersOpen(true); }}
-                                style={{ width: 44, height: 44, borderRadius: '50%', background: '#027EB5', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}
+                                style={{ width: 44, height: 44, borderRadius: '50%', background: '#0EA5BE', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}
                             >
                                 <ArrowRight size={24} color="#ffffff" />
                             </div>
@@ -9412,9 +9761,9 @@ export default function Chat() {
                             const groupCount = community.groups ? community.groups.length : 1;
 
                             return (
-                                    <div style={{ fontSize: 13, color: subTextColor, marginTop: 4 }}>
-                                        {`Community · ${uniqueCount} member${uniqueCount !== 1 ? 's' : ''} · ${groupCount} group${groupCount !== 1 ? 's' : ''}`}
-                                    </div>
+                                <div style={{ fontSize: 16, color: subTextColor, marginTop: 8 }}>
+                                    {selectedGroup?.isCommunityAnnouncements ? 'Announcements' : `Community Ã‚Â· ${uniqueCount} member${uniqueCount !== 1 ? 's' : ''} Ã‚Â· ${groupCount} group${groupCount !== 1 ? 's' : ''}`}
+                                </div>
                             );
                         })()}
 
@@ -9422,11 +9771,11 @@ export default function Chat() {
                             {canIManage && (
                                 <>
                                     <div className="wa-community-info-action" onClick={() => { /* invite handler */ }}>
-                                        <LinkIcon size={24} color="#027EB5" />
+                                        <LinkIcon size={24} color="#0EA5BE" />
                                         <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Invite</span>
                                     </div>
                                     <div className="wa-community-info-action" onClick={() => setIsCommunityAddMemberOpen(true)}>
-                                        <UserPlus size={24} color="#027EB5" />
+                                        <UserPlus size={24} color="#0EA5BE" />
                                         <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Add members</span>
                                     </div>
                                     <div className="wa-community-info-action" onClick={() => {
@@ -9434,7 +9783,7 @@ export default function Chat() {
                                             setIsManageGroupsOpen(true);
                                         }
                                     }}>
-                                        <Users size={24} color="#027EB5" />
+                                        <Users size={24} color="#0EA5BE" />
                                         <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Add groups</span>
                                     </div>
                                 </>
@@ -9454,13 +9803,27 @@ export default function Chat() {
                             style={{
                                 padding: '15px 40px',
                                 textAlign: 'center',
-                                color: '#027EB5',
-                                borderBottom: '3px solid #027EB5',
+                                color: communityInfoTab === 'community' ? '#0EA5BE' : subTextColor,
+                                borderBottom: communityInfoTab === 'community' ? '3px solid #0EA5BE' : 'none',
                                 fontWeight: 500,
                                 cursor: 'pointer'
                             }}
                         >
                             Community
+                        </div>
+                        <div
+                            style={{
+                                flex: 1,
+                                padding: '15px 0',
+                                textAlign: 'center',
+                                color: communityInfoTab === 'announcements' ? '#0EA5BE' : subTextColor,
+                                borderBottom: communityInfoTab === 'announcements' ? '3px solid #0EA5BE' : 'none',
+                                fontWeight: 500,
+                                cursor: 'pointer'
+                            }}
+                            onClick={() => setCommunityInfoTab('announcements')}
+                        >
+                            Announcements
                         </div>
                     </div>
 
@@ -9468,7 +9831,7 @@ export default function Chat() {
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                             <div style={{ flex: 1, color: textColor, fontSize: 14, lineHeight: '1.4' }}>
                                 {community.description || 'Welcome to our community!'}
-                                <span style={{ color: '#027EB5', cursor: 'pointer', marginLeft: 4 }}>Read more</span>
+                                <span style={{ color: '#0EA5BE', cursor: 'pointer', marginLeft: 4 }}>Read more</span>
                             </div>
                             <div style={{ width: 20 }}></div>
                         </div>
@@ -9626,14 +9989,14 @@ export default function Chat() {
                                                 padding: '0 2px 0 10px',
                                                 flex: 1,
                                                 maxWidth: 280,
-                                                border: '2px solid #027eb5',
+                                                border: '2px solid #0EA5BE',
                                                 boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1), 0 2px 8px rgba(2, 126, 181, 0.15)',
                                                 animation: 'wa-slide-left 0.2s ease-out',
                                                 height: 40,
                                                 overflow: 'hidden',
                                                 position: 'relative'
                                             }}>
-                                                <Search size={16} color="#027eb5" style={{ marginRight: 8, flexShrink: 0 }} />
+                                                <Search size={16} color="#0EA5BE" style={{ marginRight: 8, flexShrink: 0 }} />
                                                 <input
                                                     autoFocus
                                                     type="text"
@@ -9686,7 +10049,7 @@ export default function Chat() {
                         })()}
                         {canIManage && (
                             <div onClick={() => setIsCommunityAddMemberOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 20, cursor: 'pointer' }}>
-                                <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#027EB5', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                                <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#0EA5BE', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                                     <UserPlus size={20} color="white" />
                                 </div>
                                 <span style={{ color: textColor, fontSize: 16 }}>Add member</span>
@@ -9713,7 +10076,7 @@ export default function Chat() {
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                             <span style={{ color: textColor, fontWeight: 500 }}>{communityOwner.name}</span>
                                             <span style={{ color: '#667781', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                                {isCurrentUserOwner ? 'You • Community owner' : 'Community owner'}
+                                                {isCurrentUserOwner ? 'You Ã¢â‚¬Â¢ Community owner' : 'Community owner'}
                                                 {!isCurrentUserOwner && <ChevronRight size={18} color="#8696a0" />}
                                             </span>
                                         </div>
@@ -9840,7 +10203,7 @@ export default function Chat() {
                                     setIsNotificationSettingsOpen(false);
                                     setIsContactInfoOpen(true);
                                 }}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#027EB5', fontSize: '16px', fontWeight: 500, padding: 0 }}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#0EA5BE', fontSize: '16px', fontWeight: 500, padding: 0 }}
                             >
                                 Back
                             </button>
@@ -9888,7 +10251,7 @@ export default function Chat() {
                 <div className="wa-contact-info-header" style={{ height: 60, padding: '5px 15px', display: 'grid', gridTemplateColumns: 'minmax(60px, auto) 1fr minmax(60px, auto)', alignItems: 'center', background: '#f0f2f5', borderBottom: '1px solid #d1d7db', boxSizing: 'border-box' }}>
                     <button
                         onClick={() => setIsEditContactOpen(false)}
-                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#027EB5', justifySelf: 'start' }}
+                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#0EA5BE', justifySelf: 'start' }}
                     >
                         <span style={{ fontSize: 16, fontWeight: 500 }}>Back</span>
                     </button>
@@ -10021,7 +10384,7 @@ export default function Chat() {
                                         onClick={() => setIsSyncEnabled(!isSyncEnabled)}
                                         style={{
                                             width: 40, height: 20, borderRadius: 10,
-                                            background: isSyncEnabled ? '#027EB5' : '#8696a0',
+                                            background: isSyncEnabled ? '#0EA5BE' : '#8696a0',
                                             position: 'relative', cursor: 'pointer', transition: '0.3s'
                                         }}
                                     >
@@ -10167,7 +10530,7 @@ export default function Chat() {
                     {isSelectionMode ? (
                         <div className="wa-selection-header-grid">
                             <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                                <button onClick={() => setSelectedMediaMsgs([])} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#027EB5', fontSize: '16px', fontWeight: 500, padding: 0, width: 'auto' }}>
+                                <button onClick={() => setSelectedMediaMsgs([])} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#0EA5BE', fontSize: '16px', fontWeight: 500, padding: 0, width: 'auto' }}>
                                     {t('lang_confirm.cancel')}
                                 </button>
                             </div>
@@ -10187,7 +10550,7 @@ export default function Chat() {
                                 setIsSharedMediaOpen(false);
                                 if (selectedCommunity) setIsCommunityInfoOpen(true);
                                 else setIsContactInfoOpen(true);
-                            }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#027EB5', fontSize: '16px', fontWeight: 500, padding: 0 }}>
+                            }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#0EA5BE', fontSize: '16px', fontWeight: 500, padding: 0 }}>
                                 {t('chat_window.back')}
                             </button>
                         </div>
@@ -10261,7 +10624,7 @@ export default function Chat() {
                                                         }}
                                                     >
                                                         {isSelected ? (
-                                                            <CheckSquare size={24} color="white" fill="#027EB5" />
+                                                            <CheckSquare size={24} color="white" fill="#0EA5BE" />
                                                         ) : (
                                                             <div style={{ width: 24, height: 24, border: '2px solid white', borderRadius: 4, background: 'rgba(0,0,0,0.1)' }} />
                                                         )}
@@ -10307,7 +10670,7 @@ export default function Chat() {
                                                 <div className="wa-doc-info">
                                                     <div className="wa-doc-name-small">{msg.fileName || 'Document.pdf'}</div>
                                                     <div className="wa-doc-meta-small">
-                                                        {msg.fileSize ? Math.ceil(msg.fileSize / 1024) + ' kB' : ''} • {msg.fileName?.split('.').pop()?.toUpperCase() || 'PDF'} • {formatSharedMediaTimestamp(msg.created_at)}
+                                                        {msg.fileSize ? Math.ceil(msg.fileSize / 1024) + ' kB' : ''} Ã¢â‚¬Â¢ {msg.fileName?.split('.').pop()?.toUpperCase() || 'PDF'} Ã¢â‚¬Â¢ {formatSharedMediaTimestamp(msg.created_at)}
                                                     </div>
                                                 </div>
                                             </div>
@@ -10480,7 +10843,7 @@ export default function Chat() {
                                 <span className="wa-notification-count">{chat.unreadCount}</span>
                             </div>
                             <div className="wa-notification-msg">
-                                {chat.lastMessage?.content || 'New message'}
+                                {renderLastMessagePreview(chat.lastMessage, chat.is_group || chat.is_community, 'New message')}
                             </div>
                         </div>
                     ))}
@@ -10542,10 +10905,10 @@ export default function Chat() {
                             {totalUnread > 0 && <span className="wa-bell-badge">{totalUnread}</span>}
                         </button>
                     </div>
-                    <button className="wa-nav-icon-btn" title="New Chat" onClick={(e) => { 
-                        e.stopPropagation(); 
+                    <button className="wa-nav-icon-btn" title="New Chat" onClick={(e) => {
+                        e.stopPropagation();
                         if (users.length === 0) fetchUsers();
-                        setIsNewChatOpen(true); 
+                        setIsNewChatOpen(true);
                     }}><Plus size={20} /></button>
                     <button
                         className="wa-nav-icon-btn"
@@ -10578,10 +10941,10 @@ export default function Chat() {
                     <div className="wa-unread-banner-header">
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                                <Bell size={18} color="#027EB5" />
+                                <Bell size={18} color="#0EA5BE" />
                                 <span className="wa-unread-header-badge">{totalUnread}</span>
                             </div>
-                            <span style={{ color: '#027EB5', fontWeight: 600 }}>{t('notifications.unread_title', 'Unread Messages')}</span>
+                            <span style={{ color: '#0EA5BE', fontWeight: 600 }}>{t('notifications.unread_title', 'Unread Messages')}</span>
                         </div>
                     </div>
                     <div className="wa-unread-banner-list">
@@ -10742,7 +11105,7 @@ export default function Chat() {
                         style={{ position: 'relative' }}
                     >
                         Requests
-                        <span style={{ position: 'absolute', top: -5, right: -5, background: '#027EB5', color: 'white', borderRadius: '50%', width: 18, height: 18, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', border: '2px solid white' }}>
+                        <span style={{ position: 'absolute', top: -5, right: -5, background: '#0EA5BE', color: 'white', borderRadius: '50%', width: 18, height: 18, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', border: '2px solid white' }}>
                             {messageRequests.length}
                         </span>
                     </button>
@@ -10834,14 +11197,14 @@ export default function Chat() {
                                     return (
                                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 30px', textAlign: 'center', color: '#8696a0' }}>
                                             <div style={{ background: 'rgba(2, 126, 181, 0.05)', borderRadius: '50%', padding: '24px', marginBottom: '16px' }}>
-                                                <Plus size={40} color="#027EB5" style={{ opacity: 0.6 }} />
+                                                <Plus size={40} color="#0EA5BE" style={{ opacity: 0.6 }} />
                                             </div>
                                             <p style={{ fontSize: '15px', color: '#111b21', marginBottom: '8px', fontWeight: '500' }}>No chats yet</p>
                                             <p style={{ fontSize: '13px', lineHeight: '1.5', marginBottom: '24px' }}>Start a fresh conversation with your colleagues or friends.</p>
                                             <button
                                                 className="wa-nav-icon-btn"
                                                 style={{
-                                                    background: '#027EB5',
+                                                    background: '#0EA5BE',
                                                     color: 'white',
                                                     borderRadius: '24px',
                                                     padding: '10px 24px',
@@ -10854,10 +11217,10 @@ export default function Chat() {
                                                     gap: '8px',
                                                     boxShadow: '0 4px 12px rgba(2, 126, 181, 0.2)'
                                                 }}
-                                                onClick={(e) => { 
-                                                    e.stopPropagation(); 
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
                                                     if (users.length === 0) fetchUsers();
-                                                    setIsNewChatOpen(true); 
+                                                    setIsNewChatOpen(true);
                                                 }}
                                             >
                                                 <Plus size={18} />
@@ -10914,7 +11277,7 @@ export default function Chat() {
                                             setIsSharedMediaOpen(false);
                                             setIsEditContactOpen(false);
                                             setIsCommunitySettingsOpen(false);
-                                            
+
                                             if (item.is_community) {
                                                 setSelectedCommunity(item);
                                                 setIsCommunityHomeOpen(true);
@@ -10995,6 +11358,7 @@ export default function Chat() {
                                                         </span>
                                                     ) : (
 
+                                                        renderLastMessagePreview(item.lastMessage, isGroup || item.is_community, '')
                                                         item.lastMessage?.type === 'image' ? (isGroup ? '📷 Photo' : '📷 Image') :
                                                             item.lastMessage?.type === 'video' ? '🎥 Video' :
                                                                 item.lastMessage?.type === 'file' ? '📄 File' :
@@ -11429,7 +11793,7 @@ export default function Chat() {
         <div className="wa-forward-modal-overlay">
             <div className="wa-forward-modal">
                 <div className="wa-forward-modal-header">
-                    <button className="wa-forward-modal-close-btn" onClick={() => { setIsForwardModalOpen(false); setSelectedForwardContacts([]); setShowForwardLimitWarning(false); }} style={{ width: 'auto', padding: '0 10px', fontSize: '16px', color: '#027EB5', fontWeight: 500 }}>
+                    <button className="wa-forward-modal-close-btn" onClick={() => { setIsForwardModalOpen(false); setSelectedForwardContacts([]); setShowForwardLimitWarning(false); }} style={{ width: 'auto', padding: '0 10px', fontSize: '16px', color: '#0EA5BE', fontWeight: 500 }}>
                         Close
                     </button>
                     <div className="wa-forward-modal-title">Forward message to...</div>
@@ -11520,7 +11884,7 @@ export default function Chat() {
                         <p>
                             To take photos, NEUCHAT needs access to your computer's camera.
                             Please go to your privacy settings and allow camera access for this app.
-                            Click <a href="ms-settings:privacy-webcam" style={{ color: '#027EB5', fontWeight: 'bold' }}>here</a> to open the settings.
+                            Click <a href="ms-settings:privacy-webcam" style={{ color: '#0EA5BE', fontWeight: 'bold' }}>here</a> to open the settings.
                         </p>
                         <div className="wa-camera-modal-actions">
                             <button className="wa-camera-btn got-it" onClick={() => setCameraModal('none')}>OK, got it</button>
@@ -11615,9 +11979,9 @@ export default function Chat() {
                         </div>
                     </div>
                 )}
-                
+
                 {cameraModal === 'editor' && (
-                    <ImageEditorModal 
+                    <ImageEditorModal
                         imageUrl={capturedImage}
                         onRetake={() => {
                             setCameraModal('active');
@@ -11809,12 +12173,12 @@ export default function Chat() {
                             return (
                                 <div style={{ background: '#f8fafc', padding: '20px', borderBottom: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, boxShadow: 'inset 0 -2px 4px rgba(0,0,0,0.02)' }}>
                                     <div style={{ fontSize: '0.95rem', color: '#334155', textAlign: 'center', fontWeight: '500' }}>
-                                        <span style={{ color: '#027EB5', fontWeight: 'bold' }}>{selectedUser.name}</span> wants to message you.
+                                        <span style={{ color: '#0EA5BE', fontWeight: 'bold' }}>{selectedUser.name}</span> wants to message you.
                                     </div>
                                     <div style={{ display: 'flex', gap: 12 }}>
                                         <button
                                             onClick={() => handleAcceptRequest(pendingRequest._id)}
-                                            style={{ background: '#027EB5', color: 'white', border: 'none', padding: '10px 28px', borderRadius: '12px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 4px 6px rgba(2, 126, 181, 0.2)' }}
+                                            style={{ background: '#0EA5BE', color: 'white', border: 'none', padding: '10px 28px', borderRadius: '12px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 4px 6px rgba(2, 126, 181, 0.2)' }}
                                             onMouseOver={(e) => e.target.style.transform = 'translateY(-1px)'}
                                             onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
                                         >
@@ -11925,7 +12289,7 @@ export default function Chat() {
                                                         {isForwardingMode && (
                                                             <div className="wa-msg-checkbox">
                                                                 {forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ?
-                                                                    <CheckSquare size={24} color="white" fill="#027EB5" /> :
+                                                                    <CheckSquare size={24} color="white" fill="#0EA5BE" /> :
                                                                     <div className="wa-checkbox-empty" />
                                                                 }
                                                             </div>
@@ -12032,7 +12396,7 @@ export default function Chat() {
                                                                                         {msg.fileName || 'Document.pdf'}
                                                                                     </div>
                                                                                     <div className="wa-doc-meta">
-                                                                                        {msg.pageCount || 1} pages • {(msg.fileName || msg.file_path)?.split('.').pop()?.toUpperCase() || 'PDF'} • {msg.fileSize ? Math.ceil(msg.fileSize / 1024) + ' kB' : 'Unknown size'}
+                                                                                        {msg.pageCount || 1} pages Ã¢â‚¬Â¢ {(msg.fileName || msg.file_path)?.split('.').pop()?.toUpperCase() || 'PDF'} Ã¢â‚¬Â¢ {msg.fileSize ? Math.ceil(msg.fileSize / 1024) + ' kB' : 'Unknown size'}
                                                                                     </div>
                                                                                 </div>
 
@@ -12095,10 +12459,10 @@ export default function Chat() {
                                                                                                 <>
                                                                                                     {isMe ? (
                                                                                                         (userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo) ? (
-                                                                                                            <img 
-                                                                                                                src={userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo} 
-                                                                                                                alt="me" 
-                                                                                                                style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} 
+                                                                                                            <img
+                                                                                                                src={userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo}
+                                                                                                                alt="me"
+                                                                                                                style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
                                                                                                                 onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'; }}
                                                                                                             />
                                                                                                         ) : null
@@ -12118,11 +12482,11 @@ export default function Chat() {
                                                                                                 </>
                                                                                             )}
                                                                                             <div className="wa-voice-mic-badge">
-                                                                                                <Mic size={12} color={msg.is_read ? '#53bdeb' : (msg.is_view_once ? '#027EB5' : '#8696a0')} />
+                                                                                                <Mic size={12} color={msg.is_read ? '#53bdeb' : (msg.is_view_once ? '#0EA5BE' : '#8696a0')} />
                                                                                             </div>
                                                                                         </div>
                                                                                         <span style={{
-                                                                                            color: (String(playingAudioId) === String(msg._id || msg.id) || (msg.is_view_once && !msg.is_viewed)) ? '#027EB5' : '#8696a0',
+                                                                                            color: (String(playingAudioId) === String(msg._id || msg.id) || (msg.is_view_once && !msg.is_viewed)) ? '#0EA5BE' : '#8696a0',
                                                                                             fontSize: '11px',
                                                                                             fontWeight: 500,
                                                                                             marginTop: '2px'
@@ -12132,7 +12496,7 @@ export default function Chat() {
                                                                                     </div>
                                                                                     <div className="wa-voice-bubble-player" style={{ flex: 1, minWidth: 0 }}>
                                                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                                                            <button className="wa-voice-play-btn" style={{ background: 'none', border: 'none', color: (String(playingAudioId) === String(msg._id || msg.id) || msg.is_view_once) ? '#027EB5' : '#54656f', padding: 0, cursor: 'pointer', transition: 'transform 0.2s' }}>
+                                                                                            <button className="wa-voice-play-btn" style={{ background: 'none', border: 'none', color: (String(playingAudioId) === String(msg._id || msg.id) || msg.is_view_once) ? '#0EA5BE' : '#54656f', padding: 0, cursor: 'pointer', transition: 'transform 0.2s' }}>
                                                                                                 {String(playingAudioId) === String(msg._id || msg.id) ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
                                                                                             </button>
                                                                                             <div
@@ -12192,7 +12556,7 @@ export default function Chat() {
                                                                                                     transition: String(playingAudioId) === String(msg._id || msg.id) ? 'none' : 'clip-path 0.3s ease'
                                                                                                 }}>
                                                                                                     {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
-                                                                                                        <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#027EB5', borderRadius: '4px' }} />
+                                                                                                        <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#0EA5BE', borderRadius: '4px' }} />
                                                                                                     ))}
                                                                                                 </div>
 
@@ -12203,7 +12567,7 @@ export default function Chat() {
                                                                                                         left: `${(viewOnceElapsed / (msg.duration || 1)) * 100}%`,
                                                                                                         width: '10px',
                                                                                                         height: '10px',
-                                                                                                        backgroundColor: '#027EB5',
+                                                                                                        backgroundColor: '#0EA5BE',
                                                                                                         borderRadius: '50%',
                                                                                                         transform: 'translate(-50%, -50%)',
                                                                                                         top: '50%',
@@ -12216,7 +12580,7 @@ export default function Chat() {
                                                                                         <div className="wa-voice-meta-row" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: '2px' }}>
                                                                                             {msg.is_view_once && (
                                                                                                 <div className="wa-view-once-badge">
-                                                                                                    <span className="wa-view-once-circle" style={{ borderColor: msg.is_viewed ? '#8696a0' : '#027EB5', color: msg.is_viewed ? '#8696a0' : '#027EB5', fontSize: '10px', width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1.5px solid currentColor', fontWeight: 'bold' }}>1</span>
+                                                                                                    <span className="wa-view-once-circle" style={{ borderColor: msg.is_viewed ? '#8696a0' : '#0EA5BE', color: msg.is_viewed ? '#8696a0' : '#0EA5BE', fontSize: '10px', width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1.5px solid currentColor', fontWeight: 'bold' }}>1</span>
                                                                                                 </div>
                                                                                             )}
                                                                                         </div>
@@ -12239,7 +12603,7 @@ export default function Chat() {
                                                                                     <img src={msg.link_preview.image} alt={msg.link_preview.title} />
                                                                                     {(msg.link_preview.domain?.includes('youtube') || msg.link_preview.domain?.includes('youtu.be')) && (
                                                                                         <div className="wa-link-preview-play-btn">
-                                                                                            <div className="wa-play-icon">▶</div>
+                                                                                            <div className="wa-play-icon">Ã¢â€“Â¶</div>
                                                                                         </div>
                                                                                     )}
                                                                                 </div>
@@ -12597,7 +12961,7 @@ export default function Chat() {
                                                         {file && (
                                                             <div className="wa-file-preview-badge">
                                                                 {file.name.substring(0, 15)}...
-                                                                <button onClick={() => setFile(null)}>×</button>
+                                                                <button onClick={() => setFile(null)}>Ãƒâ€”</button>
                                                             </div>
                                                         )}
                                                         <textarea
@@ -12752,7 +13116,7 @@ export default function Chat() {
                             {selectedGroup.isCommunityAnnouncements && selectedGroup.communityDescription && !isCommunityDescDismissed && (
                                 <div style={{ background: '#f8f9fa', padding: '12px 16px', borderBottom: '1px solid #e9edef', display: 'flex', gap: 12, position: 'relative' }}>
                                     <div style={{ flex: 1 }}>
-                                        <div style={{ fontSize: 13, fontWeight: 600, color: '#027EB5', marginBottom: 4 }}>Group description</div>
+                                        <div style={{ fontSize: 13, fontWeight: 600, color: '#0EA5BE', marginBottom: 4 }}>Group description</div>
                                         <div style={{ fontSize: 14, color: '#54656f', lineHeight: '1.4' }}>{selectedGroup.communityDescription}</div>
                                     </div>
                                     <X
@@ -12862,7 +13226,7 @@ export default function Chat() {
                                         </div>
                                         <div style={{ fontSize: 16, fontWeight: 500, color: '#111b21', marginBottom: 8 }}>Welcome to your community!</div>
                                         <div style={{ fontSize: 14, color: '#667781', lineHeight: '1.5', marginBottom: 16 }}>Send important admin updates to all your members at once.</div>
-                                        <div style={{ fontSize: 14, fontWeight: 600, color: '#027EB5', cursor: 'pointer' }}>Manage community</div>
+                                        <div style={{ fontSize: 14, fontWeight: 600, color: '#0EA5BE', cursor: 'pointer' }}>Manage community</div>
                                     </div>
                                 </div>
                             ) : (
@@ -12879,7 +13243,7 @@ export default function Chat() {
                                         {String(selectedGroup.admin?._id || selectedGroup.admin) === String(user.id || user._id) ? 'You created this group' : `${selectedGroup.admin?.name || 'Admin'} created this group`}
                                     </div>
                                     <div className="wa-group-welcome-subtitle">
-                                        {selectedGroup.members?.length} members • {selectedGroup.members?.length} contacts • Created {formatDateForSeparator(selectedGroup.created_at)}
+                                        {selectedGroup.members?.length} members Ã¢â‚¬Â¢ {selectedGroup.members?.length} contacts Ã¢â‚¬Â¢ Created {formatDateForSeparator(selectedGroup.created_at)}
                                     </div>
                                     <div className="wa-group-welcome-action">Add description...</div>
                                     <div className="wa-group-welcome-buttons">
@@ -13036,11 +13400,11 @@ export default function Chat() {
                                                             }}>
                                                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', marginBottom: '24px' }}>
                                                                     <div style={{ padding: '10px', background: '#e1f5fe', borderRadius: '50%', border: '2px solid #e1f5fe' }}>
-                                                                        <Users size={22} color="#027eb5" />
+                                                                        <Users size={22} color="#0EA5BE" />
                                                                     </div>
                                                                     <ArrowRight size={22} color="#8696a0" />
                                                                     <div style={{ padding: '10px', background: '#e1f5fe', borderRadius: '50%', border: '2px solid #e1f5fe' }}>
-                                                                        <Users size={22} color="#027eb5" />
+                                                                        <Users size={22} color="#0EA5BE" />
                                                                     </div>
                                                                 </div>
                                                                 <div style={{ fontSize: '17px', fontWeight: '500', marginBottom: '16px', lineHeight: '1.4' }}>
@@ -13056,11 +13420,11 @@ export default function Chat() {
                                                                     lineHeight: '1.6'
                                                                 }}>
                                                                     <li style={{ display: 'flex', marginBottom: '8px', alignItems: 'flex-start' }}>
-                                                                        <span style={{ marginRight: '10px', marginTop: '2px' }}>•</span>
+                                                                        <span style={{ marginRight: '10px', marginTop: '2px' }}>Ã¢â‚¬Â¢</span>
                                                                         <span>Members in this group are now community members.</span>
                                                                     </li>
                                                                     <li style={{ display: 'flex', alignItems: 'flex-start' }}>
-                                                                        <span style={{ marginRight: '10px', marginTop: '2px' }}>•</span>
+                                                                        <span style={{ marginRight: '10px', marginTop: '2px' }}>Ã¢â‚¬Â¢</span>
                                                                         <span>Anyone in the community can join this group.</span>
                                                                     </li>
                                                                 </ul>
@@ -13088,7 +13452,7 @@ export default function Chat() {
                                                                         }
                                                                     }}
                                                                     style={{
-                                                                        color: '#027eb5',
+                                                                        color: '#0EA5BE',
                                                                         fontWeight: '600',
                                                                         fontSize: '14px',
                                                                         cursor: 'pointer',
@@ -13122,7 +13486,7 @@ export default function Chat() {
                                                         {isForwardingMode && (
                                                             <div className="wa-msg-checkbox">
                                                                 {forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ?
-                                                                    <CheckSquare size={24} color="white" fill="#027EB5" /> :
+                                                                    <CheckSquare size={24} color="white" fill="#0EA5BE" /> :
                                                                     <div className="wa-checkbox-empty" />
                                                                 }
                                                             </div>
@@ -13161,7 +13525,7 @@ export default function Chat() {
                                                                 </div>
                                                             )}
 
-                                                            {!isMe && <div style={{ fontSize: 12, fontWeight: 700, color: '#027EB5', marginBottom: 4 }}>{senderName}</div>}
+                                                            {!isMe && <div style={{ fontSize: 12, fontWeight: 700, color: '#0EA5BE', marginBottom: 4 }}>{senderName}</div>}
 
                                                             {msg.is_deleted_by_admin ? (
                                                                 <div className="wa-deleted-tag">
@@ -13191,14 +13555,44 @@ export default function Chat() {
                                                                     )}
 
                                                                     {msg.type === 'file' && msg.file_path && (
-                                                                        <div className="wa-msg-file" onClick={() => handleDownload(msg.file_path, msg.fileName)}>
-                                                                            <FileText size={32} color="#8696a0" />
-                                                                            <div className="wa-msg-file-info">
-                                                                                <div className="wa-msg-file-name">{msg.fileName || 'document.pdf'}</div>
-                                                                                <div className="wa-msg-file-meta">{msg.fileSize || 'Unknown size'} • {msg.fileName?.split('.').pop().toUpperCase()}</div>
+                                                                        isDocument(msg.fileName) ? (
+                                                                            <div className="wa-msg-document">
+                                                                                {msg.thumbnail_path && (
+                                                                                    <div className="wa-msg-document-preview">
+                                                                                        <img src={msg.thumbnail_path} alt="document preview" />
+                                                                                    </div>
+                                                                                )}
+                                                                                <div className="wa-msg-document-details">
+                                                                                    <div className="wa-msg-document-icon-wrapper">
+                                                                                        {getDocIcon(msg.fileName)}
+                                                                                    </div>
+                                                                                    <div className="wa-msg-document-info">
+                                                                                        <div className="wa-msg-document-name" title={msg.fileName}>{msg.fileName || 'document.pdf'}</div>
+                                                                                        <div className="wa-msg-document-meta">
+                                                                                            {(msg.pageCount > 0) ? `${msg.pageCount} ${msg.pageCount === 1 ? 'page' : 'pages'} Ã¢â‚¬Â¢ ` : ''}
+                                                                                            {msg.fileName?.split('.').pop().toUpperCase()} Ã¢â‚¬Â¢ {formatFileSize(msg.fileSize)}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="wa-msg-document-actions">
+                                                                                    <button className="wa-msg-document-action-btn" onClick={() => handleOpenFile(msg.file_path, msg.fileName)}>
+                                                                                        Open
+                                                                                    </button>
+                                                                                    <button className="wa-msg-document-action-btn" onClick={() => handleDownload(msg.file_path, msg.fileName)}>
+                                                                                        Save as...
+                                                                                    </button>
+                                                                                </div>
                                                                             </div>
-                                                                            <Download size={20} color="#8696a0" className="wa-file-download-icon" />
-                                                                        </div>
+                                                                        ) : (
+                                                                            <div className="wa-msg-file" onClick={() => handleDownload(msg.file_path, msg.fileName)}>
+                                                                                <FileText size={32} color="#8696a0" />
+                                                                                <div className="wa-msg-file-info">
+                                                                                    <div className="wa-msg-file-name">{msg.fileName || 'document.pdf'}</div>
+                                                                                    <div className="wa-msg-file-meta">{formatFileSize(msg.fileSize)} Ã¢â‚¬Â¢ {msg.fileName?.split('.').pop().toUpperCase()}</div>
+                                                                                </div>
+                                                                                <Download size={20} color="#8696a0" className="wa-file-download-icon" />
+                                                                            </div>
+                                                                        )
                                                                     )}
 
                                                                     {/* Audio Rendering */}
@@ -13249,7 +13643,7 @@ export default function Chat() {
                                                                                             </div>
                                                                                         </div>
                                                                                         <span style={{
-                                                                                            color: (String(playingAudioId) === String(msg._id || msg.id)) ? '#027EB5' : '#8696a0',
+                                                                                            color: (String(playingAudioId) === String(msg._id || msg.id)) ? '#0EA5BE' : '#8696a0',
                                                                                             fontSize: '11px',
                                                                                             fontWeight: 500,
                                                                                             marginTop: '2px'
@@ -13259,7 +13653,7 @@ export default function Chat() {
                                                                                     </div>
                                                                                     <div className="wa-voice-bubble-player" style={{ flex: 1, minWidth: 0 }}>
                                                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                                                            <button className="wa-voice-play-btn" style={{ background: 'none', border: 'none', color: (String(playingAudioId) === String(msg._id || msg.id)) ? '#027EB5' : '#54656f', padding: 0, cursor: 'pointer', transition: 'transform 0.2s' }}>
+                                                                                            <button className="wa-voice-play-btn" style={{ background: 'none', border: 'none', color: (String(playingAudioId) === String(msg._id || msg.id)) ? '#0EA5BE' : '#54656f', padding: 0, cursor: 'pointer', transition: 'transform 0.2s' }}>
                                                                                                 {String(playingAudioId) === String(msg._id || msg.id) ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
                                                                                             </button>
                                                                                             <div
@@ -13319,7 +13713,7 @@ export default function Chat() {
                                                                                                     transition: String(playingAudioId) === String(msg._id || msg.id) ? 'none' : 'clip-path 0.3s ease'
                                                                                                 }}>
                                                                                                     {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
-                                                                                                        <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#027EB5', borderRadius: '4px' }} />
+                                                                                                        <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#0EA5BE', borderRadius: '4px' }} />
                                                                                                     ))}
                                                                                                 </div>
 
@@ -13330,7 +13724,7 @@ export default function Chat() {
                                                                                                         left: `${(viewOnceElapsed / (msg.duration || 1)) * 100}%`,
                                                                                                         width: '10px',
                                                                                                         height: '10px',
-                                                                                                        backgroundColor: '#027EB5',
+                                                                                                        backgroundColor: '#0EA5BE',
                                                                                                         borderRadius: '50%',
                                                                                                         transform: 'translate(-50%, -50%)',
                                                                                                         top: '50%',
@@ -13384,11 +13778,11 @@ export default function Chat() {
                                                                                             alignItems: 'center',
                                                                                             gap: '6px',
                                                                                             fontSize: '14px',
-                                                                                            color: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#027EB5'
+                                                                                            color: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#0EA5BE'
                                                                                         }}>
                                                                                             <span className="wa-view-once-circle" style={{
-                                                                                                borderColor: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#027EB5',
-                                                                                                color: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#027EB5',
+                                                                                                borderColor: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#0EA5BE',
+                                                                                                color: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#0EA5BE',
                                                                                                 width: '18px',
                                                                                                 height: '18px',
                                                                                                 fontSize: '10px',
@@ -13737,7 +14131,7 @@ export default function Chat() {
                                                                 <button
                                                                     className="wa-nav-icon-btn"
                                                                     style={{
-                                                                        background: '#027EB5',
+                                                                        background: '#0EA5BE',
                                                                         color: 'white',
                                                                         borderRadius: '24px',
                                                                         padding: '8px 24px',
@@ -13789,14 +14183,14 @@ export default function Chat() {
                                                 <div className="wa-input-pill">
                                                     <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
                                                         {renderAttachmentMenu()}
-                                                        <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
+                                                        <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)">
                                                             <Paperclip size={22} color="#54656f" />
                                                         </button>
                                                         <input
                                                             type="file"
                                                             ref={fileInputRef}
                                                             style={{ display: 'none' }}
-                                                            accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
+                                                            accept=".jpg,.jpeg,.png,.doc,.docx,.ppt,.pptx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
                                                             onChange={handleFileSelect}
                                                         />
                                                         <button className="wa-nav-icon-btn">
@@ -13807,7 +14201,7 @@ export default function Chat() {
                                                         {file && (
                                                             <div className="wa-file-preview-badge">
                                                                 {file.name.substring(0, 15)}...
-                                                                <button onClick={() => setFile(null)}>×</button>
+                                                                <button onClick={() => setFile(null)}>Ãƒâ€”</button>
                                                             </div>
                                                         )}
                                                         <textarea
@@ -13929,7 +14323,7 @@ export default function Chat() {
                 </div>
 
                 <div className="wa-drawer-content" style={{ padding: 0, display: 'flex', flexDirection: 'column', background: '#f0f2f5' }}>
-                    <div style={{ padding: '30px 20px 10px', color: '#027EB5', fontSize: '14px', fontWeight: '500', background: 'white' }}>Community permissions</div>
+                    <div style={{ padding: '30px 20px 10px', color: '#0EA5BE', fontSize: '14px', fontWeight: '500', background: 'white' }}>Community permissions</div>
 
                     <div
                         style={{ background: 'white', padding: '15px 20px', cursor: 'pointer', borderBottom: thickDivider }}
@@ -13956,7 +14350,7 @@ export default function Chat() {
                 <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ background: '#111b21', color: 'white', padding: '24px', borderRadius: '16px', width: '400px', maxWidth: '90%' }}>
                     <h2 style={{ fontSize: 20, fontWeight: 500, marginBottom: 16 }}>Who can add new groups</h2>
                     <p style={{ fontSize: 14, color: '#8696a0', marginBottom: 24, lineHeight: '1.5' }}>
-                        Members can always suggest groups for admin approval. Community admins can remove any group. <span style={{ color: '#027EB5', cursor: 'pointer' }}>Learn more</span>
+                        Members can always suggest groups for admin approval. Community admins can remove any group. <span style={{ color: '#0EA5BE', cursor: 'pointer' }}>Learn more</span>
                     </p>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginBottom: 32 }}>
@@ -13969,13 +14363,13 @@ export default function Chat() {
                                     width: 20,
                                     height: 20,
                                     borderRadius: '50%',
-                                    border: `2px solid ${pendingWhoCanAddGroups === opt.value ? '#027EB5' : '#8696a0'}`,
+                                    border: `2px solid ${pendingWhoCanAddGroups === opt.value ? '#0EA5BE' : '#8696a0'}`,
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
                                     marginTop: 2
                                 }}>
-                                    {pendingWhoCanAddGroups === opt.value && <div style={{ width: 10, height: 10, background: '#027EB5', borderRadius: '50%' }} />}
+                                    {pendingWhoCanAddGroups === opt.value && <div style={{ width: 10, height: 10, background: '#0EA5BE', borderRadius: '50%' }} />}
                                 </div>
                                 <div style={{ flex: 1 }}>
                                     <div style={{ fontSize: 16, color: '#e9edef' }}>{opt.label}</div>
@@ -13988,7 +14382,7 @@ export default function Chat() {
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, alignItems: 'center' }}>
                         <button
                             onClick={() => setIsWhoCanAddGroupsModalOpen(false)}
-                            style={{ background: 'none', border: 'none', color: '#027EB5', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}
+                            style={{ background: 'none', border: 'none', color: '#0EA5BE', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}
                         >
                             Cancel
                         </button>
@@ -14018,7 +14412,7 @@ export default function Chat() {
                                 }
                                 setIsWhoCanAddGroupsModalOpen(false);
                             }}
-                            style={{ background: '#027EB5', border: 'none', color: '#111b21', padding: '10px 24px', borderRadius: '24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                            style={{ background: '#0EA5BE', border: 'none', color: '#111b21', padding: '10px 24px', borderRadius: '24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
                         >
                             Confirm
                         </button>
@@ -14070,7 +14464,7 @@ export default function Chat() {
                                 setIsCommunityInfoOpen(true);
                                 setSelectOwnerSearchQuery('');
                             }}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#027EB5', fontSize: 16, padding: '8px 0' }}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#0EA5BE', fontSize: 16, padding: '8px 0' }}
                         >
                             Cancel
                         </button>
@@ -14102,7 +14496,7 @@ export default function Chat() {
                         ) : (
                             sortedInitials.map(initial => (
                                 <div key={initial}>
-                                    <div style={{ padding: '20px 24px 10px', fontSize: 14, color: '#027EB5', fontWeight: 500 }}>{initial}</div>
+                                    <div style={{ padding: '20px 24px 10px', fontSize: 14, color: '#0EA5BE', fontWeight: 500 }}>{initial}</div>
                                     {grouped[initial].map(member => (
                                         <div
                                             key={member._id || member.id}
@@ -14400,7 +14794,7 @@ export default function Chat() {
                                                 <div className="wa-settings-status-dot pulse" /> {t('settings.profile.status_available')}
                                             </span>
                                         </div>
-                                        <p className="wa-settings-title">{userData.designation || "Lead Systems Architect"} — <span>Enterprise Core</span></p>
+                                        <p className="wa-settings-title">{userData.designation || "Lead Systems Architect"} Ã¢â‚¬â€ <span>Enterprise Core</span></p>
                                         <div className="wa-settings-meta-row">
                                             <div className="wa-settings-meta-item"><Building2 size={14} /> HQ - San Francisco</div>
                                             <div className="wa-settings-meta-item"><Clock size={14} /> (GMT-7) Pacific Time</div>
@@ -14481,23 +14875,23 @@ export default function Chat() {
 
                 case 'general': {
                     const languages = [
-                        'Albanian, Shqip', 'Arabic, العربية', 'Azerbaijani, Azərbaycan',
-                        'Bangla, বাংলা', 'Brazilian Portuguese, Português (Brasil)',
-                        'British English, British English', 'Bulgarian, Български', 'Catalan, Català',
-                        'Chinese Simplified, 中文(简体)', 'Chinese Traditional, 中文(繁體)',
-                        'Croatian, Hrvatski', 'Czech, Čeština', 'Danish, Dansk',
+                        'Albanian, Shqip', 'Arabic, Ã˜Â§Ã™â€žÃ˜Â¹Ã˜Â±Ã˜Â¨Ã™Å Ã˜Â©', 'Azerbaijani, AzÃ‰â„¢rbaycan',
+                        'Bangla, Ã Â¦Â¬Ã Â¦Â¾Ã Â¦â€šÃ Â¦Â²Ã Â¦Â¾', 'Brazilian Portuguese, PortuguÃƒÂªs (Brasil)',
+                        'British English, British English', 'Bulgarian, Ãâ€˜Ã‘Å ÃÂ»ÃÂ³ÃÂ°Ã‘â‚¬Ã‘ÂÃÂºÃÂ¸', 'Catalan, CatalÃƒÂ ',
+                        'Chinese Simplified, Ã¤Â¸Â­Ã¦â€“â€¡(Ã§Â®â‚¬Ã¤Â½â€œ)', 'Chinese Traditional, Ã¤Â¸Â­Ã¦â€“â€¡(Ã§Â¹ÂÃ©Â«â€)',
+                        'Croatian, Hrvatski', 'Czech, Ã„Å’eÃ…Â¡tina', 'Danish, Dansk',
                         'Dutch, Nederlands', 'English, English', 'Estonian, Eesti',
-                        'Finnish, Suomi', 'French, Français', 'German, Deutsch',
-                        'Greek, Ελληνικά', 'Hebrew, עברית', 'Hindi, हिन्दी',
+                        'Finnish, Suomi', 'French, FranÃƒÂ§ais', 'German, Deutsch',
+                        'Greek, ÃŽâ€¢ÃŽÂ»ÃŽÂ»ÃŽÂ·ÃŽÂ½ÃŽÂ¹ÃŽÂºÃŽÂ¬', 'Hebrew, Ã—Â¢Ã—â€˜Ã—Â¨Ã—â„¢Ã—Âª', 'Hindi, Ã Â¤Â¹Ã Â¤Â¿Ã Â¤Â¨Ã Â¥ÂÃ Â¤Â¦Ã Â¥â‚¬',
                         'Hungarian, Magyar', 'Indonesian, Bahasa Indonesia', 'Italian, Italiano',
-                        'Japanese, 日本語', 'Kannada, ಕನ್ನಡ', 'Korean, 한국어',
-                        'Latvian, Latviešu', 'Lithuanian, Lietuvių', 'Malay, Bahasa Melayu',
-                        'Marathi, मराठी', 'Norwegian, Norsk', 'Polish, Polski',
-                        'Romanian, Română', 'Russian, Русский', 'Slovak, Slovenčina',
-                        'Slovenian, Slovenščina', 'Spanish, Español', 'Swedish, Svenska',
-                        'Tamil, தமிழ்', 'Telugu, తెలుగు', 'Thai, ไทย',
-                        'Turkish, Türkçe', 'Ukrainian, Українська', 'Urdu, اردو',
-                        'Vietnamese, Tiếng Việt'
+                        'Japanese, Ã¦â€”Â¥Ã¦Å“Â¬Ã¨ÂªÅ¾', 'Kannada, Ã Â²â€¢Ã Â²Â¨Ã Â³ÂÃ Â²Â¨Ã Â²Â¡', 'Korean, Ã­â€¢Å“ÃªÂµÂ­Ã¬â€“Â´',
+                        'Latvian, LatvieÃ…Â¡u', 'Lithuanian, LietuviÃ…Â³', 'Malay, Bahasa Melayu',
+                        'Marathi, Ã Â¤Â®Ã Â¤Â°Ã Â¤Â¾Ã Â¤Â Ã Â¥â‚¬', 'Norwegian, Norsk', 'Polish, Polski',
+                        'Romanian, RomÃƒÂ¢nÃ„Æ’', 'Russian, ÃÂ Ã‘Æ’Ã‘ÂÃ‘ÂÃÂºÃÂ¸ÃÂ¹', 'Slovak, SlovenÃ„Âina',
+                        'Slovenian, SlovenÃ…Â¡Ã„Âina', 'Spanish, EspaÃƒÂ±ol', 'Swedish, Svenska',
+                        'Tamil, Ã Â®Â¤Ã Â®Â®Ã Â®Â¿Ã Â®Â´Ã Â¯Â', 'Telugu, Ã Â°Â¤Ã Â±â€ Ã Â°Â²Ã Â±ÂÃ Â°â€”Ã Â±Â', 'Thai, Ã Â¹â€žÃ Â¸â€”Ã Â¸Â¢',
+                        'Turkish, TÃƒÂ¼rkÃƒÂ§e', 'Ukrainian, ÃÂ£ÃÂºÃ‘â‚¬ÃÂ°Ã‘â€”ÃÂ½Ã‘ÂÃ‘Å’ÃÂºÃÂ°', 'Urdu, Ã˜Â§Ã˜Â±Ã˜Â¯Ã™Ë†',
+                        'Vietnamese, TiÃ¡ÂºÂ¿ng ViÃ¡Â»â€¡t'
                     ];
 
                     return (
@@ -14578,7 +14972,7 @@ export default function Chat() {
                     return (
                         <div className="wa-settings-tab-content fade-in">
                             <div className="wa-settings-grid privacy-grid">
-                                {/* 🔐 1. Personal Info Visibility */}
+                                {/* Ã°Å¸â€Â 1. Personal Info Visibility */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">Personal Info Visibility</h4>
                                     <button className="wa-settings-list-action">
@@ -14638,7 +15032,7 @@ export default function Chat() {
                                     </div>
                                 </div>
 
-                                {/* 🔒 2. Messaging & Forwarding Control */}
+                                {/* Ã°Å¸â€â€™ 2. Messaging & Forwarding Control */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">Messaging & Forwarding Control</h4>
                                     <button className="wa-settings-list-action">
@@ -14700,7 +15094,7 @@ export default function Chat() {
                                     </div>
                                 </div>
 
-                                {/* 🧠 3. AI Privacy Protection */}
+                                {/* Ã°Å¸Â§Â  3. AI Privacy Protection */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">AI Privacy Protection</h4>
                                     <div className="wa-settings-item">
@@ -14748,7 +15142,7 @@ export default function Chat() {
                                     </button>
                                 </div>
 
-                                {/* 📸 4. Screenshot & Media Protection */}
+                                {/* Ã°Å¸â€œÂ¸ 4. Screenshot & Media Protection */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">Screenshot & Media Protection</h4>
                                     <div className="wa-settings-item">
@@ -14789,7 +15183,7 @@ export default function Chat() {
                                     </div>
                                 </div>
 
-                                {/* 📍 5. Device & Access Privacy */}
+                                {/* Ã°Å¸â€œÂ 5. Device & Access Privacy */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">Device & Access Privacy</h4>
                                     <div className="wa-settings-item">
@@ -14837,7 +15231,7 @@ export default function Chat() {
                                     </button>
                                 </div>
 
-                                {/* 🎭 6. Hidden & Decoy Mode */}
+                                {/* Ã°Å¸Å½Â­ 6. Hidden & Decoy Mode */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">Hidden & Decoy Mode</h4>
                                     <div className="wa-settings-item">
@@ -14875,7 +15269,7 @@ export default function Chat() {
                                     </div>
                                 </div>
 
-                                {/* 📊 7. Privacy Score & Monitoring */}
+                                {/* Ã°Å¸â€œÅ  7. Privacy Score & Monitoring */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">Privacy Score & Monitoring</h4>
                                     <div className="wa-settings-item">
@@ -15051,10 +15445,10 @@ export default function Chat() {
                         <div className="wa-settings-empty-state-centered">
                             <div className="wa-settings-empty-logo">
                                 <img src={logo} alt="Neural Chat" />
-                                <h1 style={{ color: '#027EB5', fontSize: '2.5rem', fontWeight: '800', margin: 0 }}>Neural Chat</h1>
+                                <h1 style={{ color: '#0EA5BE', fontSize: '2.5rem', fontWeight: '800', margin: 0 }}>Neural Chat</h1>
                             </div>
                             <div className="wa-settings-empty-info">
-                                <Settings size={32} color="#027EB5" />
+                                <Settings size={32} color="#0EA5BE" />
                                 <h3>{t('settings.choose_category')}</h3>
                                 <p>{t('settings.choose_category_desc')}</p>
                             </div>
@@ -15152,6 +15546,86 @@ export default function Chat() {
 
     return (
         <>
+            {/* Opening File Status (Bottom-Left) */}
+            {openingFile && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        bottom: 40,
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        background: 'rgba(17, 27, 33, 0.85)',
+                        backdropFilter: 'blur(20px)',
+                        color: 'white',
+                        padding: '16px 28px',
+                        borderRadius: '24px',
+                        zIndex: 100000,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '8px',
+                        boxShadow: '0 12px 48px rgba(0,0,0,0.4)',
+                        border: '1px solid rgba(255,255,255,0.12)',
+                        animation: 'wa-slide-up-fixed 0.4s cubic-bezier(0.19, 1, 0.22, 1)'
+                    }}
+                    className="wa-opening-file-status"
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <Loader2 className="wa-spin" size={20} color="#0EA5BE" />
+                        <div style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.2px' }}>
+                            Opening <span style={{ color: "#0EA5BE" }}>{openingFile}</span>
+                        </div>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', fontWeight: 400 }}>
+                        If browser asks for permission, please click <strong style={{ color: 'white' }}>Open</strong>.
+                    </div>
+                </div>
+            )}
+
+            {isWaitingForApp && (
+                <div
+                    ref={mouseFollowerRef}
+                    style={{
+                        position: 'fixed',
+                        left: 0,
+                        top: 0,
+                        pointerEvents: 'none',
+                        zIndex: 200000,
+                        transform: 'translate(14px, 14px)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        animation: 'wa-scale-pop 0.2s ease-out',
+                        willChange: 'left, top'
+                    }}
+                >
+                    <div style={{
+                        width: '32px',
+                        height: '32px',
+                        background: 'white',
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                        border: '1px solid #0EA5BE'
+                    }}>
+                        <Loader2 className="wa-spin" size={18} color="#0EA5BE" />
+                    </div>
+                </div>
+            )}
+
+            <style>{`
+                @keyframes wa-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                .wa-spin { animation: wa-spin 1.2s linear infinite; }
+                @keyframes wa-scale-pop { from { transform: translate(10px, 10px) scale(0.5); opacity: 0; } to { transform: translate(10px, 10px) scale(1); opacity: 1; } }
+                @keyframes wa-slide-up-fixed {
+                    from { transform: translateX(-50%) translateY(30px); opacity: 0; }
+                    to { transform: translateX(-50%) translateY(0); opacity: 1; }
+                }
+                .wa-opening-file-status { transition: all 0.3s ease; }
+            `}</style>
+
             <div className={`wa-app-container ${(selectedUser || selectedGroup) ? 'chat-active' : 'list-active'}`}>
                 {renderLeftSidebar()}
                 {isSettingsOpen ? (
@@ -15197,7 +15671,7 @@ export default function Chat() {
                         <div className="wa-mute-modal-content">
                             <div className="wa-mute-header-centered" style={{ borderBottom: '1px solid #f0f2f5', paddingBottom: '15px' }}>
                                 <div className="wa-mute-icon-wrapper" style={{ background: '#f0f9fa' }}>
-                                    <MessageSquare size={28} color="#027EB5" />
+                                    <MessageSquare size={28} color="#0EA5BE" />
                                 </div>
                                 <h3 style={{ margin: '10px 0 5px 0', fontSize: '20px', color: '#111b21' }}>Message Requests</h3>
                                 <p style={{ margin: 0, fontSize: '14px', color: '#667781' }}>People you haven't chatted with before</p>
@@ -15228,7 +15702,7 @@ export default function Chat() {
                                             <div style={{ display: 'flex', gap: 8, marginLeft: 10 }}>
                                                 <button
                                                     onClick={() => { handleAcceptRequest(req._id); setIsRequestsModalOpen(false); }}
-                                                    style={{ padding: '8px 16px', borderRadius: '20px', border: 'none', background: '#027EB5', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                                                    style={{ padding: '8px 16px', borderRadius: '20px', border: 'none', background: '#0EA5BE', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
                                                 >Accept</button>
                                                 <button
                                                     onClick={() => { handleRejectRequest(req._id); setIsRequestsModalOpen(false); }}
@@ -15403,7 +15877,7 @@ export default function Chat() {
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 32 }}>
                             <button
                                 onClick={() => setAdminConfirmModal(null)}
-                                style={{ padding: '8px 24px', borderRadius: 24, border: '1px solid #d1d7db', background: 'transparent', color: '#027EB5', cursor: 'pointer', fontWeight: 500 }}
+                                style={{ padding: '8px 24px', borderRadius: 24, border: '1px solid #d1d7db', background: 'transparent', color: '#0EA5BE', cursor: 'pointer', fontWeight: 500 }}
                             >
                                 Cancel
                             </button>
@@ -15457,7 +15931,7 @@ export default function Chat() {
                                         setAdminConfirmModal(null);
                                     }
                                 }}
-                                style={{ padding: '8px 24px', borderRadius: 24, border: 'none', background: '#027EB5', color: 'white', cursor: 'pointer', fontWeight: 500 }}
+                                style={{ padding: '8px 24px', borderRadius: 24, border: 'none', background: '#0EA5BE', color: 'white', cursor: 'pointer', fontWeight: 500 }}
                             >
                                 OK
                             </button>
@@ -15537,7 +16011,7 @@ export default function Chat() {
                                 style={{
                                     background: 'none',
                                     border: '1px solid #d1d7db',
-                                    color: '#027EB5',
+                                    color: '#0EA5BE',
                                     fontSize: '14px',
                                     fontWeight: 500,
                                     cursor: 'pointer',
@@ -15578,7 +16052,7 @@ export default function Chat() {
                                     }
                                 }}
                                 style={{
-                                    background: '#027EB5',
+                                    background: '#0EA5BE',
                                     color: 'white',
                                     border: 'none',
                                     padding: '10px 24px',
@@ -15643,14 +16117,14 @@ export default function Chat() {
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '20px', alignItems: 'center' }}>
                             <button
                                 onClick={() => { setIsOwnerExitCommunityModalOpen(false); setIsAssignNewOwnerOpen(true); }}
-                                style={{ background: 'none', border: 'none', color: '#027EB5', fontSize: '16px', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                                style={{ background: 'none', border: 'none', color: '#0EA5BE', fontSize: '16px', fontWeight: 600, cursor: 'pointer', padding: 0 }}
                                 className="assign-owner-link"
                             >
                                 Assign new owner
                             </button>
                             <button
                                 onClick={() => setIsOwnerExitCommunityModalOpen(false)}
-                                style={{ background: '#027EB5', color: 'white', border: 'none', borderRadius: '24px', padding: '10px 24px', fontSize: '16px', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                                style={{ background: '#0EA5BE', color: 'white', border: 'none', borderRadius: '24px', padding: '10px 24px', fontSize: '16px', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
                             >
                                 Cancel
                             </button>
@@ -15683,9 +16157,9 @@ export default function Chat() {
                                 handleMarkOpened(viewOnceMsg._id || viewOnceMsg.id);
                                 setViewOnceMsg(null);
                             }}
-                            style={{ padding: '12px 32px', background: '#027EB5', color: 'white', border: 'none', borderRadius: '24px', fontSize: '16px', fontWeight: '500', cursor: 'pointer', marginTop: '10px', transition: 'background 0.2s' }}
+                            style={{ padding: '12px 32px', background: '#0EA5BE', color: 'white', border: 'none', borderRadius: '24px', fontSize: '16px', fontWeight: '500', cursor: 'pointer', marginTop: '10px', transition: 'background 0.2s' }}
                             onMouseOver={(e) => e.target.style.background = '#008f6f'}
-                            onMouseOut={(e) => e.target.style.background = '#027EB5'}
+                            onMouseOut={(e) => e.target.style.background = '#0EA5BE'}
                         >
                             Close
                         </button>
@@ -15740,10 +16214,10 @@ export default function Chat() {
                         {!adminContextMenu.isAdmin && (
                             <div style={{ margin: '0 20px 14px', background: '#f0f2f5', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#54656f' }}>
                                 <div style={{ fontWeight: 600, color: '#3b4a54', marginBottom: 5 }}>Admin permissions include:</div>
-                                <div style={{ marginBottom: 2 }}>• Add &amp; remove members</div>
-                                <div style={{ marginBottom: 2 }}>• Add &amp; delete groups</div>
-                                <div style={{ marginBottom: 2 }}>• Manage community settings</div>
-                                <div>• Deactivate the community</div>
+                                <div style={{ marginBottom: 2 }}>Ã¢â‚¬Â¢ Add &amp; remove members</div>
+                                <div style={{ marginBottom: 2 }}>Ã¢â‚¬Â¢ Add &amp; delete groups</div>
+                                <div style={{ marginBottom: 2 }}>Ã¢â‚¬Â¢ Manage community settings</div>
+                                <div>Ã¢â‚¬Â¢ Deactivate the community</div>
                             </div>
                         )}
 
@@ -15760,7 +16234,7 @@ export default function Chat() {
                                     background: '#f0f2f5',
                                     border: 'none',
                                     borderRadius: '8px',
-                                    color: '#027EB5',
+                                    color: '#0EA5BE',
                                     fontSize: 14,
                                     fontWeight: 500,
                                     cursor: 'pointer',
@@ -15825,7 +16299,7 @@ export default function Chat() {
                                     }
                                 }}
                                 style={{
-                                    background: adminContextMenu.isAdmin ? '#ea0038' : '#027EB5',
+                                    background: adminContextMenu.isAdmin ? '#ea0038' : '#0EA5BE',
                                     border: 'none',
                                     color: 'white',
                                     fontSize: 14,
@@ -15955,7 +16429,7 @@ export default function Chat() {
                             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
                                 <button
                                     onClick={() => setIsTransferOwnershipConfirmOpen(false)}
-                                    style={{ padding: '10px 24px', borderRadius: '24px', border: '1px solid #e9edef', background: 'transparent', color: '#027EB5', fontWeight: 500, cursor: 'pointer' }}
+                                    style={{ padding: '10px 24px', borderRadius: '24px', border: '1px solid #e9edef', background: 'transparent', color: '#0EA5BE', fontWeight: 500, cursor: 'pointer' }}
                                 >
                                     Cancel
                                 </button>
@@ -15964,7 +16438,7 @@ export default function Chat() {
                                         setIsTransferOwnershipConfirmOpen(false);
                                         await handleAssignNewOwner(ownershipTransferTarget);
                                     }}
-                                    style={{ padding: '10px 24px', borderRadius: '24px', border: 'none', background: '#027EB5', color: 'white', fontWeight: 500, cursor: 'pointer' }}
+                                    style={{ padding: '10px 24px', borderRadius: '24px', border: 'none', background: '#0EA5BE', color: 'white', fontWeight: 500, cursor: 'pointer' }}
                                 >
                                     Transfer
                                 </button>
@@ -15979,7 +16453,7 @@ export default function Chat() {
                 <div className="wa-view-once-fullscreen">
                     <div className="wa-view-once-content">
                         <div className="wa-view-once-header">
-                            <h2 style={{ fontSize: '28px', color: '#027EB5', marginBottom: '8px' }}>{activeViewOnceMsg.sender_id?.name || selectedUser?.name || 'Voice Message'}</h2>
+                            <h2 style={{ fontSize: '28px', color: '#0EA5BE', marginBottom: '8px' }}>{activeViewOnceMsg.sender_id?.name || selectedUser?.name || 'Voice Message'}</h2>
                         </div>
 
                         <div className="wa-view-once-player-body">
@@ -15996,7 +16470,7 @@ export default function Chat() {
                                     const mId = activeViewOnceMsg._id || activeViewOnceMsg.id;
                                     const audio = audioInstanceRef.current;
                                     if (!audio) return;
-                                    
+
                                     if (playingAudioId === mId) {
                                         audio.pause();
                                         setPlayingAudioId(null);
@@ -16011,8 +16485,8 @@ export default function Chat() {
                                     <span className="wa-fullscreen-timer">
                                         {formatVoiceTime(viewOnceElapsed)}
                                     </span>
-                                    <div 
-                                        className="wa-playback-speed-badge" 
+                                    <div
+                                        className="wa-playback-speed-badge"
                                         onClick={togglePlaybackSpeed}
                                         style={{
                                             position: 'static',
@@ -16020,7 +16494,7 @@ export default function Chat() {
                                             height: '38px',
                                             fontSize: '13px',
                                             background: 'rgba(2, 126, 181, 0.05)',
-                                            color: '#027EB5',
+                                            color: '#0EA5BE',
                                             border: '1px solid rgba(2, 126, 181, 0.3)',
                                             inset: 'unset',
                                             display: 'flex',
@@ -16059,6 +16533,47 @@ export default function Chat() {
                 </div>
             )}
 
+            {fileToOpenConfirm && (
+                <ConfirmModal
+                    isOpen={!!fileToOpenConfirm}
+                    title="Security Warning: Open File?"
+                    confirmVariant="danger"
+                    message={`Caution: "${fileToOpenConfirm.fileName}" could be harmful. Only open files from people you trust.`}
+                    onConfirm={() => {
+                        handleOpenFileActual(fileToOpenConfirm.filePath, fileToOpenConfirm.fileName);
+                        setFileToOpenConfirm(null);
+                    }}
+                    onSecondary={() => {
+                        window.open(fileToOpenConfirm.filePath, '_blank');
+                        setFileToOpenConfirm(null);
+                    }}
+                    secondaryText="Download Instead"
+                    secondaryVariant="primary"
+                    onCancel={() => setFileToOpenConfirm(null)}
+                    confirmText="Proceed with Open"
+                />
+            )}
+
+            {appNotFoundInfo && (
+                <ConfirmModal
+                    isOpen={!!appNotFoundInfo}
+                    title="System App Not Found"
+                    confirmVariant="primary"
+                    message={`It seems you don't have a registered application to open .${appNotFoundInfo.ext} files directly. You can find one in the Store or open/download it here in your browser.`}
+                    onConfirm={() => {
+                        window.location.assign(`ms-windows-store://search?query=.${appNotFoundInfo.ext}`);
+                        setAppNotFoundInfo(null);
+                    }}
+                    onSecondary={() => {
+                        window.open(appNotFoundInfo.filePath, '_blank');
+                        setAppNotFoundInfo(null);
+                    }}
+                    secondaryText="Open in Browser"
+                    secondaryVariant="primary"
+                    onCancel={() => setAppNotFoundInfo(null)}
+                    confirmText="Go to Store"
+                />
+            )}
             {isDeactivateCommunityConfirmOpen && deactivateCommunityTarget && (
                 <div
                     className="wa-mute-modal-overlay"

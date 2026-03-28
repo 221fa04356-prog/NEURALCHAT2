@@ -13,7 +13,7 @@
     --wa-text-secondary: #54656f;
     --wa-icon: #54656f;
     --wa-border: #e9edef;
-    --wa-active-icon: #027eb5;
+    --wa-active-icon: #0EA5BE;
     /* Indigo 600 */
     --wa-sidebar-width: 450px;
 }
@@ -1944,6 +1944,99 @@ html {
     display: flex;
     align-items: center;
     padding: 0 4px;
+}
+
+/* Document Preview in Messages */
+.wa-msg-document {
+    display: flex;
+    flex-direction: column;
+    min-width: 280px;
+    max-width: 330px;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 2px;
+    border: 1px solid rgba(0,0,0,0.05);
+}
+
+.wa-msg-document-preview {
+    width: 100%;
+    height: 150px;
+    background: #f0f2f5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+    border-bottom: 1px solid #f0f2f5;
+}
+
+.wa-msg-document-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.wa-msg-document-details {
+    display: flex;
+    align-items: flex-start;
+    padding: 12px;
+    gap: 12px;
+    background: #f8f9fa;
+}
+
+.wa-msg-document-icon-wrapper {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.wa-msg-document-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.wa-msg-document-name {
+    font-size: 15px;
+    font-weight: 500;
+    color: #111b21;
+    line-height: 1.2;
+    margin-bottom: 4px;
+    word-break: break-all;
+}
+
+.wa-msg-document-meta {
+    font-size: 13px;
+    color: #667781;
+}
+
+.wa-msg-document-actions {
+    display: flex;
+    border-top: 1px solid #e9edef;
+    background: white;
+}
+
+.wa-msg-document-action-btn {
+    flex: 1;
+    height: 44px;
+    border: none;
+    background: white;
+    color: #027EB5;
+    font-weight: 500;
+    font-size: 15px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.wa-msg-document-action-btn:first-child {
+    border-right: 1px solid #e9edef;
+}
+
+.wa-msg-document-action-btn:hover {
+    background: #f1f2f3;
+    color: #016a98;
 }
 
 .wa-file-preview-badge {

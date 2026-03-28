@@ -11,6 +11,7 @@ export default function AIChatWidget() {
     const [isLoading, setIsLoading] = useState(false);
     const [loadingText, setLoadingText] = useState('Agent is thinking...');
     const [loadingCategory, setLoadingCategory] = useState('text');
+    const [errorMsg, setErrorMsg] = useState('');
 
     // Drag State
     const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -111,6 +112,13 @@ export default function AIChatWidget() {
         return () => clearInterval(interval);
     }, [isLoading, loadingCategory]);
 
+    useEffect(() => {
+        if (errorMsg) {
+            const timer = setTimeout(() => setErrorMsg(''), 4000);
+            return () => clearTimeout(timer);
+        }
+    }, [errorMsg]);
+
     const fetchHistory = async () => {
         try {
             const token = localStorage.getItem('token');
@@ -132,12 +140,12 @@ export default function AIChatWidget() {
 
             if (allowedExtensions.includes(extension)) {
                 if (pastedFile.size > 1073741824) {
-                    alert('File must be less than 1GB');
+                    setErrorMsg('File must be less than 1GB');
                 } else {
                     setFile(pastedFile);
                 }
             } else {
-                alert('Only JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, and Video files are allowed.');
+                setErrorMsg('Only JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, and Video files are allowed.');
             }
         }
     };
@@ -158,12 +166,12 @@ export default function AIChatWidget() {
 
             if (allowedExtensions.includes(extension)) {
                 if (droppedFile.size > 1073741824) {
-                    alert('File must be less than 1GB');
+                    setErrorMsg('File must be less than 1GB');
                 } else {
                     setFile(droppedFile);
                 }
             } else {
-                alert('Only JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, and Video files are allowed.');
+                setErrorMsg('Only JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, and Video files are allowed.');
             }
         }
     };
@@ -397,13 +405,13 @@ export default function AIChatWidget() {
 
                                     if (allowedExtensions.includes(extension)) {
                                         if (selectedFile.size > 1073741824) { // 1GB limit
-                                            alert('File must be less than 1GB');
+                                            setErrorMsg('File must be less than 1GB');
                                             e.target.value = '';
                                         } else {
                                             setFile(selectedFile);
                                         }
                                     } else {
-                                        alert('Only JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, and Video files are allowed.');
+                                        setErrorMsg('Only JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, and Video files are allowed.');
                                         e.target.value = '';
                                     }
                                 }
@@ -472,6 +480,11 @@ export default function AIChatWidget() {
                         />
                         <button type="submit" className="send-btn"><Send size={18} /></button>
                     </form>
+                    {errorMsg && (
+                        <div className="ai-error-banner">
+                            {errorMsg}
+                        </div>
+                    )}
                 </div>
             )}
         </div>
