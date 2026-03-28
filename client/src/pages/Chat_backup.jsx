@@ -646,11 +646,11 @@ export default function Chat() {
     const handleReaction = async (messageId, emoji, isGroup) => {
         try {
             const token = localStorage.getItem('token');
-            const res = await axios.post(`/api/chat/messages/${messageId}/react`, {
+            const res = await axios.post(/api/messages//react, {
                 emoji,
                 isGroup
             }, {
-                headers: { 'Authorization': `Bearer ${token}` }
+                headers: { 'Authorization': Bearer  }
             });
 
             if (res.data.status === 'success') {
@@ -664,8 +664,7 @@ export default function Chat() {
             }
         } catch (err) {
             console.error('[REACTION ERROR]', err);
-            const errorMsg = err.response?.data?.error || err.message || 'Unknown error';
-            if (typeof setSnackbar !== 'undefined') setSnackbar({ message: `Failed to react: ${errorMsg}`, type: 'error' });
+            if (typeof setSnackbar !== 'undefined') setSnackbar({ message: 'Failed to react to message', type: 'error' });
         }
     };
 
@@ -772,7 +771,6 @@ export default function Chat() {
     const infoMessageRef = useRef(null); // Keep ref in sync for socket handler closures
     useEffect(() => { infoMessageRef.current = infoMessage; }, [infoMessage]);
     const [snackbar, setSnackbar] = useState(null); // For feedback
-    const [reactionDetails, setReactionDetails] = useState(null); // { msg, isGroup }
     const [typingLinkPreview, setTypingLinkPreview] = useState(null); // For typing preview overlay
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [msgToDelete, setMsgToDelete] = useState(null);
@@ -8780,13 +8778,13 @@ export default function Chat() {
                         {!isDeleted && (
                             <>
                                 <div className="wa-reactions-row">
-                                    <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '👍', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Like" data-tooltip-pos="center">👍</span>
-                                    <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '❤️', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Love" data-tooltip-pos="center">❤️</span>
-                                    <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '😂', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Haha" data-tooltip-pos="center">😂</span>
-                                    <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '😮', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Wow" data-tooltip-pos="center">😮</span>
-                                    <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '😢', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Sad" data-tooltip-pos="center">😢</span>
-                                    <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '🙏', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Thanks" data-tooltip-pos="center">🙏</span>
-                                    <Plus size={18} onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }} data-tooltip="More" data-tooltip-pos="center" />
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>👍</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>❤️</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>😂</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>😮</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>😢</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>🙏</span>
+                                    <Plus size={18} onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }} />
                                 </div>
                                 <div className="wa-dropdown-divider"></div>
                             </>
@@ -12765,37 +12763,6 @@ export default function Chat() {
                                                                         : <CheckCheck size={14} color="#9ca3af" />
                                                                 )}
                                                             </div>
-                                                            {/* Reaction display badges - P2P */}
-                                                            {msg.reactions && msg.reactions.length > 0 && (() => {
-                                                                const currentUserId = user.id || user._id;
-                                                                const grouped = msg.reactions.reduce((acc, r) => {
-                                                                    if (!acc[r.emoji]) acc[r.emoji] = { count: 0, reactedByMe: false, userNames: [] };
-                                                                    acc[r.emoji].count++;
-                                                                    const isMeReaction = String(r.user_id) === String(currentUserId);
-                                                                    if (isMeReaction) acc[r.emoji].reactedByMe = true;
-                                                                    
-                                                                    const uName = isMeReaction ? 'You' : (users.find(u => String(u._id || u.id) === String(r.user_id))?.name || 'User');
-                                                                    if (!acc[r.emoji].userNames.includes(uName)) {
-                                                                        acc[r.emoji].userNames.push(uName);
-                                                                    }
-                                                                    return acc;
-                                                                }, {});
-                                                                return (
-                                                                    <div className={`wa-reaction-badges ${isMe ? 'wa-reaction-badges-sent' : 'wa-reaction-badges-recv'}`}>
-                                                                        {Object.entries(grouped).map(([emoji, { count, reactedByMe, userNames }]) => (
-                                                                            <span
-                                                                                key={emoji}
-                                                                                className={`wa-reaction-badge ${reactedByMe ? 'reacted' : ''}`}
-                                                                                onClick={(e) => { e.stopPropagation(); const bubble = e.currentTarget.closest('.wa-message-bubble') || e.currentTarget.closest('.wa-msg-sent') || e.currentTarget.closest('.wa-msg-recv'); setReactionDetails({ msg, isGroup: false, rect: (bubble || e.currentTarget).getBoundingClientRect() }); }}
-                                                                                data-tooltip={userNames.length > 5 ? `${userNames.slice(0, 5).join(', ')} and ${userNames.length - 5} others` : userNames.join(', ')}
-                                                                                data-tooltip-pos="center"
-                                                                            >
-                                                                                {emoji}{count > 1 && <span className="wa-reaction-count">{count}</span>}
-                                                                            </span>
-                                                                        ))}
-                                                                    </div>
-                                                                );
-                                                            })()}
                                                         </div>
                                                     </div>
                                                 );
@@ -13025,7 +12992,7 @@ export default function Chat() {
                                                 <div className="wa-input-pill">
                                                     <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
                                                         {renderAttachmentMenu()}
-                                                        <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} data-tooltip="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
+                                                        <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
                                                             <Paperclip size={22} color="#54656f" />
                                                         </button>
                                                         <input
@@ -14004,37 +13971,6 @@ export default function Chat() {
                                                                     </div>
                                                                 )}
                                                             </div>
-                                                            {/* Reaction display badges - Group */}
-                                                            {msg.reactions && msg.reactions.length > 0 && (() => {
-                                                                const currentUserId = user.id || user._id;
-                                                                const grouped = msg.reactions.reduce((acc, r) => {
-                                                                    if (!acc[r.emoji]) acc[r.emoji] = { count: 0, reactedByMe: false, userNames: [] };
-                                                                    acc[r.emoji].count++;
-                                                                    const isMeReaction = String(r.user_id) === String(currentUserId);
-                                                                    if (isMeReaction) acc[r.emoji].reactedByMe = true;
-                                                                    
-                                                                    const uName = isMeReaction ? 'You' : (users.find(u => String(u._id || u.id) === String(r.user_id))?.name || 'User');
-                                                                    if (!acc[r.emoji].userNames.includes(uName)) {
-                                                                        acc[r.emoji].userNames.push(uName);
-                                                                    }
-                                                                    return acc;
-                                                                }, {});
-                                                                return (
-                                                                    <div className={`wa-reaction-badges ${isMe ? 'wa-reaction-badges-sent' : 'wa-reaction-badges-recv'}`}>
-                                                                        {Object.entries(grouped).map(([emoji, { count, reactedByMe, userNames }]) => (
-                                                                            <span
-                                                                                key={emoji}
-                                                                                className={`wa-reaction-badge ${reactedByMe ? 'reacted' : ''}`}
-                                                                                onClick={(e) => { e.stopPropagation(); const bubble = e.currentTarget.closest('.wa-message-bubble') || e.currentTarget.closest('.wa-msg-sent') || e.currentTarget.closest('.wa-msg-recv'); setReactionDetails({ msg, isGroup: true, rect: (bubble || e.currentTarget).getBoundingClientRect() }); }}
-                                                                                data-tooltip={userNames.length > 5 ? `${userNames.slice(0, 5).join(', ')} and ${userNames.length - 5} others` : userNames.join(', ')}
-                                                                                data-tooltip-pos="center"
-                                                                            >
-                                                                                {emoji}{count > 1 && <span className="wa-reaction-count">{count}</span>}
-                                                                            </span>
-                                                                        ))}
-                                                                    </div>
-                                                                );
-                                                            })()}
                                                         </div>
                                                     </div>
                                                 );
@@ -16751,124 +16687,6 @@ export default function Chat() {
                 </div>
             )}
 
-            
-            {/* Reaction Details Modal */}
-            {reactionDetails && (() => {
-                    const rWidth = 210;
-                    const activeTab = reactionDetails.activeTab || 'all';
-                    const allReactions = reactionDetails.msg.reactions;
-                    const reactions = activeTab === 'all' ? allReactions : allReactions.filter(r => r.emoji === activeTab);
-                    
-                    const displayCount = Math.min(4, Math.max(activeTab === 'all' ? allReactions.length : reactions.length, 1));
-                    const rHeight = 50 + displayCount * 54; 
-                    
-                    const rect = reactionDetails.rect;
-
-                    // Vertical: Large 30px gap to ensure 'separate' look
-                    let top = rect ? rect.top - rHeight - 30 : window.innerHeight / 2 - rHeight / 2;
-                    if (top < 70 && rect) top = rect.bottom + 30;
-                    if (top + rHeight > window.innerHeight - 10) top = window.innerHeight - rHeight - 10;
-                    if (top < 10) top = 10;
-
-                    // Horizontal: Center over bubble
-                    let left = rect ? rect.left + (rect.width / 2) - (rWidth / 2) : window.innerWidth / 2 - rWidth / 2;
-                    if (left + rWidth > window.innerWidth - 10) left = window.innerWidth - rWidth - 10;
-                    if (left < 10) left = 10;
-
-                    const grouped = allReactions.reduce((acc, r) => {
-                        if (!acc[r.emoji]) acc[r.emoji] = 0;
-                        acc[r.emoji]++;
-                        return acc;
-                    }, {});
-
-                    return (
-                        <div
-                            onClick={() => setReactionDetails(null)}
-                            style={{ zIndex: 32000, position: 'fixed', inset: 0, background: 'transparent' }}
-                        >
-                            <div
-                                onClick={(e) => e.stopPropagation()}
-                                style={{
-                                    position: 'absolute', top, left,
-                                    width: rWidth, height: rHeight,
-                                    borderRadius: 16,
-                                    background: 'rgba(255, 255, 255, 0.98)',
-                                    backdropFilter: 'blur(10px)',
-                                    boxShadow: '0 12px 30px rgba(0,0,0,0.12), 0 0 1px rgba(0,0,0,0.1)',
-                                    border: '1px solid rgba(0, 0, 0, 0.08)',
-                                    display: 'flex', flexDirection: 'column',
-                                    overflow: 'hidden',
-                                    animation: 'wa-popover-in 0.2s cubic-bezier(0.1, 0.8, 0.2, 1)'
-                                }}
-                            >
-                                {/* Tab bar with smooth sliding feel highlight */}
-                                <div style={{ display: 'flex', borderBottom: '1px solid #f0f2f5', padding: '0 8px', gap: 4, flexShrink: 0, overflowX: 'auto', background: '#fff' }}>
-                                    <div 
-                                        onClick={() => setReactionDetails({ ...reactionDetails, activeTab: 'all' })}
-                                        style={{ 
-                                            padding: '12px 10px', fontWeight: activeTab === 'all' ? 600 : 500, fontSize: 13, whiteSpace: 'nowrap', cursor: 'pointer',
-                                            color: activeTab === 'all' ? '#0EA5BE' : '#667781',
-                                            position: 'relative',
-                                            transition: 'color 0.2s'
-                                        }}
-                                    >
-                                        All {allReactions.length}
-                                        {activeTab === 'all' && (
-                                            <div style={{ position: 'absolute', bottom: 0, left: '10%', right: '10%', height: 3, background: '#0EA5BE', borderRadius: '3px 3px 0 0' }} />
-                                        )}
-                                    </div>
-                                    {Object.entries(grouped).map(([emoji, count]) => (
-                                        <div 
-                                            key={emoji} 
-                                            onClick={() => setReactionDetails({ ...reactionDetails, activeTab: emoji })}
-                                            style={{ 
-                                                padding: '12px 10px', fontWeight: activeTab === emoji ? 600 : 500, fontSize: 13, whiteSpace: 'nowrap', cursor: 'pointer',
-                                                color: activeTab === emoji ? '#0EA5BE' : '#667781',
-                                                position: 'relative',
-                                                transition: 'color 0.2s'
-                                            }}
-                                        >
-                                            {emoji} {count}
-                                            {activeTab === emoji && (
-                                                <div style={{ position: 'absolute', bottom: 0, left: '10%', right: '10%', height: 3, background: '#0EA5BE', borderRadius: '3px 3px 0 0' }} />
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                                {/* Filtered Reaction list */}
-                                <div style={{ flex: 1, overflowY: 'auto' }}>
-                                    {reactions.map((r, i) => {
-                                        const isMe = String(r.user_id) === String(user.id || user._id);
-                                        const u = isMe ? user : users.find(usr => String(usr._id || usr.id) === String(r.user_id));
-                                        const displayName = isMe ? 'You' : (u ? u.name : 'Unknown');
-                                        const displayAvatar = u?.avatar
-                                            ? (u.avatar.startsWith('http') ? u.avatar : `http://localhost:5000${u.avatar}`)
-                                            : 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png';
-                                        return (
-                                            <div
-                                                key={i}
-                                                onClick={() => { if (isMe) { handleReaction(reactionDetails.msg._id || reactionDetails.msg.id, r.emoji, reactionDetails.isGroup); setReactionDetails(null); } }}
-                                                style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', cursor: isMe ? 'pointer' : 'default', background: isMe ? '#f8f9fa' : 'transparent', transition: 'background 0.15s' }}
-                                                onMouseEnter={e => { if (isMe) e.currentTarget.style.background = '#f1f2f3'; }}
-                                                onMouseLeave={e => { if (isMe) e.currentTarget.style.background = isMe ? '#f8f9fa' : 'transparent'; }}
-                                            >
-                                                <div style={{ width: 34, height: 34, borderRadius: '50%', overflow: 'hidden', marginRight: 10, flexShrink: 0 }}>
-                                                    <img src={displayAvatar} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                </div>
-                                                <div style={{ flex: 1, minWidth: 0 }}>
-                                                    <div style={{ color: '#111b21', fontSize: 13.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</div>
-                                                    {isMe && <div style={{ color: '#8696a0', fontSize: 11, marginTop: 0.5 }}>Click to remove</div>}
-                                                </div>
-                                                <div style={{ fontSize: 20, paddingLeft: 6 }}>{r.emoji}</div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        </div>
-                    );
-                })()
-            }
             {renderContactSelectionPanel()}
             {renderConfirmContactSendPanel()}
             {renderContactDetailPopup()}
