@@ -1,0 +1,10 @@
+                        onClick={() => setOpenDropdown(null)}
+                        onContextMenu={(e) => { e.preventDefault(); setOpenDropdown(null); }}
+                    />
+                    <div
+                        className="wa-dropdown-menu msg-dropdown active-fixed"
+                        style={menuStyle}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {!isDeleted && (
+                            <>

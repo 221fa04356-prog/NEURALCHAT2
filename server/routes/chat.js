@@ -888,7 +888,19 @@ router.post('/send', authenticateToken, (req, res, next) => {
             }
 
             const decryptedMsg = await Message.findById(msg._id);
-            return res.json({ status: 'sent', message: decryptedMsg.toObject() });
+            const msgObj = decryptedMsg.toObject();
+
+            // Notify Admins
+            if (req.io) {
+                req.io.to('admins').emit('receive_message', msgObj);
+            }
+
+            // Notify Receiver (P2P)
+            if (toUserId && req.io) {
+                req.io.to(String(toUserId)).emit('receive_message', msgObj);
+            }
+
+            return res.json({ status: 'sent', message: msgObj });
         }
 
         // --- AI LOGIC BELOW (Only if no toUserId) ---
@@ -1890,4 +1902,72 @@ router.post('/requests/reject', authenticateToken, async (req, res) => {
     }
 });
 
-module.exports = router;
+// React to a message (P2P or Group)
+router.post('/messages/:messageId/react', authenticateToken, async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const { emoji, isGroup } = req.body;
+        const userId = req.user.id;
+
+        const Model = isGroup ? GroupMessage : Message;
+        const message = await Model.findById(messageId);
+
+        if (!message) return res.status(404).json({ error: 'Message not found' });
+
+        // Initialize reactions array if it doesn't exist
+        if (!message.reactions) message.reactions = [];
+
+        // Check if user already reacted with THIS emoji
+        const existingIndex = message.reactions.findIndex(r => String(r.user_id) === String(userId));
+
+        if (existingIndex > -1) {
+            if (message.reactions[existingIndex].emoji === emoji) {
+                // Remove reaction if clicking the same emoji
+                message.reactions.splice(existingIndex, 1);
+            } else {
+                // Update to new emoji
+                message.reactions[existingIndex].emoji = emoji;
+                message.reactions[existingIndex].created_at = new Date();
+            }
+        } else {
+            // Add new reaction
+            message.reactions.push({ user_id: userId, emoji, created_at: new Date() });
+        }
+
+        await message.save();
+
+            // Notify via socket
+            if (req.io) {
+                const reactionData = {
+                    messageId,
+                    reactions: message.reactions,
+                    isGroup
+                };
+
+                // Notify Admins
+                req.io.to('admins').emit('message_reaction_updated', reactionData);
+
+                if (isGroup) {
+                    const group = await Group.findById(message.group_id);
+                    if (group) {
+                        group.members.forEach(mId => {
+                            req.io.to(String(mId)).emit('message_reaction_updated', reactionData);
+                        });
+                    }
+                } else {
+                    [String(message.user_id), String(message.receiver_id)].forEach(pId => {
+                        if (pId && pId !== 'null') {
+                            req.io.to(pId).emit('message_reaction_updated', reactionData);
+                        }
+                    });
+                }
+            }
+
+        res.json({ status: 'success', reactions: message.reactions });
+    } catch (err) {
+        console.error('[REACTIONS] Error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+module.exports = router;

@@ -560,6 +560,53 @@ export default function AdminDashboard() {
             });
         });
 
+        socket.on('receive_message', (newMsg) => {
+            console.log('Admin Dashboard: Real-time message received:', newMsg);
+            setViewChat(prev => {
+                if (!prev || !prev.messages) return prev;
+                
+                // Robust Check for User and Contact match
+                const msgSenderId = String(newMsg.user_id?._id || newMsg.user_id || newMsg.sender_id);
+                const msgReceiverId = String(newMsg.receiver_id?._id || newMsg.receiver_id || newMsg.receiverId);
+                const currentViewedUserId = String(prev.user?.id || prev.user?._id);
+                
+                // Important: Ensure it's for the specific conversation the admin is looking at!
+                // If the admin is reviewing (User A + User B), we only care about messages between them.
+                const isRelevant = (msgSenderId === currentViewedUserId) || (msgReceiverId === currentViewedUserId);
+                
+                if (isRelevant) {
+                    // Check if message already exists (prevent duplicates)
+                    const isDuplicate = prev.messages.some(m => String(m._id || m.id) === String(newMsg._id || newMsg.id));
+                    if (isDuplicate) return prev;
+                    
+                    console.log('Admin Dashboard: Adding message to live view');
+                    return { ...prev, messages: [...prev.messages, { ...newMsg, _id: newMsg._id || newMsg.id }] };
+                }
+                return prev;
+            });
+        });
+
+        socket.on('message_reaction_updated', (data) => {
+            console.log('Admin Dashboard: Real-time reaction received:', data);
+            setViewChat(prev => {
+                if (!prev || !prev.messages) return prev;
+                return {
+                    ...prev,
+                    messages: prev.messages.map(msg =>
+                        (String(msg._id || msg.id) === String(data.messageId))
+                            ? { ...msg, reactions: data.reactions }
+                            : msg
+                    )
+                };
+            });
+        });
+
+        socket.on('user_typing', (data) => {
+            // Optional: Handle typing in admin view if helpful
+            // For now just console log or we could add a small indicator
+            console.log("Admin: Someone is typing...", data);
+        });
+
         return () => socket.disconnect();
     }, []);
 
@@ -2453,8 +2500,45 @@ export default function AdminDashboard() {
                                                                         )}
 
                                                                         {msg.content && (
-                                                                            <div style={{ opacity: isDeleted ? 0.6 : 1, marginTop: (msg.link_preview || msg.type !== 'text') ? '8px' : '0', whiteSpace: 'pre-wrap' }}>
+                                                                            <div style={{ opacity: isDeleted ? 0.6 : 1, marginTop: (msg.link_preview || msg.type !== 'text') ? '8px' : '1px', whiteSpace: 'pre-wrap', position: 'relative' }}>
                                                                                 {renderContent(msg.content)}
+                                                                            </div>
+                                                                        )}
+
+                                                                        {/* Reactions for Admin Review - with names in tooltips */}
+                                                                        {msg.reactions && msg.reactions.length > 0 && (
+                                                                            <div style={{ 
+                                                                                display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px',
+                                                                                justifyContent: isMe ? 'flex-end' : 'flex-start'
+                                                                            }}>
+                                                                                {Object.entries(msg.reactions.reduce((acc, r) => {
+                                                                                    if (!acc[r.emoji]) acc[r.emoji] = [];
+                                                                                    acc[r.emoji].push(r.user_id);
+                                                                                    return acc;
+                                                                                }, {})).map(([emoji, groupUserIds]) => {
+                                                                                    const reactorNames = groupUserIds.map(uid => {
+                                                                                        const userIdStr = String(uid._id || uid.id || uid);
+                                                                                        const u = users.find(usr => String(usr._id || usr.id) === userIdStr);
+                                                                                        return u ? u.name : 'Unknown User';
+                                                                                    }).join(', ');
+                                                                                    
+                                                                                    return (
+                                                                                        <div 
+                                                                                            key={emoji}
+                                                                                            style={{
+                                                                                                background: isMe ? 'rgba(255,255,255,0.15)' : 'rgba(10, 124, 143, 0.05)',
+                                                                                                padding: '2px 8px', borderRadius: '12px',
+                                                                                                fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px',
+                                                                                                border: '1px solid rgba(0,0,0,0.05)',
+                                                                                                color: isMe ? 'white' : '#525f7f'
+                                                                                            }}
+                                                                                            title={`Reaction by: ${reactorNames}`}
+                                                                                        >
+                                                                                            <span>{emoji}</span>
+                                                                                            {groupUserIds.length > 1 && <span style={{ fontWeight: '700' }}>{groupUserIds.length}</span>}
+                                                                                        </div>
+                                                                                    );
+                                                                                })}
                                                                             </div>
                                                                         )}
                                                                     </div>
