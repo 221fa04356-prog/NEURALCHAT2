@@ -802,6 +802,11 @@ export default function Chat() {
     const [isRequestsModalOpen, setIsRequestsModalOpen] = useState(false); // Requests modal
     const [accountBanned, setAccountBanned] = useState(user.bannedUntil || null); // Temporary ban
     const [accountLocked, setAccountLocked] = useState(user.adminLock || false); // Permanent lock
+    const [isContactSelectionOpen, setIsContactSelectionOpen] = useState(false);
+    const [contactSearchQuery, setContactSearchQuery] = useState('');
+    const [selectedContacts, setSelectedContacts] = useState([]);
+    const [isConfirmContactSendOpen, setIsConfirmContactSendOpen] = useState(false);
+    const [viewingContact, setViewingContact] = useState(null); // For Pic 5
 
     const isAccountBanned = () => {
         if (!accountBanned) return false;
@@ -1153,6 +1158,54 @@ export default function Chat() {
             setSnackbar({ message: `Update Failed: ${errorMsg}`, type: 'error' });
         }
     };
+
+    const handleEditMessageSubmit = async () => {
+        if (!editInput.trim() || !editingMessage) return;
+        try {
+            const id = editingMessage._id || editingMessage.id;
+            const endpoint = editingMessage.group_id 
+                ? `/api/groups/message/${id}/edit` 
+                : `/api/chat/message/${id}/edit`;
+            const token = localStorage.getItem('token');
+            const res = await axios.post(endpoint, { content: editInput }, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            
+            if (res.data.status === 'success') {
+                // Locally update messages
+                const updateMsgs = (prev) => prev.map(m => (String(m._id || m.id) === String(id)) ? { ...m, content: editInput, is_edited: true, edited_at: new Date() } : m);
+                
+                if (editingMessage.group_id) {
+                    setGroupMessages(updateMsgs);
+                    // Update group sidebar preview
+                    setGroups(prev => prev.map(g => String(g._id || g.id) === String(editingMessage.group_id) ? { ...g, lastMessage: { ...g.lastMessage, content: editInput, is_edited: true, edited_at: new Date() } } : g));
+                    // Update community sidebar preview
+                    setCommunities(prev => prev.map(c => {
+                        let updatedC = { ...c };
+                        const annId = String(c.announcements?._id || c.announcements?.id || c.announcements);
+                        if (String(editingMessage.group_id) === annId) {
+                            if (c.announcements?.lastMessage && String(c.announcements.lastMessage._id || c.announcements.lastMessage.id) === String(id)) {
+                                updatedC.announcements = { ...c.announcements, lastMessage: { ...c.announcements.lastMessage, content: editInput, is_edited: true, edited_at: new Date() } };
+                            }
+                        } else {
+                            updatedC.groups = (c.groups || []).map(g => String(g._id || g.id) === String(editingMessage.group_id) ? { ...g, lastMessage: { ...g.lastMessage, content: editInput, is_edited: true, edited_at: new Date() } } : g);
+                        }
+                        return updatedC;
+                    }));
+                } else {
+                    setMessages(updateMsgs);
+                    // Update contact sidebar preview
+                    setUsers(prev => prev.map(u => String(u._id || u.id) === String(selectedUser?._id || selectedUser?.id) ? { ...u, lastMessage: { ...u.lastMessage, content: editInput, is_edited: true, edited_at: new Date() } } : u));
+                }
+                setEditingMessage(null);
+                setEditInput("");
+                setSnackbar({ message: "Message edited", type: 'success' });
+            }
+        } catch (err) {
+            console.error('Edit failed', err);
+            setSnackbar({ message: err.response?.data?.error || "Edit failed", type: 'error' });
+        }
+    };
     const [isEditingProfileAbout, setIsEditingProfileAbout] = useState(false);
     const [isEditingProfilePhone, setIsEditingProfilePhone] = useState(false);
     const [profileEditValue, setProfileEditValue] = useState("");
@@ -1249,6 +1302,8 @@ export default function Chat() {
     const [selectOwnerSearchQuery, setSelectOwnerSearchQuery] = useState('');
     const [communityMemberSearchQuery, setCommunityMemberSearchQuery] = useState('');
     const [isCommunityMemberSearchOpen, setIsCommunityMemberSearchOpen] = useState(false);
+    const [isDeactivateCommunityConfirmOpen, setIsDeactivateCommunityConfirmOpen] = useState(false);
+    const [deactivateCommunityTarget, setDeactivateCommunityTarget] = useState(null);
 
     // --- Recording State ---
     const [isRecording, setIsRecording] = useState(false);
@@ -1256,6 +1311,8 @@ export default function Chat() {
     const [playingAudioId, setPlayingAudioId] = useState(null);
     const [playbackSpeed, setPlaybackSpeed] = useState(1);
     const [viewOncePlaybackSpeed, setViewOncePlaybackSpeed] = useState(1);
+    const [editingMessage, setEditingMessage] = useState(null);
+    const [editInput, setEditInput] = useState("");
 
 
     // Synchronize refs with state
@@ -1313,6 +1370,33 @@ export default function Chat() {
         const myId = user.id || user._id;
         const sId = msg.sender_id?._id || msg.sender_id || msg.user_id;
         return String(sId) === String(myId);
+    };
+
+    const canEditMessage = (msg) => {
+        if (!msg || msg.type !== 'text') return false;
+        if (msg.is_deleted_by_user || msg.is_deleted_by_admin) return false;
+        
+        const myId = user.id || user._id;
+        const senderId = msg.sender_id?._id || msg.sender_id || msg.user_id;
+        if (String(senderId) !== String(myId)) return false;
+
+        // P2P check - removed is_read restriction
+        if (!msg.group_id) {
+            // allows editing any time for now
+        }
+
+        // Group check
+        if (msg.group_id) {
+            const group = (groups || []).find(g => String(g._id || g.id) === String(msg.group_id));
+            if (group) {
+                const requiredReads = (group.members || []).length - 1;
+                if (msg.read_by && msg.read_by.length >= requiredReads && requiredReads > 0) {
+                    return false;
+                }
+            }
+        }
+        
+        return true;
     };
 
     // --- Scroll to Bottom Effect ---
@@ -2196,6 +2280,58 @@ export default function Chat() {
             setMessages(updateMsgs);
             setGroupMessages(updateMsgs);
         };
+
+        const onMessageEdited = (data) => {
+            console.log('Socket: message_edited', data);
+            const updateMsgs = prev => prev.map(m => (String(m._id || m.id) === String(data.messageId)) ? { ...m, content: data.content, is_edited: true, edited_at: data.edited_at } : m);
+            setMessages(updateMsgs);
+            
+            // Sync contact sidebar preview
+            setUsers(prev => prev.map(u => {
+                if (u.lastMessage && String(u.lastMessage._id || u.lastMessage.id) === String(data.messageId)) {
+                    return { ...u, lastMessage: { ...u.lastMessage, content: data.content, is_edited: true, edited_at: data.edited_at } };
+                }
+                return u;
+            }));
+        };
+        socket.on('message_edited', onMessageEdited);
+
+        const onGroupMessageEdited = (data) => {
+            console.log('Socket: group_message_edited', data);
+            const updateMsgs = prev => prev.map(m => (String(m._id || m.id) === String(data.messageId)) ? { ...m, content: data.content, is_edited: true, edited_at: data.edited_at } : m);
+            setGroupMessages(updateMsgs);
+            
+            // Sync group sidebar preview
+            setGroups(prev => prev.map(g => {
+                const isMatch = String(g._id || g.id) === String(data.groupId);
+                const isMsgMatch = g.lastMessage && String(g.lastMessage._id || g.lastMessage.id) === String(data.messageId);
+                if (isMatch || isMsgMatch) {
+                   return { ...g, lastMessage: { ...g.lastMessage, content: data.content, is_edited: true, edited_at: data.edited_at } };
+                }
+                return g;
+            }));
+            
+            // Sync communities sidebar preview
+            setCommunities(prev => prev.map(c => {
+                let updatedC = { ...c };
+                const annId = String(c.announcements?._id || c.announcements?.id || c.announcements);
+                if (String(data.groupId) === annId) {
+                    if (c.announcements?.lastMessage && String(c.announcements.lastMessage._id || c.announcements.lastMessage.id) === String(data.messageId)) {
+                        updatedC.announcements = { ...c.announcements, lastMessage: { ...c.announcements.lastMessage, content: data.content, is_edited: true, edited_at: data.edited_at } };
+                    }
+                } else {
+                    updatedC.groups = (c.groups || []).map(g => {
+                        const isMsgMatch = g.lastMessage && String(g.lastMessage._id || g.lastMessage.id) === String(data.messageId);
+                        if (String(g._id || g.id) === String(data.groupId) || isMsgMatch) {
+                           return { ...g, lastMessage: { ...(g.lastMessage || {}), content: data.content, is_edited: true, edited_at: data.edited_at } };
+                        }
+                        return g;
+                    });
+                }
+                return updatedC;
+            }));
+        };
+        socket.on('group_message_edited', onGroupMessageEdited);
 
         const onMessageDeleted = (data) => {
             console.log('Socket: message_deleted', data);
@@ -3795,6 +3931,28 @@ export default function Chat() {
         }
     };
 
+    const handleDeactivateCommunity = async () => {
+        if (!deactivateCommunityTarget) return;
+        const targetId = deactivateCommunityTarget.id || deactivateCommunityTarget._id;
+        try {
+            const token = localStorage.getItem('token');
+            await axios.delete(`/api/communities/${targetId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            setIsDeactivateCommunityConfirmOpen(false);
+            setDeactivateCommunityTarget(null);
+            setIsCommunityInfoOpen(false);
+            setIsContactInfoOpen(false);
+            setSelectedCommunity(null);
+            setSelectedGroup(null);
+            fetchCommunities();
+            setSnackbar({ message: 'Community deactivated successfully', type: 'success' });
+        } catch (err) {
+            console.error('Failed to deactivate community:', err);
+            setSnackbar({ message: 'Failed to deactivate community', type: 'error' });
+        }
+    };
+
     const handleExitCommunityAction = async (type) => {
         const community = exitCommunityTarget;
         if (!community) return;
@@ -4143,6 +4301,78 @@ export default function Chat() {
     };
 
 
+    const handleSendContact = async (contactsToSend) => {
+        if (!contactsToSend || contactsToSend.length === 0) return;
+
+        const target = selectedUser || selectedGroup;
+        if (!target) return;
+
+        const token = localStorage.getItem('token');
+        try {
+            let contentPayload;
+            if (contactsToSend.length === 1) {
+                const contact = contactsToSend[0];
+                contentPayload = JSON.stringify({
+                    _id: contact._id,
+                    name: contact.name,
+                    mobile: contact.mobile,
+                    image: contact.image,
+                    about: contact.about
+                });
+            } else {
+                contentPayload = JSON.stringify(contactsToSend.map(c => ({
+                    _id: c._id,
+                    name: c.name,
+                    mobile: c.mobile,
+                    image: c.image,
+                    about: c.about
+                })));
+            }
+
+            const formData = new FormData();
+            formData.append('userId', user.id || user._id);
+            formData.append('content', contentPayload);
+            formData.append('type', 'contact');
+            if (selectedUser) formData.append('toUserId', selectedUser._id);
+
+            const endpoint = selectedGroup ? `/api/groups/${selectedGroup._id}/send` : '/api/chat/send';
+            const res = await axios.post(endpoint, formData, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            const sentMsg = res.data.message;
+
+            // Socket Emit
+            if (selectedGroup) {
+                setGroupMessages(prev => [...prev, sentMsg]);
+                socket.emit('group_message', {
+                    groupId: selectedGroup._id,
+                    message: { ...sentMsg, sender_id: { _id: user.id || user._id, name: user.name } }
+                });
+            } else {
+                setMessages(prev => [...prev, sentMsg]);
+                socket.emit('send_message', {
+                    _id: sentMsg._id,
+                    sender_id: user.id || user._id,
+                    receiverId: selectedUser._id,
+                    content: sentMsg.content,
+                    type: 'contact',
+                    file_path: sentMsg.file_path
+                });
+            }
+
+            setIsContactSelectionOpen(false);
+            setIsConfirmContactSendOpen(false);
+            setSelectedContacts([]);
+            setSnackbar({ message: 'Contact(s) shared successfully', type: 'success', variant: 'system' });
+
+            if (selectedGroup) fetchGroups(); else fetchUsers();
+        } catch (err) {
+            console.error('Failed to send contact:', err);
+            setSnackbar({ message: 'Failed to share contacts', type: 'error' });
+        }
+    };
+
     const handleSend = async (e, contentOverride = null, voiceFile = null, voiceDuration = null, voiceIsViewOnce = null) => {
         if (e) e.preventDefault();
 
@@ -4281,6 +4511,288 @@ export default function Chat() {
                 fetchUsers(); // Refresh to catch status changes
             }
         }
+    };
+
+    const renderContactSelectionPanel = () => {
+        if (!isContactSelectionOpen) return null;
+
+        const filtered = users.filter((u) => {
+            const query = contactSearchQuery.toLowerCase();
+            return (u.name || '').toLowerCase().includes(query) || (u.mobile || '').includes(query);
+        }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+        const toggleContactSelection = (u) => {
+            if (selectedContacts.find((c) => c._id === u._id)) {
+                setSelectedContacts(selectedContacts.filter((c) => c._id !== u._id));
+            } else {
+                setSelectedContacts([...selectedContacts, u]);
+            }
+        };
+
+        const isMeSelected = selectedContacts.some(c => String(c._id || c.id) === String(user.id || user._id));
+
+        return (
+            <div
+                className="wa-contact-detail-modal-overlay"
+                onClick={() => setIsContactSelectionOpen(false)}
+                style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.7)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
+            >
+                <div
+                    className="wa-contact-detail-modal"
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ background: '#ffffff', width: '100%', maxWidth: '400px', height: '80vh', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 8px 30px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column' }}
+                >
+                    <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: '#f3f4f6', color: '#111b21', borderBottom: '1px solid rgba(0,0,0,0.08)', flexShrink: 0, position: 'relative' }}>
+                        <button onClick={() => setIsContactSelectionOpen(false)} style={{ background: 'none', border: 'none', color: '#111b21', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0, position: 'absolute', left: '16px' }}>
+                            <X size={24} />
+                        </button>
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: '0 40px' }}>
+                            <span style={{ fontSize: 19, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Send contacts</span>
+                        </div>
+                    </div>
+
+                    <div className="wa-drawer-content" style={{ background: '#ffffff', display: 'flex', flexDirection: 'column', flex: 1, padding: 0, overflow: 'hidden' }}>
+                    <div style={{ padding: '10px 16px' }}>
+                        <div style={{ background: '#f3f4f6', borderRadius: '8px', display: 'flex', alignItems: 'center', padding: '0 12px', height: 35, border: '1px solid #027EB5' }}>
+                            <Search size={18} color="#8696a0" style={{ marginRight: 15 }} />
+                            <input
+                                type="text"
+                                placeholder="Search name or number"
+                                style={{ background: 'transparent', border: 'none', color: '#111b21', fontSize: 14, flex: 1, outline: 'none' }}
+                                value={contactSearchQuery}
+                                onChange={(e) => setContactSearchQuery(e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    <div style={{ flex: 1, overflowY: 'auto' }}>
+                        <div style={{ padding: '20px 16px 10px', color: '#027EB5', fontSize: '13px', fontWeight: '600' }}>You</div>
+                        <div
+                            className="wa-user-item"
+                            style={{ background: 'transparent', borderBottom: 'none', cursor: 'pointer' }}
+                            onClick={() => toggleContactSelection({ ...user, ...userData, _id: user.id || user._id, mobile: userData?.mobile || user?.mobile || userData?.phone || '+91 00000 00000' })}
+                        >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 15, padding: '10px 16px', flex: 1 }}>
+                                <div style={{ width: 22, height: 22, border: '2px solid #8696a0', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: isMeSelected ? '#027EB5' : 'transparent', borderColor: isMeSelected ? '#027EB5' : '#8696a0', flexShrink: 0 }}>
+                                    {isMeSelected && <Check size={16} color="white" />}
+                                </div>
+                                <div className="wa-avatar" style={{ width: 45, height: 45, flexShrink: 0 }}>
+                                    {userData?.image || user?.image || userData?.profile_photo || user?.profile_photo ? <img src={userData?.image || user?.image || userData?.profile_photo || user?.profile_photo} alt={userData?.name || user?.name} /> : <div style={{ background: '#dfe5e7', width: '100%', height: '100%', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><UserIcon size={24} color="#8696a0" /></div>}
+                                </div>
+                                <div style={{ color: '#111b21', fontSize: 16, fontWeight: 500 }}>{userData?.mobile || user?.mobile || userData?.phone || '+91 00000 00000'}</div>
+                            </div>
+                        </div>
+
+                        <div style={{ padding: '25px 16px 10px', color: '#027EB5', fontSize: '13px', fontWeight: '600' }}>Contacts</div>
+                        {filtered.map((u) => {
+                            if (String(u._id || u.id) === String(user.id || user._id)) return null;
+                            const isSelected = selectedContacts.some(c => String(c._id || c.id) === String(u._id || u.id));
+                            return (
+                                <div
+                                    key={u._id || u.id}
+                                    className="wa-user-item"
+                                    style={{ background: 'transparent', borderBottom: 'none', cursor: 'pointer' }}
+                                    onClick={() => toggleContactSelection(u)}
+                                >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 15, padding: '10px 16px', flex: 1 }}>
+                                        <div style={{ width: 22, height: 22, border: '2px solid #8696a0', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: isSelected ? '#027EB5' : 'transparent', borderColor: isSelected ? '#027EB5' : '#8696a0', flexShrink: 0 }}>
+                                            {isSelected && <Check size={16} color="white" />}
+                                        </div>
+                                        <div className="wa-avatar" style={{ width: 45, height: 45, flexShrink: 0 }}>
+                                            {u.image || u.profile_photo ? <img src={u.image || u.profile_photo} alt={u.name} /> : <div style={{ background: '#dfe5e7', width: '100%', height: '100%', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><UserIcon size={24} color="#8696a0" /></div>}
+                                        </div>
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ color: '#111b21', fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name}</div>
+                                            <div style={{ color: '#8696a0', fontSize: 13, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.about || 'Available'}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {selectedContacts.length > 0 && (
+                        <div style={{ padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f3f4f6', borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+                            <div style={{ color: '#111b21', fontWeight: 500, fontSize: '15px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: '15px', flex: 1 }}>
+                                {selectedContacts.map(c => c.name || c.mobile || 'Unknown').join(', ')}
+                            </div>
+                            <button
+                                onClick={() => { setIsContactSelectionOpen(false); setIsConfirmContactSendOpen(true); }}
+                                style={{ background: '#027EB5', border: 'none', borderRadius: '50%', width: 50, height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.3)', flexShrink: 0 }}
+                            >
+                                <Check size={28} color="white" />
+                            </button>
+                        </div>
+                    )}
+                </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderConfirmContactSendPanel = () => {
+        if (!isConfirmContactSendOpen) return null;
+        const targetName = selectedUser?.name || selectedGroup?.name || 'this chat';
+
+        return (
+            <div
+                className="wa-contact-detail-modal-overlay"
+                onClick={() => setIsConfirmContactSendOpen(false)}
+                style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.7)', zIndex: 10001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
+            >
+                <div
+                    className="wa-contact-detail-modal"
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ background: '#ffffff', width: '100%', maxWidth: '400px', height: '80vh', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 8px 30px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column' }}
+                >
+                    <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: '#f3f4f6', color: '#111b21', borderBottom: '1px solid rgba(0,0,0,0.08)', flexShrink: 0, position: 'relative' }}>
+                        <button onClick={() => { setIsConfirmContactSendOpen(false); setIsContactSelectionOpen(true); }} style={{ background: 'none', border: 'none', color: '#111b21', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0, position: 'absolute', left: '16px' }}>
+                            <ArrowLeft size={24} />
+                        </button>
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: '0 40px' }}>
+                            <span style={{ fontSize: 19, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Send {selectedContacts.length} contact{selectedContacts.length > 1 ? 's' : ''} to "{targetName}"</span>
+                        </div>
+                    </div>
+
+                    <div className="wa-drawer-content" style={{ background: '#ffffff', display: 'flex', flexDirection: 'column', flex: 1, padding: '20px', overflowY: 'auto' }}>
+                        <div style={{ flex: 1 }}>
+                        {selectedContacts.map((contact) => (
+                            <div key={contact._id || contact.id} style={{ background: '#f3f4f6', borderRadius: '12px', padding: '20px', marginBottom: '15px', border: '1px solid rgba(0,0,0,0.08)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 15 }}>
+                                    <div className="wa-avatar" style={{ width: 60, height: 60, flexShrink: 0 }}>
+                                        {contact.image || contact.profile_photo ? <img src={contact.image || contact.profile_photo} alt={contact.name} /> : <div style={{ background: '#dfe5e7', width: '100%', height: '100%', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><UserIcon size={30} color="#8696a0" /></div>}
+                                    </div>
+                                    <div style={{ fontSize: 22, color: '#111b21', fontWeight: '600', fontStyle: 'italic' }}>{contact.name || contact.mobile}</div>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: 12 }}>
+                                    <div>
+                                        <div style={{ color: '#027EB5', fontSize: 15, fontWeight: 600 }}>{contact.mobile || '+91 00000 00000'}</div>
+                                        <div style={{ color: '#8696a0', fontSize: 12, marginTop: 4 }}>TEL</div>
+                                    </div>
+                                    <button onClick={() => {
+                                        handleUserSelect({ ...contact, _id: contact._id || contact.id });
+                                        setIsConfirmContactSendOpen(false);
+                                        setIsContactSelectionOpen(false);
+                                    }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px' }}>
+                                        <MessageSquare size={20} color="#027EB5" />
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '10px' }}>
+                        <button
+                            onClick={() => handleSendContact(selectedContacts)}
+                            style={{ background: '#027EB5', border: 'none', borderRadius: '50%', width: 60, height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 10px rgba(0,0,0,0.3)', flexShrink: 0 }}
+                        >
+                            <Send size={28} color="#ffffff" fill="#ffffff" strokeWidth={3} />
+                        </button>
+                    </div>
+                </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderContactDetailPopup = () => {
+        if (!viewingContact) return null;
+
+        if (Array.isArray(viewingContact)) {
+            return (
+                <div
+                    className="wa-contact-detail-modal-overlay"
+                    onClick={() => setViewingContact(null)}
+                    style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.7)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
+                >
+                    <div
+                        className="wa-contact-detail-modal"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ background: '#ffffff', width: '100%', maxWidth: '360px', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 8px 30px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', maxHeight: '80vh' }}
+                    >
+                        <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(0,0,0,0.08)', background: '#f3f4f6', display: 'flex', alignItems: 'center', boxSizing: 'border-box', position: 'relative', justifyContent: 'center' }}>
+                            <button onClick={() => setViewingContact(null)} style={{ background: 'none', border: 'none', display: 'flex', alignItems: 'center', cursor: 'pointer', color: '#54656f', padding: 0, position: 'absolute', left: 20 }}>
+                                <ArrowLeft size={24} />
+                            </button>
+                            <span style={{ fontSize: 18, color: '#111b21', fontWeight: 500, whiteSpace: 'nowrap' }}>{viewingContact.length} Contacts</span>
+                        </div>
+                        <div style={{ overflowY: 'auto', flex: 1 }}>
+                            {viewingContact.map((c, i) => (
+                                <div key={i} style={{ padding: '16px 20px', borderBottom: i < viewingContact.length - 1 ? '6px solid #f3f4f6' : 'none' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+                                        <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 15, overflow: 'hidden', flexShrink: 0 }}>
+                                            {c.image || c.profile_photo ? <img src={c.image || c.profile_photo} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                        </div>
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ fontSize: 16, color: '#111b21', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                {c.name || 'Contact'}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', marginRight: 15 }}>
+                                            <div style={{ fontSize: 15, color: '#111b21', fontWeight: 500 }}>
+                                                {c.mobile || '+91 00000 00000'}
+                                            </div>
+                                            <div style={{ fontSize: 12, color: '#00a884', fontWeight: 600, marginTop: 4 }}>
+                                                TEL
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => { handleUserSelect({ ...c, id: c._id }); setViewingContact(null); }}
+                                            style={{ background: 'none', border: 'none', color: '#027EB5', fontSize: '15px', fontWeight: 'bold', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}
+                                        >
+                                            <MessageSquare size={16} />
+                                            Message
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        return (
+            <div
+                className="wa-contact-detail-modal-overlay"
+                onClick={() => setViewingContact(null)}
+                style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.7)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
+            >
+                <div
+                    className="wa-contact-detail-modal"
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ background: '#ffffff', width: '100%', maxWidth: '360px', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 8px 30px rgba(0,0,0,0.15)' }}
+                >
+                    <div style={{ height: 220, position: 'relative', background: '#f3f4f6' }}>
+                        {viewingContact.image || viewingContact.profile_photo ? <img src={viewingContact.image || viewingContact.profile_photo} alt={viewingContact.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><UserIcon size={100} color="#8696a0" /></div>}
+                        <button onClick={() => setViewingContact(null)} style={{ position: 'absolute', top: 15, left: 15, background: 'rgba(0,0,0,0.4)', border: 'none', borderRadius: '50%', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'white' }}>
+                            <ArrowLeft size={20} />
+                        </button>
+                    </div>
+
+                    <div style={{ padding: '20px' }}>
+                        <div style={{ fontSize: 24, color: '#111b21', fontWeight: 600, marginBottom: 8 }}>{viewingContact.name || viewingContact.mobile}</div>
+
+                        <div style={{ marginTop: 24 }}>
+                            <div style={{ color: '#027EB5', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Mobile</div>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div style={{ color: '#111b21', fontSize: 16, fontWeight: 500 }}>{viewingContact.mobile || '+91 00000 00000'}</div>
+                                <div style={{ display: 'flex', gap: 20 }}>
+                                    <button onClick={() => { handleUserSelect({ ...viewingContact, _id: viewingContact._id || viewingContact.id }); setViewingContact(null); }} style={{ background: 'none', border: 'none', color: '#027EB5', cursor: 'pointer' }}><MessageSquare size={20} /></button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style={{ marginTop: 25, borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: 20 }}>
+                            <div style={{ color: '#027EB5', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>About</div>
+                            <div style={{ color: '#111b21', fontSize: 15 }}>{viewingContact.about || 'Available'}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
     };
 
     const logout = () => {
@@ -5148,7 +5660,7 @@ export default function Chat() {
                 }
             },
             { icon: Camera, label: t('chat_window.camera'), color: '#ff2e74', onClick: () => { setIsAttachmentMenuOpen(false); handleCameraAction('chat'); } },
-            { icon: User, label: t('chat_window.contact'), color: '#009de2', onClick: () => { setIsAttachmentMenuOpen(false); } },
+            { icon: User, label: t('chat_window.contact'), color: '#009de2', onClick: () => { setIsAttachmentMenuOpen(false); setIsContactSelectionOpen(true); setSelectedContacts([]); setContactSearchQuery(''); } },
             { icon: List, label: t('chat_window.poll'), color: '#ffbc38', onClick: () => { setIsAttachmentMenuOpen(false); } },
             { icon: Calendar, label: t('chat_window.event'), color: '#ef0b33', onClick: () => { setIsAttachmentMenuOpen(false); } },
         ];
@@ -5346,13 +5858,25 @@ export default function Chat() {
                                 }
                             }
 
+                            const communityOfGroup = msg.isGroup ? communities.find(c =>
+                                (c.groups || []).some(g => String(g._id || g) === String(msg.group_id?._id || msg.group_id)) ||
+                                String(c.announcements?._id || c.announcements) === String(msg.group_id?._id || msg.group_id)
+                            ) : null;
+                            const communityName = communityOfGroup?.name;
+
                             return (
                                 <div key={idx} className="wa-starred-item" onClick={() => navigateToMessage(msg)} style={{ margin: '8px 12px', background: 'white', borderRadius: '8px', boxShadow: '0 1px 1px 0 rgba(11,20,26,.06)', cursor: 'pointer' }}>
-                                    <div className="wa-starred-item-header" style={{ padding: '12px 12px 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                        <div className="wa-starred-names" style={{ fontSize: '13px', color: '#54656f', display: 'flex', alignItems: 'center', gap: '4px', flex: 1 }}>
-                                            <span style={{ fontWeight: '500' }}>{senderName}</span>
-                                            <ChevronRight size={14} />
-                                            <span style={{ fontWeight: '500' }}>{recipientName}</span>
+                                    <div className="wa-starred-item-header" style={{ padding: '12px 12px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <div className="wa-starred-names" style={{ fontSize: '13px', color: '#54656f', display: 'flex', alignItems: 'center', gap: '4px', flex: 1, overflow: 'hidden' }}>
+                                            <span style={{ fontWeight: '500', whiteSpace: 'nowrap' }}>{senderName}</span>
+                                            <ChevronRight size={14} style={{ flexShrink: 0 }} />
+                                            {communityName && (
+                                                <>
+                                                    <span style={{ fontWeight: '500', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100px' }}>{communityName}</span>
+                                                    <ChevronRight size={14} style={{ flexShrink: 0 }} />
+                                                </>
+                                            )}
+                                            <span style={{ fontWeight: '500', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{recipientName}</span>
                                         </div>
                                         <div className="wa-starred-date" style={{ fontSize: '11px', color: '#8696a0' }}>
                                             {new Date(msg.created_at).toLocaleDateString()}
@@ -6976,11 +7500,11 @@ export default function Chat() {
     };
 
     const renderStarredMessagesPanel = () => {
-        const activeTarget = selectedUser || selectedGroup;
+        const activeTarget = selectedUser || selectedGroup || selectedCommunity;
         if (!activeTarget) return null;
 
-        const isGroup = !!selectedGroup;
-        const starredMsgs = (isGroup ? groupMessages : messages).filter(m => m.is_starred);
+        const isGroupOrCommunity = !!selectedGroup || !!selectedCommunity;
+        const starredMsgs = (isGroupOrCommunity ? groupMessages : messages).filter(m => m.is_starred);
 
         return (
             <div className={`wa-starred-messages-panel ${isStarredMessagesOpen ? 'active' : ''}`}>
@@ -6988,7 +7512,8 @@ export default function Chat() {
                     <div style={{ display: 'flex', alignItems: 'center', width: '100%', height: '100%', justifyContent: 'space-between' }}>
                         <button className="wa-panel-back-btn" onClick={() => {
                             setIsStarredMessagesOpen(false);
-                            setIsContactInfoOpen(true);
+                            if (selectedCommunity) setIsCommunityInfoOpen(true);
+                            else setIsContactInfoOpen(true);
                         }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#027EB5', fontSize: '16px', fontWeight: 500, padding: 0, paddingLeft: '12px', zIndex: 10 }}>
                             Back
                         </button>
@@ -7021,8 +7546,8 @@ export default function Chat() {
                             const senderName = isMe ? 'You' : (msg.sender_id?.name || msg.user_id?.name || activeTarget.name || 'Someone');
 
                             let recipientName = '';
-                            if (isGroup) {
-                                recipientName = activeTarget.name || 'Group';
+                            if (isGroupOrCommunity) {
+                                recipientName = activeTarget.name || (activeTarget.is_community ? 'Community' : 'Group');
                             } else {
                                 if (isMe) {
                                     const recId = msg.receiver_id?._id || msg.receiver_id;
@@ -7137,10 +7662,70 @@ export default function Chat() {
                                         <span>{infoMessage.fileSize} bytes • PDF</span>
                                     </div>
                                 </div>
-                            ) : (
+                            ) : infoMessage.type === 'contact' ? (() => {
+                                let cDataArray;
+                                try {
+                                    const rawData = JSON.parse(infoMessage.content);
+                                    cDataArray = Array.isArray(rawData) ? rawData : [rawData];
+                                } catch (e) {
+                                    cDataArray = [{ name: 'Contact' }];
+                                }
+
+                                if (cDataArray.length > 1) {
+                                    return (
+                                        <div
+                                            className="wa-contact-msg-card-multiple"
+                                            onClick={(e) => { e.stopPropagation(); setViewingContact(cDataArray); }}
+                                            style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '260px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}
+                                        >
+                                            <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                <div style={{ position: 'relative', width: 66, height: 44, marginRight: 12, flexShrink: 0 }}>
+                                                    <div className="wa-avatar" style={{ position: 'absolute', right: 0, zIndex: 1, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                        {cDataArray[1].image ? <img src={cDataArray[1].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                    </div>
+                                                    <div className="wa-avatar" style={{ position: 'absolute', left: 0, zIndex: 2, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                        {cDataArray[0].image ? <img src={cDataArray[0].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                    </div>
+                                                </div>
+                                                <div style={{ color: '#111b21', fontSize: '15px', fontWeight: 600, lineHeight: '1.3' }}>
+                                                    {cDataArray[0].name || cDataArray[0].mobile} and {cDataArray.length - 1} other contact{cDataArray.length > 2 ? 's' : ''}
+                                                </div>
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                <button style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>
+                                                    View all
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                }
+
+                                const cData = cDataArray[0];
+                                return (
+                                    <div
+                                        className="wa-contact-msg-card"
+                                        style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '240px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                            <div className="wa-avatar" style={{ width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                {cData.image ? <img src={cData.image} alt={cData.name} style={{ width: '100%', height: '100%', borderRadius: '50%' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                            </div>
+                                            <div style={{ color: '#111b21', fontSize: '16px', fontWeight: 600 }}>
+                                                {cData.name || 'Contact'}
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                            <button style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600' }}>
+                                                Message
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })() : (
                                 <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{infoMessage.content}</p>
                             )}
                             <div className="wa-msg-meta">
+                                {infoMessage.is_edited && <span style={{ fontSize: '10px', color: '#667781', marginRight: '2px', opacity: 0.9 }}>Edited</span>}
                                 {formatTime(infoMessage.created_at)}
                                 <CheckCheck size={16} color={infoMessage.is_read ? "#53bdeb" : "#8696a0"} />
                             </div>
@@ -7812,6 +8397,11 @@ export default function Chat() {
                                 {isMe && (
                                     <div className="wa-dropdown-item" onClick={(e) => { e.stopPropagation(); setInfoMessage(data); setOpenDropdown(null); }}>
                                         <Info size={16} style={{ marginRight: 10 }} /> Message info
+                                    </div>
+                                )}
+                                {canEditMessage(data) && (
+                                    <div className="wa-dropdown-item" onClick={(e) => { e.stopPropagation(); setEditingMessage(data); setEditInput(data.content); setOpenDropdown(null); }}>
+                                        <Pencil size={16} style={{ marginRight: 10 }} /> Edit
                                     </div>
                                 )}
                                 <div className="wa-dropdown-item" onClick={() => { setReplyingTo(data); setOpenDropdown(null); }}>
@@ -8822,9 +9412,9 @@ export default function Chat() {
                             const groupCount = community.groups ? community.groups.length : 1;
 
                             return (
-                                <div style={{ fontSize: 16, color: subTextColor, marginTop: 8 }}>
-                                    {selectedGroup?.isCommunityAnnouncements ? 'Announcements' : `Community · ${uniqueCount} member${uniqueCount !== 1 ? 's' : ''} · ${groupCount} group${groupCount !== 1 ? 's' : ''}`}
-                                </div>
+                                    <div style={{ fontSize: 13, color: subTextColor, marginTop: 4 }}>
+                                        {`Community · ${uniqueCount} member${uniqueCount !== 1 ? 's' : ''} · ${groupCount} group${groupCount !== 1 ? 's' : ''}`}
+                                    </div>
                             );
                         })()}
 
@@ -8859,34 +9449,18 @@ export default function Chat() {
 
                     <div style={{ borderBottom: thickDivider }}></div>
 
-                    <div style={{ display: 'flex', borderBottom: thinDivider }}>
+                    <div style={{ display: 'flex', borderBottom: thinDivider, justifyContent: 'center' }}>
                         <div
                             style={{
-                                flex: 1,
-                                padding: '15px 0',
+                                padding: '15px 40px',
                                 textAlign: 'center',
-                                color: communityInfoTab === 'community' ? '#027EB5' : subTextColor,
-                                borderBottom: communityInfoTab === 'community' ? '3px solid #027EB5' : 'none',
+                                color: '#027EB5',
+                                borderBottom: '3px solid #027EB5',
                                 fontWeight: 500,
                                 cursor: 'pointer'
                             }}
-                            onClick={() => setCommunityInfoTab('community')}
                         >
                             Community
-                        </div>
-                        <div
-                            style={{
-                                flex: 1,
-                                padding: '15px 0',
-                                textAlign: 'center',
-                                color: communityInfoTab === 'announcements' ? '#027EB5' : subTextColor,
-                                borderBottom: communityInfoTab === 'announcements' ? '3px solid #027EB5' : 'none',
-                                fontWeight: 500,
-                                cursor: 'pointer'
-                            }}
-                            onClick={() => setCommunityInfoTab('announcements')}
-                        >
-                            Announcements
                         </div>
                     </div>
 
@@ -8917,7 +9491,7 @@ export default function Chat() {
 
                             return (
                                 <>
-                                    <div className="clickable" onClick={() => setIsSharedMediaOpen(true)} style={{ padding: '14px 30px', display: 'flex', flexDirection: 'column', cursor: 'pointer' }}>
+                                    <div className="clickable" onClick={() => { setIsSharedMediaOpen(true); setIsCommunityInfoOpen(false); }} style={{ padding: '14px 30px', display: 'flex', flexDirection: 'column', cursor: 'pointer' }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                             <span style={{ color: textColor, fontSize: 16 }}>Media, links and docs</span>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -8980,7 +9554,23 @@ export default function Chat() {
                                 { icon: <Users size={20} />, label: 'Manage groups', onClick: () => { if (checkAddGroupPermission(community, true)) setIsManageGroupsOpen(true); } },
                                 { icon: <Settings size={20} />, label: 'Community settings', onClick: () => setIsCommunitySettingsOpen(true) }
                             ] : []),
-                            { icon: <Users size={20} />, label: 'View groups (' + (community.groups?.length || 0) + ')', onClick: () => setIsCommunityGroupsListOpen(true) }
+                            { icon: <Users size={20} />, label: 'View groups (' + (community.groups?.length || 0) + ')', onClick: () => setIsCommunityGroupsListOpen(true) },
+                            {
+                                icon: <Star size={20} />,
+                                label: 'Starred Messages',
+                                onClick: () => {
+                                    setIsStarredMessagesOpen(true);
+                                    setIsCommunityInfoOpen(false);
+                                }
+                            },
+                            {
+                                icon: <Bell size={20} />,
+                                label: 'Mute notifications',
+                                onClick: () => {
+                                    setMuteTargetUser({ id: community.id || community._id, name: community.name });
+                                    setIsMuteModalOpen(true);
+                                }
+                            }
                         ].map((item, idx, arr) => (
                             <div
                                 key={idx}
@@ -9213,7 +9803,7 @@ export default function Chat() {
                     <div style={{ background: bgColor, padding: '10px 0 40px 0', borderTop: thickDivider }}>
                         {[
                             { icon: <LogOut size={20} />, label: 'Exit community', color: '#ea0038', action: onExitClick },
-                            { icon: <XCircle size={20} />, label: 'Deactivate community', color: '#ea0038' }
+                            ...(canIManage ? [{ icon: <XCircle size={20} />, label: 'Deactivate community', color: '#ea0038', action: () => { setDeactivateCommunityTarget(community); setIsDeactivateCommunityConfirmOpen(true); } }] : [])
                         ].map((item, idx) => (
                             <div
                                 key={idx}
@@ -9518,9 +10108,9 @@ export default function Chat() {
     };
 
     const renderSharedMediaPanel = () => {
-        const activeTarget = selectedUser || selectedGroup;
+        const activeTarget = selectedUser || selectedGroup || selectedCommunity;
         if (!activeTarget) return null;
-        const isGroup = !!selectedGroup;
+        const isGroup = !!selectedGroup || !!selectedCommunity;
 
         // Filter messages for this chat
         let chatMsgs = [];
@@ -9593,7 +10183,11 @@ export default function Chat() {
                         </div>
                     ) : <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', width: '100%', height: '100%' }}>
                         <div style={{ display: 'flex', justifyContent: 'flex-start', paddingLeft: '8px' }}>
-                            <button onClick={() => setIsSharedMediaOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#027EB5', fontSize: '16px', fontWeight: 500, padding: 0 }}>
+                            <button onClick={() => {
+                                setIsSharedMediaOpen(false);
+                                if (selectedCommunity) setIsCommunityInfoOpen(true);
+                                else setIsContactInfoOpen(true);
+                            }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#027EB5', fontSize: '16px', fontWeight: 500, padding: 0 }}>
                                 {t('chat_window.back')}
                             </button>
                         </div>
@@ -10327,6 +10921,9 @@ export default function Chat() {
                                                 setSelectedGroup(null);
                                                 setSelectedUser(null);
                                                 setCommunities(prev => prev.map(c => String(c.id) === String(item.id) ? { ...c, unreadCount: 0 } : c));
+                                                // Fetch announcements messages
+                                                const annId = item.announcements?._id || item.announcements?.id || item.announcements;
+                                                if (annId) fetchGroupMessages(annId);
                                                 return;
                                             }
                                             if (isGroup) {
@@ -10401,7 +10998,20 @@ export default function Chat() {
                                                         item.lastMessage?.type === 'image' ? (isGroup ? '📷 Photo' : '📷 Image') :
                                                             item.lastMessage?.type === 'video' ? '🎥 Video' :
                                                                 item.lastMessage?.type === 'file' ? '📄 File' :
-                                                                    item.lastMessage?.type === 'audio' ? (
+                                                                item.lastMessage?.type === 'contact' ? (
+                                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                                    <UserIcon size={14} color="#8696a0" />
+                                                                    <span>{(() => {
+                                                                        try { 
+                                                                            const parsed = JSON.parse(item.lastMessage.content);
+                                                                            if (Array.isArray(parsed)) return `${parsed.length} contacts`;
+                                                                            return parsed.name || parsed.mobile || 'Contact';
+                                                                        }
+                                                                        catch (e) { return 'Contact'; }
+                                                                    })()}</span>
+                                                                </span>
+                                                            ) :
+                                                                item.lastMessage?.type === 'audio' ? (
                                                                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#667781' }}>
                                                                             <Mic size={13} style={{ flexShrink: 0 }} />
                                                                             <span>{formatVoiceTime(item.lastMessage.duration || 0)}</span>
@@ -11346,7 +11956,20 @@ export default function Chat() {
                                                                         {isMeMsg(msg.reply_to) ? 'You' : (selectedUser.name || 'User')}
                                                                     </div>
                                                                     <div className="wa-reply-context-text">
-                                                                        {msg.reply_to.type === 'image' ? '📷 Image' : (msg.reply_to.type === 'file' ? '📄 File' : (msg.reply_to.content || ''))}
+                                                                        {(() => {
+                                                                            if (msg.reply_to.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
+                                                                            if (msg.reply_to.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
+                                                                            if (msg.reply_to.type === 'contact') {
+                                                                                try {
+                                                                                    const parsed = JSON.parse(msg.reply_to.content);
+                                                                                    const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
+                                                                                    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
+                                                                                } catch (e) {
+                                                                                    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+                                                                                }
+                                                                            }
+                                                                            return msg.reply_to.content || '';
+                                                                        })()}
                                                                     </div>
                                                                 </div>
                                                             )}
@@ -11645,13 +12268,79 @@ export default function Chat() {
                                                                             </div>
                                                                         </div>
                                                                     )}
-                                                                    {msg.content && (
+                                                                    {msg.type === 'contact' && (() => {
+                                                                        let cDataArray;
+                                                                        try {
+                                                                            const rawData = JSON.parse(msg.content);
+                                                                            cDataArray = Array.isArray(rawData) ? rawData : [rawData];
+                                                                        } catch (e) {
+                                                                            cDataArray = [{ name: 'Contact' }];
+                                                                        }
+
+                                                                        if (cDataArray.length > 1) {
+                                                                            return (
+                                                                                <div
+                                                                                    className="wa-contact-msg-card-multiple"
+                                                                                    onClick={(e) => { e.stopPropagation(); setViewingContact(cDataArray); }}
+                                                                                    style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '260px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}
+                                                                                >
+                                                                                    <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                                        <div style={{ position: 'relative', width: 66, height: 44, marginRight: 12, flexShrink: 0 }}>
+                                                                                            <div className="wa-avatar" style={{ position: 'absolute', right: 0, zIndex: 1, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                                                                {cDataArray[1].image ? <img src={cDataArray[1].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                            </div>
+                                                                                            <div className="wa-avatar" style={{ position: 'absolute', left: 0, zIndex: 2, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                                                                {cDataArray[0].image ? <img src={cDataArray[0].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                        <div style={{ color: '#111b21', fontSize: '15px', fontWeight: 600, lineHeight: '1.3' }}>
+                                                                                            {cDataArray[0].name || cDataArray[0].mobile} and {cDataArray.length - 1} other contact{cDataArray.length > 2 ? 's' : ''}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                                                        <button style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>
+                                                                                            View all
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        }
+
+                                                                        const cData = cDataArray[0];
+                                                                        return (
+                                                                            <div
+                                                                                className="wa-contact-msg-card"
+                                                                                onClick={(e) => { e.stopPropagation(); setViewingContact(cData); }}
+                                                                                style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '240px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}
+                                                                            >
+                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                                    <div className="wa-avatar" style={{ width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                                        {cData.image ? <img src={cData.image} alt={cData.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                    </div>
+                                                                                    <div style={{ color: '#111b21', fontSize: '16px', fontWeight: 600 }}>
+                                                                                        {cData.name || 'Contact'}
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                                                    <button
+                                                                                        className="wa-contact-card-action"
+                                                                                        onClick={(e) => { e.stopPropagation(); handleUserSelect({ ...cData, id: cData._id }); }}
+                                                                                        style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+                                                                                    >
+                                                                                        Message
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })()}
+                                                                    {msg.content && msg.type !== 'contact' && (
                                                                         <span>{renderContent(msg.content)}</span>
                                                                     )}
                                                                 </>
                                                             )}
 
                                                             <div className="wa-msg-meta">
+                                                                {msg.is_edited && <span style={{ fontSize: '10px', color: '#667781', marginRight: '2px', opacity: 0.9 }}>Edited</span>}
                                                                 {msg.is_pinned && <Pin size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3, transform: 'rotate(45deg)' }} />}
                                                                 {msg.is_starred && <Star size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3 }} />}
                                                                 <span>{formatTime(msg.created_at)}</span>
@@ -11783,14 +12472,60 @@ export default function Chat() {
                                                     </span>
                                                 </div>
                                                 <div className="wa-reply-preview-content">
-                                                    {replyingTo.type === 'image' ? '📷 Photo' : (replyingTo.type === 'file' ? '📄 File' : replyingTo.content)}
+                                                    {(() => {
+                                                        if (replyingTo.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
+                                                        if (replyingTo.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
+                                                        if (replyingTo.type === 'contact') {
+                                                            try {
+                                                                const parsed = JSON.parse(replyingTo.content);
+                                                                const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
+                                                                return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
+                                                            } catch (e) {
+                                                                return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+                                                            }
+                                                        }
+                                                        return replyingTo.content;
+                                                    })()}
                                                 </div>
                                             </div>
-                                            {replyingTo.type === 'image' && replyingTo.file_path && (
-                                                <div className="wa-reply-preview-thumb">
-                                                    <img src={replyingTo.file_path} alt="thumbnail" />
-                                                </div>
-                                            )}
+                                            {(() => {
+                                                if (replyingTo.type === 'image' && replyingTo.file_path) {
+                                                    return (
+                                                        <div className="wa-reply-preview-thumb">
+                                                            <img src={replyingTo.file_path} alt="thumbnail" />
+                                                        </div>
+                                                    );
+                                                }
+                                                if (replyingTo.type === 'contact') {
+                                                    try {
+                                                        const parsed = JSON.parse(replyingTo.content);
+                                                        if (Array.isArray(parsed)) {
+                                                            return (
+                                                                <div className="wa-reply-preview-thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(2, 126, 181, 0.1)' }}>
+                                                                    <UserIcon size={24} color="#027EB5" />
+                                                                </div>
+                                                            );
+                                                        } else {
+                                                            if (parsed.image || parsed.profile_photo) {
+                                                                return (
+                                                                    <div className="wa-reply-preview-thumb">
+                                                                        <img src={parsed.image || parsed.profile_photo} alt="thumbnail" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                                    </div>
+                                                                );
+                                                            } else {
+                                                                return (
+                                                                    <div className="wa-reply-preview-thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(2, 126, 181, 0.1)' }}>
+                                                                        <UserIcon size={24} color="#027EB5" />
+                                                                    </div>
+                                                                );
+                                                            }
+                                                        }
+                                                    } catch (e) {
+                                                        return null;
+                                                    }
+                                                }
+                                                return null;
+                                            })()}
                                             <X size={16} className="wa-reply-preview-close" onClick={() => setReplyingTo(null)} />
                                         </div>
                                     )}
@@ -12408,7 +13143,20 @@ export default function Chat() {
                                                                         {isMeMsg(msg.reply_to) ? 'You' : (msg.reply_to.sender_id?.name || 'User')}
                                                                     </div>
                                                                     <div className="wa-reply-context-text">
-                                                                        {msg.reply_to.type === 'image' ? '📷 Photo' : (msg.reply_to.type === 'file' ? '📄 File' : msg.reply_to.content)}
+                                                                        {(() => {
+                                                                            if (msg.reply_to.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
+                                                                            if (msg.reply_to.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
+                                                                            if (msg.reply_to.type === 'contact') {
+                                                                                try {
+                                                                                    const parsed = JSON.parse(msg.reply_to.content);
+                                                                                    const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
+                                                                                    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
+                                                                                } catch (e) {
+                                                                                    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+                                                                                }
+                                                                            }
+                                                                            return msg.reply_to.content || '';
+                                                                        })()}
                                                                     </div>
                                                                 </div>
                                                             )}
@@ -12695,11 +13443,78 @@ export default function Chat() {
                                                                         </div>
                                                                     )}
 
-                                                                    {msg.content && <span>{renderContent(msg.content)}</span>}
+                                                                    {msg.type === 'contact' && (() => {
+                                                                        let cDataArray;
+                                                                        try {
+                                                                            const rawData = JSON.parse(msg.content);
+                                                                            cDataArray = Array.isArray(rawData) ? rawData : [rawData];
+                                                                        } catch (e) {
+                                                                            cDataArray = [{ name: 'Contact' }];
+                                                                        }
+
+                                                                        if (cDataArray.length > 1) {
+                                                                            return (
+                                                                                <div
+                                                                                    className="wa-contact-msg-card-multiple"
+                                                                                    onClick={(e) => { e.stopPropagation(); setViewingContact(cDataArray); }}
+                                                                                    style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '260px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}
+                                                                                >
+                                                                                    <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                                        <div style={{ position: 'relative', width: 66, height: 44, marginRight: 12, flexShrink: 0 }}>
+                                                                                            <div className="wa-avatar" style={{ position: 'absolute', right: 0, zIndex: 1, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                                                                {cDataArray[1].image ? <img src={cDataArray[1].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                            </div>
+                                                                                            <div className="wa-avatar" style={{ position: 'absolute', left: 0, zIndex: 2, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                                                                {cDataArray[0].image ? <img src={cDataArray[0].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                        <div style={{ color: '#111b21', fontSize: '15px', fontWeight: 600, lineHeight: '1.3' }}>
+                                                                                            {cDataArray[0].name || cDataArray[0].mobile} and {cDataArray.length - 1} other contact{cDataArray.length > 2 ? 's' : ''}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                                                        <button style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>
+                                                                                            View all
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        }
+
+                                                                        const cData = cDataArray[0];
+                                                                        return (
+                                                                            <div
+                                                                                className="wa-contact-msg-card"
+                                                                                onClick={(e) => { e.stopPropagation(); setViewingContact(cData); }}
+                                                                                style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '240px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}
+                                                                            >
+                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                                    <div className="wa-avatar" style={{ width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                                        {cData.image ? <img src={cData.image} alt={cData.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                    </div>
+                                                                                    <div style={{ color: '#111b21', fontSize: '16px', fontWeight: 600 }}>
+                                                                                        {cData.name || 'Contact'}
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                                                    <button
+                                                                                        className="wa-contact-card-action"
+                                                                                        onClick={(e) => { e.stopPropagation(); handleUserSelect({ ...cData, id: cData._id }); }}
+                                                                                        style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+                                                                                    >
+                                                                                        Message
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })()}
+
+                                                                    {msg.content && msg.type !== 'contact' && <span>{renderContent(msg.content)}</span>}
                                                                 </>
                                                             )}
 
                                                             <div className="wa-msg-meta">
+                                                                {msg.is_edited && <span style={{ fontSize: '10px', color: '#667781', marginRight: '2px', opacity: 0.9 }}>Edited</span>}
                                                                 {msg.is_pinned && <Pin size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3, transform: 'rotate(45deg)' }} />}
                                                                 {msg.is_starred && <Star size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3 }} />}
                                                                 <span className="wa-timestamp">
@@ -12806,14 +13621,60 @@ export default function Chat() {
                                                     </span>
                                                 </div>
                                                 <div className="wa-reply-preview-content">
-                                                    {replyingTo.type === 'image' ? '📷 Photo' : (replyingTo.type === 'file' ? '📄 File' : replyingTo.content)}
+                                                    {(() => {
+                                                        if (replyingTo.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
+                                                        if (replyingTo.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
+                                                        if (replyingTo.type === 'contact') {
+                                                            try {
+                                                                const parsed = JSON.parse(replyingTo.content);
+                                                                const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
+                                                                return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
+                                                            } catch (e) {
+                                                                return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+                                                            }
+                                                        }
+                                                        return replyingTo.content;
+                                                    })()}
                                                 </div>
                                             </div>
-                                            {replyingTo.type === 'image' && replyingTo.file_path && (
-                                                <div className="wa-reply-preview-thumb">
-                                                    <img src={replyingTo.file_path} alt="thumbnail" />
-                                                </div>
-                                            )}
+                                            {(() => {
+                                                if (replyingTo.type === 'image' && replyingTo.file_path) {
+                                                    return (
+                                                        <div className="wa-reply-preview-thumb">
+                                                            <img src={replyingTo.file_path} alt="thumbnail" />
+                                                        </div>
+                                                    );
+                                                }
+                                                if (replyingTo.type === 'contact') {
+                                                    try {
+                                                        const parsed = JSON.parse(replyingTo.content);
+                                                        if (Array.isArray(parsed)) {
+                                                            return (
+                                                                <div className="wa-reply-preview-thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(2, 126, 181, 0.1)' }}>
+                                                                    <UserIcon size={24} color="#027EB5" />
+                                                                </div>
+                                                            );
+                                                        } else {
+                                                            if (parsed.image || parsed.profile_photo) {
+                                                                return (
+                                                                    <div className="wa-reply-preview-thumb">
+                                                                        <img src={parsed.image || parsed.profile_photo} alt="thumbnail" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                                    </div>
+                                                                );
+                                                            } else {
+                                                                return (
+                                                                    <div className="wa-reply-preview-thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(2, 126, 181, 0.1)' }}>
+                                                                        <UserIcon size={24} color="#027EB5" />
+                                                                    </div>
+                                                                );
+                                                            }
+                                                        }
+                                                    } catch (e) {
+                                                        return null;
+                                                    }
+                                                }
+                                                return null;
+                                            })()}
                                             <X size={16} className="wa-reply-preview-close" onClick={() => setReplyingTo(null)} />
                                         </div>
                                     )}
@@ -13027,6 +13888,7 @@ export default function Chat() {
             {renderCommunitySettingsPanel()}
             {renderWhoCanAddGroupsModal()}
             {renderAssignOwnerModal()}
+            {renderEditMessageOverlay()}
         </div >
     );
 
@@ -13268,6 +14130,148 @@ export default function Chat() {
                             ))
                         )}
                         <div style={{ height: 100 }}></div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+
+    const renderEditMessageOverlay = () => {
+        if (!editingMessage) return null;
+        const isMeEditing = isMeMsg(editingMessage);
+        
+        return (
+            <div className="wa-edit-overlay" style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                background: 'rgba(255, 255, 255, 0.4)',
+                backdropFilter: 'blur(8px)',
+                zIndex: 10001,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'default'
+            }} onClick={() => setEditingMessage(null)}>
+                <div className="wa-edit-container" style={{
+                    width: '90%',
+                    maxWidth: '600px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '24px',
+                    alignItems: 'center',
+                    animation: 'wa-slide-up 0.3s ease-out'
+                }} onClick={e => e.stopPropagation()}>
+                    
+                    {/* Message Preview */}
+                    <div style={{
+                        alignSelf: isMeEditing ? 'flex-end' : 'flex-start',
+                        background: isMeEditing ? '#e1f5fe' : 'white',
+                        padding: '8px 12px 16px 12px',
+                        borderRadius: '12px',
+                        boxShadow: '0 4px 15px rgba(0,0,0,0.08)',
+                        maxWidth: '85%',
+                        position: 'relative',
+                        minWidth: '100px',
+                        border: '1px solid rgba(0,0,0,0.05)'
+                    }}>
+                         <div style={{ fontSize: '15px', color: '#111b21', whiteSpace: 'pre-wrap', marginBottom: '8px', lineHeight: '1.4' }}>
+                            {editInput || <span style={{ color: '#8696a0', fontStyle: 'italic' }}>Typing...</span>}
+                         </div>
+                         <div style={{ position: 'absolute', bottom: '6px', right: '10px', fontSize: '11px', color: '#667781', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            {new Date(editingMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                            {isMeEditing && (editingMessage.is_read ? <CheckCheck size={14} color="#53bdeb" /> : <CheckCheck size={14} color="#8696a0" />)}
+                         </div>
+                    </div>
+
+                    {/* Edit Input Area */}
+                    <div style={{
+                        width: '100%',
+                        background: '#f8fafc',
+                        borderRadius: '24px',
+                        padding: '8px 12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+                        border: '1px solid #e2e8f0'
+                    }}>
+                        <Smile size={24} color="#54656f" style={{ cursor: 'pointer', flexShrink: 0 }} />
+                        <textarea
+                            autoFocus
+                            className="wa-edit-box"
+                            value={editInput}
+                            onChange={(e) => setEditInput(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    handleEditMessageSubmit();
+                                }
+                                if (e.key === 'Escape') setEditingMessage(null);
+                            }}
+                            rows={1}
+                            style={{
+                                flex: 1,
+                                background: 'white',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: '18px',
+                                padding: '10px 16px',
+                                fontSize: '15px',
+                                color: '#111b21',
+                                outline: 'none',
+                                resize: 'none',
+                                maxHeight: '150px',
+                                transition: 'all 0.2s'
+                            }}
+                        />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                            <button 
+                                onClick={() => setEditingMessage(null)} 
+                                style={{ 
+                                    background: '#f1f5f9', 
+                                    border: 'none', 
+                                    borderRadius: '50%', 
+                                    width: '38px', 
+                                    height: '38px', 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    justifyContent: 'center', 
+                                    cursor: 'pointer', 
+                                    color: '#64748b',
+                                    transition: 'background 0.2s'
+                                }}
+                            >
+                                <X size={20} />
+                            </button>
+                            <button 
+                                onClick={handleEditMessageSubmit} 
+                                style={{ 
+                                    background: '#027EB5', 
+                                    border: 'none', 
+                                    borderRadius: '50%', 
+                                    width: '42px', 
+                                    height: '42px', 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    justifyContent: 'center', 
+                                    cursor: 'pointer', 
+                                    color: 'white',
+                                    boxShadow: '0 2px 8px rgba(2, 126, 181, 0.3)',
+                                    transition: 'transform 0.2s'
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.05)'}
+                                onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                            >
+                                <Check size={24} strokeWidth={2.5} />
+                            </button>
+                        </div>
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#667781', background: 'rgba(255,255,255,0.7)', padding: '4px 12px', borderRadius: '12px' }}>
+                        Press Esc to cancel • Enter to save
                     </div>
                 </div>
             </div>
@@ -15054,6 +16058,74 @@ export default function Chat() {
                     </div>
                 </div>
             )}
+
+            {isDeactivateCommunityConfirmOpen && deactivateCommunityTarget && (
+                <div
+                    className="wa-mute-modal-overlay"
+                    onClick={() => setIsDeactivateCommunityConfirmOpen(false)}
+                    style={{ zIndex: 32000, background: 'rgba(11,20,26,0.85)', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                    <div
+                        className="wa-mute-modal"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ maxWidth: '420px', width: '90%', borderRadius: '24px', padding: 0, background: '#ffffff', boxShadow: '0 17px 50px 0 rgba(0,0,0,0.19)', overflow: 'hidden' }}
+                    >
+                        <div style={{ padding: '32px 24px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', marginBottom: 24 }}>
+                                <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16, color: '#ef4444' }}>
+                                    <AlertCircle size={32} />
+                                </div>
+                                <h3 style={{ fontSize: '20px', color: '#111b21', margin: '0 0 8px', fontWeight: 600 }}>Deactivate community?</h3>
+                                <p style={{ color: '#54656f', fontSize: '14px', lineHeight: '1.5', margin: 0 }}>
+                                    Are you sure you want to deactivate <strong>{deactivateCommunityTarget.name}</strong>? This action cannot be undone. All groups and members within this community will be affected.
+                                </p>
+                            </div>
+                            
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                <button
+                                    onClick={handleDeactivateCommunity}
+                                    style={{ 
+                                        width: '100%',
+                                        padding: '12px', 
+                                        borderRadius: '24px', 
+                                        border: 'none', 
+                                        background: '#ef4444', 
+                                        color: 'white', 
+                                        fontWeight: 600, 
+                                        fontSize: 15,
+                                        cursor: 'pointer',
+                                        transition: 'opacity 0.2s'
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
+                                    onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                                >
+                                    Deactivate
+                                </button>
+                                <button
+                                    onClick={() => setIsDeactivateCommunityConfirmOpen(false)}
+                                    style={{ 
+                                        width: '100%',
+                                        padding: '12px', 
+                                        borderRadius: '24px', 
+                                        border: '1px solid #d1d7db', 
+                                        background: 'transparent', 
+                                        color: '#54656f', 
+                                        fontWeight: 600, 
+                                        fontSize: 15,
+                                        cursor: 'pointer' 
+                                    }}
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {renderContactSelectionPanel()}
+            {renderConfirmContactSendPanel()}
+            {renderContactDetailPopup()}
 
         </>
     );
