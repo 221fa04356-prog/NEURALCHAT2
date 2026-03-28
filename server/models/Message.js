@@ -11,7 +11,8 @@ const messageSchema = new mongoose.Schema({
     file_path: { type: String },
     fileName: { type: String },
     fileSize: { type: Number }, // in bytes
-    pageCount: { type: Number }, // optional, for PDFs
+    pageCount: { type: Number, default: 0 }, // optional, for PDFs
+    thumbnail_path: { type: String },
     is_view_once: { type: Boolean, default: false },
     is_viewed: { type: Boolean, default: false },
     is_opened: { type: Boolean, default: false },
@@ -38,6 +39,16 @@ const messageSchema = new mongoose.Schema({
     forward_count: { type: Number, default: 0 },
     is_read: { type: Boolean, default: false },
     read_at: { type: Date, default: null },
+    
+    // E2EE specific fields
+    ciphertext: { type: String }, // Encrypted with Double Ratchet
+    session_header: {             // Signal session headers for Bob to sync ratchet
+        ephemeralKey: { type: String },
+        ratchetKey: { type: String },
+        preKeyId: { type: Number },
+        signedPreKeyId: { type: Number }
+    },
+    
     created_at: { type: Date, default: Date.now }
 }, {
     toJSON: { virtuals: true },
@@ -48,12 +59,13 @@ const messageSchema = new mongoose.Schema({
 messageSchema.add({
     __enc_content: { type: Boolean, select: true, default: false },
     __enc_file_path: { type: Boolean, select: true, default: false },
-    __enc_fileName: { type: Boolean, select: true, default: false }
+    __enc_fileName: { type: Boolean, select: true, default: false },
+    __enc_thumbnail_path: { type: Boolean, select: true, default: false }
 });
 
 // App-level Field Encryption
 messageSchema.plugin(fieldEncryption, {
-    fields: ["content", "file_path", "fileName"],
+    fields: ["content", "file_path", "fileName", "thumbnail_path"],
     secret: process.env.DEFAULT_ENCRYPTION_SECRET,
     salt: process.env.DEFAULT_ENCRYPTION_SALT
 });

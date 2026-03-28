@@ -168,7 +168,7 @@ router.get('/history/:userId', async (req, res) => {
 // GET Current User Profile - Secured with Auth
 router.get('/me', authenticateToken, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).select('name email mobile designation about role isOnline lastSeen bannedUntil rejectionCount adminLock');
+        const user = await User.findById(req.user.id).select('name email mobile designation about role isOnline lastSeen bannedUntil rejectionCount adminLock __enc_name __enc_email __enc_mobile __enc_designation __enc_about');
         if (!user) return res.status(404).json({ error: 'User not found' });
         res.json(user);
     } catch (err) {
@@ -190,7 +190,7 @@ router.get('/users', authenticateToken, async (req, res) => {
             query.role = { $ne: 'admin' };
         }
 
-        const users = await User.find(query).select('name email mobile _id role about isOnline lastSeen');
+        const users = await User.find(query).select('name email mobile _id role about isOnline lastSeen __enc_name __enc_email __enc_mobile __enc_about __enc_designation');
         console.log(`[DEBUG] /users: Found ${users.length} raw users for requester ${currentUserId} (Role: ${currentUserRole})`);
 
         if (!currentUserId) {
@@ -213,7 +213,7 @@ router.get('/users', authenticateToken, async (req, res) => {
                         { user_id: new mongoose.Types.ObjectId(u._id), receiver_id: new mongoose.Types.ObjectId(currentUserId) }
                     ],
                     deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
-                }).sort({ created_at: -1 }).select('content created_at type sender_id duration is_deleted_by_admin is_deleted_by_user deleted_for __enc_content __enc_file_path __enc_fileName');
+                }).sort({ created_at: -1 }).then(r => r ? (typeof r.toObject === 'function' ? r.toObject() : r) : null);
 
                 // 2. Get Unread Count
                 const unreadCount = await Message.countDocuments({
@@ -244,7 +244,7 @@ router.get('/users', authenticateToken, async (req, res) => {
                         { sender_id: u._id, receiver_id: currentUserId },
                         { sender_id: currentUserId, receiver_id: u._id }
                     ]
-                }).lean();
+                }).then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
                 const isAccepted = request && request.status === 'accepted';
                 const isPendingForMe = request && request.status === 'pending' && String(request.receiver_id) === String(currentUserId);
@@ -363,6 +363,52 @@ router.post('/toggle-favorite', authenticateToken, async (req, res) => {
 
         await currentUser.save();
         res.json({ status: 'success', favorites: currentUser.favorites });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- E2EE (Signal Protocol) Key Management ---
+
+// Upload Signal public keys
+router.post('/signal/upload-keys', authenticateToken, async (req, res) => {
+    try {
+        const { identityKey, signedPreKey, oneTimePreKeys } = req.body;
+        const user = await User.findByIdAndUpdate(req.user.id, {
+            signal_keys: {
+                identityKey,
+                signedPreKey,
+                oneTimePreKeys
+            }
+        }, { new: true });
+        res.json({ status: 'success', message: 'Keys uploaded' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Fetch a user's Signal public keys for X3DH
+router.get('/signal/keys/:userId', authenticateToken, async (req, res) => {
+    try {
+        const user = await User.findById(req.params.userId).select('signal_keys');
+        if (!user || !user.signal_keys || !user.signal_keys.identityKey) {
+            return res.status(404).json({ error: 'User does not have E2EE enabled' });
+        }
+
+        // Return a pre-key bundle (ID key, signed pre-key, and one one-time pre-key)
+        const bundle = {
+            identityKey: user.signal_keys.identityKey,
+            signedPreKey: user.signal_keys.signedPreKey,
+            oneTimePreKey: null
+        };
+
+        // Pop an OPK (One-Time PreKey) if available
+        if (user.signal_keys.oneTimePreKeys && user.signal_keys.oneTimePreKeys.length > 0) {
+            bundle.oneTimePreKey = user.signal_keys.oneTimePreKeys.shift();
+            await user.save(); // Save the popped OPK state
+        }
+
+        res.json(bundle);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -525,15 +571,15 @@ router.get('/messages/starred/all', authenticateToken, async (req, res) => {
 
         // Fetch starred P2P messages
         const p2pStarred = await Message.find({ starred_by: userId })
-            .populate('user_id', 'name image mobile')
-            .populate('receiver_id', 'name image mobile')
-            .lean();
+            .populate('user_id', 'name image mobile __enc_name __enc_mobile')
+            .populate('receiver_id', 'name image mobile __enc_name __enc_mobile')
+            .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         // Fetch starred Group messages
         const groupStarred = await GroupMessage.find({ starred_by: userId })
-            .populate('sender_id', 'name image mobile')
+            .populate('sender_id', 'name image mobile __enc_name __enc_mobile')
             .populate('group_id', 'name icon')
-            .lean();
+            .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         // Standardize output
         const combined = [
@@ -602,7 +648,7 @@ router.get('/p2p/:userId/:otherUserId', authenticateToken, async (req, res) => {
             deleted_for: { $ne: new mongoose.Types.ObjectId(req.user.id) }
         })
             .sort({ created_at: 1 })
-            .populate('reply_to', 'content type file_path user_id sender_id');
+            .populate('reply_to', 'content type file_path user_id sender_id ciphertext session_header');
 
         // Map messages to include user-specific is_starred boolean
         const enrichedMessages = messages.map(msg => {
@@ -748,7 +794,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
 
                         // Notify receiver
                         if (req.io) {
-                            const senderUser = await User.findById(userId).select('name');
+                            const senderUser = await User.findById(userId).select('name __enc_name');
                             req.io.to(String(toUserId)).emit('new_message_request', {
                                 senderId: userId,
                                 senderName: senderUser ? senderUser.name : 'New User',
@@ -771,7 +817,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
                         existingRequest.updated_at = new Date();
                         await existingRequest.save();
                         if (req.io) {
-                            const senderUser = await User.findById(userId).select('name');
+                            const senderUser = await User.findById(userId).select('name __enc_name');
                             req.io.to(String(toUserId)).emit('new_message_request', {
                                 senderId: userId,
                                 senderName: senderUser ? senderUser.name : 'New User',
@@ -808,14 +854,21 @@ router.post('/send', authenticateToken, (req, res, next) => {
                 content: content || '',
                 type,
                 file_path: filePath,
-                link_preview: linkPreview,
-                fileName, fileSize, pageCount, duration: req.body.duration, is_view_once, // Metadata
+                fileSize: fileSize || 0,
+            pageCount: req.body.pageCount || 0,
+            thumbnail_path: req.body.thumbnail_path || null,
+            link_preview: linkPreview,
+            duration: req.body.duration, is_view_once, // Metadata
                 reply_to: reply_to || null,
 
                 is_flagged: !!isFlagged,
                 flag_reason: flagReason,
                 is_forwarded: isForwarded,
-                forward_count: forwardCount
+                forward_count: forwardCount,
+                
+                // E2EE fields
+                ciphertext: req.body.ciphertext,
+                session_header: req.body.session_header ? JSON.parse(req.body.session_header) : undefined
             });
 
 
@@ -1006,7 +1059,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
         console.error("Groq/DB Error FULL:", aiErr); // Enhanced logging
         // Fallback
         try {
-            const errorMsg = "Sorry, I encountered an error processing that. (" + (aiErr.error?.message || aiErr.message) + ")";
+            const errorMsg = "Sorry, I encountered an error processing that. (" + (aiErr.message) + ")";
             await Message.create({
                 user_id: userId,
                 receiver_id: null,
@@ -1606,7 +1659,7 @@ router.get('/requests', authenticateToken, async (req, res) => {
         const rawRequests = await MessageRequest.find({
             receiver_id: currentUserId,
             status: 'pending'
-        }).lean();
+        }).then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         console.log('[REQUESTS] Raw requests found:', rawRequests.length);
 
@@ -1654,8 +1707,8 @@ router.get('/requests', authenticateToken, async (req, res) => {
         // Step 3: Fetch sender users manually using the sender_id values
         const senderIds = validRequests.map(r => r.sender_id).filter(Boolean);
         const senders = await User.find({ _id: { $in: senderIds } })
-            .select('name email mobile')
-            .lean();
+            .select('name email mobile __enc_name __enc_email __enc_mobile')
+            .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         // Build lookup map
         const senderMap = {};
@@ -1704,7 +1757,7 @@ router.post('/requests/accept', authenticateToken, async (req, res) => {
 
         // Notify the sender that their request was accepted
         if (req.io) {
-            const receiver = await User.findById(currentUserId).select('name');
+            const receiver = await User.findById(currentUserId).select('name __enc_name');
             req.io.to(String(request.sender_id)).emit('request_accepted', {
                 requestId: request._id,
                 receiverName: receiver ? receiver.name : 'User'

@@ -15,7 +15,7 @@ const NeuralBackground = () => {
 
         // Configuration
         const config = {
-            baseColor: { r: 13, g: 159, b: 183 }, // #0D9FB7
+            baseColor: { r: 14, g: 165, b: 190 }, // #0EA5BE
             baseConnectionDistance: 110,
             mouseDistance: 200,
             baseSpeed: 0.5

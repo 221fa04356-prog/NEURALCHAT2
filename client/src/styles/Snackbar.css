@@ -132,7 +132,7 @@
 
 /* Action Button (Undo/Action) */
 .snackbar-action-btn {
-    color: #027EB5;
+    color: #0EA5BE;
     font-weight: 700;
     font-size: 14px;
     cursor: pointer;
@@ -144,7 +144,7 @@
 }
 
 .snackbar-action-btn:hover {
-    background: rgba(2, 126, 181, 0.1);
+    background: rgba(14, 165, 190, 0.1);
     text-decoration: none;
 }
 

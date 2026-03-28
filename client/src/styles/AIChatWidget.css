@@ -278,3 +278,31 @@
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.ai-error-banner {
+    position: absolute;
+    bottom: 4.5rem;
+    left: 1rem;
+    right: 1rem;
+    background: #fee2e2;
+    color: #ef4444;
+    padding: 0.6rem 1rem;
+    border-radius: 0.8rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    border: 1px solid #fecaca;
+    animation: slideUp 0.3s ease-out;
+    z-index: 50;
+    text-align: center;
+}
+
+@keyframes slideUp {
+    from { transform: translateY(10px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}

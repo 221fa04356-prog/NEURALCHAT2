@@ -150,8 +150,8 @@ router.post('/create', authenticateToken, async (req, res) => {
 
         // Populate members for response
         const populatedGroup = await Group.findById(group._id)
-            .populate('members', 'name email _id isOnline lastSeen')
-            .populate('admin', 'name _id');
+            .populate('members', 'name email _id isOnline lastSeen __enc_name __enc_email')
+            .populate('admin', 'name _id __enc_name');
 
         // Create the system message "group created"
         await GroupMessage.create({
@@ -197,8 +197,8 @@ router.get('/my-groups', authenticateToken, async (req, res) => {
             $or: [{ members: userId }, { removedMembers: userId }],
             isAnnouncementGroup: { $ne: true }
         })
-            .populate('members', 'name email _id isOnline lastSeen')
-            .populate('admin', 'name _id')
+            .populate('members', 'name email _id isOnline lastSeen __enc_name __enc_email')
+            .populate('admin', 'name _id __enc_name')
             .sort({ created_at: -1 });
 
         // Enrich each group with last message and unread count
@@ -208,7 +208,8 @@ router.get('/my-groups', authenticateToken, async (req, res) => {
                 deleted_for: { $ne: userId }
             })
                 .sort({ created_at: -1 })
-                .populate('sender_id', 'name');
+                .populate('sender_id', 'name __enc_name')
+                .then(r => r ? r.toObject() : null);
 
             const userIdObj = new mongoose.Types.ObjectId(userId);
             
@@ -247,9 +248,9 @@ router.get('/:groupId', authenticateToken, async (req, res) => {
         const userId = req.user.id;
 
         const group = await Group.findById(groupId)
-            .populate('members', 'name email _id isOnline lastSeen about mobile countryCode')
-            .populate('admin', 'name _id')
-            .populate('admins', 'name _id');
+            .populate('members', 'name email _id isOnline lastSeen about mobile countryCode __enc_name __enc_email __enc_about __enc_mobile')
+            .populate('admin', 'name _id __enc_name')
+            .populate('admins', 'name _id __enc_name');
 
         if (!group) return res.status(404).json({ error: 'Group not found' });
 
@@ -292,7 +293,7 @@ router.get('/:groupId/messages', authenticateToken, async (req, res) => {
             deleted_for: { $ne: userId },
             created_at: { $gte: visibleFrom }
         })
-            .populate('sender_id', 'name _id')
+            .populate('sender_id', 'name _id __enc_name')
             .populate('read_by', 'name image _id')
             .populate('read_details.user_id', 'name image _id')
             .sort({ created_at: 1 });
@@ -348,6 +349,27 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             } else {
                 type = 'file';
             }
+
+            // Extract page count for PDF
+            if (file.mimetype === 'application/pdf') {
+                try {
+                    const dataBuffer = fs.readFileSync(path.join(__dirname, '../uploads', file.filename));
+                    const pdfParse = require('pdf-parse');
+                    if (typeof pdfParse === 'function') {
+                        const data = await pdfParse(dataBuffer);
+                        req.body.pageCount = data.numpages;
+                    }
+                } catch (e) {
+                    console.error("Group PDF Page Count Failed", e);
+                }
+            }
+        } else if (req.body.file_path) {
+            // Forwarded file
+            file_path = req.body.file_path;
+            fileName = req.body.fileName;
+            fileSize = req.body.fileSize;
+            req.body.pageCount = req.body.pageCount || 0;
+            req.body.thumbnail_path = req.body.thumbnail_path || null;
         }
 
         // Detect URL for preview
@@ -366,18 +388,24 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             file_path: file_path || null,
             fileName: fileName || null,
             fileSize: fileSize || 0,
+            pageCount: req.body.pageCount || 0,
+            thumbnail_path: req.body.thumbnail_path || null,
             link_preview: linkPreview,
             duration: req.body.duration,
             is_view_once: is_view_once === 'true' || is_view_once === true,
             is_forwarded: isForwarded === true || isForwarded === 'true',
-            forward_count: forward_count || 0
+            forward_count: forward_count || 0,
+            
+            // E2EE fields
+            ciphertext: req.body.ciphertext,
+            sender_key_id: req.body.sender_key_id
         });
 
         const populated = await GroupMessage.findById(msg._id)
-            .populate('sender_id', 'name _id');
+            .populate('sender_id', 'name _id __enc_name');
 
         // Re-fetch to guarantee decryption before sending to socket/response
-        const decryptedPopulated = await GroupMessage.findById(msg._id).populate('sender_id', 'name _id');
+        const decryptedPopulated = await GroupMessage.findById(msg._id).populate('sender_id', 'name _id __enc_name');
 
         // Emit to all group members
         if (req.io) {
@@ -629,11 +657,11 @@ router.patch('/:groupId/members', authenticateToken, async (req, res) => {
             // Optional: notify about community member addition
             if (req.io) {
                 const updatedComm = await Community.findById(community._id)
-                    .populate('creator', 'name mobile countryCode _id')
-                    .populate('members', 'name mobile countryCode _id about')
-                    .populate('admins', 'name mobile countryCode _id about')
+                    .populate('creator', 'name mobile countryCode _id __enc_name __enc_mobile')
+                    .populate('members', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
+                    .populate('admins', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
                     .populate('announcements', 'name icon _id members admin')
-                    .lean();
+                    .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
                 const communityData = { ...updatedComm, id: updatedComm._id, is_community: true };
                 
@@ -652,7 +680,7 @@ router.patch('/:groupId/members', authenticateToken, async (req, res) => {
 
         // Emit to all members
         if (req.io) {
-            const populated = await Group.findById(groupId).populate('members', 'name image mobile about');
+            const populated = await Group.findById(groupId).populate('members', 'name image mobile about __enc_name __enc_mobile __enc_about');
             group.members.forEach(m => {
                 req.io.to(m.toString()).emit('group_members_updated', { 
                     groupId, 
@@ -717,9 +745,9 @@ router.post('/:groupId/join', authenticateToken, async (req, res) => {
         });
 
         const populatedGroup = await Group.findById(groupId)
-            .populate('members', 'name email _id isOnline lastSeen about mobile image')
-            .populate('admin', 'name _id')
-            .populate('admins', 'name _id');
+            .populate('members', 'name email _id isOnline lastSeen about mobile image __enc_name __enc_email __enc_about __enc_mobile')
+            .populate('admin', 'name _id __enc_name')
+            .populate('admins', 'name _id __enc_name');
 
         // Emit to all members
         if (req.io) {

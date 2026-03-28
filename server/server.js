@@ -175,7 +175,7 @@ io.on('connection', async (socket) => {
                     status: 'pending'
                 });
 
-                const senderUser = await User.findById(userId).select('name');
+                const senderUser = await User.findById(userId).select('name __enc_name');
                 const senderName = senderUser ? senderUser.name : 'Someone';
 
                 io.to(receiverId).emit('new_message_request', {
@@ -187,7 +187,7 @@ io.on('connection', async (socket) => {
                 console.log(`[MSG_REQUEST] New request from ${userId} to ${receiverId}`);
             } else if (existingRequest.status === 'rejected') {
                 // Check if ban is still active
-                const sender = await User.findById(userId).select('bannedUntil adminLock name');
+                const sender = await User.findById(userId).select('bannedUntil adminLock name __enc_name');
                 
                 if (sender.adminLock) {
                      socket.emit('account_locked', { message: 'Your account is permanently locked from messaging.' });
