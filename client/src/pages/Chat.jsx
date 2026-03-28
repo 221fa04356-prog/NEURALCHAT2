@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useRef, memo } from 'react';
+import React, { useEffect, useState, useRef, memo } from 'react';
 import axios from 'axios';
 import ImageEditorModal from '../components/ImageEditorModal';
 import logo from '../assets/logo.png';
@@ -4500,13 +4500,17 @@ export default function Chat() {
         if (!url && typeof msg.content === 'string' && msg.content.includes('/uploads/')) {
             url = msg.content;
         }
-
-        // Strip hardcoded localhost for robust playback on other networks
-        if (url && url.includes('localhost:3000')) {
-            url = url.replace('http://localhost:3000', '');
+        // Strip any backend URLs pointing to port 3000 or /uploads/ so Vite proxy uses HTTPS
+        if (url && url.startsWith('http')) {
+            try {
+                const parsed = new URL(url);
+                if (parsed.port === '3000' || parsed.pathname.startsWith('/uploads/')) {
+                    url = parsed.pathname + parsed.search;
+                }
+            } catch(e) {}
         }
 
-        if (url && !url.startsWith('http')) {
+        if (url && !url.startsWith('http') && !url.startsWith('blob:') && !url.startsWith('data:')) {
             // Use the base API URL or window origin since we have proxy
             url = `${window.location.protocol}//${window.location.host}${url.startsWith('/') ? '' : '/'}${url}`;
         }
@@ -8735,7 +8739,13 @@ export default function Chat() {
                         {!isDeleted && (
                             <>
                                 <div className="wa-reactions-row">
-                                    <span>Ã°Å¸â€˜Â</span><span>Ã¢ÂÂ¤Ã¯Â¸Â</span><span>Ã°Å¸Ëœâ€š</span><span>Ã°Å¸ËœÂ®</span><span>Ã°Å¸ËœÂ¢</span><span>Ã°Å¸â„¢Â</span><Plus size={18} />
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>👍</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>❤️</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>😂</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>😮</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>😢</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>🙏</span>
+                                    <Plus size={18} onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }} />
                                 </div>
                                 <div className="wa-dropdown-divider"></div>
                             </>
@@ -11358,7 +11368,7 @@ export default function Chat() {
                                                         </span>
                                                     ) : (
 
-                                                        renderLastMessagePreview(item.lastMessage, isGroup || item.is_community, '')
+
                                                         item.lastMessage?.type === 'image' ? (isGroup ? '📷 Photo' : '📷 Image') :
                                                             item.lastMessage?.type === 'video' ? '🎥 Video' :
                                                                 item.lastMessage?.type === 'file' ? '📄 File' :
