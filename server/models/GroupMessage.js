@@ -6,7 +6,7 @@ const groupMessageSchema = new mongoose.Schema({
     sender_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     role: { type: String, default: 'user' },
     content: { type: String, default: '' },
-    type: { type: String, enum: ['text', 'image', 'file', 'system', 'video', 'community_link', 'audio'], default: 'text' },
+    type: { type: String, enum: ['text', 'image', 'file', 'system', 'video', 'community_link', 'audio', 'contact'], default: 'text' },
     duration: { type: Number }, // in seconds
     metadata: { type: mongoose.Schema.Types.Mixed },
     file_path: { type: String },
@@ -32,6 +32,8 @@ const groupMessageSchema = new mongoose.Schema({
     is_forwarded: { type: Boolean, default: false },
     forward_count: { type: Number, default: 0 },
     is_read: { type: Boolean, default: false },
+    is_edited: { type: Boolean, default: false },
+    edited_at: { type: Date, default: null },
     created_at: { type: Date, default: Date.now }
 }, {
     toJSON: { virtuals: true },

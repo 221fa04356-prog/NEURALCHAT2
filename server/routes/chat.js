@@ -404,8 +404,7 @@ router.post('/user/update', authenticateToken, async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-
-// Mark messages as read - Secured with Auth
+// Inserted comment
 router.post('/messages/mark-read', authenticateToken, async (req, res) => {
     const { userId, senderId } = req.body;
 
@@ -607,7 +606,8 @@ router.get('/p2p/:userId/:otherUserId', authenticateToken, async (req, res) => {
         // Map messages to include user-specific is_starred boolean
         const enrichedMessages = messages.map(msg => {
             const msgObj = msg.toObject();
-            msgObj.is_starred = (msg.starred_by || []).includes(req.user.id);
+            msgObj.is_starred = (msg.starred_by || []).some(id => String(id) === String(req.user.id));
+            msgObj.is_edited = msg.is_edited || false;
             return msgObj;
         });
 
@@ -637,7 +637,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
     }
 
     // Determine type and metadata
-    let type = 'text';
+    let type = req.body.type || 'text';
     let filePath = null;
     let fileName = null;
     let fileSize = 0;
@@ -1170,11 +1170,58 @@ router.post('/message/:id/toggle', authenticateToken, async (req, res) => {
     }
 });
 
+// Edit Message - Secured with Auth
+router.post('/message/:id/edit', authenticateToken, async (req, res) => {
+    const userId = req.user.id;
+    const { content } = req.body;
+
+    if (!content) return res.status(400).json({ error: 'Content is required' });
+
+    try {
+        const msg = await Message.findById(req.params.id);
+        if (!msg) return res.status(404).json({ error: 'Message not found' });
+
+        // Permission check: only sender can edit
+        if (msg.user_id.toString() !== userId) {
+            return res.status(403).json({ error: 'Unauthorized to edit this message' });
+        }
+
+        // Permission check: removed read restriction for now
+
+        msg.content = content;
+        msg.is_edited = true;
+        msg.edited_at = new Date();
+        await msg.save();
+
+        // Notify participants via socket
+        if (req.io) {
+            const updatedMsg = await Message.findById(msg._id);
+            const participants = [msg.user_id.toString()];
+            if (msg.receiver_id) participants.push(msg.receiver_id.toString());
+
+            participants.forEach(pId => {
+                req.io.to(pId).emit('message_edited', {
+                    messageId: msg._id,
+                    content: updatedMsg.content,
+                    is_edited: true,
+                    edited_at: msg.edited_at
+                });
+            });
+        }
+
+        res.json({
+            status: 'success',
+            message: msg
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Mark Message as Opened - Secured with Auth
 router.post('/message/:id/open', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
-        
         let msg = await Message.findById(req.params.id);
         let isGroupMsg = false;
         
