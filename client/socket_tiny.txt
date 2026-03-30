@@ -1,0 +1,2 @@
+        socket.on('account_locked', onAccountLocked);
+

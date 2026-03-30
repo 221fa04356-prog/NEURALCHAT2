@@ -1,0 +1,13 @@
+646: const handleReaction = async (messageId, emoji, isGroup) => {
+775: const [reactionDetails, setReactionDetails] = useState(null); // { msg, isGroup }
+8783: <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '👍', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }}>👍</span>
+8784: <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '❤️', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }}>❤️</span>
+8785: <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '😂', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }}>😂</span>
+8786: <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '😮', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }}>😮</span>
+8787: <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '😢', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }}>😢</span>
+8788: <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '🙏', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }}>🙏</span>
+12783: onClick={(e) => { e.stopPropagation(); setReactionDetails({ msg, isGroup: false }); }}
+14015: onClick={(e) => { e.stopPropagation(); setReactionDetails({ msg, isGroup: true }); }}
+16745: onClick={() => setReactionDetails(null)}
+16771: handleReaction(reactionDetails.msg._id || reactionDetails.msg.id, r.emoji, reactionDetails.isGroup);
+16772: setReactionDetails(null);

@@ -9,6 +9,7 @@ const GroupMessage = require('../models/GroupMessage');
 const ChatDeletion = require('../models/ChatDeletion');
 const PasswordReset = require('../models/PasswordReset');
 const Community = require('../models/Community');
+const ReactionLog = require('../models/ReactionLog'); // Import ReactionLog model for audit
 const sendEmail = require('../utils/emailService');
 const crypto = require('crypto');
 const getLocalIp = require('../utils/getLocalIp');
@@ -601,13 +602,25 @@ router.get('/chat/history-filtered', async (req, res) => {
             }
         }
 
+        // --- Enrich messages with reaction history (Audit Trail) ---
+        const messageIds = messages.map(m => m._id);
+        const reactionLogs = await ReactionLog.find({ message_id: { $in: messageIds } })
+            .populate('user_id', 'name __enc_name')
+            .sort({ timestamp: 1 });
+
+        const historyWithAudit = messages.map(m => {
+            const mObj = m.toObject ? m.toObject() : m;
+            mObj.reaction_history = reactionLogs.filter(log => String(log.message_id) === String(mObj._id));
+            return mObj;
+        });
+
         // Check if user has deleted this contact
         const deletions = await ChatDeletion.find({
             userId: userId,
             contactId: otherUserId
         }).populate('userId', 'name __enc_name').sort({ deletedAt: 1 });
 
-        const enrichedMessages = [...messages];
+        const enrichedMessages = [...historyWithAudit];
 
         if (deletions.length > 0) {
             deletions.forEach(del => {
@@ -628,6 +641,52 @@ router.get('/chat/history-filtered', async (req, res) => {
         res.json(enrichedMessages);
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// --- GLOBAL REACTION AUDIT LOGS ---
+router.get('/reaction-logs', async (req, res) => {
+    try {
+        const ReactionLog = require('../models/ReactionLog');
+        const Message = require('../models/Message');
+        const GroupMessage = require('../models/GroupMessage');
+
+        const logs = await ReactionLog.find({})
+            .populate('user_id', 'name login_id email')
+            .sort({ timestamp: -1 })
+            .limit(300);
+
+        const enrichedLogs = await Promise.all(logs.map(async (log) => {
+            const logObj = log.toObject();
+            let message = await Message.findById(log.message_id).populate('user_id receiver_id', 'name');
+            if (!message) {
+                message = await GroupMessage.findById(log.message_id).populate('sender_id group_id', 'name');
+            }
+
+            if (message) {
+                logObj.contentSnippet = message.content ? (message.content.length > 30 ? message.content.substring(0, 30) + '...' : message.content) : `[${message.type}]`;
+                logObj.type = message.type;
+                if (log.isGroup) {
+                    logObj.context = `Group: ${message.group_id?.name || 'Unknown'}`;
+                    logObj.participants = `Sent by: ${message.sender_id?.name || 'Unknown'}`;
+                } else {
+                    const sender = message.user_id?.name || 'Unknown';
+                    const receiver = message.receiver_id?.name || 'Unknown';
+                    logObj.context = `Private Chat`;
+                    logObj.participants = `${sender} ➔ ${receiver}`;
+                }
+            } else {
+                logObj.contentSnippet = "[Message Deleted]";
+                logObj.context = "N/A";
+                logObj.participants = "N/A";
+            }
+            return logObj;
+        }));
+
+        res.json(enrichedLogs);
+    } catch (err) {
+        console.error('Error fetching global reaction logs:', err);
+        res.status(500).json({ error: 'Server error' });
     }
 });
 

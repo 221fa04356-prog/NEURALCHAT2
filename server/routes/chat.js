@@ -9,6 +9,7 @@ const ChatDeletion = require('../models/ChatDeletion');
 const User = require('../models/User'); // Import User model
 const Group = require('../models/Group'); // Import Group model
 const MessageRequest = require('../models/MessageRequest'); // Import MessageRequest model
+const ReactionLog = require('../models/ReactionLog'); // Import ReactionLog model for audit logs
 const Groq = require('groq-sdk');
 const pdfParse = require('pdf-parse'); // Renamed to avoid confusion
 const mammoth = require('mammoth');
@@ -137,10 +138,10 @@ const upload = multer({
         const ext = path.extname(file.originalname).toLowerCase();
         const allowedExts = ['.jpg', '.jpeg', '.png', '.doc', '.docx', '.pdf', '.mp3', '.m4a', '.ogg', '.wav', '.webm'];
 
-        const isAllowedType = allowedTypes.includes(file.mimetype) || 
-                             file.mimetype.startsWith('audio/') || 
-                             file.mimetype.startsWith('video/') || 
-                             file.mimetype.startsWith('image/');
+        const isAllowedType = allowedTypes.includes(file.mimetype) ||
+            file.mimetype.startsWith('audio/') ||
+            file.mimetype.startsWith('video/') ||
+            file.mimetype.startsWith('image/');
 
         if (isAllowedType && allowedExts.includes(ext)) {
             cb(null, true);
@@ -289,7 +290,7 @@ router.get('/users', authenticateToken, async (req, res) => {
 
         const result = enhancedUsers.filter(u => u !== null);
         console.log(`[DEBUG] /users: Returning ${result.length} enhanced users for ${currentUserId}`);
-        
+
         result.sort((a, b) => {
             const timeA = a.lastMessage?.created_at ? new Date(a.lastMessage.created_at).getTime() : 0;
             const timeB = b.lastMessage?.created_at ? new Date(b.lastMessage.created_at).getTime() : 0;
@@ -897,7 +898,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
                         // Restricted for 24 hours after rejection
                         const isWithin24Hours = (new Date() - new Date(existingRequest.updated_at)) < 24 * 60 * 60 * 1000;
                         if (isWithin24Hours) {
-                            return res.status(403).json({ 
+                            return res.status(403).json({
                                 error: 'Messaging is restricted for 24 hours after a rejection.',
                                 restrictedUntil: new Date(existingRequest.updated_at.getTime() + 24 * 60 * 60 * 1000)
                             });
@@ -947,17 +948,17 @@ router.post('/send', authenticateToken, (req, res, next) => {
                 type,
                 file_path: filePath,
                 fileSize: fileSize || 0,
-            pageCount: req.body.pageCount || 0,
-            thumbnail_path: req.body.thumbnail_path || null,
-            link_preview: linkPreview,
-            duration: req.body.duration, is_view_once, // Metadata
+                pageCount: req.body.pageCount || 0,
+                thumbnail_path: req.body.thumbnail_path || null,
+                link_preview: linkPreview,
+                duration: req.body.duration, is_view_once, // Metadata
                 reply_to: reply_to || null,
 
                 is_flagged: !!isFlagged,
                 flag_reason: flagReason,
                 is_forwarded: isForwarded,
                 forward_count: forwardCount,
-                
+
                 // E2EE fields
                 ciphertext: req.body.ciphertext,
                 session_header: req.body.session_header ? JSON.parse(req.body.session_header) : undefined
@@ -980,7 +981,19 @@ router.post('/send', authenticateToken, (req, res, next) => {
             }
 
             const decryptedMsg = await Message.findById(msg._id);
-            return res.json({ status: 'sent', message: decryptedMsg.toObject() });
+            const msgObj = decryptedMsg.toObject();
+
+            // Notify Admins
+            if (req.io) {
+                req.io.to('admins').emit('receive_message', msgObj);
+            }
+
+            // Notify Receiver (P2P)
+            if (toUserId && req.io) {
+                req.io.to(String(toUserId)).emit('receive_message', msgObj);
+            }
+
+            return res.json({ status: 'sent', message: msgObj });
         }
 
         // --- AI LOGIC BELOW (Only if no toUserId) ---
@@ -1384,18 +1397,18 @@ router.post('/message/:id/open', authenticateToken, async (req, res) => {
         const userId = req.user.id;
         let msg = await Message.findById(req.params.id);
         let isGroupMsg = false;
-        
+
         if (!msg) {
             const GroupMessage = require('../models/GroupMessage');
             msg = await GroupMessage.findById(req.params.id);
             if (msg) isGroupMsg = true;
         }
-        
+
         if (!msg) return res.status(404).json({ error: 'Message not found' });
-        
+
         msg.is_opened = true;
         await msg.save();
-        
+
         if (req.io) {
             if (isGroupMsg) {
                 const Group = require('../models/Group');
@@ -1408,13 +1421,13 @@ router.post('/message/:id/open', authenticateToken, async (req, res) => {
             } else {
                 const participants = [msg.user_id.toString()];
                 if (msg.receiver_id) participants.push(msg.receiver_id.toString());
-                
+
                 participants.forEach(pId => {
                     req.io.to(pId).emit('message_opened', { messageId: msg._id, is_opened: true });
                 });
             }
         }
-        
+
         res.json({ status: 'success', messageId: msg._id, is_opened: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -1425,27 +1438,27 @@ router.post('/message/:id/open', authenticateToken, async (req, res) => {
 router.post('/message/:id/viewed', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
-        
+
         let msg = await Message.findById(req.params.id);
         let isGroupMsg = false;
-        
+
         if (!msg) {
             const GroupMessage = require('../models/GroupMessage');
             msg = await GroupMessage.findById(req.params.id);
             if (msg) isGroupMsg = true;
         }
-        
+
         if (!msg) return res.status(404).json({ error: 'Message not found' });
-        
+
         // Safety check: receiver should be the one marking as viewed
         if (!isGroupMsg && msg.receiver_id && String(msg.receiver_id) !== String(userId)) {
-             // Senders can't mark their own view-once as viewed for the receiver
-             // But let's keep it simple for now or skip check
+            // Senders can't mark their own view-once as viewed for the receiver
+            // But let's keep it simple for now or skip check
         }
 
         msg.is_viewed = true;
         await msg.save();
-        
+
         if (req.io) {
             if (isGroupMsg) {
                 const group = await Group.findById(msg.group_id);
@@ -1457,13 +1470,13 @@ router.post('/message/:id/viewed', authenticateToken, async (req, res) => {
             } else {
                 const participants = [msg.user_id.toString()];
                 if (msg.receiver_id) participants.push(msg.receiver_id.toString());
-                
+
                 participants.forEach(pId => {
                     req.io.to(pId).emit('message_viewed', { messageId: msg._id, is_viewed: true });
                 });
             }
         }
-        
+
         res.json({ status: 'success', messageId: msg._id, is_viewed: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -2028,6 +2041,99 @@ router.post('/requests/reject', authenticateToken, async (req, res) => {
         res.json({ status: 'rejected', requestId, rejectionCount: sender.rejectionCount });
     } catch (err) {
         console.error('[REQUESTS] Reject error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// React to a message (P2P or Group)
+router.post('/messages/:messageId/react', authenticateToken, async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const { emoji, isGroup } = req.body;
+        const userId = req.user.id;
+
+        const Model = isGroup ? GroupMessage : Message;
+        const message = await Model.findById(messageId);
+
+        if (!message) return res.status(404).json({ error: 'Message not found' });
+
+        // Check if user already reacted with ANY emoji in this message
+        const reactions = message.reactions || [];
+        const existingIndex = reactions.findIndex(r => String(r.user_id) === String(userId));
+        let logAction = 'added';
+        let logEmoji = emoji;
+
+        let historyEvents = [];
+        if (existingIndex > -1) {
+            const previousEmoji = message.reactions[existingIndex].emoji;
+            if (previousEmoji === emoji) {
+                // Case 1: Simple Removal
+                message.reactions.splice(existingIndex, 1);
+                historyEvents.push({ emoji: emoji, action: 'removed' });
+            } else {
+                // Case 2: Replacement (Update)
+                message.reactions[existingIndex].emoji = emoji;
+                message.reactions[existingIndex].created_at = new Date();
+                historyEvents.push({ emoji: previousEmoji, action: 'removed' });
+                historyEvents.push({ emoji: emoji, action: 'added' });
+            }
+        } else {
+            // Case 3: Initial Addition
+            message.reactions.push({ user_id: userId, emoji, created_at: new Date() });
+            historyEvents.push({ emoji: emoji, action: 'added' });
+        }
+
+        await message.save();
+
+        // --- Permanent Audit Logging & Socket Notifications ---
+        for (const event of historyEvents) {
+            try {
+                await ReactionLog.create({
+                    message_id: messageId,
+                    user_id: userId,
+                    emoji: event.emoji,
+                    action: event.action,
+                    isGroup: isGroup === true || isGroup === 'true',
+                    timestamp: new Date()
+                });
+
+                if (req.io) {
+                    req.io.to('admins').emit('reaction_audit_log', {
+                        messageId,
+                        user_id: { _id: userId, name: req.user.name }, // Pass basic user info
+                        emoji: event.emoji,
+                        action: event.action,
+                        timestamp: new Date()
+                    });
+                }
+            } catch (auditErr) {
+                console.error('[REACTION_AUDIT] Failed to log/emit event:', auditErr);
+            }
+        }
+
+        if (req.io) {
+            const reactionData = { messageId, reactions: message.reactions, isGroup };
+            req.io.to('admins').emit('message_reaction_updated', reactionData);
+
+            if (isGroup) {
+                const group = await Group.findById(message.group_id);
+                if (group) {
+                    group.members.forEach(mId => {
+                        req.io.to(String(mId)).emit('message_reaction_updated', reactionData);
+                    });
+                }
+            } else {
+                [String(message.user_id), String(message.receiver_id)].forEach(pId => {
+                    if (pId && pId !== 'null') {
+                        req.io.to(pId).emit('message_reaction_updated', reactionData);
+                    }
+                });
+            }
+        }
+
+        res.json({ status: 'success', reactions: message.reactions });
+    } catch (err) {
+        console.error('[REACTIONS] Error:', err);
         res.status(500).json({ error: err.message });
     }
 });

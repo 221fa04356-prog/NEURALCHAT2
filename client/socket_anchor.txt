@@ -1,0 +1,15 @@
+
+        const onAccountLocked = (data) => {
+            console.log('Socket: account_locked', data);
+            setAccountLocked(true);
+            setSnackbar({ message: 'Your account has been locked due to multiple rejections.', type: 'error' });
+        };
+        socket.on('account_locked', onAccountLocked);
+
+        const onMessageRestrictionUpdated = (data) => {
+            console.log('Socket: message_restriction_updated', data);
+            const { targetId, status, updatedAt, rejectedBy } = data;
+
+            setUsers(prev => prev.map(u =>
+                String(u._id) === String(targetId)
+                    ? { ...u, requestStatus: status, requestUpdatedAt: updatedAt, requestRejectedBy: rejectedBy }

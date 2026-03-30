@@ -9,7 +9,7 @@ import {
     Eye, EyeOff, Menu, AlertTriangle, ArrowLeft, Smile,
     User as UserIcon, Search, Bell, Settings, LayoutDashboard,
     TrendingUp, Calendar, ChevronRight, X, Layers, Check, RefreshCw, Forward, ChevronDown, XCircle,
-    Mic, Pause, Play, List
+    Mic, Pause, Play, List, History
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import {
@@ -32,7 +32,7 @@ const CustomTooltip = ({ active, payload, label, coordinate, scrollRef }) => {
             const tooltipX = coordinate.x;
 
             const TOOLTIP_ESTIMATED_WIDTH = 220;
-            const RECHARTS_FLIP_THRESHOLD = 300; 
+            const RECHARTS_FLIP_THRESHOLD = 300;
 
             const isNearSvgRight = (scrollWidth - tooltipX) < RECHARTS_FLIP_THRESHOLD;
             const isNearVisibleRight = (tooltipX - scrollLeft) > (containerWidth - TOOLTIP_ESTIMATED_WIDTH);
@@ -153,7 +153,18 @@ export default function AdminDashboard() {
     const [chartPeriod, setChartPeriod] = useState('day'); // 'day', 'month', 'year'
     const [users, setUsers] = useState([]);
     const [resets, setResets] = useState([]);
+    const [reactionLogs, setReactionLogs] = useState([]);
+    const [selectedReactionMsg, setSelectedReactionMsg] = useState(null); // For message-specific audit card
     const [loading, setLoading] = useState(true);
+
+    const fetchReactionLogs = async () => {
+        try {
+            const res = await axios.get('/api/admin/reaction-logs');
+            setReactionLogs(res.data);
+        } catch (err) {
+            console.error('Failed to fetch reaction logs:', err);
+        }
+    };
 
     // Auth & Visibility States
     const [confirmPass, setConfirmPass] = useState({});
@@ -187,6 +198,11 @@ export default function AdminDashboard() {
 
     // Chat Review State
     const [viewChat, setViewChat] = useState(null);
+    const [viewingMedia, setViewingMedia] = useState(null);
+    const [zoomLevel, setZoomLevel] = useState(1);
+    const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+    const [isDragging, setIsDragging] = useState(false);
+    const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
     const [loadingChat, setLoadingChat] = useState(false);
     const [chatStep, setChatStep] = useState('contacts');
     const [chatContacts, setChatContacts] = useState([]);
@@ -257,7 +273,7 @@ export default function AdminDashboard() {
 
                 const todayIndex = chartData.findIndex(item => item.name === todayKey);
                 const scrollContainer = chartScrollRef.current;
-                
+
                 if (scrollContainer) {
                     if (todayIndex !== -1) {
                         const barGroupWidth = isMobile ? 80 : 120;
@@ -429,6 +445,7 @@ export default function AdminDashboard() {
         fetchData();
         fetchStats();
         fetchUnethicalAlerts();
+        fetchReactionLogs();
     }, []);
 
     const fetchUnethicalAlerts = async () => {
@@ -559,6 +576,78 @@ export default function AdminDashboard() {
                     )
                 };
             });
+        });
+
+        socket.on('receive_message', (newMsg) => {
+            console.log('Admin Dashboard: Real-time message received:', newMsg);
+            setViewChat(prev => {
+                if (!prev || !prev.messages) return prev;
+
+                // Robust Check for User and Contact match
+                const msgSenderId = String(newMsg.user_id?._id || newMsg.user_id || newMsg.sender_id);
+                const msgReceiverId = String(newMsg.receiver_id?._id || newMsg.receiver_id || newMsg.receiverId);
+                const currentViewedUserId = String(prev.user?.id || prev.user?._id);
+
+                // Important: Ensure it's for the specific conversation the admin is looking at!
+                // If the admin is reviewing (User A + User B), we only care about messages between them.
+                const isRelevant = (msgSenderId === currentViewedUserId) || (msgReceiverId === currentViewedUserId);
+
+                if (isRelevant) {
+                    // Check if message already exists (prevent duplicates)
+                    const isDuplicate = prev.messages.some(m => String(m._id || m.id) === String(newMsg._id || newMsg.id));
+                    if (isDuplicate) return prev;
+
+                    console.log('Admin Dashboard: Adding message to live view');
+                    return { ...prev, messages: [...prev.messages, { ...newMsg, _id: newMsg._id || newMsg.id }] };
+                }
+                return prev;
+            });
+        });
+
+        socket.on('message_reaction_updated', (data) => {
+            console.log('Admin Dashboard: Real-time reaction received:', data);
+            setViewChat(prev => {
+                if (!prev || !prev.messages) return prev;
+                return {
+                    ...prev,
+                    messages: prev.messages.map(msg =>
+                        (String(msg._id || msg.id) === String(data.messageId))
+                            ? { ...msg, reactions: data.reactions }
+                            : msg
+                    )
+                };
+            });
+        });
+
+        socket.on('reaction_audit_log', (data) => {
+            console.log('Admin Dashboard: Audit event received:', data);
+            setViewChat(prev => {
+                if (!prev || !prev.messages) return prev;
+                return {
+                    ...prev,
+                    messages: prev.messages.map(msg => {
+                        if (String(msg._id || msg.id) === String(data.messageId)) {
+                            const history = msg.reaction_history || [];
+                            // Add new log to history if not duplicate
+                            const isDuplicate = history.some(h =>
+                                String(h.user_id?._id || h.user_id) === String(data.user_id?._id || data.user_id) &&
+                                h.emoji === data.emoji &&
+                                h.action === data.action &&
+                                Math.abs(new Date(h.timestamp) - new Date(data.timestamp)) < 1000
+                            );
+                            if (isDuplicate) return msg;
+                            return { ...msg, reaction_history: [...history, data] };
+                        }
+                        return msg;
+                    })
+                };
+            });
+        });
+
+        socket.on('user_typing', (data) => {
+            // Optional: Handle typing in admin view if helpful
+            // For now just console log or we could add a small indicator
+            console.log("Admin: Someone is typing...", data);
         });
 
         return () => socket.disconnect();
@@ -860,6 +949,321 @@ export default function AdminDashboard() {
     // --------------------------------------------------------------------------------
 
     const COLORS = ['#0A7C8F', '#0FB5D0', '#2BC9E4', '#0098B0', '#CCFAFF'];
+
+    const renderReactionAuditModal = () => {
+        if (!selectedReactionMsg) return null;
+        const history = selectedReactionMsg.reaction_history || [];
+
+        return (
+            <div
+                style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}
+                onClick={() => setSelectedReactionMsg(null)}
+            >
+                <div
+                    style={{ background: 'white', width: '95%', maxWidth: '420px', borderRadius: '1.2rem', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', animation: 'slideUp 0.3s ease-out' }}
+                    onClick={e => e.stopPropagation()}
+                >
+                    {/* Header */}
+                    <div style={{ padding: '1.2rem 1.5rem', background: 'linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: '0 0 auto' }}>
+                            <div style={{ background: 'rgba(255,255,255,0.2)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <History size={16} />
+                            </div>
+                            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '800', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>Emoji Activity</h3>
+                        </div>
+                        <button
+                            onClick={() => setSelectedReactionMsg(null)}
+                            style={{
+                                background: 'rgba(255,255,255,0.25)',
+                                border: 'none',
+                                color: 'white',
+                                cursor: 'pointer',
+                                padding: '6px 18px',
+                                borderRadius: '40px',
+                                fontSize: '0.9rem',
+                                fontWeight: '700',
+                                transition: 'all 0.2s',
+                                width: 'fit-content',
+                                flexShrink: 0
+                            }}
+                            onMouseOver={(e) => {
+                                e.currentTarget.style.background = 'rgba(255,255,255,0.35)';
+                            }}
+                            onMouseOut={(e) => {
+                                e.currentTarget.style.background = 'rgba(255,255,255,0.25)';
+                            }}
+                        >
+                            Close
+                        </button>
+                    </div>
+
+                    {/* Content */}
+                    <div style={{ padding: '1.2rem', maxHeight: '60vh', overflowY: 'auto', background: '#f8f9fe' }}>
+                        {history.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: '2rem', color: '#8898aa' }}>
+                                No history recorded for this message.
+                            </div>
+                        ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                {Object.values(history.reduce((acc, log) => {
+                                    const key = `${log.user_id?._id || log.user_id}-${log.emoji}`;
+                                    if (!acc[key]) acc[key] = { user: log.user_id, emoji: log.emoji, logs: [] };
+                                    acc[key].logs.push(log);
+                                    return acc;
+                                }, {})).map((group, idx) => (
+                                    <div key={idx} style={{ background: 'white', padding: '12px 16px', borderRadius: '12px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', border: '1px solid #e9ecef', display: 'flex', alignItems: 'center', gap: '15px' }}>
+                                        <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', flexShrink: 0 }}>
+                                            {group.user?.name?.charAt(0) || '?'}
+                                        </div>
+                                        <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                                                <span style={{ fontWeight: '700', color: '#32325d', fontSize: '0.95rem' }}>{group.user?.name || 'Unknown User'}</span>
+                                                <div style={{ fontSize: '1.2rem', marginTop: '2px' }}>{group.emoji}</div>
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                                                {group.logs.map((L, i) => (
+                                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.65rem', color: '#8898aa', whiteSpace: 'nowrap' }}>
+                                                        <span style={{ fontWeight: '800', color: L.action === 'added' ? '#2dce89' : '#f5365c', textTransform: 'capitalize' }}>{L.action}:</span>
+                                                        <span>
+                                                            {new Date(L.timestamp).toLocaleDateString([], { month: 'short', day: '2-digit' })}, {new Date(L.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Footer */}
+                    <div style={{ padding: '1rem 1.2rem', background: 'white', borderTop: '1px solid #e9ecef', display: 'flex', justifyContent: 'center' }}>
+                        <button
+                            onClick={() => setSelectedReactionMsg(null)}
+                            style={{
+                                width: '100%',
+                                padding: '12px 24px',
+                                borderRadius: '12px',
+                                border: 'none',
+                                background: 'linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)',
+                                color: 'white',
+                                fontWeight: '800',
+                                fontSize: '1rem',
+                                cursor: 'pointer',
+                                transition: 'all 0.3s ease',
+                                boxShadow: '0 4px 15px rgba(10, 124, 143, 0.2)',
+                                textTransform: 'uppercase',
+                                letterSpacing: '1px'
+                            }}
+                            onMouseOver={(e) => {
+                                e.currentTarget.style.transform = 'translateY(-2px)';
+                                e.currentTarget.style.boxShadow = '0 6px 20px rgba(10, 124, 143, 0.3)';
+                                e.currentTarget.style.filter = 'brightness(1.1)';
+                            }}
+                            onMouseOut={(e) => {
+                                e.currentTarget.style.transform = 'translateY(0)';
+                                e.currentTarget.style.boxShadow = '0 4px 15px rgba(10, 124, 143, 0.2)';
+                                e.currentTarget.style.filter = 'brightness(1)';
+                            }}
+                        >
+                            Done
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderMediaLightbox = () => {
+        if (!viewingMedia) return null;
+        const isImage = viewingMedia.type === 'image';
+
+        // Collect all media messages from current chat to show in the bottom bar
+        const allMedia = viewChat?.messages?.filter(m => m.type === 'image' || m.type === 'video') || [];
+
+        const handleWheel = (e) => {
+            if (!isImage) return;
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? -0.1 : 0.1;
+            const newZoom = Math.min(Math.max(1, zoomLevel + delta), 4); // Min zoom now 100% (1)
+            if (newZoom === 1) setPanOffset({ x: 0, y: 0 });
+            setZoomLevel(newZoom);
+        };
+
+        const handleMouseDown = (e) => {
+            if (zoomLevel > 1) {
+                setIsDragging(true);
+                setDragStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+            }
+        };
+
+        const handleMouseMove = (e) => {
+            if (isDragging) {
+                setPanOffset({
+                    x: e.clientX - dragStart.x,
+                    y: e.clientY - dragStart.y
+                });
+            }
+        };
+
+        const handleMouseUp = () => setIsDragging(false);
+
+        return (
+            <div
+                style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(255, 255, 255, 0.6)',
+                    backdropFilter: 'blur(25px)',
+                    WebkitBackdropFilter: 'blur(25px)',
+                    zIndex: 5000, display: 'flex', flexDirection: 'column',
+                    animation: 'wa-fade-in 0.3s ease-out',
+                    overflow: 'hidden',
+                    userSelect: 'none'
+                }}
+                onClick={() => { setViewingMedia(null); setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
+                onWheel={handleWheel}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+            >
+                <style>
+                    {`
+                    @keyframes wa-fade-in { from { opacity: 0; } to { opacity: 1; } }
+                    @keyframes wa-scale-in { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+                    .lightbox-media-hover {
+                        transition: ${isDragging ? 'none' : 'transform 0.1s ease-out'} !important;
+                        ${zoomLevel === 1 ? 'cursor: zoom-in;' : (isDragging ? 'cursor: grabbing;' : 'cursor: move;')}
+                    }
+                    .media-thumb-item { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); border: 3px solid transparent; }
+                    .media-thumb-item.active { border-color: #0FB5D0; transform: scale(1.1); box-shadow: 0 10px 25px rgba(15, 181, 208, 0.3); }
+                    .media-thumb-container::-webkit-scrollbar { height: 6px; }
+                    .media-thumb-container::-webkit-scrollbar-thumb { background: rgba(10, 124, 143, 0.2); border-radius: 10px; }
+                    `}
+                </style>
+
+                {/* Header */}
+                <div style={{
+                    position: 'absolute', top: 0, left: 0, right: 0,
+                    padding: '25px 30px', display: 'flex', justifyContent: 'space-between',
+                    alignItems: 'center', color: '#1a1f36', zIndex: 5002
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                        <div style={{ width: '45px', height: '45px', background: 'rgba(10, 124, 143, 0.1)', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0A7C8F' }}>
+                            {isImage ? <Smile size={24} /> : <Play size={24} />}
+                        </div>
+                        <div>
+                            <div style={{ fontWeight: '800', fontSize: '1.2rem', color: '#0A7C8F' }}>{isImage ? 'Photo' : 'Video'} Preview</div>
+                            <div style={{ fontSize: '0.85rem', opacity: 0.8, fontWeight: '600' }}>Reviewing activity from {viewChat?.user?.name}</div>
+                        </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '15px' }}>
+                        {isImage && (
+                            <div style={{
+                                background: 'white', padding: '10px 20px', borderRadius: '14px',
+                                boxShadow: '0 4px 15px rgba(0,0,0,0.05)', fontSize: '0.9rem',
+                                fontWeight: '700', color: '#0A7C8F', border: '1px solid rgba(10, 124, 143, 0.1)'
+                            }}>
+                                Zoom: {Math.round(zoomLevel * 100)}% {zoomLevel > 1 && '(Drag to pan)'}
+                            </div>
+                        )}
+                        <button
+                            onClick={() => { setViewingMedia(null); setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
+                            style={{
+                                background: 'white', border: 'none', color: '#1a1f36',
+                                width: '45px', height: '45px', borderRadius: '50%', cursor: 'pointer',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
+                            }}
+                            onMouseOver={e => e.currentTarget.style.transform = 'rotate(90deg)'}
+                            onMouseOut={e => e.currentTarget.style.transform = 'rotate(0deg)'}
+                        >
+                            <X size={24} />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Media Container - Removed Padded White Card as requested */}
+                <div
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '60px 40px', position: 'relative' }}
+                    onClick={e => e.stopPropagation()}
+                    onMouseDown={handleMouseDown}
+                >
+                    {isImage ? (
+                        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <img
+                                src={viewingMedia.file_path}
+                                alt="Full View"
+                                className="lightbox-media-hover"
+                                draggable="false"
+                                style={{
+                                    maxWidth: '100%', maxHeight: '70vh',
+                                    objectFit: 'contain',
+                                    borderRadius: '12px',
+                                    boxShadow: '0 30px 90px rgba(0,0,0,0.15)',
+                                    transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomLevel})`,
+                                    animation: 'wa-scale-in 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
+                                    display: 'block'
+                                }}
+                            />
+                        </div>
+                    ) : (
+                        <video
+                            src={viewingMedia.file_path}
+                            controls
+                            autoPlay
+                            style={{
+                                maxWidth: '100%', maxHeight: '70vh',
+                                borderRadius: '16px', boxShadow: '0 30px 70px rgba(0,0,0,0.2)',
+                                animation: 'wa-scale-in 0.4s cubic-bezier(0.16, 1, 0.3, 1)'
+                            }}
+                        />
+                    )}
+                </div>
+
+                {/* Bottom Media Carousel */}
+                {allMedia.length > 0 && (
+                    <div
+                        className="media-thumb-container"
+                        style={{
+                            background: 'rgba(255, 255, 255, 0.8)', padding: '20px',
+                            display: 'flex', gap: '15px', overflowX: 'auto',
+                            justifyContent: allMedia.length < 10 ? 'center' : 'flex-start',
+                            borderTop: '1px solid rgba(0,0,0,0.05)', zIndex: 5003
+                        }}
+                        onClick={e => e.stopPropagation()}
+                    >
+                        {allMedia.map((m, i) => (
+                            <div
+                                key={m._id || m.id || i}
+                                className={`media-thumb-item ${String(m._id || m.id) === String(viewingMedia._id || viewingMedia.id) ? 'active' : ''}`}
+                                onClick={() => { setViewingMedia(m); setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
+                                style={{
+                                    width: '80px', height: '80px', borderRadius: '12px',
+                                    overflow: 'hidden', cursor: 'pointer', flexShrink: 0,
+                                    position: 'relative', background: '#f0f2f5'
+                                }}
+                            >
+                                {m.type === 'video' ? (
+                                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e9ecef' }}>
+                                        <Play size={24} color="#0A7C8F" />
+                                        {m.duration && (
+                                            <div style={{ position: 'absolute', bottom: '4px', right: '4px', background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: '0.6rem', padding: '2px 4px', borderRadius: '4px' }}>
+                                                {formatVoiceTime(m.duration)}
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <img src={m.file_path} alt="thumb" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
+    };
 
     const renderNotificationDropdown = () => {
         if (!showNotifications) return null;
@@ -1820,13 +2224,6 @@ export default function AdminDashboard() {
                                                     e.currentTarget.style.border = 'none';
                                                     e.currentTarget.style.outline = 'none';
                                                 }}
-                                                onMouseOut={(e) => {
-                                                    e.currentTarget.style.background = '#fff';
-                                                    e.currentTarget.style.color = '#f5365c';
-                                                    e.currentTarget.style.transform = 'translateY(0)';
-                                                    e.currentTarget.style.border = 'none';
-                                                    e.currentTarget.style.outline = 'none';
-                                                }}
                                             >
                                                 <Trash2 size={16} /> Delete
                                             </button>
@@ -1836,6 +2233,97 @@ export default function AdminDashboard() {
                             ))}
                         </tbody>
                     </table>
+                )}
+            </div>
+        );
+    };
+
+    const renderReactionLogs = () => {
+        return (
+            <div style={{ background: 'white', padding: '1.5rem', borderRadius: '1rem', boxShadow: '0 0 2rem rgba(0,0,0,0.05)', minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: isMobile ? 'wrap' : 'nowrap', gap: '1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <Smile size={18} color="#0FB5D0" />
+                        <h4 style={{ margin: 0, fontWeight: '700', color: '#32325d' }}>Global Reaction Activity Audit</h4>
+                    </div>
+                    <button
+                        onClick={fetchReactionLogs}
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f6f9fc', border: '1px solid #e9ecef', padding: '6px 12px', borderRadius: '8px', fontSize: '0.75rem', fontWeight: '700', color: '#0FB5D0', cursor: 'pointer' }}
+                    >
+                        <RefreshCw size={14} /> Refresh Logs
+                    </button>
+                </div>
+
+                {!reactionLogs || reactionLogs.length === 0 ? (
+                    <div style={{ padding: '3rem', textAlign: 'center', color: '#8898aa', background: '#f8f9fe', borderRadius: '12px', border: '2px dashed #e9ecef' }}>
+                        No reaction activities found across the platform.
+                    </div>
+                ) : (
+                    <div className="table-responsive" style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0' }}>
+                            <thead>
+                                <tr style={{ background: '#f6f9fc' }}>
+                                    <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '700', color: '#8898aa', textTransform: 'uppercase', borderRadius: '8px 0 0 0' }}>Reactor</th>
+                                    <th style={{ padding: '12px 16px', textAlign: 'center', fontSize: '0.75rem', fontWeight: '700', color: '#8898aa', textTransform: 'uppercase' }}>Emoji</th>
+                                    <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '700', color: '#8898aa', textTransform: 'uppercase' }}>Action</th>
+                                    <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '700', color: '#8898aa', textTransform: 'uppercase' }}>Message Content</th>
+                                    <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '700', color: '#8898aa', textTransform: 'uppercase' }}>Context</th>
+                                    <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: '0.75rem', fontWeight: '700', color: '#8898aa', textTransform: 'uppercase', borderRadius: '0 8px 0 0' }}>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {reactionLogs.map((log, idx) => (
+                                    <tr key={idx} style={{ borderBottom: '1px solid #f1f3f5' }} className="hover-row">
+                                        <td style={{ padding: '12px 16px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '0.7rem', fontWeight: 'bold' }}>
+                                                    {log.user_id?.name?.charAt(0) || '?'}
+                                                </div>
+                                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                    <span style={{ fontWeight: '700', fontSize: '0.85rem', color: '#32325d' }}>{log.user_id?.name || 'Unknown'}</span>
+                                                    <span style={{ fontSize: '0.7rem', color: '#8898aa' }}>ID: {log.user_id?.login_id || 'N/A'}</span>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '1.2rem' }}>
+                                            {log.emoji}
+                                        </td>
+                                        <td style={{ padding: '12px 16px' }}>
+                                            <span style={{
+                                                padding: '2px 8px', borderRadius: '12px', fontSize: '0.7rem', fontWeight: '800',
+                                                background: log.action === 'added' ? '#e1f5fe' : '#fff1f2',
+                                                color: log.action === 'added' ? '#01579b' : '#be123c',
+                                                textTransform: 'capitalize',
+                                                display: 'inline-flex', alignItems: 'center', gap: '4px'
+                                            }}>
+                                                {log.action === 'added' ? <Check size={10} /> : <XCircle size={10} />}
+                                                {log.action}
+                                            </span>
+                                        </td>
+                                        <td style={{ padding: '12px 16px' }}>
+                                            <div style={{ fontSize: '0.825rem', color: '#525f7f', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                {log.contentSnippet}
+                                            </div>
+                                        </td>
+                                        <td style={{ padding: '12px 16px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                <span style={{ fontSize: '0.8rem', fontWeight: '600', color: '#32325d' }}>{log.context}</span>
+                                                <span style={{ fontSize: '0.65rem', color: '#8898aa' }}>{log.participants}</span>
+                                            </div>
+                                        </td>
+                                        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                                            <div style={{ fontSize: '0.8rem', color: '#525f7f' }}>
+                                                {new Date(log.timestamp).toLocaleDateString()}
+                                            </div>
+                                            <div style={{ fontSize: '0.7rem', color: '#adb5bd' }}>
+                                                {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
             </div>
         );
@@ -2096,10 +2584,13 @@ export default function AdminDashboard() {
                                 {activeTab === 'management' && renderUsersList('management')}
                                 {activeTab === 'pending' && renderUsersList('pending')}
                                 {activeTab === 'resets' && renderResets()}
+                                {activeTab === 'reactions' && renderReactionLogs()}
                             </>
                         )}
                     </div>
                 </main>
+                {renderReactionAuditModal()}
+                {renderMediaLightbox()}
             </div>
 
             {/* Chat Overlays & Modals (Overhauled for premium look) */}
@@ -2383,13 +2874,13 @@ export default function AdminDashboard() {
                                                                         {renderLinkPreview(msg)}
 
                                                                         {msg.type === 'image' && msg.file_path && (
-                                                                            <div style={{ marginTop: '8px', position: 'relative' }}>
+                                                                            <div style={{ marginTop: '8px', position: 'relative', cursor: 'zoom-in' }} onClick={(e) => { e.stopPropagation(); setViewingMedia(msg); }}>
                                                                                 <img src={msg.file_path} alt="media" style={{ maxWidth: '100%', borderRadius: '8px', maxHeight: '200px', objectFit: 'contain' }} />
                                                                                 {msg.is_view_once && <div style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>View Once {msg.is_opened ? '(Opened)' : ''}</div>}
                                                                             </div>
                                                                         )}
                                                                         {msg.type === 'video' && msg.file_path && (
-                                                                            <div style={{ marginTop: '8px', position: 'relative' }}>
+                                                                            <div style={{ marginTop: '8px', position: 'relative', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setViewingMedia(msg); }}>
                                                                                 <video src={msg.file_path} controls style={{ maxWidth: '100%', borderRadius: '8px', maxHeight: '200px' }} />
                                                                                 {msg.is_view_once && <div style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>View Once {msg.is_opened ? '(Opened)' : ''}</div>}
                                                                             </div>
@@ -2403,26 +2894,26 @@ export default function AdminDashboard() {
 
                                                                         {msg.type === 'audio' && msg.file_path && (
                                                                             <div style={{ marginTop: '8px', position: 'relative' }}>
-                                                                                <div style={{ 
-                                                                                    display: 'flex', 
-                                                                                    alignItems: 'center', 
-                                                                                    gap: '12px', 
-                                                                                    background: isMe ? 'rgba(13, 159, 183, 0.12)' : 'rgba(13, 159, 183, 0.05)', 
-                                                                                    padding: '12px 16px', 
+                                                                                <div style={{
+                                                                                    display: 'flex',
+                                                                                    alignItems: 'center',
+                                                                                    gap: '12px',
+                                                                                    background: isMe ? 'rgba(13, 159, 183, 0.12)' : 'rgba(13, 159, 183, 0.05)',
+                                                                                    padding: '12px 16px',
                                                                                     borderRadius: '16px',
                                                                                     minWidth: '220px',
                                                                                     boxShadow: isMe ? 'none' : 'inset 0 1px 3px rgba(0,0,0,0.05)'
                                                                                 }}>
-                                                                                    <div 
+                                                                                    <div
                                                                                         onClick={() => handlePlayAudio(msgId, msg.file_path)}
-                                                                                        style={{ 
-                                                                                            width: '40px', 
-                                                                                            height: '40px', 
-                                                                                            borderRadius: '50%', 
-                                                                                            background: '#0d9fb7', 
-                                                                                            display: 'flex', 
-                                                                                            alignItems: 'center', 
-                                                                                            justifyContent: 'center', 
+                                                                                        style={{
+                                                                                            width: '40px',
+                                                                                            height: '40px',
+                                                                                            borderRadius: '50%',
+                                                                                            background: '#0d9fb7',
+                                                                                            display: 'flex',
+                                                                                            alignItems: 'center',
+                                                                                            justifyContent: 'center',
                                                                                             cursor: 'pointer',
                                                                                             boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
                                                                                             flexShrink: 0
@@ -2434,7 +2925,7 @@ export default function AdminDashboard() {
                                                                                             <Play size={20} color="white" style={{ marginLeft: '3px' }} />
                                                                                         )}
                                                                                     </div>
-                                                                                    
+
                                                                                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                                                                                             <Mic size={14} color={isMe ? '#0d9fb7' : '#57b1be'} />
@@ -2468,7 +2959,7 @@ export default function AdminDashboard() {
                                                                                         const votes = opt.voters?.length || 0;
                                                                                         const percentage = totalVotes === 0 ? 0 : Math.round((votes / totalVotes) * 100);
                                                                                         const hasAnyVote = totalVotes > 0;
-                                                                                        
+
                                                                                         return (
                                                                                             <div key={idx} style={{ position: 'relative', overflow: 'hidden', padding: '10px', borderRadius: '8px', border: '1px solid #e9edef', background: '#ffffff' }}>
                                                                                                 {hasAnyVote && (
@@ -2558,6 +3049,89 @@ export default function AdminDashboard() {
                                                                                 {renderContent(msg.content)}
                                                                             </div>
                                                                         )}
+
+                                                                        {/* Reactions for Admin Review - Enhanced Audit Log */}
+                                                                        {((msg.reactions && msg.reactions.length > 0) || (msg.reaction_history && msg.reaction_history.length > 0)) && (
+                                                                            <div style={{
+                                                                                display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '8px',
+                                                                                justifyContent: isMe ? 'flex-end' : 'flex-start'
+                                                                            }}>
+                                                                                {/* Group unique reaction-user pairs to show history status */}
+                                                                                {(() => {
+                                                                                    const history = msg.reaction_history || [];
+                                                                                    const currentSet = new Set((msg.reactions || []).map(r => `${String(r.user_id._id || r.user_id)}-${r.emoji}`));
+
+                                                                                    // Get all unique user-emoji events
+                                                                                    const allEvents = {};
+                                                                                    history.forEach(log => {
+                                                                                        const userIdStr = String(log.user_id._id || log.user_id);
+                                                                                        const key = `${userIdStr}-${log.emoji}`;
+                                                                                        if (!allEvents[key]) {
+                                                                                            const u = users.find(usr => String(usr._id || usr.id) === userIdStr);
+                                                                                            allEvents[key] = {
+                                                                                                emoji: log.emoji,
+                                                                                                userName: u ? u.name : (log.user_id?.name || 'Unknown'),
+                                                                                                isCurrentlyActive: currentSet.has(key),
+                                                                                                logs: []
+                                                                                            };
+                                                                                        }
+                                                                                        allEvents[key].logs.push(log);
+                                                                                    });
+
+                                                                                    // If no events but current reactions exists (stale data support)
+                                                                                    if (Object.keys(allEvents).length === 0 && msg.reactions) {
+                                                                                        msg.reactions.forEach(r => {
+                                                                                            const userIdStr = String(r.user_id._id || r.user_id);
+                                                                                            const key = `${userIdStr}-${r.emoji}`;
+                                                                                            const u = users.find(usr => String(usr._id || usr.id) === userIdStr);
+                                                                                            allEvents[key] = {
+                                                                                                emoji: r.emoji,
+                                                                                                userName: u ? u.name : (r.user_id?.name || 'Unknown'),
+                                                                                                isCurrentlyActive: true,
+                                                                                                logs: []
+                                                                                            };
+                                                                                        });
+                                                                                    }
+
+                                                                                    return Object.values(allEvents).map((event, idx) => {
+                                                                                        return (
+                                                                                            <div
+                                                                                                key={idx}
+                                                                                                className="reaction-audit-badge"
+                                                                                                style={{
+                                                                                                    background: event.isCurrentlyActive ? (isMe ? 'rgba(255,255,255,0.15)' : 'rgba(10, 124, 143, 0.05)') : 'rgba(0,0,0,0.03)',
+                                                                                                    padding: '2px 8px', borderRadius: '12px',
+                                                                                                    fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px',
+                                                                                                    border: event.isCurrentlyActive ? '1px solid rgba(0,0,0,0.05)' : '1px dashed #adb5bd',
+                                                                                                    color: event.isCurrentlyActive ? (isMe ? 'white' : '#525f7f') : '#adb5bd',
+                                                                                                    opacity: event.isCurrentlyActive ? 1 : 0.7,
+                                                                                                    transition: 'all 0.2s',
+                                                                                                    cursor: 'help'
+                                                                                                }}
+                                                                                                onMouseOver={e => { e.currentTarget.style.transform = 'scale(1.05)'; if (!event.isCurrentlyActive) e.currentTarget.style.opacity = 1; }}
+                                                                                                onMouseOut={e => { e.currentTarget.style.transform = 'scale(1)'; if (!event.isCurrentlyActive) e.currentTarget.style.opacity = 0.7; }}
+                                                                                            >
+                                                                                                <span>{event.emoji}</span>
+                                                                                                {!event.isCurrentlyActive && <X size={8} style={{ marginLeft: '2px' }} />}
+                                                                                            </div>
+                                                                                        );
+                                                                                    }).concat([
+                                                                                        <div
+                                                                                            key="history-btn"
+                                                                                            onClick={(e) => { e.stopPropagation(); setSelectedReactionMsg(msg); }}
+                                                                                            style={{
+                                                                                                cursor: 'pointer', padding: '4px 8px', borderRadius: '12px', background: isMe ? 'rgba(255,255,255,0.2)' : 'rgba(15, 181, 208, 0.1)',
+                                                                                                display: 'flex', alignItems: 'center', justifyContent: 'center', color: isMe ? 'white' : '#0FB5D0',
+                                                                                                transition: 'all 0.2s', marginLeft: '4px', border: '1px solid rgba(0,0,0,0.05)',
+                                                                                                gap: '4px', fontSize: '10px', fontWeight: 'bold'
+                                                                                            }}
+                                                                                        >
+                                                                                            <History size={12} /> Emoji Activity
+                                                                                        </div>
+                                                                                    ]);
+                                                                                })()}
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                     <div style={{ fontSize: '0.7rem', color: '#8898aa', marginTop: '4px', textAlign: isMe ? 'right' : 'left' }}>
                                                                         {isMe ? 'You' : (selectedContact.name)} • {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -2636,7 +3210,7 @@ export default function AdminDashboard() {
                             </div>
                         )}
                         <div style={{ marginTop: 24, display: 'flex', justifyContent: 'center' }}>
-                            <button 
+                            <button
                                 onClick={() => setViewingContact(null)}
                                 style={{ background: '#0A7C8F', color: 'white', border: 'none', padding: '10px 30px', borderRadius: '24px', fontWeight: '600', cursor: 'pointer' }}
                             >

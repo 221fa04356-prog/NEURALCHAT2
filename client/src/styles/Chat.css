@@ -2218,10 +2218,10 @@ html {
     transform: translateY(10px);
     background: white;
     color: #027eb5;
-    padding: 6px 14px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
     white-space: nowrap;
     opacity: 0;
     visibility: hidden;
@@ -7539,3 +7539,76 @@ html {
 
 
 @keyframes wa-status-loop { 0% { opacity: 0.5; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-1px); } 100% { opacity: 0.5; transform: translateY(0); } } .wa-status-animation { animation: wa-status-loop 3s infinite ease-in-out; display: inline-block; }
+
+/* Reaction Badges on Messages */
+.wa-reaction-badges {
+    position: absolute;
+    bottom: -16px; /* Moved lower so it does not touch text */
+    display: flex;
+    gap: 4px;
+    z-index: 2;
+    background: transparent;
+    border-radius: 12px;
+}
+
+.wa-reaction-badges-sent {
+    left: 5px; /* User specifically requested left side */
+    right: auto;
+}
+
+.wa-reaction-badges-recv {
+    left: 5px;
+    right: auto;
+}
+
+.wa-reaction-badge {
+    border: none; /* Removed the outline */
+    border-radius: 50px;
+    padding: 2px 5px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    gap: 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15); /* Shadow defines it instead of outline */
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+    box-sizing: border-box;
+    line-height: 1;
+}
+
+/* Inherit bubble colors */
+.wa-reaction-badges-sent .wa-reaction-badge {
+    background: #E1F5FE;
+}
+
+.wa-reaction-badges-recv .wa-reaction-badge {
+    background: #ffffff;
+}
+
+.wa-reaction-badge:hover {
+    filter: brightness(0.96);
+    transform: scale(1.05);
+}
+
+.wa-reaction-badge.reacted {
+    /* No outline, keeps the background matching the bubble */
+    border: none;
+}
+
+.wa-reaction-count {
+    color: #54656f;
+    font-size: 11px;
+    font-weight: 500;
+}
+.wa-reaction-badge.reacted .wa-reaction-count {
+    color: #0ea5be;
+}
+
+@keyframes wa-popover-in {
+    from { opacity: 0; transform: scale(0.92) translateY(6px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+}

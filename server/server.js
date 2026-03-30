@@ -144,6 +144,9 @@ io.on('connection', async (socket) => {
             user_id: userId
         };
 
+        // Notify Admins for real-time review
+        io.to('admins').emit('receive_message', secureData);
+
         try {
             const receiverId = data.receiverId;
 
@@ -228,6 +231,9 @@ io.on('connection', async (socket) => {
 
     socket.on('typing', async (data) => {
         const { receiverId, isGroup } = data;
+        // Notify Admins
+        io.to('admins').emit('user_typing', { userId, receiverId, isGroup });
+        
         if (isGroup) {
             const Group = require('./models/Group');
             const group = await Group.findById(receiverId);
@@ -245,6 +251,9 @@ io.on('connection', async (socket) => {
 
     socket.on('stop_typing', async (data) => {
         const { receiverId, isGroup } = data;
+        // Notify Admins
+        io.to('admins').emit('user_stop_typing', { userId, receiverId, isGroup });
+
         if (isGroup) {
             const Group = require('./models/Group');
             const group = await Group.findById(receiverId);

@@ -59,6 +59,11 @@ const messageSchema = new mongoose.Schema({
         allowMultipleAnswers: { type: Boolean, default: true }
     },
     edited_at: { type: Date, default: null },
+    reactions: [{
+        user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        emoji: { type: String },
+        created_at: { type: Date, default: Date.now }
+    }],
     created_at: { type: Date, default: Date.now }
 }, {
     toJSON: { virtuals: true },
