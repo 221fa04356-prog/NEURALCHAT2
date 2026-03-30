@@ -9,6 +9,7 @@ const ChatDeletion = require('../models/ChatDeletion');
 const User = require('../models/User'); // Import User model
 const Group = require('../models/Group'); // Import Group model
 const MessageRequest = require('../models/MessageRequest'); // Import MessageRequest model
+const ReactionLog = require('../models/ReactionLog'); // Import ReactionLog model for audit logs
 const Groq = require('groq-sdk');
 const pdfParse = require('pdf-parse'); // Renamed to avoid confusion
 const mammoth = require('mammoth');
@@ -1914,38 +1915,63 @@ router.post('/messages/:messageId/react', authenticateToken, async (req, res) =>
 
         if (!message) return res.status(404).json({ error: 'Message not found' });
 
-        // Initialize reactions array if it doesn't exist
-        if (!message.reactions) message.reactions = [];
+        // Check if user already reacted with ANY emoji in this message
+        const reactions = message.reactions || [];
+        const existingIndex = reactions.findIndex(r => String(r.user_id) === String(userId));
+        let logAction = 'added';
+        let logEmoji = emoji;
 
-        // Check if user already reacted with THIS emoji
-        const existingIndex = message.reactions.findIndex(r => String(r.user_id) === String(userId));
-
+        let historyEvents = [];
         if (existingIndex > -1) {
-            if (message.reactions[existingIndex].emoji === emoji) {
-                // Remove reaction if clicking the same emoji
+            const previousEmoji = message.reactions[existingIndex].emoji;
+            if (previousEmoji === emoji) {
+                // Case 1: Simple Removal
                 message.reactions.splice(existingIndex, 1);
+                historyEvents.push({ emoji: emoji, action: 'removed' });
             } else {
-                // Update to new emoji
+                // Case 2: Replacement (Update)
                 message.reactions[existingIndex].emoji = emoji;
                 message.reactions[existingIndex].created_at = new Date();
+                historyEvents.push({ emoji: previousEmoji, action: 'removed' });
+                historyEvents.push({ emoji: emoji, action: 'added' });
             }
         } else {
-            // Add new reaction
+            // Case 3: Initial Addition
             message.reactions.push({ user_id: userId, emoji, created_at: new Date() });
+            historyEvents.push({ emoji: emoji, action: 'added' });
         }
 
         await message.save();
 
-            // Notify via socket
-            if (req.io) {
-                const reactionData = {
-                    messageId,
-                    reactions: message.reactions,
-                    isGroup
-                };
+        // --- Permanent Audit Logging & Socket Notifications ---
+        for (const event of historyEvents) {
+            try {
+                await ReactionLog.create({
+                    message_id: messageId,
+                    user_id: userId,
+                    emoji: event.emoji,
+                    action: event.action,
+                    isGroup: isGroup === true || isGroup === 'true',
+                    timestamp: new Date()
+                });
+                
+                if (req.io) {
+                    req.io.to('admins').emit('reaction_audit_log', {
+                        messageId,
+                        user_id: { _id: userId, name: req.user.name }, // Pass basic user info
+                        emoji: event.emoji,
+                        action: event.action,
+                        timestamp: new Date()
+                    });
+                }
+            } catch (auditErr) {
+                console.error('[REACTION_AUDIT] Failed to log/emit event:', auditErr);
+            }
+        }
 
-                // Notify Admins
-                req.io.to('admins').emit('message_reaction_updated', reactionData);
+        if (req.io) {
+            const reactionData = { messageId, reactions: message.reactions, isGroup };
+            req.io.to('admins').emit('message_reaction_updated', reactionData);
 
                 if (isGroup) {
                     const group = await Group.findById(message.group_id);

@@ -12787,8 +12787,6 @@ export default function Chat() {
                                                                                 key={emoji}
                                                                                 className={`wa-reaction-badge ${reactedByMe ? 'reacted' : ''}`}
                                                                                 onClick={(e) => { e.stopPropagation(); const bubble = e.currentTarget.closest('.wa-message-bubble') || e.currentTarget.closest('.wa-msg-sent') || e.currentTarget.closest('.wa-msg-recv'); setReactionDetails({ msg, isGroup: false, rect: (bubble || e.currentTarget).getBoundingClientRect() }); }}
-                                                                                data-tooltip={userNames.length > 5 ? `${userNames.slice(0, 5).join(', ')} and ${userNames.length - 5} others` : userNames.join(', ')}
-                                                                                data-tooltip-pos="center"
                                                                             >
                                                                                 {emoji}{count > 1 && <span className="wa-reaction-count">{count}</span>}
                                                                             </span>
@@ -13325,7 +13323,7 @@ export default function Chat() {
                                         {String(selectedGroup.admin?._id || selectedGroup.admin) === String(user.id || user._id) ? 'You created this group' : `${selectedGroup.admin?.name || 'Admin'} created this group`}
                                     </div>
                                     <div className="wa-group-welcome-subtitle">
-                                        {selectedGroup.members?.length} members Ã¢â‚¬Â¢ {selectedGroup.members?.length} contacts Ã¢â‚¬Â¢ Created {formatDateForSeparator(selectedGroup.created_at)}
+                                        {selectedGroup.members?.length} members • {selectedGroup.members?.length} contacts • Created {formatDateForSeparator(selectedGroup.created_at)}
                                     </div>
                                     <div className="wa-group-welcome-action">Add description...</div>
                                     <div className="wa-group-welcome-buttons">
@@ -13502,11 +13500,11 @@ export default function Chat() {
                                                                     lineHeight: '1.6'
                                                                 }}>
                                                                     <li style={{ display: 'flex', marginBottom: '8px', alignItems: 'flex-start' }}>
-                                                                        <span style={{ marginRight: '10px', marginTop: '2px' }}>Ã¢â‚¬Â¢</span>
+                                                                        <span style={{ marginRight: '10px', marginTop: '2px' }}>•</span>
                                                                         <span>Members in this group are now community members.</span>
                                                                     </li>
                                                                     <li style={{ display: 'flex', alignItems: 'flex-start' }}>
-                                                                        <span style={{ marginRight: '10px', marginTop: '2px' }}>Ã¢â‚¬Â¢</span>
+                                                                        <span style={{ marginRight: '10px', marginTop: '2px' }}>•</span>
                                                                         <span>Anyone in the community can join this group.</span>
                                                                     </li>
                                                                 </ul>
@@ -13631,8 +13629,7 @@ export default function Chat() {
 
                                                                     {msg.type === 'video' && msg.file_path && (
                                                                         <div className="wa-msg-video-wrapper" onClick={() => setViewingImage(msg)}>
-                                                                            <video src={msg.file_path} className="wa-msg-video" />
-                                                                            <div className="wa-video-play-overlay"><Play size={40} color="white" fill="rgba(255,255,255,0.3)" /></div>
+                                                                            <video src={msg.file_path} controls className="wa-msg-video" />
                                                                         </div>
                                                                     )}
 
@@ -13651,8 +13648,8 @@ export default function Chat() {
                                                                                     <div className="wa-msg-document-info">
                                                                                         <div className="wa-msg-document-name" title={msg.fileName}>{msg.fileName || 'document.pdf'}</div>
                                                                                         <div className="wa-msg-document-meta">
-                                                                                            {(msg.pageCount > 0) ? `${msg.pageCount} ${msg.pageCount === 1 ? 'page' : 'pages'} Ã¢â‚¬Â¢ ` : ''}
-                                                                                            {msg.fileName?.split('.').pop().toUpperCase()} Ã¢â‚¬Â¢ {formatFileSize(msg.fileSize)}
+                                                                                            {(msg.pageCount > 0) ? `${msg.pageCount} ${msg.pageCount === 1 ? 'page' : 'pages'} • ` : ''}
+                                                                                            {msg.fileName?.split('.').pop().toUpperCase()} • {formatFileSize(msg.fileSize)}
                                                                                         </div>
                                                                                     </div>
                                                                                 </div>
@@ -13670,7 +13667,7 @@ export default function Chat() {
                                                                                 <FileText size={32} color="#8696a0" />
                                                                                 <div className="wa-msg-file-info">
                                                                                     <div className="wa-msg-file-name">{msg.fileName || 'document.pdf'}</div>
-                                                                                    <div className="wa-msg-file-meta">{formatFileSize(msg.fileSize)} Ã¢â‚¬Â¢ {msg.fileName?.split('.').pop().toUpperCase()}</div>
+                                                                                    <div className="wa-msg-file-meta">{formatFileSize(msg.fileSize)} • {msg.fileName?.split('.').pop().toUpperCase()}</div>
                                                                                 </div>
                                                                                 <Download size={20} color="#8696a0" className="wa-file-download-icon" />
                                                                             </div>
@@ -14026,8 +14023,6 @@ export default function Chat() {
                                                                                 key={emoji}
                                                                                 className={`wa-reaction-badge ${reactedByMe ? 'reacted' : ''}`}
                                                                                 onClick={(e) => { e.stopPropagation(); const bubble = e.currentTarget.closest('.wa-message-bubble') || e.currentTarget.closest('.wa-msg-sent') || e.currentTarget.closest('.wa-msg-recv'); setReactionDetails({ msg, isGroup: true, rect: (bubble || e.currentTarget).getBoundingClientRect() }); }}
-                                                                                data-tooltip={userNames.length > 5 ? `${userNames.slice(0, 5).join(', ')} and ${userNames.length - 5} others` : userNames.join(', ')}
-                                                                                data-tooltip-pos="center"
                                                                             >
                                                                                 {emoji}{count > 1 && <span className="wa-reaction-count">{count}</span>}
                                                                             </span>
@@ -16754,19 +16749,19 @@ export default function Chat() {
             
             {/* Reaction Details Modal */}
             {reactionDetails && (() => {
-                    const rWidth = 210;
+                    const rWidth = 220;
                     const activeTab = reactionDetails.activeTab || 'all';
                     const allReactions = reactionDetails.msg.reactions;
                     const reactions = activeTab === 'all' ? allReactions : allReactions.filter(r => r.emoji === activeTab);
                     
                     const displayCount = Math.min(4, Math.max(activeTab === 'all' ? allReactions.length : reactions.length, 1));
-                    const rHeight = 50 + displayCount * 54; 
+                    const rHeight = 36 + displayCount * 50; 
                     
                     const rect = reactionDetails.rect;
 
-                    // Vertical: Large 30px gap to ensure 'separate' look
-                    let top = rect ? rect.top - rHeight - 30 : window.innerHeight / 2 - rHeight / 2;
-                    if (top < 70 && rect) top = rect.bottom + 30;
+                    // Vertical: Tightened the gap from 30px to 12px for better integration
+                    let top = rect ? rect.top - rHeight - 12 : window.innerHeight / 2 - rHeight / 2;
+                    if (top < 70 && rect) top = rect.bottom + 12;
                     if (top + rHeight > window.innerHeight - 10) top = window.innerHeight - rHeight - 10;
                     if (top < 10) top = 10;
 
@@ -16806,7 +16801,7 @@ export default function Chat() {
                                     <div 
                                         onClick={() => setReactionDetails({ ...reactionDetails, activeTab: 'all' })}
                                         style={{ 
-                                            padding: '12px 10px', fontWeight: activeTab === 'all' ? 600 : 500, fontSize: 13, whiteSpace: 'nowrap', cursor: 'pointer',
+                                            padding: '9px 10px', fontWeight: activeTab === 'all' ? 600 : 500, fontSize: 13, whiteSpace: 'nowrap', cursor: 'pointer',
                                             color: activeTab === 'all' ? '#0EA5BE' : '#667781',
                                             position: 'relative',
                                             transition: 'color 0.2s'
@@ -16822,7 +16817,7 @@ export default function Chat() {
                                             key={emoji} 
                                             onClick={() => setReactionDetails({ ...reactionDetails, activeTab: emoji })}
                                             style={{ 
-                                                padding: '12px 10px', fontWeight: activeTab === emoji ? 600 : 500, fontSize: 13, whiteSpace: 'nowrap', cursor: 'pointer',
+                                                padding: '9px 10px', fontWeight: activeTab === emoji ? 600 : 500, fontSize: 13, whiteSpace: 'nowrap', cursor: 'pointer',
                                                 color: activeTab === emoji ? '#0EA5BE' : '#667781',
                                                 position: 'relative',
                                                 transition: 'color 0.2s'
@@ -16836,7 +16831,7 @@ export default function Chat() {
                                     ))}
                                 </div>
                                 {/* Filtered Reaction list */}
-                                <div style={{ flex: 1, overflowY: 'auto' }}>
+                                <div style={{ flex: 1, overflowY: reactions.length > 4 ? 'auto' : 'hidden' }}>
                                     {reactions.map((r, i) => {
                                         const isMe = String(r.user_id) === String(user.id || user._id);
                                         const u = isMe ? user : users.find(usr => String(usr._id || usr.id) === String(r.user_id));
@@ -16848,16 +16843,16 @@ export default function Chat() {
                                             <div
                                                 key={i}
                                                 onClick={() => { if (isMe) { handleReaction(reactionDetails.msg._id || reactionDetails.msg.id, r.emoji, reactionDetails.isGroup); setReactionDetails(null); } }}
-                                                style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', cursor: isMe ? 'pointer' : 'default', background: isMe ? '#f8f9fa' : 'transparent', transition: 'background 0.15s' }}
+                                                style={{ display: 'flex', alignItems: 'center', padding: '10px 10px', cursor: isMe ? 'pointer' : 'default', background: isMe ? '#f8f9fa' : 'transparent', transition: 'background 0.15s' }}
                                                 onMouseEnter={e => { if (isMe) e.currentTarget.style.background = '#f1f2f3'; }}
                                                 onMouseLeave={e => { if (isMe) e.currentTarget.style.background = isMe ? '#f8f9fa' : 'transparent'; }}
                                             >
-                                                <div style={{ width: 34, height: 34, borderRadius: '50%', overflow: 'hidden', marginRight: 10, flexShrink: 0 }}>
+                                                <div style={{ width: 30, height: 30, borderRadius: '50%', overflow: 'hidden', marginRight: 10, flexShrink: 0 }}>
                                                     <img src={displayAvatar} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                 </div>
                                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                                    <div style={{ color: '#111b21', fontSize: 13.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</div>
-                                                    {isMe && <div style={{ color: '#8696a0', fontSize: 11, marginTop: 0.5 }}>Click to remove</div>}
+                                                    <div style={{ color: '#111b21', fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</div>
+                                                    {isMe && <div style={{ color: '#8696a0', fontSize: 10, marginTop: 0.5 }}>Click to remove</div>}
                                                 </div>
                                                 <div style={{ fontSize: 20, paddingLeft: 6 }}>{r.emoji}</div>
                                             </div>
