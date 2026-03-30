@@ -2218,10 +2218,10 @@ html {
     transform: translateY(10px);
     background: white;
     color: #027eb5;
-    padding: 6px 14px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
     white-space: nowrap;
     opacity: 0;
     visibility: hidden;
