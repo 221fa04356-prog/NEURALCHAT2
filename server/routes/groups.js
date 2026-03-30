@@ -310,6 +310,124 @@ router.get('/:groupId/messages', authenticateToken, async (req, res) => {
     }
 });
 
+// POST /api/groups/poll/send - Send a group poll message
+router.post('/poll/send', authenticateToken, async (req, res) => {
+    try {
+        const { groupId, question, options, allowMultipleAnswers } = req.body;
+        const senderId = req.user.id;
+
+        if (!groupId) return res.status(400).json({ error: 'Group ID required' });
+        if (!question || !question.trim()) return res.status(400).json({ error: 'Poll question required' });
+        if (!options || options.length < 2) return res.status(400).json({ error: 'At least 2 options required' });
+
+        const group = await Group.findById(groupId);
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+
+        const isMem = (group.members || []).some(m => String(m) === String(senderId));
+        const isRemoved = (group.removedMembers || []).some(m => String(m) === String(senderId));
+        const isOwner = String(group.admin) === String(senderId);
+
+        if (isRemoved && !isMem && !isOwner) {
+            return res.status(403).json({ error: 'You have been removed from this group and cannot send polls.' });
+        }
+
+        if (!isMem && !isOwner) {
+            return res.status(403).json({ error: 'Not a group member' });
+        }
+
+        const pollOptions = options.map(opt => ({ text: opt, voters: [] }));
+
+        const msg = await GroupMessage.create({
+            group_id: groupId,
+            sender_id: senderId,
+            role: 'user',
+            content: question,
+            type: 'poll',
+            poll: {
+                question,
+                options: pollOptions,
+                allowMultipleAnswers: allowMultipleAnswers !== false
+            }
+        });
+
+        const populated = await GroupMessage.findById(msg._id).populate('sender_id', 'name _id __enc_name');
+        const msgObj = populated.toObject();
+
+        if (req.io) {
+            group.members.forEach(memberId => {
+                req.io.to(memberId.toString()).emit('group_message', {
+                    groupId,
+                    message: msgObj
+                });
+            });
+        }
+
+        res.json({ status: 'sent', message: msgObj });
+    } catch (err) {
+        console.error('[POLL SEND GROUP]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/groups/poll/:messageId/vote - Vote on a group poll
+router.post('/poll/:messageId/vote', authenticateToken, async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const { optionIndexes } = req.body;
+        const userId = req.user.id;
+        const userObjId = new mongoose.Types.ObjectId(userId);
+
+        const msg = await GroupMessage.findById(messageId);
+        if (!msg || msg.type !== 'poll') return res.status(404).json({ error: 'Poll not found' });
+
+        const group = await Group.findById(msg.group_id);
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+
+        const allowMultiple = msg.poll.allowMultipleAnswers;
+        const indexes = Array.isArray(optionIndexes) ? optionIndexes : [optionIndexes];
+
+        if (!allowMultiple && indexes.length > 1) {
+            return res.status(400).json({ error: 'Multiple answers not allowed' });
+        }
+
+        // Remove user from all options first
+        msg.poll.options.forEach(opt => {
+            opt.voters = (opt.voters || []).filter(v => String(v) !== String(userId));
+        });
+
+        // Add vote to chosen options
+        indexes.forEach(idx => {
+            if (idx >= 0 && idx < msg.poll.options.length) {
+                msg.poll.options[idx].voters.push(userObjId);
+            }
+        });
+
+        msg.markModified('poll');
+        await msg.save();
+
+        const updated = await GroupMessage.findById(messageId);
+        const msgObj = updated.toObject();
+
+        if (req.io) {
+            const notifyIds = new Set((group.members || []).map(id => id.toString()));
+            if (group.admin) notifyIds.add(group.admin.toString());
+            
+            notifyIds.forEach(memberId => {
+                req.io.to(memberId).emit('poll_voted', {
+                    messageId,
+                    poll: msgObj.poll,
+                    isGroup: true,
+                    groupId: String(msg.group_id)
+                });
+            });
+        }
+
+        res.json({ status: 'voted', poll: msgObj.poll });
+    } catch (err) {
+        console.error('[POLL VOTE GROUP]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
 // POST /api/groups/:groupId/send - Send a message to a group
 router.post('/:groupId/send', authenticateToken, (req, res, next) => {
     upload.single('file')(req, res, (err) => {
@@ -478,7 +596,11 @@ router.post('/message/:id/toggle', authenticateToken, async (req, res) => {
         }
 
         await msg.save();
-        res.json({ status: 'success', is_starred: msg.starred_by.includes(userId) });
+        
+        // RE-FETCH for decryption transparency
+        const refreshed = await GroupMessage.findById(msg._id);
+        const starred = refreshed ? (refreshed.starred_by || []) : (msg.starred_by || []);
+        res.json({ status: 'success', is_starred: starred.includes(userId) });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -838,5 +960,6 @@ router.post('/:groupId/join', authenticateToken, async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
 
 module.exports = router;

@@ -1,0 +1,585 @@
+65: const startTimeRef = useRef(null);
+123: const startRecording = async () => {
+142: startTimeRef.current = Date.now();
+144: const elapsed = (accumulatedDurationRef.current + (Date.now() - startTimeRef.current)) / 1000;
+160: googTypingNoiseDetection: true
+249: const startWaveformTimer = () => {
+258: const startBin = 6; // Filter out low-end hum and rumble
+260: for (let i = startBin; i < endBin; i++) sum += dataArray[i];
+261: const avg = sum / (endBin - startBin);
+288: waveformTimerHandler.current = startWaveformTimer;
+309: if (startTimeRef.current) {
+310: accumulatedDurationRef.current += (Date.now() - startTimeRef.current);
+311: startTimeRef.current = null;
+340: mediaRecorder.start();
+369: if (startTimeRef.current) {
+370: accumulatedDurationRef.current += (Date.now() - startTimeRef.current);
+371: startTimeRef.current = null;
+405: startTimeRef.current = Date.now();
+407: const elapsed = (accumulatedDurationRef.current + (Date.now() - startTimeRef.current)) / 1000;
+453: startRecording();
+477: if (audioUrl && audioUrl.startsWith('blob:')) {
+737: const [isContactInfoOpen, setIsContactInfoOpen] = useState(false); // Controls "Contact Info" panel
+748: const [typingLinkPreview, setTypingLinkPreview] = useState(null); // For typing preview overlay
+764: const [forwardSelectedMsgs, setForwardSelectedMsgs] = useState([]); // List of message objects
+766: const [forwardSearchQuery, setForwardSearchQuery] = useState('');
+768: const [selectedForwardContacts, setSelectedForwardContacts] = useState([]); // List of user objects
+775: // --- Edit Contact State ---
+776: const [isEditContactOpen, setIsEditContactOpen] = useState(false);
+787: const [isGlobalStarredOpen, setIsGlobalStarredOpen] = useState(false); // For starred from main menu
+796: const [isUnstarConfirmOpen, setIsUnstarConfirmOpen] = useState(false); // Confirmation bar
+797: const [unstarTarget, setUnstarTarget] = useState('current'); // 'current' or 'global'
+806: const [isContactSelectionOpen, setIsContactSelectionOpen] = useState(false);
+807: const [contactSearchQuery, setContactSearchQuery] = useState('');
+808: const [selectedContacts, setSelectedContacts] = useState([]);
+809: const [isConfirmContactSendOpen, setIsConfirmContactSendOpen] = useState(false);
+810: const [viewingContact, setViewingContact] = useState(null); // For Pic 5
+816: const starredMenuRef = useRef(null);
+828: const [pinReplaceModal, setPinReplaceModal] = useState(null); // { newId, isGroup, pinnedIds }
+829: const [pinMessageModal, setPinMessageModal] = useState(null);
+830: const [pinMessageDuration, setPinMessageDuration] = useState('30 days');
+848: typingIndicator: true,
+854: forwardLimit: 5,
+983: setIsContactInfoOpen(false);
+987: setIsEditContactOpen(false);
+1229: if (!filePath.startsWith('http')) {
+1726: const rawImageUrl = msg.file_path.startsWith('http') ? msg.file_path : `${window.location.origin}${msg.file_path}`;
+1836: const imageUrl = msg.file_path.startsWith('http') ? msg.file_path : `${window.location.origin}${msg.file_path}`;
+1870: const url = msg.file_path ? (msg.file_path.startsWith('http') ? msg.file_path : `${window.location.origin}${msg.file_path}`) : '';
+1946: const allStarred = selectedMediaMsgs.every(m => m.is_starred);
+1947: await Promise.all(ids.map(id => axios.post(`/api/chat/message/${id}/toggle`, { action: 'star', value: !allStarred }, {
+1950: setMessages(prev => prev.map(m => ids.includes(m._id) ? { ...m, is_starred: !allStarred } : m));
+1951: setSnackbar({ message: `Messages ${allStarred ? 'unstarred' : 'starred'}`, type: 'success', variant: 'system' });
+1954: console.error("Bulk star failed", err);
+1955: setSnackbar({ message: "Failed to update stars", type: 'error' });
+1976: const url = m.file_path ? (m.file_path.startsWith('http') ? m.file_path : `${window.location.origin}${m.file_path}`) : '';
+2017: // For now, let's keep them selected so the user knows what's being forwarded.
+2022: if (forwardSelectedMsgs.length === 0) {
+2026: const ids = forwardSelectedMsgs.map(m => m._id);
+2029: const allStarred = forwardSelectedMsgs.every(m => m.is_starred);
+2031: { action: 'star', value: !allStarred },
+2034: setMessages(prev => prev.map(m => ids.some(id => String(id) === String(m._id) || String(id) === String(m.id)) ? { ...m, is_starred: !allStarred } : m));
+2035: setGroupMessages(prev => prev.map(m => ids.some(id => String(id) === String(m._id) || String(id) === String(m.id)) ? { ...m, is_starred: !allStarred } : m));
+2036: setSnackbar({ message: `Messages ${allStarred ? 'unstarred' : 'starred'}`, type: 'success', variant: 'system' });
+2041: console.error("Bulk star failed", err);
+2042: setSnackbar({ message: "Failed to update stars", type: 'error' });
+2047: if (forwardSelectedMsgs.length === 0) {
+2051: setMsgToDelete(forwardSelectedMsgs.map(m => m._id));
+2056: if (forwardSelectedMsgs.length === 0) {
+2062: if (forwardSelectedMsgs.length === 1 && forwardSelectedMsgs[0].type === 'image') {
+2063: await handleCopyMessage(forwardSelectedMsgs[0]);
+2070: const texts = forwardSelectedMsgs.map(m => {
+2072: const rawUrl = m.file_path ? (m.file_path.startsWith('http') ? m.file_path : `${window.location.origin}${m.file_path}`) : '';
+2113: const mediaMsgs = forwardSelectedMsgs.filter(m => m.type === 'image' || m.type === 'video' || m.type === 'file');
+2234: if (!typingLinkPreview || typingLinkPreview.url !== url) {
+2242: setTypingLinkPreview(res.data);
+2244: setTypingLinkPreview(null);
+2247: console.error('Typing preview failed', err);
+2248: setTypingLinkPreview(null);
+2253: setTypingLinkPreview(null);
+2503: ? { ...msg, is_pinned: data.is_pinned, pinned_at: data.pinned_at, pin_expires_at: data.pin_expires_at, pinned_by: data.pinned_by }
+2637: socket.on('message_pinned', onMessagePinned);
+2643: console.warn('Socket: force_logout received. Another session was started.');
+3101: socket.off('message_pinned', onMessagePinned);
+3184: if (starredMenuRef.current && !starredMenuRef.current.contains(e.target)) {
+3252: const res = await axios.get('/api/chat/messages/starred/all', {
+3257: console.error("Failed to fetch global starred messages", err);
+3263: // Trigger fetch when global starred panel opens
+3289: }, [isProfileOpen, isContactInfoOpen]); // trigger when profile or contact info opens
+3298: const pinnedGroupsKey = `pinnedGroups_${user.id}`;
+3299: const pinnedGroupIds = JSON.parse(localStorage.getItem(pinnedGroupsKey)) || [];
+3309: isPinned: pinnedGroupIds.includes(g._id)
+3330: const pinnedKey = `pinnedCommunities_${userId}`;
+3332: const pinnedIds = JSON.parse(localStorage.getItem(pinnedKey)) || [];
+3355: isPinned: pinnedIds.includes(id),
+3426: is_starred: (m.starred_by || []).some(id => String(id) === String(currentUserId))
+3611: const pinnedKey = `pinnedContacts_${userId}`;
+3613: const pinnedIds = JSON.parse(localStorage.getItem(pinnedKey)) || [];
+3653: isPinned: pinnedIds.includes(u._id),
+3698: if (isContactInfoOpen) {
+3701: }, [isContactInfoOpen]);
+3706: const pinnedKey = isCommunity ? `pinnedCommunities_${user.id}` : (isGroup ? `pinnedGroups_${user.id}` : `pinnedContacts_${user.id}`);
+3707: let pinnedIds = JSON.parse(localStorage.getItem(pinnedKey)) || [];
+3709: if (pinnedIds.includes(contactId)) {
+3710: // Unpin
+3711: pinnedIds = pinnedIds.filter(id => id !== contactId);
+3712: localStorage.setItem(pinnedKey, JSON.stringify(pinnedIds));
+3719: message: `Chat unpinned`,
+3726: } else if (pinnedIds.length >= 5) {
+3728: setPinReplaceModal({ newId: contactId, isGroup, pinnedIds });
+3732: pinnedIds.push(contactId);
+3733: localStorage.setItem(pinnedKey, JSON.stringify(pinnedIds));
+3740: message: `Chat pinned`,
+3751: if (!pinReplaceModal) return;
+3752: const { newId, isGroup, pinnedIds } = pinReplaceModal;
+3753: const pinnedKey = isGroup ? `pinnedGroups_${user.id}` : `pinnedContacts_${user.id}`;
+3756: const newPinnedIds = pinnedIds.filter(id => id !== oldId);
+3758: localStorage.setItem(pinnedKey, JSON.stringify(newPinnedIds));
+3841: setTypingLinkPreview(null);
+3847: setIsContactInfoOpen(false);
+3851: setIsEditContactOpen(false);
+3861: if (!pinMessageModal) return;
+3862: const msgId = pinMessageModal._id || pinMessageModal.id;
+3863: const isCurrentlyPinned = pinMessageModal.is_pinned;
+3867: { action: 'pin', value: !isCurrentlyPinned, duration: pinMessageDuration },
+3881: const handleUnpinMessage = async (msgId) => {
+3885: { action: 'pin', value: false },
+3890: } catch (err) { console.error("Unpin failed", err); }
+3897: { action: 'star', value: !currentState },
+3900: setMessages(prev => prev.map(m => (String(m._id) === String(msgId) || String(m.id) === String(msgId)) ? { ...m, is_starred: !currentState } : m));
+3901: setGroupMessages(prev => prev.map(m => (String(m._id) === String(msgId) || String(m.id) === String(msgId)) ? { ...m, is_starred: !currentState } : m));
+3902: setSnackbar({ message: `Message ${!currentState ? 'starred' : 'unstarred'}`, type: 'success', variant: 'system', onAction: () => handleToggleStar(msgId, !currentState), actionLabel: 'Undo' });
+4235: // Also clear pinned state
+4236: const pinnedKey = `pinnedCommunities_${user.id || user._id}`;
+4237: let pinnedIds = JSON.parse(localStorage.getItem(pinnedKey)) || [];
+4238: pinnedIds = pinnedIds.filter(id => String(id) !== String(targetId));
+4239: localStorage.setItem(pinnedKey, JSON.stringify(pinnedIds));
+4262: setIsContactInfoOpen(false);
+4288: setIsContactInfoOpen(false);
+4402: const handleUnstarAllRequest = () => {
+4404: setUnstarTarget('current');
+4405: setIsUnstarConfirmOpen(true);
+4408: const handleGlobalUnstarAllRequest = () => {
+4410: setUnstarTarget('global');
+4411: setIsUnstarConfirmOpen(true);
+4414: const confirmUnstarAll = async () => {
+4415: const targetMsgs = unstarTarget === 'global' ? globalStarredMessages : messages.filter(m => m.is_starred);
+4417: setIsUnstarConfirmOpen(false);
+4426: action: 'star',
+4433: if (unstarTarget === 'global') {
+4435: // Also update local current chat messages if any of them were unstarred
+4436: setMessages(prev => prev.map(m => ({ ...m, is_starred: false })));
+4437: setGroupMessages(prev => prev.map(m => ({ ...m, is_starred: false })));
+4439: setMessages(prev => prev.map(m => ({ ...m, is_starred: false })));
+4443: setSnackbar({ message: "Messages unstarred", type: 'success', variant: 'system' });
+4444: setIsUnstarConfirmOpen(false);
+4446: console.error("Unstar all failed", err);
+4447: setSnackbar({ message: "Failed to unstar messages", type: 'error', variant: 'system' });
+4448: setIsUnstarConfirmOpen(false);
+4455: const startRecording = () => {
+4467: const handlePlayAudio = async (msg, startTime = 0) => {
+4483: if (String(playingAudioId) === String(msg._id || msg.id) && startTime === 0) {
+4509: if (url && !url.startsWith('http')) {
+4511: url = `${window.location.protocol}//${window.location.host}${url.startsWith('/') ? '' : '/'}${url}`;
+4522: setViewOnceElapsed(startTime);
+4525: if (startTime > 0) {
+4526: audio.currentTime = startTime;
+4647: const handleSendContact = async (contactsToSend) => {
+4707: setIsContactSelectionOpen(false);
+4708: setIsConfirmContactSendOpen(false);
+4709: setSelectedContacts([]);
+4710: setSnackbar({ message: 'Contact(s) shared successfully', type: 'success', variant: 'system' });
+4737: type: voiceFile ? 'audio' : (file ? (file.type.startsWith('image/') ? 'image' : (file.type.startsWith('video/') ? 'video' : 'file')) : 'text'),
+4762: setTypingLinkPreview(null); // Clear typing preview immediately
+4880: const renderContactSelectionPanel = () => {
+4881: if (!isContactSelectionOpen) return null;
+4888: const toggleContactSelection = (u) => {
+4889: if (selectedContacts.find((c) => c._id === u._id)) {
+4890: setSelectedContacts(selectedContacts.filter((c) => c._id !== u._id));
+4892: setSelectedContacts([...selectedContacts, u]);
+4896: const isMeSelected = selectedContacts.some(c => String(c._id || c.id) === String(user.id || user._id));
+4901: onClick={() => setIsContactSelectionOpen(false)}
+4910: <button onClick={() => setIsContactSelectionOpen(false)} style={{ background: 'none', border: 'none', color: '#111b21', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0, position: 'absolute', left: '16px' }}>
+4927: onChange={(e) => setContactSearchQuery(e.target.value)}
+4937: onClick={() => toggleContactSelection({ ...user, ...userData, _id: user.id || user._id, mobile: userData?.mobile || user?.mobile || userData?.phone || '+91 00000 00000' })}
+4950: <div style={{ padding: '25px 16px 10px', color: '#027EB5', fontSize: '13px', fontWeight: '600' }}>Contacts</div>
+4953: const isSelected = selectedContacts.some(c => String(c._id || c.id) === String(u._id || u.id));
+4959: onClick={() => toggleContactSelection(u)}
+4978: {selectedContacts.length > 0 && (
+4981: {selectedContacts.map(c => c.name || c.mobile || 'Unknown').join(', ')}
+4984: onClick={() => { setIsContactSelectionOpen(false); setIsConfirmContactSendOpen(true); }}
+4997: const renderConfirmContactSendPanel = () => {
+4998: if (!isConfirmContactSendOpen) return null;
+5004: onClick={() => setIsConfirmContactSendOpen(false)}
+5013: <button onClick={() => { setIsConfirmContactSendOpen(false); setIsContactSelectionOpen(true); }} style={{ background: 'none', border: 'none', color: '#111b21', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0, position: 'absolute', left: '16px' }}>
+5017: <span style={{ fontSize: 19, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Send {selectedContacts.length} contact{selectedContacts.length > 1 ? 's' : ''} to "{targetName}"</span>
+5023: {selectedContacts.map((contact) => (
+5038: setIsConfirmContactSendOpen(false);
+5039: setIsContactSelectionOpen(false);
+5050: onClick={() => handleSendContact(selectedContacts)}
+5062: const renderContactDetailPopup = () => {
+5063: if (!viewingContact) return null;
+5065: if (Array.isArray(viewingContact)) {
+5069: onClick={() => setViewingContact(null)}
+5078: <button onClick={() => setViewingContact(null)} style={{ background: 'none', border: 'none', display: 'flex', alignItems: 'center', cursor: 'pointer', color: '#54656f', padding: 0, position: 'absolute', left: 20 }}>
+5081: <span style={{ fontSize: 18, color: '#111b21', fontWeight: 500, whiteSpace: 'nowrap' }}>{viewingContact.length} Contacts</span>
+5084: {viewingContact.map((c, i) => (
+5085: <div key={i} style={{ padding: '16px 20px', borderBottom: i < viewingContact.length - 1 ? '6px solid #f3f4f6' : 'none' }}>
+5092: {c.name || 'Contact'}
+5106: onClick={() => { handleUserSelect({ ...c, id: c._id }); setViewingContact(null); }}
+5124: onClick={() => setViewingContact(null)}
+5133: {viewingContact.image || viewingContact.profile_photo ? <img src={viewingContact.image || viewingContact.profile_photo} alt={viewingContact.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><UserIcon size={100} color="#8696a0" /></div>}
+5134: <button onClick={() => setViewingContact(null)} style={{ position: 'absolute', top: 15, left: 15, background: 'rgba(0,0,0,0.4)', border: 'none', borderRadius: '50%', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'white' }}>
+5140: <div style={{ fontSize: 24, color: '#111b21', fontWeight: 600, marginBottom: 8 }}>{viewingContact.name || viewingContact.mobile}</div>
+5145: <div style={{ color: '#111b21', fontSize: 16, fontWeight: 500 }}>{viewingContact.mobile || '+91 00000 00000'}</div>
+5147: <button onClick={() => { handleUserSelect({ ...viewingContact, _id: viewingContact._id || viewingContact.id }); setViewingContact(null); }} style={{ background: 'none', border: 'none', color: '#027EB5', cursor: 'pointer' }}><MessageSquare size={20} /></button>
+5154: <div style={{ color: '#111b21', fontSize: 15 }}>{viewingContact.about || 'Available'}</div>
+5333: const startCamera = async () => {
+5378: startCamera();
+5476: // Save state for clipping to circle
+5503: console.error("Cropping inner error:", innerErr);
+5522: console.error("Cropping setup error:", err);
+5675: <div className="wa-profile-row" style={{ padding: '14px 30px', display: 'flex', alignItems: 'flex-start', gap: 20 }}>
+5705: <div className="wa-profile-row" style={{ padding: '14px 30px', display: 'flex', alignItems: 'flex-start', gap: 20 }}>
+5733: <div className="wa-profile-row" style={{ padding: '14px 30px', display: 'flex', alignItems: 'flex-start', gap: 20 }}>
+5854: {/* Grouped Contacts */}
+5898: const matchingContact = cleanTyped.length > 0 ? users.find(u => {
+5933: Enter a phone number to start a chat
+5937: {/* 3rd Pic: Found Contact display */}
+5938: {phoneNumberInput && matchingContact && (
+5944: handleUserSelect(matchingContact);
+5952: {matchingContact.image ? (
+5953: <img src={matchingContact.image} alt="" style={{ width: 45, height: 45, borderRadius: '50%' }} />
+5962: {matchingContact.name || matchingContact.mobile || matchingContact.phone}
+5965: {matchingContact.about || 'Hey there! I am using WhatsApp.'}
+6027: { icon: User, label: t('chat_window.contact'), color: '#009de2', onClick: () => { setIsAttachmentMenuOpen(false); setIsContactSelectionOpen(true); setSelectedContacts([]); setContactSearchQuery(''); } },
+6172: <span style={{ fontSize: 19, fontWeight: 500, color: '#3b4a54', whiteSpace: 'nowrap', flexShrink: 0 }}>{t('contact_info.starred_messages')}</span>
+6183: <div className="wa-menu-dropdown wa-starred-menu-dropdown" ref={globalStarredMenuRef} style={{ top: '100%', right: 0, left: 'auto', marginTop: 8 }}>
+6184: <div className="wa-menu-item wa-starred-menu-item" onClick={handleGlobalUnstarAllRequest} style={{ display: 'flex', alignItems: 'center', padding: '10px 15px', gap: 12 }}>
+6186: <span>{t('chat_list.unstar_all')}</span>
+6196: <CircleDashed size={24} className="wa-spinner" style={{ animation: 'waSpinner 1s linear infinite' }} />
+6201: <div style={{ fontSize: 14 }}>{t('chat_list.no_starred_messages')}</div>
+6230: <div key={idx} className="wa-starred-item" onClick={() => navigateToMessage(msg)} style={{ margin: '8px 12px', background: 'white', borderRadius: '8px', boxShadow: '0 1px 1px 0 rgba(11,20,26,.06)', cursor: 'pointer' }}>
+6231: <div className="wa-starred-item-header" style={{ padding: '12px 12px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+6232: <div className="wa-starred-names" style={{ fontSize: '13px', color: '#54656f', display: 'flex', alignItems: 'center', gap: '4px', flex: 1, overflow: 'hidden' }}>
+6243: <div className="wa-starred-date" style={{ fontSize: '11px', color: '#8696a0' }}>
+6249: <div className={`wa-starred-bubble ${isMe ? 'sent' : 'received'}`} style={{ maxWidth: '100%', margin: 0, padding: '6px 7px 8px' }}>
+6250: <div className="wa-starred-content">
+6256: <div className="wa-starred-meta" style={{ display: 'flex', justifyContent: 'flex-end', gap: '4px', alignItems: 'center', marginTop: '2px' }}>
+6268: {isUnstarConfirmOpen && unstarTarget === 'global' && (
+6269: <div className="wa-unstar-confirm-bar">
+6270: <div className="wa-unstar-confirm-content">
+6271: <span>{t('chat_list.unstar_all_confirm')}</span>
+6272: <div className="wa-unstar-confirm-actions">
+6273: <button className="wa-unstar-btn cancel" onClick={() => setIsUnstarConfirmOpen(false)}>{t('lang_confirm.cancel')}</button>
+6274: <button className="wa-unstar-btn confirm" onClick={confirmUnstarAll}>{t('chat_list.ok')}</button>
+6436: description="This includes the name, icon, description, disappearing message timer, and the ability to pin, keep or unkeep messages."
+6544: {/* Grouped Contacts */}
+6646: {file && file.type.startsWith('image/') ? (
+6658: ) : file && file.type.startsWith('video/') ? (
+6765: setIsContactInfoOpen(true);
+6768: style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#0EA5BE', justifySelf: 'start' }}
+6889: Get started
+7137: setIsContactInfoOpen(false);
+7142: setIsContactInfoOpen(false);
+7197: setIsContactInfoOpen(false);
+7200: setIsContactInfoOpen(false);
+7265: const renderContactInfoPanel = () => {
+7289: <div className={`wa-contact-info-panel wa-group-info ${isContactInfoOpen ? 'active' : ''}`} style={{ background: bgColor, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+7291: <button className="wa-contact-info-close-btn" onClick={() => setIsContactInfoOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 24, padding: '0 8px' }}>
+7325: <div style={{ flex: 1, padding: '12px 0', border: '1px solid #e9edef', borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, cursor: 'pointer', maxWidth: 160 }} onClick={() => { setIsContactInfoOpen(false); setIsMessageSearchOpen(true); searchSource.current = 'contact_info'; }}>
+7421: <div className="clickable" onClick={() => { setIsContactInfoOpen(false); setIsStarredMessagesOpen(true); }} style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+7428: <div className="clickable" onClick={() => { setIsContactInfoOpen(false); setIsNotificationSettingsOpen(true); }} style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+7480: } else if (!phoneValue.startsWith('+') && m.mobile) phoneValue = `+91 ${m.mobile}`;
+7567: <div className={`wa-contact-info-panel ${isContactInfoOpen ? 'active' : ''}`}>
+7570: <button className="wa-contact-info-close-btn" onClick={() => setIsContactInfoOpen(false)} style={{ position: 'absolute', left: 16, zIndex: 10, background: 'none', border: 'none', cursor: 'pointer' }}>
+7586: setIsEditContactOpen(true);
+7613: setIsContactInfoOpen(false); // Close contact info
+7644: <div className="wa-info-item-row" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 8 }}>
+7726: setIsContactInfoOpen(false);
+7730: <div className="wa-setting-text">{t('contact_info.starred_messages')}</div>
+7734: setIsContactInfoOpen(false);
+7856: const starredMsgs = (isGroupOrCommunity ? groupMessages : messages).filter(m => m.is_starred);
+7859: <div className={`wa-starred-messages-panel ${isStarredMessagesOpen ? 'active' : ''}`}>
+7860: <div className="wa-panel-header starred" style={{ position: 'relative' }}>
+7865: else setIsContactInfoOpen(true);
+7879: <div className="wa-starred-menu-dropdown" ref={starredMenuRef}>
+7880: <div className="wa-starred-menu-item" onClick={handleUnstarAllRequest}>
+7882: <span>Unstar all</span>
+7890: <div className="wa-starred-list">
+7891: {starredMsgs.length > 0 ? (
+7892: starredMsgs.map((msg, idx) => {
+7912: <div key={idx} className="wa-starred-item" onClick={() => {
+7915: <div className="wa-starred-item-header">
+7916: <div className="wa-starred-avatar">
+7923: <div className="wa-starred-names">
+7924: <span className="wa-starred-sender">{senderName}</span>
+7925: <ChevronRight size={14} className="wa-starred-arrow" />
+7926: <span className="wa-starred-recipient">{recipientName}</span>
+7928: <div className="wa-starred-date">{dateStr}</div>
+7930: <div className={`wa-starred-bubble-container ${isMe ? 'sent' : 'received'}`}>
+7931: <div className={`wa-starred-bubble ${isMe ? 'sent' : 'received'}`}>
+7932: <div className="wa-starred-content">
+7934: <div className="wa-starred-image-container" onClick={(e) => { e.stopPropagation(); setViewingImage(msg); }} style={{ cursor: 'pointer' }}>
+7935: <img src={msg.file_path} alt="Starred" className="wa-starred-image" />
+7939: <div className="wa-starred-file-item" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0' }}>
+7946: <div className="wa-starred-meta">
+7959: <div className="wa-no-starred">
+7961: <p>No starred messages</p>
+7966: {isUnstarConfirmOpen && (
+7967: <div className="wa-unstar-confirm-bar">
+7968: <div className="wa-unstar-confirm-content">
+7969: <span>Unstar all messages?</span>
+7970: <div className="wa-unstar-confirm-actions">
+7971: <button className="wa-unstar-btn cancel" onClick={() => setIsUnstarConfirmOpen(false)}>Cancel</button>
+7972: <button className="wa-unstar-btn confirm" onClick={confirmUnstarAll}>OK</button>
+8020: cDataArray = [{ name: 'Contact' }];
+8027: onClick={(e) => { e.stopPropagation(); setViewingContact(cDataArray); }}
+8063: {cData.name || 'Contact'}
+8241: // Refactored ImageViewer Component to handle complex state like cropping
+8243: const [isCropping, setIsCropping] = useState(false);
+8252: setIsCropping(false);
+8277: const newStatus = !viewingImage.is_starred;
+8280: { action: 'star', value: newStatus },
+8286: m._id === viewingImage._id ? { ...m, is_starred: newStatus } : m
+8290: setViewingImage(prev => ({ ...prev, is_starred: newStatus }));
+8293: console.error("Failed to star message", err);
+8294: setSnackbar({ message: "Failed to update star", type: 'error' });
+8351: const startCrop = (e) => {
+8353: setIsCropping(true);
+8360: setIsCropping(false);
+8397: setIsCropping(false);
+8409: if (!isCropping) return;
+8424: if (!isCropping || !isDragging) return;
+8474: {isCropping && cropRect && (
+8535: {isCropping ? (
+8547: <button className="wa-viewer-btn" onClick={startCrop} title="Crop">
+8554: <button className="wa-viewer-btn" onClick={handleViewerStar} title={viewingImage.is_starred ? "Unstar" : "Star"}>
+8555: <Star size={20} fill={viewingImage.is_starred ? "#54656f" : "none"} />
+8572: {currentIndex > 0 && !isCropping && (
+8580: {currentIndex < viewableMsgs.length - 1 && currentIndex !== -1 && !isCropping && (
+8587: {viewingImage.content && !isCropping && (
+8593: {!isCropping && (
+8702: // to the start of the chat area instead
+8705: // Contact menu would go off-screen left Ã¢â€ â€™ clamp to screen edge
+8773: if (data.is_pinned) {
+8774: handleUnpinMessage(id);
+8780: <Pin size={18} style={{ marginRight: 12, transform: data.is_pinned ? 'rotate(45deg)' : 'none' }} /> {data.is_pinned ? 'Unpin' : 'Pin'}
+8783: <div className="wa-dropdown-item" onClick={() => handleToggleStar(id, data.is_starred)}>
+8784: <Star size={16} style={{ marginRight: 10 }} fill={data.is_starred ? "#8696a0" : "none"} /> {data.is_starred ? 'Unstar' : 'Star'}
+8853: <Pin size={18} style={{ marginRight: 12, transform: data.isPinned ? 'rotate(45deg)' : 'none' }} /> {data.isPinned ? (isCommunity ? 'Unpin community' : (isGroup ? 'Unpin group' : 'Unpin chat')) : (isCommunity ? 'Pin community' : (isGroup ? 'Pin group' : 'Pin chat'))}
+9436: const availableContacts = users.filter(u =>
+9440: const filteredContacts = availableContacts.filter(u =>
+9467: <div style={{ padding: '8px 24px', fontSize: '13px', color: '#0EA5BE', fontWeight: '500' }}>Contacts</div>
+9470: {filteredContacts.map(u => {
+9598: const availableContacts = users.filter(u =>
+9602: const filteredContacts = availableContacts.filter(u =>
+9629: <div style={{ padding: '8px 24px', fontSize: '13px', color: '#0EA5BE', fontWeight: '500' }}>Contacts</div>
+9632: {filteredContacts.map(u => {
+10199: <div style={{ display: 'flex', justifyContent: 'flex-start', paddingLeft: '16px', zIndex: 10 }}>
+10204: setIsContactInfoOpen(true);
+10246: const renderEditContactPanel = () => {
+10250: <div className={`wa-contact-info-panel edit-panel ${isEditContactOpen ? 'active' : ''}`} style={{ boxSizing: 'border-box' }}>
+10253: onClick={() => setIsEditContactOpen(false)}
+10254: style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#0EA5BE', justifySelf: 'start' }}
+10266: <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 35 }}>
+10300: <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 25 }}>
+10363: <div style={{ display: 'flex', alignItems: 'flex-start', marginTop: 35 }}>
+10423: setIsEditContactOpen(false);
+10532: <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+10548: <div style={{ display: 'flex', justifyContent: 'flex-start', paddingLeft: '8px' }}>
+10552: else setIsContactInfoOpen(true);
+10815: setTypingLinkPreview(null);
+10821: setIsContactInfoOpen(false);
+10825: setIsEditContactOpen(false);
+10858: const startX = e.clientX;
+10859: const startWidth = leftPanelWidth;
+10862: const delta = moveEvent.clientX - startX;
+10864: setLeftPanelWidth(Math.max(260, Math.min(maxWidth, startWidth + delta)));
+10966: const originalContact = users.find(u => u._id === chat._id);
+10984: setIsContactInfoOpen(false);
+10988: setIsEditContactOpen(false);
+11008: } else if (originalContact) {
+11013: setTypingLinkPreview(null);
+11019: setIsContactInfoOpen(false);
+11023: setIsEditContactOpen(false);
+11025: setSelectedUser(originalContact);
+11029: if (selectedUserRef) selectedUserRef.current = originalContact;
+11033: markAsRead(originalContact._id);
+11034: setUsers(prev => prev.map(u => u._id === originalContact._id ? { ...u, unreadCount: 0 } : u));
+11036: fetchP2PRequest(originalContact._id);
+11063: aria-label="Search or start new chat"
+11144: <CircleDashed size={24} className="wa-spinner" style={{ animation: 'waSpinner 1s linear infinite' }} />
+11145: <style>{`@keyframes waSpinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+11167: // If not searching and on "All" tab, hide users with no history/no pinning/no active requests
+11273: setIsContactInfoOpen(false);
+11278: setIsEditContactOpen(false);
+11297: setTypingLinkPreview(null);
+11370: return parsed.name || parsed.mobile || 'Contact';
+11372: catch (e) { return 'Contact'; }
+11527: setTypingLinkPreview(null);
+11533: setIsContactInfoOpen(false);
+11537: setIsEditContactOpen(false);
+11540: const toggleForwardContact = (contact) => {
+11541: const isSelected = selectedForwardContacts.find(c => c._id === contact._id);
+11543: // Check if any selected message is "highly forwarded"
+11544: const isHighlyForwarded = forwardSelectedMsgs.some(msg => (msg.forward_count || 0) >= 4);
+11547: setSelectedForwardContacts(prev => prev.filter(c => c._id !== contact._id));
+11552: if (selectedForwardContacts.length >= 1) {
+11557: if (selectedForwardContacts.length >= 5) {
+11563: setSelectedForwardContacts(prev => [...prev, contact]);
+11569: if (selectedForwardContacts.length === 0 || forwardSelectedMsgs.length === 0) return;
+11575: setSelectedForwardContacts([]);
+11581: for (const contact of selectedForwardContacts) {
+11582: for (const msg of forwardSelectedMsgs) {
+11609: formData.append('forward_count', msg.forward_count || 0);
+11656: setSnackbar({ message: 'Messages forwarded!', type: 'success', variant: 'system' });
+11701: if (!pinReplaceModal) return null;
+11702: const { isGroup, pinnedIds } = pinReplaceModal;
+11703: const pinnedItems = isGroup
+11704: ? groups.filter(g => pinnedIds.includes(g._id))
+11705: : users.filter(u => pinnedIds.includes(u._id));
+11719: You have reached the limit of 5 pinned {isGroup ? 'groups' : 'contacts'}. Select one below to replace:
+11721: <div className="wa-pin-replace-list">
+11722: {pinnedItems.map((item, idx) => {
+11739: className="wa-pin-replace-card"
+11759: <div className="wa-pin-replace-avatar" style={{ background: gradient }}>
+11762: <div className="wa-pin-replace-info">
+11763: <div className="wa-pin-replace-name">
+11766: <div className="wa-pin-replace-hint">Tap to replace</div>
+11768: <svg className="wa-pin-replace-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={themeColor} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+11791: <div className="wa-forward-modal-overlay">
+11792: <div className="wa-forward-modal">
+11793: <div className="wa-forward-modal-header">
+11794: <button className="wa-forward-modal-close-btn" onClick={() => { setIsForwardModalOpen(false); setSelectedForwardContacts([]); setShowForwardLimitWarning(false); }} style={{ width: 'auto', padding: '0 10px', fontSize: '16px', color: '#0EA5BE', fontWeight: 500 }}>
+11797: <div className="wa-forward-modal-title">Forward message to...</div>
+11801: <div className="wa-forward-limit-banner">
+11807: <div className="wa-forward-search">
+11812: value={forwardSearchQuery}
+11818: <div className="wa-forward-contact-list">
+11819: <div className="wa-forward-section-title">Recent chats</div>
+11821: .filter(item => (item.name || '').toLowerCase().includes(forwardSearchQuery.toLowerCase()))
+11823: const isSelected = !!selectedForwardContacts.find(c => c._id === item._id);
+11826: <div key={item._id} className="wa-forward-contact-item" onClick={() => toggleForwardContact(item)}>
+11834: <div className="wa-forward-contact-info">
+11838: <div className={`wa-forward-checkbox ${isSelected ? 'selected' : ''}`}>
+11847: {selectedForwardContacts.length > 0 && (
+11848: <div className="wa-forward-fab-container">
+11849: <div className="wa-forward-names-preview">
+11850: {selectedForwardContacts.map(c => c.name).join(', ')}
+11852: <button className="wa-forward-fab" onClick={handleForwardSend}>
+11874: <button className="wa-camera-btn allow" onClick={startCamera}>Allow</button>
+11971: <button className="wa-crop-retake-btn-footer" onClick={startCamera}>
+11986: startCamera();
+11999: className={`wa-main-chat ${(isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen) ? 'wa-main-chat-with-panel' : ''}`}
+12004: borderRight: (isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen) ? '1px solid #d1d7db' : 'none'
+12021: <div className="wa-chat-header-user" onClick={() => setIsContactInfoOpen(true)}>
+12097: const pinnedMessages = messages.filter(m => m.is_pinned && !m.is_deleted_by_admin && !m.is_deleted_by_user).sort((a, b) => new Date(b.pinned_at) - new Date(a.pinned_at));
+12098: if (pinnedMessages.length === 0) return null;
+12099: const safeIndex = currentPinnedIndex >= pinnedMessages.length ? 0 : currentPinnedIndex;
+12100: const msg = pinnedMessages[safeIndex];
+12109: {msg.type === 'image' ? <img src={msg.file_path} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned" /> : <video src={msg.file_path} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+12121: <img src={msg.link_preview?.image || `https://img.youtube.com/vi/${youtubeId}/default.jpg`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned link" />
+12133: <div className="wa-pinned-messages-banner" style={{ background: 'white', padding: '8px 16px', borderBottom: '1px solid #d1d7db', display: 'flex', alignItems: 'center', zIndex: 10, position: 'relative', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+12136: setCurrentPinnedIndex((safeIndex + 1) % pinnedMessages.length);
+12139: {pinnedMessages.length > 1 && (
+12141: {Array.from({ length: pinnedMessages.length }).map((_, i) => (
+12153: {(msg.user_id === user.id || msg.user_id === user._id) ? 'You' : (selectedUser?.name || 'Contact')}
+12271: className={`wa-message-container ${isForwardingMode ? 'forward-mode' : ''}`}
+12274: const isSelected = forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id));
+12289: {forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ?
+12302: {(msg.isForwarded || msg.is_forwarded) && !isMe && (
+12303: <div className="wa-forwarded-tag">
+12305: {(msg.forward_count || 0) >= 4 ? 'Forwarded many times' : 'Forwarded'}
+12327: const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
+12330: return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+12639: cDataArray = [{ name: 'Contact' }];
+12646: onClick={(e) => { e.stopPropagation(); setViewingContact(cDataArray); }}
+12675: onClick={(e) => { e.stopPropagation(); setViewingContact(cData); }}
+12683: {cData.name || 'Contact'}
+12706: {msg.is_pinned && <Pin size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3, transform: 'rotate(45deg)' }} />}
+12707: {msg.is_starred && <Star size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3 }} />}
+12728: <div className="wa-forward-bottom-bar">
+12729: <div className="wa-forward-left-group">
+12730: <button className="wa-forward-cancel-btn" onClick={() => {
+12737: <span className="wa-forward-count">{forwardSelectedMsgs.length} selected</span>
+12755: if (forwardSelectedMsgs.length === 0) {
+12773: {forwardSelectedMsgs.some(m => m.type === 'image' || m.type === 'video' || m.type === 'file') && (
+12788: {/* Typing Link Preview */}
+12789: {typingLinkPreview && typingLinkPreview.title && (
+12790: <div className="wa-typing-link-preview">
+12791: <div className="wa-typing-preview-header" style={{ justifyContent: 'flex-end' }}>
+12795: onClick={() => setTypingLinkPreview(null)}
+12798: <div className="wa-typing-preview-card">
+12799: {typingLinkPreview.image && (
+12801: src={typingLinkPreview.image}
+12802: alt={typingLinkPreview.title}
+12803: className="wa-typing-preview-image"
+12806: <div className="wa-typing-preview-text">
+12807: <div className="wa-typing-preview-title">{typingLinkPreview.title}</div>
+12808: {typingLinkPreview.description && (
+12809: <div className="wa-typing-preview-description">{typingLinkPreview.description}</div>
+12811: <div className="wa-typing-preview-domain">
+12812: {typingLinkPreview.domain === 'youtube.com' || typingLinkPreview.domain === 'www.youtube.com' ? (
+12817: <span>{typingLinkPreview.domain}</span>
+12820: <span>{typingLinkPreview.domain}</span>
+12843: const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
+12846: return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+12990: <button className="wa-mic-btn-idle" data-tooltip="Voice message" onClick={startRecording}>
+13020: setIsContactInfoOpen(false);
+13022: setIsContactInfoOpen(true);
+13082: setIsContactInfoOpen(true);
+13133: const pinnedMessages = groupMessages.filter(m => m.is_pinned && !m.is_deleted_by_admin && !m.is_deleted_by_user).sort((a, b) => new Date(b.pinned_at) - new Date(a.pinned_at));
+13134: if (pinnedMessages.length === 0) return null;
+13135: const safeIndex = currentPinnedIndex >= pinnedMessages.length ? 0 : currentPinnedIndex;
+13136: const msg = pinnedMessages[safeIndex];
+13145: {msg.type === 'image' ? <img src={msg.file_path} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned" /> : <video src={msg.file_path} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+13157: <img src={msg.link_preview?.image || `https://img.youtube.com/vi/${youtubeId}/default.jpg`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned link" />
+13169: <div className="wa-pinned-messages-banner" style={{ background: 'white', padding: '8px 16px', borderBottom: '1px solid #d1d7db', display: 'flex', alignItems: 'center', zIndex: 10, position: 'relative', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+13172: setCurrentPinnedIndex((safeIndex + 1) % pinnedMessages.length);
+13175: {pinnedMessages.length > 1 && (
+13177: {Array.from({ length: pinnedMessages.length }).map((_, i) => (
+13259: {/* Render Group Messages with Date Grouping */}
+13364: if (!content.toLowerCase().startsWith(prefixMe.toLowerCase()) &&
+13365: !content.toLowerCase().startsWith(prefixSender.toLowerCase()) &&
+13366: !content.startsWith('Group ')) {
+13420: <li style={{ display: 'flex', marginBottom: '8px', alignItems: 'flex-start' }}>
+13424: <li style={{ display: 'flex', alignItems: 'flex-start' }}>
+13441: const pinnedKey = `pinnedCommunities_${user.id || user._id}`;
+13442: const pinnedIds = JSON.parse(localStorage.getItem(pinnedKey)) || [];
+13443: const formatted = { ...comm, id, isPinned: pinnedIds.includes(id) };
+13472: className={`wa-message-container ${isForwardingMode ? 'forward-mode' : ''}`}
+13475: const isSelected = forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id));
+13486: {forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ?
+13514: const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
+13517: return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+13844: cDataArray = [{ name: 'Contact' }];
+13851: onClick={(e) => { e.stopPropagation(); setViewingContact(cDataArray); }}
+13880: onClick={(e) => { e.stopPropagation(); setViewingContact(cData); }}
+13888: {cData.name || 'Contact'}
+13910: {msg.is_pinned && <Pin size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3, transform: 'rotate(45deg)' }} />}
+13911: {msg.is_starred && <Star size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3 }} />}
+13937: <div className="wa-forward-bottom-bar">
+13938: <div className="wa-forward-left-group">
+13939: <button className="wa-forward-cancel-btn" onClick={() => {
+13946: <span className="wa-forward-count">{forwardSelectedMsgs.length} selected</span>
+13961: if (forwardSelectedMsgs.length === 0) {
+13977: {forwardSelectedMsgs.some(m => m.type === 'image' || m.type === 'video' || m.type === 'file') && (
+13990: {/* Typing Link Preview */}
+13991: {typingLinkPreview && typingLinkPreview.title && (
+13992: <div className="wa-typing-link-preview">
+13993: <div className="wa-typing-preview-header" style={{ justifyContent: 'flex-end' }}>
+13994: <X size={16} style={{ cursor: 'pointer', color: '#667781' }} onClick={() => setTypingLinkPreview(null)} />
+13996: <div className="wa-typing-preview-card">
+13997: {typingLinkPreview.image && <img src={typingLinkPreview.image} alt={typingLinkPreview.title} className="wa-typing-preview-image" />}
+13998: <div className="wa-typing-preview-text">
+13999: <div className="wa-typing-preview-title">{typingLinkPreview.title}</div>
+14000: {typingLinkPreview.description && <div className="wa-typing-preview-description">{typingLinkPreview.description}</div>}
+14001: <div className="wa-typing-preview-domain"><span>{typingLinkPreview.domain}</span></div>
+14022: const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
+14025: return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+14230: <button className="wa-mic-btn-idle" data-tooltip="Voice message" onClick={startRecording}>
+14246: <p style={{ fontSize: 14, marginTop: 10 }}>Send and receive messages without keeping your phone online.</p>
+14251: {showScrollBtn && (selectedUser || selectedGroup) && (window.innerWidth > 768 || !(isMessageSearchOpen || isContactInfoOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen)) && (
+14264: {renderContactInfoPanel()}
+14278: {renderEditContactPanel()}
+14564: alignSelf: isMeEditing ? 'flex-end' : 'flex-start',
+14575: {editInput || <span style={{ color: '#8696a0', fontStyle: 'italic' }}>Typing...</span>}
+15023: <p className="wa-settings-item-label">Typing Indicator</p>
+15024: <p className="wa-settings-item-desc">Show when you are typing a message</p>
+15027: <input type="checkbox" checked={privacySettings.typingIndicator} onChange={() => toggleSetting('typingIndicator')} />
+15080: <p className="wa-settings-item-desc">{privacySettings.forwardLimit} messages</p>
+15421: <button className="wa-settings-btn-white">Contact Admin</button>
+15572: <Loader2 className="wa-spin" size={20} color="#0EA5BE" />
+15611: <Loader2 className="wa-spin" size={18} color="#0EA5BE" />
+15617: @keyframes wa-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+15618: .wa-spin { animation: wa-spin 1.2s linear infinite; }
+15662: {pinReplaceModal && renderPinReplaceModal()}
+15744: // Actually restart the app to apply the language change
+15941: {pinMessageModal && (
+15954: Choose how long your message stays pinned. You can unpin at any time.
+15964: <div className={`wa-radio-circle-custom ${pinMessageDuration === dur ? 'selected' : ''}`}>
+15965: {pinMessageDuration === dur && <div className="wa-radio-inner-custom" />}
+16639: {renderContactSelectionPanel()}
+16640: {renderConfirmContactSendPanel()}
+16641: {renderContactDetailPopup()}

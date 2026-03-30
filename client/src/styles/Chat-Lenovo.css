@@ -1,4 +1,4 @@
-﻿:root {
+:root {
     --wa-header-bg: #f0f2f5;
     --wa-sidebar-bg: #ffffff;
     --wa-panel-header-bg: #f0f2f5;
@@ -2551,6 +2551,7 @@ html {
     background-color: var(--wa-chat-bg);
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
     min-height: 150px;
+    flex-shrink: 0;
 }
 
 .wa-info-message-preview .wa-chat-bg-overlay {

@@ -3289,6 +3289,7 @@ html {
     overflow-y: auto;
     display: flex;
     flex-direction: column;
+    background-color: #f0f2f5;
 }
 
 .wa-info-message-preview {
@@ -3301,6 +3302,7 @@ html {
     background-color: var(--wa-chat-bg);
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
     min-height: 150px;
+    flex-shrink: 0;
 }
 
 .wa-info-message-preview .wa-chat-bg-overlay {
@@ -3345,6 +3347,7 @@ html {
 
 .wa-info-stats {
     padding: 28px 20px;
+    flex-shrink: 0;
 }
 
 .wa-info-stat-card {

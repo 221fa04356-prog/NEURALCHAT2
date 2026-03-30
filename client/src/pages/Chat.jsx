@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useRef, memo } from 'react';
+import React, { useEffect, useState, useRef, memo } from 'react';
 import axios from 'axios';
 import ImageEditorModal from '../components/ImageEditorModal';
 import logo from '../assets/logo.png';
@@ -798,6 +798,15 @@ export default function Chat() {
     const [isNotificationSettingsOpen, setIsNotificationSettingsOpen] = useState(false);
     const [showUnreadBanner, setShowUnreadBanner] = useState(true);
     const [showGroupMenu, setShowGroupMenu] = useState(false);
+
+    // --- Poll States ---
+    const [isPollModalOpen, setIsPollModalOpen] = useState(false);
+    const [pollQuestion, setPollQuestion] = useState('');
+    const [pollOptions, setPollOptions] = useState(['', '']); // Initial 2 fields
+    const [allowMultipleAnswers, setAllowMultipleAnswers] = useState(true);
+    const [pollErrors, setPollErrors] = useState({}); // To track duplicate option errors
+    const [isPollDetailsOpen, setIsPollDetailsOpen] = useState(false);
+    const [pollDetails, setPollDetails] = useState(null);
     const [showNotificationDetails, setShowNotificationDetails] = useState(false);
     const [messageRequests, setMessageRequests] = useState([]); // Message request list
     const [isRequestsModalOpen, setIsRequestsModalOpen] = useState(false); // Requests modal
@@ -1317,6 +1326,24 @@ export default function Chat() {
                         )}
                     </span>
                 );
+            case 'contact':
+                try {
+                    const parsed = JSON.parse(msg.content);
+                    if (Array.isArray(parsed)) {
+                        return (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <UserIcon size={14} /> {parsed[0].name || parsed[0].mobile} and {parsed.length - 1} other contact{parsed.length > 2 ? 's' : ''}
+                            </span>
+                        );
+                    }
+                    return (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <UserIcon size={14} /> {parsed.name || parsed.mobile || 'Contact'}
+                        </span>
+                    );
+                } catch (e) {
+                    return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><UserIcon size={14} /> Contact</span>;
+                }
             default:
                 if (msg.is_request_placeholder) {
                     return <span style={{ color: '#0EA5BE', fontWeight: '500' }}>{msg.content}</span>;
@@ -1595,7 +1622,7 @@ export default function Chat() {
     const isMeMsg = (msg) => {
         if (!msg) return false;
         const myId = user.id || user._id;
-        const sId = msg.sender_id?._id || msg.sender_id || msg.user_id;
+        const sId = (msg.sender_id?._id || msg.sender_id) || (msg.user_id?._id || msg.user_id);
         return String(sId) === String(myId);
     };
 
@@ -2594,6 +2621,21 @@ export default function Chat() {
             fetchUsers();
         };
 
+        const onPollVoted = (data) => {
+            console.log('Socket: poll_voted', data);
+            const { messageId, poll, isGroup } = data;
+            
+            const updateMsgs = prev => prev.map(m => 
+                (String(m._id || m.id) === String(messageId)) ? { ...m, poll } : m
+            );
+            
+            if (isGroup) {
+                setGroupMessages(updateMsgs);
+            } else {
+                setMessages(updateMsgs);
+            }
+        };
+
         const onUserProfileUpdated = (data) => {
             console.log('Socket: user_profile_updated', data);
             setUsers(prev => prev.map(u =>
@@ -2638,6 +2680,7 @@ export default function Chat() {
         socket.on('message_opened', onMessageOpened);
         socket.on('message_viewed', onMessageViewed);
         socket.on('user_profile_updated', onUserProfileUpdated);
+        socket.on('poll_voted', onPollVoted);
 
         const onForceLogout = () => {
             console.warn('Socket: force_logout received. Another session was started.');
@@ -4716,6 +4759,130 @@ export default function Chat() {
         }
     };
 
+    const handleSendPoll = async () => {
+        // Validate question
+        if (!pollQuestion.trim()) {
+            setSnackbar({ message: 'No question entered. Please enter the question to proceed forward', type: 'error', variant: 'system' });
+            return;
+        }
+
+        // Filter valid options
+        const validOptions = pollOptions.map(o => o.trim()).filter(o => o.length > 0);
+        if (validOptions.length < 2) {
+            setSnackbar({ message: 'Please enter at least 2 options', type: 'error', variant: 'system' });
+            return;
+        }
+
+        // Check for duplicates
+        const lowerOptions = validOptions.map(o => o.toLowerCase());
+        const hasDup = lowerOptions.some((o, i) => lowerOptions.indexOf(o) !== i);
+        if (hasDup) {
+            setSnackbar({ message: 'Duplicate options are not allowed', type: 'error', variant: 'system' });
+            return;
+        }
+
+        const target = selectedUser || selectedGroup;
+        if (!target) return;
+
+        const token = localStorage.getItem('token');
+        try {
+            let endpoint, payload;
+            if (selectedGroup) {
+                endpoint = '/api/groups/poll/send';
+                payload = { groupId: selectedGroup._id, question: pollQuestion.trim(), options: validOptions, allowMultipleAnswers };
+            } else {
+                endpoint = '/api/chat/poll/send';
+                payload = { toUserId: selectedUser._id, question: pollQuestion.trim(), options: validOptions, allowMultipleAnswers };
+            }
+
+            const res = await axios.post(endpoint, payload, {
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+            });
+
+            const sentMsg = res.data.message;
+
+            if (selectedGroup) {
+                setGroupMessages(prev => [...prev, sentMsg]);
+                socket.emit('group_message', {
+                    groupId: selectedGroup._id,
+                    message: { ...sentMsg, sender_id: { _id: user.id || user._id, name: user.name } }
+                });
+            } else {
+                setMessages(prev => [...prev, sentMsg]);
+                socket.emit('send_message', {
+                    _id: sentMsg._id,
+                    sender_id: user.id || user._id,
+                    receiverId: selectedUser._id,
+                    content: sentMsg.content,
+                    type: 'poll',
+                    poll: sentMsg.poll
+                });
+            }
+
+            setIsPollModalOpen(false);
+            setPollQuestion('');
+            setPollOptions(['', '']);
+            setAllowMultipleAnswers(true);
+            setPollErrors({});
+            setSnackbar({ message: 'Poll created!', type: 'success', variant: 'system' });
+        } catch (err) {
+            console.error('Poll send failed:', err);
+            setSnackbar({ message: 'Failed to create poll', type: 'error', variant: 'system' });
+        }
+    };
+
+    const handleVotePoll = async (msg, optionIndex) => {
+        const isGroup = !!selectedGroup;
+        const myId = String(user.id || user._id);
+        const poll = msg.poll;
+        if (!poll) return;
+
+        const allowMultiple = poll.allowMultipleAnswers;
+
+        // Determine current voted indexes
+        const currentVotedIndexes = poll.options
+            .map((opt, i) => ((opt.voters || []).some(v => String(v) === myId || String(v?._id || v) === myId) ? i : -1))
+            .filter(i => i !== -1);
+
+        let newIndexes;
+        if (allowMultiple) {
+            // Toggle this option
+            if (currentVotedIndexes.includes(optionIndex)) {
+                newIndexes = currentVotedIndexes.filter(i => i !== optionIndex);
+            } else {
+                newIndexes = [...currentVotedIndexes, optionIndex];
+            }
+        } else {
+            // Single choice: toggle or switch
+            if (currentVotedIndexes.includes(optionIndex)) {
+                newIndexes = []; // Unvote
+            } else {
+                newIndexes = [optionIndex];
+            }
+        }
+
+        const token = localStorage.getItem('token');
+        const endpoint = isGroup ? `/api/groups/poll/${msg._id}/vote` : `/api/chat/poll/${msg._id}/vote`;
+
+        try {
+            const res = await axios.post(endpoint, { optionIndexes: newIndexes }, {
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+            });
+
+            const updatedPoll = res.data.poll;
+            const updateFn = prev => prev.map(m =>
+                (String(m._id) === String(msg._id) || String(m.id) === String(msg._id))
+                    ? { ...m, poll: updatedPoll }
+                    : m
+            );
+            if (isGroup) setGroupMessages(updateFn);
+            else setMessages(updateFn);
+        } catch (err) {
+            console.error('Vote failed:', err);
+            setSnackbar({ message: 'Failed to vote', type: 'error', variant: 'system' });
+        }
+    };
+
     const handleSend = async (e, contentOverride = null, voiceFile = null, voiceDuration = null, voiceIsViewOnce = null) => {
         if (e) e.preventDefault();
 
@@ -6025,7 +6192,7 @@ export default function Chat() {
             },
             { icon: Camera, label: t('chat_window.camera'), color: '#ff2e74', onClick: () => { setIsAttachmentMenuOpen(false); handleCameraAction('chat'); } },
             { icon: User, label: t('chat_window.contact'), color: '#009de2', onClick: () => { setIsAttachmentMenuOpen(false); setIsContactSelectionOpen(true); setSelectedContacts([]); setContactSearchQuery(''); } },
-            { icon: List, label: t('chat_window.poll'), color: '#ffbc38', onClick: () => { setIsAttachmentMenuOpen(false); } },
+            { icon: List, label: t('chat_window.poll'), color: '#ffbc38', onClick: () => { setIsAttachmentMenuOpen(false); setPollQuestion(''); setPollOptions(['', '']); setAllowMultipleAnswers(true); setPollErrors({}); setIsPollModalOpen(true); } },
             { icon: Calendar, label: t('chat_window.event'), color: '#ef0b33', onClick: () => { setIsAttachmentMenuOpen(false); } },
         ];
 
@@ -6251,7 +6418,92 @@ export default function Chat() {
                                                 {msg.type === 'image' && msg.file_path && (
                                                     <img src={msg.file_path} alt="" style={{ maxWidth: '100%', borderRadius: '4px', marginBottom: '4px', display: 'block' }} />
                                                 )}
-                                                {msg.content && <div className="wa-msg-text" style={{ fontSize: '14.2px', lineHeight: '19px', color: '#111b21', wordBreak: 'break-word' }}>{msg.content}</div>}
+                                                {msg.type === 'contact' && (() => {
+                                                    let cDataArray;
+                                                    try {
+                                                        const rawData = JSON.parse(msg.content);
+                                                        cDataArray = Array.isArray(rawData) ? rawData : [rawData];
+                                                    } catch (e) {
+                                                        cDataArray = [{ name: 'Contact' }];
+                                                    }
+                                                    if (cDataArray.length > 1) {
+                                                        return (
+                                                            <div className="wa-contact-msg-card-multiple" onClick={(e) => { e.stopPropagation(); setViewingContact(cDataArray); }} style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '260px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                    <div style={{ position: 'relative', width: 66, height: 44, marginRight: 12, flexShrink: 0 }}>
+                                                                        <div className="wa-avatar" style={{ position: 'absolute', right: 0, zIndex: 1, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                                            {cDataArray[1].image ? <img src={cDataArray[1].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                        </div>
+                                                                        <div className="wa-avatar" style={{ position: 'absolute', left: 0, zIndex: 2, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                                            {cDataArray[0].image ? <img src={cDataArray[0].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div style={{ color: '#111b21', fontSize: '15px', fontWeight: 600, lineHeight: '1.3' }}>
+                                                                        {cDataArray[0].name || cDataArray[0].mobile} and {cDataArray.length - 1} other contact{cDataArray.length > 2 ? 's' : ''}
+                                                                    </div>
+                                                                </div>
+                                                                <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                                    <button style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>View all</button>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    const cData = cDataArray[0];
+                                                    return (
+                                                        <div className="wa-contact-msg-card" onClick={(e) => { e.stopPropagation(); setViewingContact(cData); }} style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '240px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                <div className="wa-avatar" style={{ width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                    {cData.image ? <img src={cData.image} alt={cData.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                </div>
+                                                                <div style={{ color: '#111b21', fontSize: '16px', fontWeight: 600 }}>{cData.name || 'Contact'}</div>
+                                                            </div>
+                                                            <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                                <button className="wa-contact-card-action" onClick={(e) => { e.stopPropagation(); handleUserSelect({ ...cData, id: cData._id }); }} style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>Message</button>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
+                                                {msg.type === 'poll' && msg.poll && (
+                                                    <div className="wa-poll-card" style={{ background: '#ffffff', borderRadius: '12px', padding: '15px', minWidth: '280px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
+                                                        <div style={{ paddingBottom: '10px', fontWeight: 'bold', color: '#111b21', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            <List size={20} color="#0EA5BE" />
+                                                            {msg.poll.question}
+                                                        </div>
+                                                        <div style={{ color: '#8696a0', fontSize: '13px', marginBottom: '12px' }}>
+                                                            {msg.poll.allowMultipleAnswers ? 'Select one or more' : 'Select one'}
+                                                        </div>
+                                                        <div className="wa-poll-options" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                            {msg.poll.options.map((opt, idx) => {
+                                                                const totalVotes = msg.poll.options.reduce((sum, o) => sum + (o.voters?.length || 0), 0);
+                                                                const votes = opt.voters?.length || 0;
+                                                                const percentage = totalVotes === 0 ? 0 : Math.round((votes / totalVotes) * 100);
+                                                                const hasAnyVote = totalVotes > 0;
+                                                                
+                                                                return (
+                                                                    <div key={idx} style={{ position: 'relative', overflow: 'hidden', padding: '10px', borderRadius: '8px', border: '1px solid #e9edef', background: '#ffffff' }}>
+                                                                        {hasAnyVote && (
+                                                                            <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${percentage}%`, background: 'rgba(14, 165, 190, 0.15)', zIndex: 1, transition: 'width 0.3s ease' }} />
+                                                                        )}
+                                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
+                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px', color: '#111b21' }}>
+                                                                                <div style={{ width: '18px', height: '18px', borderRadius: msg.poll.allowMultipleAnswers ? '4px' : '50%', border: '2px solid #8696a0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}></div>
+                                                                                {opt.text}
+                                                                            </div>
+                                                                            {votes > 0 && <span style={{ fontSize: '12px', color: '#54656f', fontWeight: '500' }}>{votes}</span>}
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <div style={{ borderTop: '1px solid #e9edef', marginTop: '15px', paddingTop: '10px' }}>
+                                                            <button 
+                                                                disabled={msg.poll.options.every(o => !(o.voters?.length > 0))}
+                                                                style={{ background: 'none', border: 'none', width: '100%', color: msg.poll.options.some(o => o.voters?.length > 0) ? '#0EA5BE' : '#8696a0', fontSize: '14px', fontWeight: 'bold', padding: '6px 0', cursor: msg.poll.options.some(o => o.voters?.length > 0) ? 'pointer' : 'default', transition: 'color 0.2s' }}
+                                                            >View votes</button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && <div className="wa-msg-text" style={{ fontSize: '14.2px', lineHeight: '19px', color: '#111b21', wordBreak: 'break-word' }}>{msg.content}</div>}
                                             </div>
                                             <div className="wa-starred-meta" style={{ display: 'flex', justifyContent: 'flex-end', gap: '4px', alignItems: 'center', marginTop: '2px' }}>
                                                 <Star size={10} fill="#8696a0" color="#8696a0" />
@@ -7941,7 +8193,92 @@ export default function Chat() {
                                                         <span style={{ fontSize: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{msg.fileName || 'Document'}</span>
                                                     </div>
                                                 )}
-                                                {msg.content && <div className="wa-msg-text">{msg.content}</div>}
+                                                {msg.type === 'contact' && (() => {
+                                                    let cDataArray;
+                                                    try {
+                                                        const rawData = JSON.parse(msg.content);
+                                                        cDataArray = Array.isArray(rawData) ? rawData : [rawData];
+                                                    } catch (e) {
+                                                        cDataArray = [{ name: 'Contact' }];
+                                                    }
+                                                    if (cDataArray.length > 1) {
+                                                        return (
+                                                            <div className="wa-contact-msg-card-multiple" onClick={(e) => { e.stopPropagation(); setViewingContact(cDataArray); }} style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '260px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                    <div style={{ position: 'relative', width: 66, height: 44, marginRight: 12, flexShrink: 0 }}>
+                                                                        <div className="wa-avatar" style={{ position: 'absolute', right: 0, zIndex: 1, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                                            {cDataArray[1].image ? <img src={cDataArray[1].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                        </div>
+                                                                        <div className="wa-avatar" style={{ position: 'absolute', left: 0, zIndex: 2, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                                            {cDataArray[0].image ? <img src={cDataArray[0].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div style={{ color: '#111b21', fontSize: '15px', fontWeight: 600, lineHeight: '1.3' }}>
+                                                                        {cDataArray[0].name || cDataArray[0].mobile} and {cDataArray.length - 1} other contact{cDataArray.length > 2 ? 's' : ''}
+                                                                    </div>
+                                                                </div>
+                                                                <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                                    <button style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>View all</button>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    const cData = cDataArray[0];
+                                                    return (
+                                                        <div className="wa-contact-msg-card" onClick={(e) => { e.stopPropagation(); setViewingContact(cData); }} style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '240px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                <div className="wa-avatar" style={{ width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                    {cData.image ? <img src={cData.image} alt={cData.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                </div>
+                                                                <div style={{ color: '#111b21', fontSize: '16px', fontWeight: 600 }}>{cData.name || 'Contact'}</div>
+                                                            </div>
+                                                            <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                                <button className="wa-contact-card-action" onClick={(e) => { e.stopPropagation(); handleUserSelect({ ...cData, id: cData._id }); }} style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>Message</button>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
+                                                {msg.type === 'poll' && msg.poll && (
+                                                    <div className="wa-poll-card" style={{ background: '#ffffff', borderRadius: '12px', padding: '15px', minWidth: '280px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
+                                                        <div style={{ paddingBottom: '10px', fontWeight: 'bold', color: '#111b21', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            <List size={20} color="#0EA5BE" />
+                                                            {msg.poll.question}
+                                                        </div>
+                                                        <div style={{ color: '#8696a0', fontSize: '13px', marginBottom: '12px' }}>
+                                                            {msg.poll.allowMultipleAnswers ? 'Select one or more' : 'Select one'}
+                                                        </div>
+                                                        <div className="wa-poll-options" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                            {msg.poll.options.map((opt, idx) => {
+                                                                const totalVotes = msg.poll.options.reduce((sum, o) => sum + (o.voters?.length || 0), 0);
+                                                                const votes = opt.voters?.length || 0;
+                                                                const percentage = totalVotes === 0 ? 0 : Math.round((votes / totalVotes) * 100);
+                                                                const hasAnyVote = totalVotes > 0;
+                                                                
+                                                                return (
+                                                                    <div key={idx} style={{ position: 'relative', overflow: 'hidden', padding: '10px', borderRadius: '8px', border: '1px solid #e9edef', background: '#ffffff' }}>
+                                                                        {hasAnyVote && (
+                                                                            <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${percentage}%`, background: 'rgba(14, 165, 190, 0.15)', zIndex: 1, transition: 'width 0.3s ease' }} />
+                                                                        )}
+                                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
+                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px', color: '#111b21' }}>
+                                                                                <div style={{ width: '18px', height: '18px', borderRadius: msg.poll.allowMultipleAnswers ? '4px' : '50%', border: '2px solid #8696a0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}></div>
+                                                                                {opt.text}
+                                                                            </div>
+                                                                            {votes > 0 && <span style={{ fontSize: '12px', color: '#54656f', fontWeight: '500' }}>{votes}</span>}
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <div style={{ borderTop: '1px solid #e9edef', marginTop: '15px', paddingTop: '10px' }}>
+                                                            <button 
+                                                                disabled={msg.poll.options.every(o => !(o.voters?.length > 0))}
+                                                                style={{ background: 'none', border: 'none', width: '100%', color: msg.poll.options.some(o => o.voters?.length > 0) ? '#0EA5BE' : '#8696a0', fontSize: '14px', fontWeight: 'bold', padding: '6px 0', cursor: msg.poll.options.some(o => o.voters?.length > 0) ? 'pointer' : 'default', transition: 'color 0.2s' }}
+                                                            >View votes</button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && <div className="wa-msg-text">{msg.content}</div>}
                                             </div>
                                             <div className="wa-starred-meta">
                                                 <Star size={12} fill="#8696a0" color="#8696a0" />
@@ -8070,7 +8407,53 @@ export default function Chat() {
                                         </div>
                                     </div>
                                 );
-                            })() : (
+                            })() : infoMessage.type === 'poll' && infoMessage.poll ? (
+                                <div className="wa-poll-card" style={{ background: '#ffffff', borderRadius: '12px', padding: '15px', minWidth: '280px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
+                                    <div style={{ paddingBottom: '10px', fontWeight: 'bold', color: '#111b21', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <List size={20} color="#0EA5BE" />
+                                        {infoMessage.poll.question}
+                                    </div>
+                                    <div style={{ color: '#8696a0', fontSize: '13px', marginBottom: '12px' }}>
+                                        {infoMessage.poll.allowMultipleAnswers ? 'Select one or more' : 'Select one'}
+                                    </div>
+                                    <div className="wa-poll-options" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        {infoMessage.poll.options.map((opt, idx) => {
+                                            const totalVotes = infoMessage.poll.options.reduce((sum, o) => sum + (o.voters?.length || 0), 0);
+                                            const votes = opt.voters?.length || 0;
+                                            const percentage = totalVotes === 0 ? 0 : Math.round((votes / totalVotes) * 100);
+                                            const hasAnyVote = totalVotes > 0;
+                                            
+                                            return (
+                                                <div 
+                                                    key={idx} 
+                                                    style={{ position: 'relative', overflow: 'hidden', padding: '10px', borderRadius: '8px', border: '1px solid #e9edef', background: '#ffffff' }}
+                                                >
+                                                    {hasAnyVote && (
+                                                        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${percentage}%`, background: 'rgba(14, 165, 190, 0.15)', zIndex: 1, transition: 'width 0.3s ease' }} />
+                                                    )}
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px', color: '#111b21' }}>
+                                                            <div style={{ width: '18px', height: '18px', borderRadius: infoMessage.poll.allowMultipleAnswers ? '4px' : '50%', border: '2px solid #8696a0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                            </div>
+                                                            {opt.text}
+                                                        </div>
+                                                        {votes > 0 && <span style={{ fontSize: '12px', color: '#54656f', fontWeight: '500' }}>{votes}</span>}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <div style={{ borderTop: '1px solid #e9edef', marginTop: '15px', paddingTop: '10px' }}>
+                                        <button 
+                                            // Make it visually disabled when no votes
+                                            disabled={infoMessage.poll.options.every(o => !(o.voters?.length > 0))}
+                                            style={{ background: 'none', border: 'none', width: '100%', color: infoMessage.poll.options.some(o => o.voters?.length > 0) ? '#0EA5BE' : '#8696a0', fontSize: '14px', fontWeight: 'bold', padding: '6px 0', cursor: infoMessage.poll.options.some(o => o.voters?.length > 0) ? 'pointer' : 'default', transition: 'color 0.2s' }}
+                                        >
+                                            View votes
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
                                 <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{infoMessage.content}</p>
                             )}
                             <div className="wa-msg-meta">
@@ -8128,59 +8511,55 @@ export default function Chat() {
                                     }));
 
                                     return (
-                                        <>
+                                        <div className="wa-info-stat-card group-stats" style={{ background: '#ffffff', borderRadius: '12px', boxShadow: '0 1px 1px rgba(0, 0, 0, 0.06)', overflow: 'hidden' }}>
                                             {readMems.length > 0 && (
-                                                <div className="wa-group-stat-section" style={{ padding: '10px 20px' }}>
-                                                    <div className="wa-group-stat-header" style={{ display: 'flex', alignItems: 'center', marginBottom: 15 }}>
-                                                        <CheckCheck size={20} color="#53bdeb" style={{ marginRight: 12 }} />
-                                                        <span style={{ color: '#53bdeb', fontWeight: 500 }}>Read by</span>
+                                                <div className="wa-group-stat-section" style={{ padding: '16px 20px', borderBottom: deliveredMems.length > 0 ? '1px solid #f0f2f5' : 'none' }}>
+                                                    <div className="wa-group-stat-header" style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                                                        <CheckCheck size={18} color="#53bdeb" style={{ marginRight: 12 }} />
+                                                        <span style={{ color: '#53bdeb', fontWeight: 500, fontSize: '15px' }}>Read by</span>
                                                     </div>
                                                     <div className="wa-group-stat-list">
                                                         {readMems.map(rm => (
-                                                            <div key={rm.id} className="wa-group-stat-item" style={{ display: 'flex', alignItems: 'center', padding: '10px 0' }}>
+                                                            <div key={rm.id} className="wa-group-stat-item" style={{ display: 'flex', alignItems: 'center', padding: '12px 0' }}>
                                                                 {rm.image ? (
-                                                                    <img src={rm.image} alt={rm.name} style={{ width: 40, height: 40, borderRadius: '50%', marginRight: 15 }} />
+                                                                    <img src={rm.image} alt={rm.name} style={{ width: 40, height: 40, borderRadius: '50%', marginRight: 15, objectFit: 'cover' }} />
                                                                 ) : (
-                                                                    <div style={{ width: 40, height: 40, borderRadius: '50%', marginRight: 15, background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>{rm.name?.charAt(0)}</div>
+                                                                    <div style={{ width: 40, height: 40, borderRadius: '50%', marginRight: 15, background: '#f0f2f5', color: '#8696a0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 500 }}>{rm.name?.charAt(0).toUpperCase()}</div>
                                                                 )}
                                                                 <div style={{ flex: 1 }}>
-                                                                    <div style={{ fontWeight: 500, color: '#111b21', fontSize: 16 }}>{rm.name}</div>
-                                                                    <div style={{ color: '#667781', fontSize: 13 }}>{formatDateForInfo(rm.time)} {formatTime(rm.time)}</div>
+                                                                    <div style={{ fontWeight: 500, color: '#111b21', fontSize: '16px' }}>{rm.name}</div>
+                                                                    <div style={{ color: '#667781', fontSize: '13px' }}>{formatDateForInfo(rm.time)} {formatTime(rm.time)}</div>
                                                                 </div>
                                                             </div>
                                                         ))}
                                                     </div>
                                                 </div>
-                                            )}
-
-                                            {readMems.length > 0 && deliveredMems.length > 0 && (
-                                                <div className="wa-dropdown-divider" style={{ margin: '10px 0' }}></div>
                                             )}
 
                                             {deliveredMems.length > 0 && (
-                                                <div className="wa-group-stat-section" style={{ padding: '10px 20px' }}>
-                                                    <div className="wa-group-stat-header" style={{ display: 'flex', alignItems: 'center', marginBottom: 15 }}>
-                                                        <CheckCheck size={20} color="#8696a0" style={{ marginRight: 12 }} />
-                                                        <span style={{ color: '#8696a0', fontWeight: 500 }}>Delivered to</span>
+                                                <div className="wa-group-stat-section" style={{ padding: '16px 20px' }}>
+                                                    <div className="wa-group-stat-header" style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                                                        <Check size={18} color="#8696a0" style={{ marginRight: 12 }} />
+                                                        <span style={{ color: '#8696a0', fontWeight: 500, fontSize: '15px' }}>Delivered to</span>
                                                     </div>
                                                     <div className="wa-group-stat-list">
                                                         {deliveredMems.map(dm => (
-                                                            <div key={dm.id} className="wa-group-stat-item" style={{ display: 'flex', alignItems: 'center', padding: '10px 0' }}>
+                                                            <div key={dm.id} className="wa-group-stat-item" style={{ display: 'flex', alignItems: 'center', padding: '12px 0' }}>
                                                                 {dm.image ? (
-                                                                    <img src={dm.image} alt={dm.name} style={{ width: 40, height: 40, borderRadius: '50%', marginRight: 15 }} />
+                                                                    <img src={dm.image} alt={dm.name} style={{ width: 40, height: 40, borderRadius: '50%', marginRight: 15, objectFit: 'cover' }} />
                                                                 ) : (
-                                                                    <div style={{ width: 40, height: 40, borderRadius: '50%', marginRight: 15, background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>{dm.name?.charAt(0)}</div>
+                                                                    <div style={{ width: 40, height: 40, borderRadius: '50%', marginRight: 15, background: '#f0f2f5', color: '#8696a0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 500 }}>{dm.name?.charAt(0).toUpperCase()}</div>
                                                                 )}
                                                                 <div style={{ flex: 1 }}>
-                                                                    <div style={{ fontWeight: 500, color: '#111b21', fontSize: 16 }}>{dm.name}</div>
-                                                                    <div style={{ color: '#667781', fontSize: 13 }}>{formatDateForInfo(dm.time)} {formatTime(dm.time)}</div>
+                                                                    <div style={{ fontWeight: 500, color: '#111b21', fontSize: '16px' }}>{dm.name}</div>
+                                                                    <div style={{ color: '#667781', fontSize: '13px' }}>{formatDateForInfo(dm.time)} {formatTime(dm.time)}</div>
                                                                 </div>
                                                             </div>
                                                         ))}
                                                     </div>
                                                 </div>
                                             )}
-                                        </>
+                                        </div>
                                     );
                                 })()}
                             </div>
@@ -8197,7 +8576,7 @@ export default function Chat() {
                                                 <>
                                                     {formatDateForInfo(infoMessage.read_at)} {formatTime(infoMessage.read_at)}
                                                 </>
-                                            ) : 'Ã¢â‚¬â€'}
+                                            ) : '-'}
                                         </div>
                                     </div>
                                 </div>
@@ -8756,17 +9135,23 @@ export default function Chat() {
                                 <div className="wa-dropdown-item" onClick={() => { setReplyingTo(data); setOpenDropdown(null); }}>
                                     <Reply size={16} style={{ marginRight: 10 }} /> Reply
                                 </div>
-                                <div className="wa-dropdown-item" onClick={() => handleCopyMessage(data)}>
-                                    <Copy size={16} style={{ marginRight: 10 }} /> Copy
-                                </div>
-                                <div className="wa-dropdown-item" onClick={() => {
-                                    setIsForwardingMode(true);
-                                    setIsChatSelectionMode(false);
-                                    setForwardSelectedMsgs([data]);
-                                    setOpenDropdown(null);
-                                }}>
-                                    <Forward size={16} style={{ marginRight: 10 }} /> Forward
-                                </div>
+                                {data.type !== 'poll' && (
+                                    <>
+                                        {data.type !== 'contact' && (
+                                            <div className="wa-dropdown-item" onClick={() => handleCopyMessage(data)}>
+                                                <Copy size={16} style={{ marginRight: 10 }} /> Copy
+                                            </div>
+                                        )}
+                                        <div className="wa-dropdown-item" onClick={() => {
+                                            setIsForwardingMode(true);
+                                            setIsChatSelectionMode(false);
+                                            setForwardSelectedMsgs([data]);
+                                            setOpenDropdown(null);
+                                        }}>
+                                            <Forward size={16} style={{ marginRight: 10 }} /> Forward
+                                        </div>
+                                    </>
+                                )}
                                 <div className="wa-dropdown-item" onClick={(e) => {
                                     e.stopPropagation();
                                     setOpenDropdown(null);
@@ -11357,8 +11742,6 @@ export default function Chat() {
                                                             <XCircle size={12} style={{ marginRight: 4 }} /> {t('chat_window.deleted_user_other')}
                                                         </span>
                                                     ) : (
-
-                                                        renderLastMessagePreview(item.lastMessage, isGroup || item.is_community, '')
                                                         item.lastMessage?.type === 'image' ? (isGroup ? '📷 Photo' : '📷 Image') :
                                                             item.lastMessage?.type === 'video' ? '🎥 Video' :
                                                                 item.lastMessage?.type === 'file' ? '📄 File' :
@@ -11605,7 +11988,7 @@ export default function Chat() {
                             formData.append('fileName', msg.fileName || '');
                             formData.append('fileSize', msg.fileSize || 0);
                         } else {
-                            formData.append('type', 'text');
+                            formData.append('type', msg.type || 'text');
                         }
                         formData.append('isForwarded', 'true');
                         formData.append('forward_count', msg.forward_count || 0);
@@ -12152,10 +12535,42 @@ export default function Chat() {
 
                                     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
                                         <span style={{ fontWeight: 500, fontSize: 13, color: '#111b21', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-                                            {(msg.user_id === user.id || msg.user_id === user._id) ? 'You' : (selectedUser?.name || 'Contact')}
+                                            {(() => {
+                                                if (msg.type === 'contact') {
+                                                    try {
+                                                        const p = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content;
+                                                        if (Array.isArray(p)) {
+                                                            return p.length > 1 ? `${p[0].name || p[0].mobile || 'Contact'} and ${p.length - 1} other contact${p.length > 2 ? 's' : ''}` : (p[0].name || p[0].mobile || 'Contact');
+                                                        }
+                                                        return p.name || p.mobile || 'Contact';
+                                                    } catch (e) { return 'Contact'; }
+                                                }
+                                                const sId = (msg.sender_id?._id || msg.sender_id) || (msg.user_id?._id || msg.user_id);
+                                                if (String(sId) === String(user.id || user._id)) return 'You';
+                                                return msg.sender_id?.name || msg.sender_id?.firstName || selectedUser?.name || 'Contact';
+                                            })()}
                                         </span>
-                                        <span style={{ fontSize: 13, color: '#54656f', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                            {msg.content || (msg.type === 'image' ? 'Photo' : msg.type === 'file' ? 'Document' : msg.type === 'video' ? 'Video' : 'Message')}
+                                        <span style={{ fontSize: 13, color: '#54656f', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                            {msg.type === 'contact' && <UserIcon size={14} color="#8696a0" />}
+                                            {msg.type === 'poll' && <List size={14} color="#0EA5BE" />}
+                                            {(() => {
+                                                if (msg.type === 'poll') {
+                                                    return msg.poll?.question || 'Poll';
+                                                }
+                                                if (msg.type === 'contact' && msg.content) {
+                                                    try {
+                                                        const parsed = JSON.parse(msg.content);
+                                                        if (Array.isArray(parsed)) {
+                                                            return parsed.length > 1 ? `${parsed[0].name || 'Contact'} and ${parsed.length - 1} other contact${parsed.length > 2 ? 's' : ''}` : (parsed[0].name || parsed[0].mobile || 'Contact');
+                                                        } else {
+                                                            return parsed.name || parsed.mobile || 'Contact';
+                                                        }
+                                                    } catch (e) {
+                                                        return 'Contact';
+                                                    }
+                                                }
+                                                return msg.content || (msg.type === 'image' ? 'Photo' : msg.type === 'file' ? 'Document' : msg.type === 'video' ? 'Video' : 'Message');
+                                            })()}
                                         </span>
                                     </div>
 
@@ -12396,7 +12811,7 @@ export default function Chat() {
                                                                                         {msg.fileName || 'Document.pdf'}
                                                                                     </div>
                                                                                     <div className="wa-doc-meta">
-                                                                                        {msg.pageCount || 1} pages Ã¢â‚¬Â¢ {(msg.fileName || msg.file_path)?.split('.').pop()?.toUpperCase() || 'PDF'} Ã¢â‚¬Â¢ {msg.fileSize ? Math.ceil(msg.fileSize / 1024) + ' kB' : 'Unknown size'}
+                                                                                        {msg.pageCount || 1} pages • {(msg.fileName || msg.file_path)?.split('.').pop()?.toUpperCase() || 'PDF'} • {msg.fileSize ? Math.ceil(msg.fileSize / 1024) + ' kB' : 'Unknown size'}
                                                                                     </div>
                                                                                 </div>
 
@@ -12697,7 +13112,60 @@ export default function Chat() {
                                                                             </div>
                                                                         );
                                                                     })()}
-                                                                    {msg.content && msg.type !== 'contact' && (
+
+                                                                    {msg.type === 'poll' && msg.poll && (
+                                                                        <div className="wa-poll-card" style={{ background: '#ffffff', borderRadius: '12px', padding: '15px', minWidth: '280px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                            <div style={{ paddingBottom: '10px', fontWeight: 'bold', color: '#111b21', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                                <List size={20} color="#0EA5BE" />
+                                                                                {msg.poll.question}
+                                                                            </div>
+                                                                            <div style={{ color: '#8696a0', fontSize: '13px', marginBottom: '12px' }}>
+                                                                                {msg.poll.allowMultipleAnswers ? 'Select one or more' : 'Select one'}
+                                                                            </div>
+                                                                            <div className="wa-poll-options" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                                                {msg.poll.options.map((opt, idx) => {
+                                                                                    const totalVotes = msg.poll.options.reduce((sum, o) => sum + (o.voters?.length || 0), 0);
+                                                                                    const votes = opt.voters?.length || 0;
+                                                                                    const percentage = totalVotes === 0 ? 0 : Math.round((votes / totalVotes) * 100);
+                                                                                    const myId = String(user.id || user._id);
+                                                                                    const hasVotedOpt = (opt.voters || []).some(v => String(v) === myId || String(v?._id || v) === myId);
+                                                                                    const hasAnyVote = totalVotes > 0;
+                                                                                    
+                                                                                    return (
+                                                                                        <div 
+                                                                                            key={idx} 
+                                                                                            onClick={(e) => { e.stopPropagation(); handleVotePoll(msg, idx); }}
+                                                                                            style={{ cursor: 'pointer', position: 'relative', overflow: 'hidden', padding: '10px', borderRadius: '8px', border: hasVotedOpt ? '1px solid #0EA5BE' : '1px solid #e9edef', background: hasVotedOpt ? 'rgba(14, 165, 190, 0.05)' : '#ffffff', transition: 'all 0.2s' }}
+                                                                                        >
+                                                                                            {hasAnyVote && (
+                                                                                                <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${percentage}%`, background: 'rgba(14, 165, 190, 0.15)', zIndex: 1, transition: 'width 0.3s ease' }} />
+                                                                                            )}
+                                                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
+                                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px', color: '#111b21' }}>
+                                                                                                    <div style={{ width: '18px', height: '18px', borderRadius: msg.poll.allowMultipleAnswers ? '4px' : '50%', border: hasVotedOpt ? '2px solid #0EA5BE' : '2px solid #8696a0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                                                        {hasVotedOpt && <div style={{ width: '10px', height: '10px', borderRadius: msg.poll.allowMultipleAnswers ? '2px' : '50%', background: '#0EA5BE' }} />}
+                                                                                                    </div>
+                                                                                                    {opt.text}
+                                                                                                </div>
+                                                                                                {votes > 0 && <span style={{ fontSize: '12px', color: '#54656f', fontWeight: '500' }}>{votes}</span>}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                            <div style={{ borderTop: '1px solid #e9edef', marginTop: '15px', paddingTop: '10px' }}>
+                                                                                <button 
+                                                                                    onClick={(e) => { e.stopPropagation(); setPollDetails(msg.poll); setIsPollDetailsOpen(true); }}
+                                                                                    disabled={msg.poll.options.every(o => !(o.voters?.length > 0))}
+                                                                                    style={{ background: 'none', border: 'none', width: '100%', color: msg.poll.options.some(o => o.voters?.length > 0) ? '#0EA5BE' : '#8696a0', fontSize: '14px', fontWeight: 'bold', padding: '6px 0', cursor: msg.poll.options.some(o => o.voters?.length > 0) ? 'pointer' : 'default', transition: 'color 0.2s' }}
+                                                                                >
+                                                                                    View votes
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && (
                                                                         <span>{renderContent(msg.content)}</span>
                                                                     )}
                                                                 </>
@@ -13187,11 +13655,32 @@ export default function Chat() {
                                     </div>
 
                                     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-                                        <span style={{ fontWeight: 500, fontSize: 13, color: '#111b21', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-                                            {isMeMsg(msg) ? 'You' : (msg.sender_id?.name || 'User')}
-                                        </span>
-                                        <span style={{ fontSize: 13, color: '#54656f', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                            {msg.content || (msg.type === 'image' ? 'Photo' : msg.type === 'file' ? 'Document' : msg.type === 'video' ? 'Video' : 'Message')}
+                                        {msg.type !== 'poll' && (
+                                            <span style={{ fontWeight: 500, fontSize: 13, color: '#111b21', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                                                {(msg.sender_id === user.id || msg.sender_id === user._id || msg.user_id === user.id || msg.user_id === user._id) ? 'You' : (msg.sender_id?.name || 'User')}
+                                            </span>
+                                        )}
+                                        <span style={{ fontSize: 13, color: '#54656f', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                            {msg.type === 'contact' && <UserIcon size={14} color="#8696a0" />}
+                                            {msg.type === 'poll' && <List size={14} color="#0EA5BE" />}
+                                            {(() => {
+                                                if (msg.type === 'poll') {
+                                                    return msg.poll?.question || 'Poll';
+                                                }
+                                                if (msg.type === 'contact' && msg.content) {
+                                                    try {
+                                                        const parsed = JSON.parse(msg.content);
+                                                        if (Array.isArray(parsed)) {
+                                                            return parsed.length > 1 ? `${parsed[0].name || 'Contact'} and ${parsed.length - 1} other contact${parsed.length > 2 ? 's' : ''}` : (parsed[0].name || parsed[0].mobile || 'Contact');
+                                                        } else {
+                                                            return parsed.name || parsed.mobile || 'Contact';
+                                                        }
+                                                    } catch (e) {
+                                                        return 'Contact';
+                                                    }
+                                                }
+                                                return msg.content || (msg.type === 'image' ? 'Photo' : msg.type === 'file' ? 'Document' : msg.type === 'video' ? 'Video' : 'Message');
+                                            })()}
                                         </span>
                                     </div>
 
@@ -13903,7 +14392,59 @@ export default function Chat() {
                                                                         );
                                                                     })()}
 
-                                                                    {msg.content && msg.type !== 'contact' && <span>{renderContent(msg.content)}</span>}
+                                                                    {msg.type === 'poll' && msg.poll && (
+                                                                        <div className="wa-poll-card" style={{ background: '#ffffff', borderRadius: '12px', padding: '15px', minWidth: '280px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                            <div style={{ paddingBottom: '10px', fontWeight: 'bold', color: '#111b21', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                                <List size={20} color="#0EA5BE" />
+                                                                                {msg.poll.question}
+                                                                            </div>
+                                                                            <div style={{ color: '#8696a0', fontSize: '13px', marginBottom: '12px' }}>
+                                                                                {msg.poll.allowMultipleAnswers ? 'Select one or more' : 'Select one'}
+                                                                            </div>
+                                                                            <div className="wa-poll-options" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                                                {msg.poll.options.map((opt, idx) => {
+                                                                                    const totalVotes = msg.poll.options.reduce((sum, o) => sum + (o.voters?.length || 0), 0);
+                                                                                    const votes = opt.voters?.length || 0;
+                                                                                    const percentage = totalVotes === 0 ? 0 : Math.round((votes / totalVotes) * 100);
+                                                                                    const myId = String(user.id || user._id);
+                                                                                    const hasVotedOpt = (opt.voters || []).some(v => String(v) === myId || String(v?._id || v) === myId);
+                                                                                    const hasAnyVote = totalVotes > 0;
+                                                                                    
+                                                                                    return (
+                                                                                        <div 
+                                                                                            key={idx} 
+                                                                                            onClick={(e) => { e.stopPropagation(); handleVotePoll(msg, idx); }}
+                                                                                            style={{ cursor: 'pointer', position: 'relative', overflow: 'hidden', padding: '10px', borderRadius: '8px', border: hasVotedOpt ? '1px solid #0EA5BE' : '1px solid #e9edef', background: hasVotedOpt ? 'rgba(14, 165, 190, 0.05)' : '#ffffff', transition: 'all 0.2s' }}
+                                                                                        >
+                                                                                            {hasAnyVote && (
+                                                                                                <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${percentage}%`, background: 'rgba(14, 165, 190, 0.15)', zIndex: 1, transition: 'width 0.3s ease' }} />
+                                                                                            )}
+                                                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
+                                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px', color: '#111b21' }}>
+                                                                                                    <div style={{ width: '18px', height: '18px', borderRadius: msg.poll.allowMultipleAnswers ? '4px' : '50%', border: hasVotedOpt ? '2px solid #0EA5BE' : '2px solid #8696a0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                                                        {hasVotedOpt && <div style={{ width: '10px', height: '10px', borderRadius: msg.poll.allowMultipleAnswers ? '2px' : '50%', background: '#0EA5BE' }} />}
+                                                                                                    </div>
+                                                                                                    {opt.text}
+                                                                                                </div>
+                                                                                                {votes > 0 && <span style={{ fontSize: '12px', color: '#54656f', fontWeight: '500' }}>{votes}</span>}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                            <div style={{ borderTop: '1px solid #e9edef', marginTop: '15px', paddingTop: '10px' }}>
+                                                                                <button 
+                                                                                    onClick={(e) => { e.stopPropagation(); setPollDetails(msg.poll); setIsPollDetailsOpen(true); }}
+                                                                                    disabled={msg.poll.options.every(o => !(o.voters?.length > 0))}
+                                                                                    style={{ background: 'none', border: 'none', width: '100%', color: msg.poll.options.some(o => o.voters?.length > 0) ? '#0EA5BE' : '#8696a0', fontSize: '14px', fontWeight: 'bold', padding: '6px 0', cursor: msg.poll.options.some(o => o.voters?.length > 0) ? 'pointer' : 'default', transition: 'color 0.2s' }}
+                                                                                >
+                                                                                    View votes
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && <span>{renderContent(msg.content)}</span>}
                                                                 </>
                                                             )}
 
@@ -14283,8 +14824,163 @@ export default function Chat() {
             {renderWhoCanAddGroupsModal()}
             {renderAssignOwnerModal()}
             {renderEditMessageOverlay()}
+            {renderPollModal()}
+            {renderPollDetailsPanel()}
         </div >
     );
+
+    const handlePollOptionChange = (idx, val) => {
+        const newOpts = [...pollOptions];
+        newOpts[idx] = val;
+        
+        // Remove duplicate error if any
+        if (pollErrors[idx]) {
+            const newErrs = { ...pollErrors };
+            delete newErrs[idx];
+            setPollErrors(newErrs);
+        }
+
+        // Detect duplicates globally
+        const lowerOpts = newOpts.map(o => o.trim().toLowerCase());
+        const dups = {};
+        lowerOpts.forEach((opt, i) => {
+            if (opt && lowerOpts.indexOf(opt) !== i) dups[i] = true;
+        });
+        setPollErrors(dups);
+
+        if (idx === newOpts.length - 1 && val !== '' && newOpts.length < 12) {
+            newOpts.push('');
+        }
+        setPollOptions(newOpts);
+    };
+
+    const renderPollModal = () => {
+        if (!isPollModalOpen) return null;
+        return (
+            <div className="wa-mute-modal-overlay" onClick={() => setIsPollModalOpen(false)} style={{ zIndex: 3000 }}>
+                <div className="wa-mute-modal" onClick={e => e.stopPropagation()} style={{ width: '400px', maxWidth: '90%', padding: '0', background: '#f0f2f5', borderRadius: '12px', display: 'flex', flexDirection: 'column', height: '80vh', maxHeight: '600px' }}>
+                    <div style={{ padding: '15px 20px', background: '#0EA5BE', color: '#fff', borderTopLeftRadius: '12px', borderTopRightRadius: '12px', display: 'flex', alignItems: 'center', position: 'relative', flexShrink: 0 }}>
+                        <button onClick={() => setIsPollModalOpen(false)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', display: 'flex', padding: 0, position: 'absolute', left: '20px' }}><X size={24} /></button>
+                        <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+                            <span style={{ fontSize: '19px', fontWeight: '500', whiteSpace: 'nowrap' }}>Create Poll</span>
+                        </div>
+                    </div>
+                    <div style={{ padding: '20px', flex: 1, overflowY: 'auto' }}>
+                        <div style={{ marginBottom: '20px' }}>
+                            <div style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: '500', marginBottom: '8px' }}>Question</div>
+                            <input 
+                                autoFocus
+                                value={pollQuestion}
+                                onChange={e => setPollQuestion(e.target.value)}
+                                placeholder="Ask question"
+                                style={{ width: '100%', border: 'none', borderBottom: '2px solid #0EA5BE', padding: '8px 0', fontSize: '16px', outline: 'none', background: 'transparent' }}
+                            />
+                        </div>
+                        <div style={{ marginBottom: '20px' }}>
+                            <div style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: '500', marginBottom: '8px' }}>Options</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                                {pollOptions.map((opt, idx) => (
+                                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                                        <div style={{ marginTop: '5px' }}>
+                                            <List size={20} color="#8696a0" />
+                                        </div>
+                                        <div style={{ flex: 1 }}>
+                                            <input 
+                                                value={opt}
+                                                onChange={e => handlePollOptionChange(idx, e.target.value)}
+                                                placeholder={idx === pollOptions.length - 1 && idx > 1 ? "+ Add" : "Option"}
+                                                style={{ width: '100%', border: 'none', borderBottom: pollErrors[idx] ? '2px solid #ef0b33' : '1px solid #d1d7db', padding: '8px 0', fontSize: '16px', outline: 'none', background: 'transparent', transition: 'border-color 0.2s' }}
+                                                onFocus={(e) => { e.target.style.borderBottom = pollErrors[idx] ? '2px solid #ef0b33' : '2px solid #0EA5BE'; }}
+                                                onBlur={(e) => { e.target.style.borderBottom = pollErrors[idx] ? '2px solid #ef0b33' : '1px solid #d1d7db'; }}
+                                            />
+                                            {pollErrors[idx] && <div style={{ color: '#ef0b33', fontSize: '12px', marginTop: '4px' }}>Same options are twice</div>}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ fontSize: '15px', color: '#111b21' }}>Allow multiple answers</div>
+                            <div 
+                                onClick={() => setAllowMultipleAnswers(!allowMultipleAnswers)}
+                                style={{
+                                    width: '40px', height: '24px', borderRadius: '12px',
+                                    background: allowMultipleAnswers ? '#0EA5BE' : '#8696a0',
+                                    position: 'relative', cursor: 'pointer', transition: 'background 0.3s'
+                                }}
+                            >
+                                <div style={{
+                                    width: '20px', height: '20px', borderRadius: '50%', background: '#fff',
+                                    position: 'absolute', top: '2px', left: allowMultipleAnswers ? '18px' : '2px',
+                                    transition: 'left 0.3s'
+                                }} />
+                            </div>
+                        </div>
+                    </div>
+                    <div style={{ padding: '15px', display: 'flex', justifyContent: 'flex-end', background: '#f0f2f5', borderBottomLeftRadius: '12px', borderBottomRightRadius: '12px' }}>
+                        <button 
+                            onClick={handleSendPoll}
+                            style={{ background: '#0EA5BE', width: '50px', height: '50px', borderRadius: '50%', border: 'none', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}
+                        >
+                            <Send size={24} />
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderPollDetailsPanel = () => {
+        if (!isPollDetailsOpen || !pollDetails) return null;
+        
+        return (
+            <div className={`wa-contact-info-panel active`} style={{ background: '#ffffff', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', borderLeft: '1px solid #e9edef', width: isMobile ? '100%' : '400px', position: 'absolute', right: 0, top: 0, zIndex: 100 }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: '#ffffff', borderBottom: '1px solid #e9edef', position: 'relative' }}>
+                    <button onClick={() => setIsPollDetailsOpen(false)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0, position: 'absolute', left: '12px' }}>
+                        <ArrowLeft size={24} />
+                    </button>
+                    <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+                        <span style={{ fontSize: '19px', fontWeight: '500', color: '#111b21', whiteSpace: 'nowrap' }}>Poll details</span>
+                    </div>
+                </div>
+                <div style={{ padding: '20px', overflowY: 'auto', flex: 1, background: '#f0f2f5' }}>
+                    <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#111b21', margin: '10px 0 20px 0', background: '#fff', padding: '15px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                        {pollDetails.question}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {pollDetails.options.filter(o => o.voters && o.voters.length > 0).map((opt, idx) => {
+                            const voters = opt.voters.map(v => {
+                                const idStr = String(v._id || v);
+                                const userObj = users.find(u => String(u._id) === idStr) || (String(user.id || user._id) === idStr ? user : null);
+                                return userObj || { _id: idStr, name: 'Unknown' };
+                            });
+                            
+                            return (
+                                <div key={idx} style={{ display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: '8px', padding: '15px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#8696a0', fontSize: '14px', fontWeight: '600', marginBottom: '15px', textTransform: 'uppercase' }}>
+                                        <span>{opt.text}</span>
+                                        <span>{voters.length}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                                        {voters.map((voter, vIdx) => (
+                                            <div key={vIdx} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                                <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#e9edef', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                                    {voter.image ? <img src={voter.image} alt={voter.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                </div>
+                                                <div style={{ flex: 1, display: 'flex', alignItems: 'center', borderBottom: vIdx < voters.length - 1 ? '1px solid #e9edef' : 'none', paddingBottom: vIdx < voters.length - 1 ? '15px' : '0' }}>
+                                                    <span style={{ color: '#111b21', fontSize: '16px' }}>{voter.name || voter.mobile || 'User'}</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+        );
+    };
 
     const checkAddGroupPermission = (community, showAlert = false) => {
         if (!community) return true;
