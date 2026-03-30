@@ -138,10 +138,10 @@ const upload = multer({
         const ext = path.extname(file.originalname).toLowerCase();
         const allowedExts = ['.jpg', '.jpeg', '.png', '.doc', '.docx', '.pdf', '.mp3', '.m4a', '.ogg', '.wav', '.webm'];
 
-        const isAllowedType = allowedTypes.includes(file.mimetype) || 
-                             file.mimetype.startsWith('audio/') || 
-                             file.mimetype.startsWith('video/') || 
-                             file.mimetype.startsWith('image/');
+        const isAllowedType = allowedTypes.includes(file.mimetype) ||
+            file.mimetype.startsWith('audio/') ||
+            file.mimetype.startsWith('video/') ||
+            file.mimetype.startsWith('image/');
 
         if (isAllowedType && allowedExts.includes(ext)) {
             cb(null, true);
@@ -290,7 +290,7 @@ router.get('/users', authenticateToken, async (req, res) => {
 
         const result = enhancedUsers.filter(u => u !== null);
         console.log(`[DEBUG] /users: Returning ${result.length} enhanced users for ${currentUserId}`);
-        
+
         result.sort((a, b) => {
             const timeA = a.lastMessage?.created_at ? new Date(a.lastMessage.created_at).getTime() : 0;
             const timeB = b.lastMessage?.created_at ? new Date(b.lastMessage.created_at).getTime() : 0;
@@ -664,6 +664,98 @@ router.get('/p2p/:userId/:otherUserId', authenticateToken, async (req, res) => {
     }
 });
 
+// POST /api/chat/poll/send - Send a P2P poll message
+router.post('/poll/send', authenticateToken, async (req, res) => {
+    try {
+        const { toUserId, question, options, allowMultipleAnswers } = req.body;
+        const senderId = req.user.id;
+
+        if (!toUserId) return res.status(400).json({ error: 'Recipient required' });
+        if (!question || !question.trim()) return res.status(400).json({ error: 'Poll question required' });
+        if (!options || options.length < 2) return res.status(400).json({ error: 'At least 2 options required' });
+
+        const pollOptions = options.map(opt => ({ text: opt, voters: [] }));
+
+        const msg = await Message.create({
+            user_id: senderId,
+            receiver_id: toUserId,
+            role: 'user',
+            content: question,
+            type: 'poll',
+            poll: {
+                question,
+                options: pollOptions,
+                allowMultipleAnswers: allowMultipleAnswers !== false
+            }
+        });
+
+        const populated = await Message.findById(msg._id);
+        const msgObj = populated.toObject();
+
+        if (req.io) {
+            req.io.to(String(toUserId)).emit('send_message', {
+                ...msgObj,
+                sender_id: senderId
+            });
+        }
+
+        res.json({ status: 'sent', message: msgObj });
+    } catch (err) {
+        console.error('[POLL SEND P2P]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/chat/poll/:messageId/vote - Vote on a P2P poll
+router.post('/poll/:messageId/vote', authenticateToken, async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const { optionIndexes } = req.body; // array of indexes voted for
+        const userId = req.user.id;
+        const userObjId = new mongoose.Types.ObjectId(userId);
+
+        const msg = await Message.findById(messageId);
+        if (!msg || msg.type !== 'poll') return res.status(404).json({ error: 'Poll not found' });
+
+        const allowMultiple = msg.poll.allowMultipleAnswers;
+        const indexes = Array.isArray(optionIndexes) ? optionIndexes : [optionIndexes];
+
+        if (!allowMultiple && indexes.length > 1) {
+            return res.status(400).json({ error: 'Multiple answers not allowed' });
+        }
+
+        // Remove user from all options first (reset vote)
+        msg.poll.options.forEach(opt => {
+            opt.voters = (opt.voters || []).filter(v => String(v) !== String(userId));
+        });
+
+        // Add vote to chosen options
+        indexes.forEach(idx => {
+            if (idx >= 0 && idx < msg.poll.options.length) {
+                msg.poll.options[idx].voters.push(userObjId);
+            }
+        });
+
+        msg.markModified('poll');
+        await msg.save();
+
+        const updated = await Message.findById(messageId);
+        const msgObj = updated.toObject();
+
+        // Emit to both parties
+        if (req.io) {
+            [String(msg.user_id), String(msg.receiver_id)].filter(Boolean).forEach(uid => {
+                req.io.to(uid).emit('poll_voted', { messageId, poll: msgObj.poll, isGroup: false });
+            });
+        }
+
+        res.json({ status: 'voted', poll: msgObj.poll });
+    } catch (err) {
+        console.error('[POLL VOTE P2P]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Send Message - Secured with Auth
 router.post('/send', authenticateToken, (req, res, next) => {
     upload.single('file')(req, res, (err) => {
@@ -806,7 +898,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
                         // Restricted for 24 hours after rejection
                         const isWithin24Hours = (new Date() - new Date(existingRequest.updated_at)) < 24 * 60 * 60 * 1000;
                         if (isWithin24Hours) {
-                            return res.status(403).json({ 
+                            return res.status(403).json({
                                 error: 'Messaging is restricted for 24 hours after a rejection.',
                                 restrictedUntil: new Date(existingRequest.updated_at.getTime() + 24 * 60 * 60 * 1000)
                             });
@@ -856,17 +948,17 @@ router.post('/send', authenticateToken, (req, res, next) => {
                 type,
                 file_path: filePath,
                 fileSize: fileSize || 0,
-            pageCount: req.body.pageCount || 0,
-            thumbnail_path: req.body.thumbnail_path || null,
-            link_preview: linkPreview,
-            duration: req.body.duration, is_view_once, // Metadata
+                pageCount: req.body.pageCount || 0,
+                thumbnail_path: req.body.thumbnail_path || null,
+                link_preview: linkPreview,
+                duration: req.body.duration, is_view_once, // Metadata
                 reply_to: reply_to || null,
 
                 is_flagged: !!isFlagged,
                 flag_reason: flagReason,
                 is_forwarded: isForwarded,
                 forward_count: forwardCount,
-                
+
                 // E2EE fields
                 ciphertext: req.body.ciphertext,
                 session_header: req.body.session_header ? JSON.parse(req.body.session_header) : undefined
@@ -1197,6 +1289,12 @@ router.post('/message/:id/toggle', authenticateToken, async (req, res) => {
 
         await msg.save();
 
+        // RE-FETCH to ensure fields are decrypted before returning to client!
+        const refreshed = await (msg.group_id ? GroupMessage.findById(msg._id) : Message.findById(msg._id));
+        if (refreshed) {
+            msg = refreshed;
+        }
+
         if (req.io && action === 'pin') {
             if (msg.group_id) {
                 const Group = require('../models/Group');
@@ -1226,6 +1324,15 @@ router.post('/message/:id/toggle', authenticateToken, async (req, res) => {
                     });
                 });
             }
+        }
+
+        if (msg.group_id) {
+            await msg.populate('sender_id', 'name profile_pic profile_photo mobile');
+        } else {
+            await msg.populate([
+                { path: 'user_id', select: 'name profile_pic profile_photo mobile' },
+                { path: 'receiver_id', select: 'name profile_pic profile_photo mobile' }
+            ]);
         }
 
         const msgObj = msg.toObject();
@@ -1290,18 +1397,18 @@ router.post('/message/:id/open', authenticateToken, async (req, res) => {
         const userId = req.user.id;
         let msg = await Message.findById(req.params.id);
         let isGroupMsg = false;
-        
+
         if (!msg) {
             const GroupMessage = require('../models/GroupMessage');
             msg = await GroupMessage.findById(req.params.id);
             if (msg) isGroupMsg = true;
         }
-        
+
         if (!msg) return res.status(404).json({ error: 'Message not found' });
-        
+
         msg.is_opened = true;
         await msg.save();
-        
+
         if (req.io) {
             if (isGroupMsg) {
                 const Group = require('../models/Group');
@@ -1314,13 +1421,13 @@ router.post('/message/:id/open', authenticateToken, async (req, res) => {
             } else {
                 const participants = [msg.user_id.toString()];
                 if (msg.receiver_id) participants.push(msg.receiver_id.toString());
-                
+
                 participants.forEach(pId => {
                     req.io.to(pId).emit('message_opened', { messageId: msg._id, is_opened: true });
                 });
             }
         }
-        
+
         res.json({ status: 'success', messageId: msg._id, is_opened: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -1331,27 +1438,27 @@ router.post('/message/:id/open', authenticateToken, async (req, res) => {
 router.post('/message/:id/viewed', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
-        
+
         let msg = await Message.findById(req.params.id);
         let isGroupMsg = false;
-        
+
         if (!msg) {
             const GroupMessage = require('../models/GroupMessage');
             msg = await GroupMessage.findById(req.params.id);
             if (msg) isGroupMsg = true;
         }
-        
+
         if (!msg) return res.status(404).json({ error: 'Message not found' });
-        
+
         // Safety check: receiver should be the one marking as viewed
         if (!isGroupMsg && msg.receiver_id && String(msg.receiver_id) !== String(userId)) {
-             // Senders can't mark their own view-once as viewed for the receiver
-             // But let's keep it simple for now or skip check
+            // Senders can't mark their own view-once as viewed for the receiver
+            // But let's keep it simple for now or skip check
         }
 
         msg.is_viewed = true;
         await msg.save();
-        
+
         if (req.io) {
             if (isGroupMsg) {
                 const group = await Group.findById(msg.group_id);
@@ -1363,13 +1470,13 @@ router.post('/message/:id/viewed', authenticateToken, async (req, res) => {
             } else {
                 const participants = [msg.user_id.toString()];
                 if (msg.receiver_id) participants.push(msg.receiver_id.toString());
-                
+
                 participants.forEach(pId => {
                     req.io.to(pId).emit('message_viewed', { messageId: msg._id, is_viewed: true });
                 });
             }
         }
-        
+
         res.json({ status: 'success', messageId: msg._id, is_viewed: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -1384,12 +1491,20 @@ router.post('/message/:id/delete', authenticateToken, async (req, res) => {
     const { mode } = req.body; // 'me' or 'everyone'
 
     try {
-        const msg = await Message.findById(req.params.id);
+        let msg = await Message.findById(req.params.id);
+        let isGroupMsg = false;
+        if (!msg) {
+            msg = await GroupMessage.findById(req.params.id);
+            isGroupMsg = true;
+        }
+
         if (!msg) return res.status(404).json({ error: 'Message not found' });
+
+        const senderId = isGroupMsg ? msg.sender_id : msg.user_id;
 
         if (userRole === 'admin') {
             msg.is_deleted_by_admin = true;
-        } else if (msg.user_id.toString() === userId) {
+        } else if (senderId.toString() === userId) {
             // Sender Deleting
             if (mode === 'me') {
                 if (!msg.deleted_for.includes(userId)) {
@@ -1407,29 +1522,56 @@ router.post('/message/:id/delete', authenticateToken, async (req, res) => {
                     msg.is_deleted_by_user = true;
                 }
             }
-        } else if (msg.receiver_id && msg.receiver_id.toString() === userId) {
-            // Receiver deleting "for me"
-            if (!msg.deleted_for.includes(userId)) {
-                msg.deleted_for.push(userId);
-            }
         } else {
-            return res.status(403).json({ error: 'Unauthorized to delete this message' });
+            // Check if user is a member of the group (for group messages)
+            if (isGroupMsg) {
+                const group = await Group.findById(msg.group_id);
+                const isMember = group?.members.some(mId => String(mId) === String(userId));
+                if (isMember) {
+                    // Receiver deleting "for me"
+                    if (!msg.deleted_for.includes(userId)) {
+                        msg.deleted_for.push(userId);
+                    }
+                } else {
+                    return res.status(403).json({ error: 'Unauthorized to delete this message' });
+                }
+            } else if (msg.receiver_id && msg.receiver_id.toString() === userId) {
+                // Receiver deleting "for me"
+                if (!msg.deleted_for.includes(userId)) {
+                    msg.deleted_for.push(userId);
+                }
+            } else {
+                return res.status(403).json({ error: 'Unauthorized to delete this message' });
+            }
         }
 
         await msg.save();
 
         // Notify participants via socket
         if (req.io) {
-            const participants = [msg.user_id.toString()];
-            if (msg.receiver_id) participants.push(msg.receiver_id.toString());
+            if (isGroupMsg) {
+                const group = await Group.findById(msg.group_id);
+                if (group) {
+                    group.members.forEach(mId => {
+                        req.io.to(mId.toString()).emit('message_deleted', {
+                            messageId: msg._id,
+                            is_deleted_by_admin: msg.is_deleted_by_admin,
+                            is_deleted_by_user: msg.is_deleted_by_user
+                        });
+                    });
+                }
+            } else {
+                const participants = [msg.user_id.toString()];
+                if (msg.receiver_id) participants.push(msg.receiver_id.toString());
 
-            participants.forEach(pId => {
-                req.io.to(pId).emit('message_deleted', {
-                    messageId: msg._id,
-                    is_deleted_by_admin: msg.is_deleted_by_admin,
-                    is_deleted_by_user: msg.is_deleted_by_user
+                participants.forEach(pId => {
+                    req.io.to(pId).emit('message_deleted', {
+                        messageId: msg._id,
+                        is_deleted_by_admin: msg.is_deleted_by_admin,
+                        is_deleted_by_user: msg.is_deleted_by_user
+                    });
                 });
-            });
+            }
 
             // Also notify admins with enriched data for the Review Box
             (async () => {
@@ -1954,7 +2096,7 @@ router.post('/messages/:messageId/react', authenticateToken, async (req, res) =>
                     isGroup: isGroup === true || isGroup === 'true',
                     timestamp: new Date()
                 });
-                
+
                 if (req.io) {
                     req.io.to('admins').emit('reaction_audit_log', {
                         messageId,
@@ -1973,21 +2115,21 @@ router.post('/messages/:messageId/react', authenticateToken, async (req, res) =>
             const reactionData = { messageId, reactions: message.reactions, isGroup };
             req.io.to('admins').emit('message_reaction_updated', reactionData);
 
-                if (isGroup) {
-                    const group = await Group.findById(message.group_id);
-                    if (group) {
-                        group.members.forEach(mId => {
-                            req.io.to(String(mId)).emit('message_reaction_updated', reactionData);
-                        });
-                    }
-                } else {
-                    [String(message.user_id), String(message.receiver_id)].forEach(pId => {
-                        if (pId && pId !== 'null') {
-                            req.io.to(pId).emit('message_reaction_updated', reactionData);
-                        }
+            if (isGroup) {
+                const group = await Group.findById(message.group_id);
+                if (group) {
+                    group.members.forEach(mId => {
+                        req.io.to(String(mId)).emit('message_reaction_updated', reactionData);
                     });
                 }
+            } else {
+                [String(message.user_id), String(message.receiver_id)].forEach(pId => {
+                    if (pId && pId !== 'null') {
+                        req.io.to(pId).emit('message_reaction_updated', reactionData);
+                    }
+                });
             }
+        }
 
         res.json({ status: 'success', reactions: message.reactions });
     } catch (err) {

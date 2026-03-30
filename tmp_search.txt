@@ -1,0 +1,23 @@
+﻿42|    transports: ['websocket', 'polling'], //  Try WebSocket first, then polling
+802|    // --- Poll States ---
+803|    const [isPollModalOpen, setIsPollModalOpen] = useState(false);
+804|    const [pollQuestion, setPollQuestion] = useState('');
+805|    const [pollOptions, setPollOptions] = useState(['', '']); // Initial 2 fields
+807|    const [pollErrors, setPollErrors] = useState({}); // To track duplicate option errors
+808|    const [isPollDetailsOpen, setIsPollDetailsOpen] = useState(false);
+809|    const [pollDetails, setPollDetails] = useState(null);
+4656|    const handleSendContact = async (contactsToSend) => {
+4728|    const handleSend = async (e, contentOverride = null, voiceFile = null, voiceDuration = null, voiceIsViewOnce = null) => {
+5059|                            onClick={() => handleSendContact(selectedContacts)}
+6012|    const renderAttachmentMenu = () => {
+6037|            { icon: List, label: t('chat_window.poll'), color: '#ffbc38', onClick: () => { setIsAttachmentMenuOpen(false); } },
+6783|                                if (e.key === 'Enter') handleSend(e);
+6789|                        onClick={handleSend}
+13044|                                                        await handleSend(null, null, fileObj, duration, isViewOnce);
+13057|                                                        {renderAttachmentMenu()}
+13091|                                                                    handleSend(e);
+13100|                                                            <button onClick={handleSend} className="wa-send-btn-inner" data-tooltip="Send">
+14299|                                                        await handleSend(null, null, fileObj, duration, isViewOnce);
+14312|                                                        {renderAttachmentMenu()}
+14346|                                                                    handleSend(e);
+14355|                                                            <button onClick={handleSend} className="wa-send-btn-inner" data-tooltip="Send">

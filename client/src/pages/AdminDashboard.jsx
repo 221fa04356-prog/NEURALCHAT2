@@ -9,7 +9,7 @@ import {
     Eye, EyeOff, Menu, AlertTriangle, ArrowLeft, Smile,
     User as UserIcon, Search, Bell, Settings, LayoutDashboard,
     TrendingUp, Calendar, ChevronRight, X, Layers, Check, RefreshCw, Forward, ChevronDown, XCircle,
-    Mic, Pause, Play, History
+    Mic, Pause, Play, List, History
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import {
@@ -210,6 +210,7 @@ export default function AdminDashboard() {
     const [selectedContact, setSelectedContact] = useState(null);
     const [selectedDate, setSelectedDate] = useState(null);
     const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, messageId: null });
+    const [viewingContact, setViewingContact] = useState(null);
 
     // Multi-Select State
     const [selectionMode, setSelectionMode] = useState(false);
@@ -1077,7 +1078,7 @@ export default function AdminDashboard() {
     const renderMediaLightbox = () => {
         if (!viewingMedia) return null;
         const isImage = viewingMedia.type === 'image';
-        
+
         // Collect all media messages from current chat to show in the bottom bar
         const allMedia = viewChat?.messages?.filter(m => m.type === 'image' || m.type === 'video') || [];
 
@@ -1198,7 +1199,7 @@ export default function AdminDashboard() {
                                 draggable="false"
                                 style={{
                                     maxWidth: '100%', maxHeight: '70vh',
-                                    objectFit: 'contain', 
+                                    objectFit: 'contain',
                                     borderRadius: '12px',
                                     boxShadow: '0 30px 90px rgba(0,0,0,0.15)',
                                     transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomLevel})`,
@@ -1223,10 +1224,10 @@ export default function AdminDashboard() {
 
                 {/* Bottom Media Carousel */}
                 {allMedia.length > 0 && (
-                    <div 
+                    <div
                         className="media-thumb-container"
-                        style={{ 
-                            background: 'rgba(255, 255, 255, 0.8)', padding: '20px', 
+                        style={{
+                            background: 'rgba(255, 255, 255, 0.8)', padding: '20px',
                             display: 'flex', gap: '15px', overflowX: 'auto',
                             justifyContent: allMedia.length < 10 ? 'center' : 'flex-start',
                             borderTop: '1px solid rgba(0,0,0,0.05)', zIndex: 5003
@@ -1234,12 +1235,12 @@ export default function AdminDashboard() {
                         onClick={e => e.stopPropagation()}
                     >
                         {allMedia.map((m, i) => (
-                            <div 
+                            <div
                                 key={m._id || m.id || i}
                                 className={`media-thumb-item ${String(m._id || m.id) === String(viewingMedia._id || viewingMedia.id) ? 'active' : ''}`}
                                 onClick={() => { setViewingMedia(m); setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
-                                style={{ 
-                                    width: '80px', height: '80px', borderRadius: '12px', 
+                                style={{
+                                    width: '80px', height: '80px', borderRadius: '12px',
                                     overflow: 'hidden', cursor: 'pointer', flexShrink: 0,
                                     position: 'relative', background: '#f0f2f5'
                                 }}
@@ -2872,7 +2873,7 @@ export default function AdminDashboard() {
 
                                                                         {renderLinkPreview(msg)}
 
-                                                                         {msg.type === 'image' && msg.file_path && (
+                                                                        {msg.type === 'image' && msg.file_path && (
                                                                             <div style={{ marginTop: '8px', position: 'relative', cursor: 'zoom-in' }} onClick={(e) => { e.stopPropagation(); setViewingMedia(msg); }}>
                                                                                 <img src={msg.file_path} alt="media" style={{ maxWidth: '100%', borderRadius: '8px', maxHeight: '200px', objectFit: 'contain' }} />
                                                                                 {msg.is_view_once && <div style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>View Once {msg.is_opened ? '(Opened)' : ''}</div>}
@@ -2943,8 +2944,108 @@ export default function AdminDashboard() {
                                                                             </div>
                                                                         )}
 
-                                                                        {msg.content && (
-                                                                            <div style={{ opacity: isDeleted ? 0.6 : 1, marginTop: (msg.link_preview || msg.type !== 'text') ? '8px' : '1px', whiteSpace: 'pre-wrap', position: 'relative' }}>
+                                                                        {msg.type === 'poll' && msg.poll && (
+                                                                            <div className="wa-poll-card" style={{ background: '#ffffff', borderRadius: '12px', padding: '15px', minWidth: '280px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginTop: '8px', marginBottom: '4px', cursor: 'default' }}>
+                                                                                <div style={{ paddingBottom: '10px', fontWeight: 'bold', color: '#111b21', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                                    <List size={20} color="#0EA5BE" />
+                                                                                    {msg.poll.question}
+                                                                                </div>
+                                                                                <div style={{ color: '#8696a0', fontSize: '13px', marginBottom: '12px' }}>
+                                                                                    {msg.poll.allowMultipleAnswers ? 'Select one or more' : 'Select one'}
+                                                                                </div>
+                                                                                <div className="wa-poll-options" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                                                    {msg.poll.options.map((opt, idx) => {
+                                                                                        const totalVotes = msg.poll.options.reduce((sum, o) => sum + (o.voters?.length || 0), 0);
+                                                                                        const votes = opt.voters?.length || 0;
+                                                                                        const percentage = totalVotes === 0 ? 0 : Math.round((votes / totalVotes) * 100);
+                                                                                        const hasAnyVote = totalVotes > 0;
+
+                                                                                        return (
+                                                                                            <div key={idx} style={{ position: 'relative', overflow: 'hidden', padding: '10px', borderRadius: '8px', border: '1px solid #e9edef', background: '#ffffff' }}>
+                                                                                                {hasAnyVote && (
+                                                                                                    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${percentage}%`, background: 'rgba(14, 165, 190, 0.15)', zIndex: 1 }} />
+                                                                                                )}
+                                                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
+                                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px', color: '#111b21' }}>
+                                                                                                        <div style={{ width: '18px', height: '18px', borderRadius: msg.poll.allowMultipleAnswers ? '4px' : '50%', border: '2px solid #8696a0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}></div>
+                                                                                                        {opt.text}
+                                                                                                    </div>
+                                                                                                    {votes > 0 && <span style={{ fontSize: '12px', color: '#54656f', fontWeight: '500' }}>{votes}</span>}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        );
+                                                                                    })}
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {msg.type === 'contact' && (() => {
+                                                                            let cDataArray;
+                                                                            try {
+                                                                                const rawData = JSON.parse(msg.content);
+                                                                                cDataArray = Array.isArray(rawData) ? rawData : [rawData];
+                                                                            } catch (e) {
+                                                                                cDataArray = [{ name: 'Contact' }];
+                                                                            }
+
+                                                                            if (cDataArray.length > 1) {
+                                                                                return (
+                                                                                    <div
+                                                                                        className="wa-contact-msg-card-multiple"
+                                                                                        onClick={(e) => { e.stopPropagation(); setViewingContact(cDataArray); }}
+                                                                                        style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '260px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginTop: '8px' }}
+                                                                                    >
+                                                                                        <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                                            <div style={{ position: 'relative', width: 66, height: 44, marginRight: 12, flexShrink: 0 }}>
+                                                                                                <div className="wa-avatar" style={{ position: 'absolute', right: 0, zIndex: 1, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                                                                    {cDataArray[1].image ? <img src={cDataArray[1].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                                </div>
+                                                                                                <div className="wa-avatar" style={{ position: 'absolute', left: 0, zIndex: 2, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                                                                    {cDataArray[0].image ? <img src={cDataArray[0].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                            <div style={{ color: '#111b21', fontSize: '15px', fontWeight: 600, lineHeight: '1.3' }}>
+                                                                                                {cDataArray[0].name || cDataArray[0].mobile} and {cDataArray.length - 1} other contact{cDataArray.length > 2 ? 's' : ''}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                        <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                                                            <button style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>
+                                                                                                View all
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                );
+                                                                            }
+
+                                                                            const cData = cDataArray[0];
+                                                                            return (
+                                                                                <div
+                                                                                    className="wa-contact-msg-card"
+                                                                                    onClick={(e) => { e.stopPropagation(); setViewingContact(cData); }}
+                                                                                    style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '240px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginTop: '8px' }}
+                                                                                >
+                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                                        <div className="wa-avatar" style={{ width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%' }}>
+                                                                                            {cData.image ? <img src={cData.image} alt={cData.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                        </div>
+                                                                                        <div style={{ color: '#111b21', fontSize: '16px', fontWeight: 600 }}>
+                                                                                            {cData.name || 'Contact'}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                                                        <button
+                                                                                            className="wa-contact-card-action"
+                                                                                            style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+                                                                                        >
+                                                                                            View Info
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        })()}
+
+                                                                        {msg.content && msg.type !== 'poll' && msg.type !== 'contact' && (
+                                                                            <div style={{ opacity: isDeleted ? 0.6 : 1, marginTop: (msg.link_preview || msg.type !== 'text') ? '8px' : '0', whiteSpace: 'pre-wrap' }}>
                                                                                 {renderContent(msg.content)}
                                                                             </div>
                                                                         )}
@@ -3058,6 +3159,67 @@ export default function AdminDashboard() {
             {renderMsgDropdown()}
             {snackbar && <Snackbar message={snackbar.message} type={snackbar.type} senderName={snackbar.senderName} onClose={closeSnackbar} />}
             <ConfirmModal isOpen={!!confirmConfig} {...confirmConfig} onCancel={closeConfirm} />
+
+            {/* Viewing Contact Details Modal */}
+            {viewingContact && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10000,
+                    background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    backdropFilter: 'blur(4px)'
+                }} onClick={() => setViewingContact(null)}>
+                    <div style={{
+                        background: 'white', borderRadius: '16px',
+                        width: '400px', maxWidth: '90%', maxHeight: '80vh', overflowY: 'auto',
+                        padding: '24px', boxShadow: '0 25px 50px rgba(0,0,0,0.2)',
+                        animation: 'scaleIn 0.2s ease-out'
+                    }} onClick={e => e.stopPropagation()}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                            <h3 style={{ margin: 0, fontSize: '1.25rem', color: '#111b21' }}>Contact Info</h3>
+                            <div onClick={() => setViewingContact(null)} style={{ cursor: 'pointer', color: '#54656f' }}>
+                                <X size={24} />
+                            </div>
+                        </div>
+
+                        {Array.isArray(viewingContact) ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                {viewingContact.map((c, i) => (
+                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px', borderBottom: i < viewingContact.length - 1 ? '1px solid #f0f2f5' : 'none' }}>
+                                        <div style={{ width: 56, height: 56, background: '#f3f4f6', borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                            {c.image ? <img src={c.image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={28} color="#8696a0" />}
+                                        </div>
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{ fontWeight: '600', color: '#111b21', fontSize: '16px' }}>{c.name || 'Contact'}</div>
+                                            <div style={{ color: '#54656f', fontSize: '14px' }}>{c.mobile || 'No phone'}</div>
+                                            {c.about && <div style={{ color: '#8696a0', fontSize: '13px', marginTop: 2 }}>{c.about}</div>}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                                <div style={{ width: 100, height: 100, background: '#f3f4f6', borderRadius: '50%', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                    {viewingContact.image ? <img src={viewingContact.image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={50} color="#8696a0" />}
+                                </div>
+                                <h2 style={{ margin: '0 0 4px 0', fontSize: '1.5rem' }}>{viewingContact.name || 'Contact'}</h2>
+                                <div style={{ color: '#54656f', fontSize: '16px', marginBottom: 12 }}>{viewingContact.mobile || 'No phone'}</div>
+                                {viewingContact.about && (
+                                    <div style={{ padding: '12px', background: '#f0f2f5', borderRadius: '8px', width: '100%', fontSize: '14px', color: '#111b21' }}>
+                                        {viewingContact.about}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        <div style={{ marginTop: 24, display: 'flex', justifyContent: 'center' }}>
+                            <button
+                                onClick={() => setViewingContact(null)}
+                                style={{ background: '#0A7C8F', color: 'white', border: 'none', padding: '10px 30px', borderRadius: '24px', fontWeight: '600', cursor: 'pointer' }}
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Unethical Content Alert Popup */}
             {/* Unethical Content Alert Modal */}
