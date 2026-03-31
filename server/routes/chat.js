@@ -781,6 +781,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
     let fileName = null;
     let fileSize = 0;
     let pageCount = 0;
+    let duration = Number(req.body.duration || 0);
 
     let is_view_once = req.body.is_view_once === 'true' || req.body.is_view_once === true;
 
@@ -951,7 +952,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
                 pageCount: req.body.pageCount || 0,
                 thumbnail_path: req.body.thumbnail_path || null,
                 link_preview: linkPreview,
-                duration: req.body.duration, is_view_once, // Metadata
+                duration: Number(req.body.duration || 0), is_view_once, // Metadata
                 reply_to: reply_to || null,
 
                 is_flagged: !!isFlagged,
