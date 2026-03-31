@@ -45,6 +45,67 @@ const socket = io(SOCKET_URL, {
     reconnectionDelay: 1000,
 });
 
+const TimePicker = ({ value, onChange, onClose }) => {
+    const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
+    const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'));
+    const hCurrent = value.split(':')[0] || '11';
+    const mCurrent = value.split(':')[1] || '00';
+
+    return (
+        <div style={{
+            position: 'absolute',
+            background: '#233138',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+            borderRadius: '8px',
+            display: 'flex',
+            zIndex: 10000,
+            bottom: '100%',
+            left: 0,
+            marginBottom: '8px',
+            height: '240px',
+            overflow: 'hidden',
+            border: '1px solid #3b4a54'
+        }}>
+            <div className="custom-scrollbar" style={{ overflowY: 'auto', borderRight: '1px solid #3b4a54', width: '60px' }}>
+                {hours.map(hour => (
+                    <div
+                        key={hour}
+                        onClick={(e) => { e.stopPropagation(); onChange(`${hour}:${mCurrent}`); }}
+                        style={{
+                            padding: '10px',
+                            textAlign: 'center',
+                            cursor: 'pointer',
+                            background: hCurrent === hour ? '#00a884' : 'transparent',
+                            color: '#e9edef',
+                            fontSize: '14px'
+                        }}
+                    >
+                        {hour}
+                    </div>
+                ))}
+            </div>
+            <div className="custom-scrollbar" style={{ overflowY: 'auto', width: '60px' }}>
+                {minutes.map(minute => (
+                    <div
+                        key={minute}
+                        onClick={(e) => { e.stopPropagation(); onChange(`${hCurrent}:${minute}`); onClose(); }}
+                        style={{
+                            padding: '10px',
+                            textAlign: 'center',
+                            cursor: 'pointer',
+                            background: mCurrent === minute ? '#00a884' : 'transparent',
+                            color: '#e9edef',
+                            fontSize: '14px'
+                        }}
+                    >
+                        {minute}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
 const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, userData, replyingTo, isMeMsg }) => {
     const [isPaused, setIsPaused] = useState(false);
     const [recordingTime, setRecordingTime] = useState(0);
@@ -835,6 +896,22 @@ export default function Chat() {
     const [pollErrors, setPollErrors] = useState({}); // To track duplicate option errors
     const [isPollDetailsOpen, setIsPollDetailsOpen] = useState(false);
     const [pollDetails, setPollDetails] = useState(null);
+
+    // --- Event States ---
+    const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+    const [eventName, setEventName] = useState('');
+    const [eventDescription, setEventDescription] = useState('');
+    const [eventStartDate, setEventStartDate] = useState(new Date().toISOString().split('T')[0]);
+    const [eventStartTime, setEventStartTime] = useState('11:00');
+    const [eventEndDate, setEventEndDate] = useState('');
+    const [eventEndTime, setEventEndTime] = useState('');
+    const [eventLocation, setEventLocation] = useState('');
+    const [eventCallOn, setEventCallOn] = useState(false);
+    const [eventCallType, setEventCallType] = useState('Video'); // Video / Voice
+    const [showStartTimePicker, setShowStartTimePicker] = useState(false);
+    const [showEndTimePicker, setShowEndTimePicker] = useState(false);
+    const [showEventCallTypeDropdown, setShowEventCallTypeDropdown] = useState(false);
+
     const [showNotificationDetails, setShowNotificationDetails] = useState(false);
     const [messageRequests, setMessageRequests] = useState([]); // Message request list
     const [isRequestsModalOpen, setIsRequestsModalOpen] = useState(false); // Requests modal
@@ -1018,6 +1095,8 @@ export default function Chat() {
                 setIsArchivedChatsOpen(false);
                 setIsGlobalStarredOpen(false);
                 setIsContactInfoOpen(false);
+                setIsGroupInfoOpen(false);
+                setIsCommunityInfoOpen(false);
                 setIsMessageSearchOpen(false);
                 setIsStarredMessagesOpen(false);
                 setIsSharedMediaOpen(false);
@@ -2664,6 +2743,21 @@ export default function Chat() {
             }
         };
 
+        const onEventUpdated = (data) => {
+            console.log('Socket: event_updated', data);
+            const { messageId, event, isGroup } = data;
+
+            const updateMsgs = prev => prev.map(m =>
+                (String(m._id || m.id) === String(messageId)) ? { ...m, event } : m
+            );
+
+            if (isGroup) {
+                setGroupMessages(updateMsgs);
+            } else {
+                setMessages(updateMsgs);
+            }
+        };
+
         const onUserProfileUpdated = (data) => {
             console.log('Socket: user_profile_updated', data);
             setUsers(prev => prev.map(u =>
@@ -2709,6 +2803,7 @@ export default function Chat() {
         socket.on('message_viewed', onMessageViewed);
         socket.on('user_profile_updated', onUserProfileUpdated);
         socket.on('poll_voted', onPollVoted);
+        socket.on('event_updated', onEventUpdated);
 
         const onForceLogout = () => {
             console.warn('Socket: force_logout received. Another session was started.');
@@ -4876,6 +4971,102 @@ export default function Chat() {
         }
     };
 
+    const handleSendEvent = async () => {
+        if (!eventName.trim()) {
+            setSnackbar({ message: 'Event name is required', type: 'error', variant: 'system' });
+            return;
+        }
+
+        const eventData = {
+            name: eventName.trim(),
+            description: eventDescription.trim(),
+            startDate: eventStartDate,
+            startTime: eventStartTime,
+            endDate: eventEndDate,
+            endTime: eventEndTime,
+            location: eventLocation.trim(),
+            callOn: eventCallOn,
+            callType: eventCallOn ? eventCallType : null
+        };
+
+        const target = selectedUser || selectedGroup;
+        if (!target) return;
+
+        const token = localStorage.getItem('token');
+        try {
+            let endpoint, payload;
+            if (selectedGroup) {
+                endpoint = '/api/groups/event/send';
+                payload = { groupId: selectedGroup._id, eventData };
+            } else {
+                endpoint = '/api/chat/event/send';
+                payload = { toUserId: selectedUser._id, eventData };
+            }
+
+            const res = await axios.post(endpoint, payload, {
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+            });
+
+            const sentMsg = res.data.message;
+
+            if (selectedGroup) {
+                setGroupMessages(prev => [...prev, sentMsg]);
+                socket.emit('group_message', {
+                    groupId: selectedGroup._id,
+                    message: { ...sentMsg, sender_id: { _id: user.id || user._id, name: user.name } }
+                });
+            } else {
+                setMessages(prev => [...prev, sentMsg]);
+                socket.emit('send_message', {
+                    _id: sentMsg._id,
+                    sender_id: user.id || user._id,
+                    receiverId: selectedUser._id,
+                    content: sentMsg.content,
+                    type: 'event',
+                    event: sentMsg.event
+                });
+            }
+
+            setIsEventModalOpen(false);
+            setEventName('');
+            setEventDescription('');
+            setEventLocation('');
+            setSnackbar({ message: 'Event created!', type: 'success', variant: 'system' });
+        } catch (err) {
+            console.error('Failed to send event:', err);
+            setSnackbar({ message: 'Failed to create event', type: 'error', variant: 'system' });
+        }
+    };
+
+    const handleJoinEvent = async (msg) => {
+        const isGroup = !!msg.group_id;
+        const msgId = msg._id || msg.id;
+        const token = localStorage.getItem('token');
+        const endpoint = isGroup ? `/api/groups/event/${msgId}/join` : `/api/chat/event/${msgId}/join`;
+
+        try {
+            const res = await axios.post(endpoint, {}, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            const updatedEvent = res.data.event;
+            const updateFn = prev => prev.map(m =>
+                (String(m._id) === String(msgId) || String(m.id) === String(msgId))
+                    ? { ...m, event: updatedEvent }
+                    : m
+            );
+
+            if (isGroup) {
+                setGroupMessages(updateFn);
+            } else {
+                setMessages(updateFn);
+            }
+        } catch (err) {
+            console.error('Failed to join event:', err);
+            setSnackbar({ message: 'Failed to update event status', type: 'error', variant: 'system' });
+        }
+    };
+
     const handleVotePoll = async (msg, optionIndex) => {
         const isGroup = !!selectedGroup;
         const myId = String(user.id || user._id);
@@ -5777,15 +5968,11 @@ export default function Chat() {
         const myId = user?._id || user?.id || userData?._id || userData?.id;
 
         // Strictly filter out the current user (the account owner)
-        const otherMembers = (group.members || []).filter(m => {
+        const onlineCount = (group.members || []).filter(m => {
             const memberId = String(m._id || m);
-            return memberId !== String(myId);
-        });
-
-        // Calculate online members among the OTHER members
-        const onlineCount = otherMembers.filter(m => {
+            if (memberId === String(myId)) return true;
             // Check global users list first as it's the primary source for status updates
-            const userInList = (users || []).find(u => String(u._id) === String(m._id || m));
+            const userInList = (users || []).find(u => String(u._id) === String(memberId));
             return userInList ? userInList.isOnline : m.isOnline;
         }).length;
 
@@ -6238,7 +6425,19 @@ export default function Chat() {
             { icon: Camera, label: t('chat_window.camera'), color: '#ff2e74', onClick: () => { setIsAttachmentMenuOpen(false); handleCameraAction('chat'); } },
             { icon: User, label: t('chat_window.contact'), color: '#009de2', onClick: () => { setIsAttachmentMenuOpen(false); setIsContactSelectionOpen(true); setSelectedContacts([]); setContactSearchQuery(''); } },
             { icon: List, label: t('chat_window.poll'), color: '#ffbc38', onClick: () => { setIsAttachmentMenuOpen(false); setPollQuestion(''); setPollOptions(['', '']); setAllowMultipleAnswers(true); setPollErrors({}); setIsPollModalOpen(true); } },
-            { icon: Calendar, label: t('chat_window.event'), color: '#ef0b33', onClick: () => { setIsAttachmentMenuOpen(false); } },
+            { icon: Calendar, label: t('chat_window.event'), color: '#ef0b33', onClick: () => { 
+                setIsAttachmentMenuOpen(false); 
+                setEventName('');
+                setEventDescription('');
+                setEventStartDate(new Date().toISOString().split('T')[0]);
+                setEventStartTime('11:00');
+                setEventEndDate('');
+                setEventEndTime('');
+                setEventLocation('');
+                setEventCallOn(false);
+                setEventCallType('Video');
+                setIsEventModalOpen(true);
+            } },
         ];
 
         return (
@@ -10198,7 +10397,7 @@ export default function Chat() {
 
                             return (
                                 <div style={{ fontSize: 16, color: subTextColor, marginTop: 8 }}>
-                                    {selectedGroup?.isCommunityAnnouncements ? 'Announcements' : `Community Ã‚Â· ${uniqueCount} member${uniqueCount !== 1 ? 's' : ''} Ã‚Â· ${groupCount} group${groupCount !== 1 ? 's' : ''}`}
+                                    {`Community · ${uniqueCount} member${uniqueCount !== 1 ? 's' : ''} · ${groupCount} group${groupCount !== 1 ? 's' : ''}`}
                                 </div>
                             );
                         })()}
@@ -10239,27 +10438,13 @@ export default function Chat() {
                             style={{
                                 padding: '15px 40px',
                                 textAlign: 'center',
-                                color: communityInfoTab === 'community' ? '#0EA5BE' : subTextColor,
-                                borderBottom: communityInfoTab === 'community' ? '3px solid #0EA5BE' : 'none',
+                                color: '#0EA5BE',
+                                borderBottom: '3px solid #0EA5BE',
                                 fontWeight: 500,
-                                cursor: 'pointer'
+                                cursor: 'default'
                             }}
                         >
                             Community
-                        </div>
-                        <div
-                            style={{
-                                flex: 1,
-                                padding: '15px 0',
-                                textAlign: 'center',
-                                color: communityInfoTab === 'announcements' ? '#0EA5BE' : subTextColor,
-                                borderBottom: communityInfoTab === 'announcements' ? '3px solid #0EA5BE' : 'none',
-                                fontWeight: 500,
-                                cursor: 'pointer'
-                            }}
-                            onClick={() => setCommunityInfoTab('announcements')}
-                        >
-                            Announcements
                         </div>
                     </div>
 
@@ -13553,7 +13738,7 @@ export default function Chat() {
                                             {selectedGroup.isCommunityAnnouncements ? selectedGroup.communityName : (selectedGroup.name || 'Unnamed Group')}
                                         </span>
                                         <span style={{ fontSize: 12, color: '#667781', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                            {selectedGroup.isCommunityAnnouncements ? 'Announcements' : renderGroupStatus(selectedGroup)}
+                                            {renderGroupStatus(selectedGroup)}
                                         </span>
                                     </div>
                                 </div>
@@ -14483,7 +14668,46 @@ export default function Chat() {
                                                                         </div>
                                                                     )}
 
-                                                                    {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && <span>{renderContent(msg.content)}</span>}
+                                                                    {msg.type === 'event' && msg.event && (
+                                                                        <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', minWidth: '280px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                            <div style={{ background: '#202c33', padding: '15px', color: '#e9edef' }}>
+                                                                                <div style={{ fontSize: '13px', color: '#8696a0', marginBottom: '8px', textTransform: 'uppercase', fontWeight: '500' }}>Event</div>
+                                                                                <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '4px' }}>{msg.event.name}</div>
+                                                                                <div style={{ fontSize: '14px', color: '#8696a0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                                                    <Calendar size={14} /> 
+                                                                                    {new Date(msg.event.startDate).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}, {msg.event.startTime}
+                                                                                </div>
+                                                                                {msg.event.location && (
+                                                                                    <div style={{ fontSize: '14px', color: '#8696a0', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                                                                                        <MapPin size={14} /> {msg.event.location}
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                            <div style={{ padding: '12px 15px', background: '#fff' }}>
+                                                                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                                                                                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                                                                                        <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#e9edef', border: '2px solid #fff', overflow: 'hidden' }}>
+                                                                                             <UserIcon size={14} color="#8696a0" style={{ margin: '3px' }} />
+                                                                                        </div>
+                                                                                        <span style={{ fontSize: '14px', color: '#54656f', marginLeft: '8px' }}>{msg.event.participants?.length || 0} going</span>
+                                                                                    </div>
+                                                                                    <button 
+                                                                                        onClick={(e) => { e.stopPropagation(); handleJoinEvent(msg); }}
+                                                                                        style={{ background: '#f0f2f5', border: 'none', borderRadius: '18px', padding: '6px 16px', color: '#00a884', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+                                                                                    >
+                                                                                        {msg.event.participants?.includes(user.id || user._id) ? 'Going' : 'Respond'}
+                                                                                    </button>
+                                                                               </div>
+                                                                               <button 
+                                                                                    style={{ width: '100%', background: '#f8f9fa', border: '1px solid #e9edef', borderRadius: '8px', padding: '8px', color: '#00a884', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+                                                                                >
+                                                                                    View event
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && msg.type !== 'event' && <span>{renderContent(msg.content)}</span>}
                                                                 </>
                                                             )}
 
@@ -14894,6 +15118,7 @@ export default function Chat() {
             {renderEditMessageOverlay()}
             {renderPollModal()}
             {renderPollDetailsPanel()}
+            {renderEventModal()}
         </div >
     );
 
@@ -15044,6 +15269,183 @@ export default function Chat() {
                                 </div>
                             );
                         })}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderEventModal = () => {
+        if (!isEventModalOpen) return null;
+
+        return (
+            <div className="wa-mute-modal-overlay" onClick={() => setIsEventModalOpen(false)} style={{ zIndex: 3000 }}>
+                <div className="wa-mute-modal" onClick={e => e.stopPropagation()} style={{ width: '400px', maxWidth: '90%', padding: '0', background: '#202c33', borderRadius: '12px', display: 'flex', flexDirection: 'column', height: 'auto', maxHeight: '90vh', color: '#e9edef' }}>
+                    <div style={{ padding: '15px 20px', display: 'flex', alignItems: 'center', borderTopLeftRadius: '12px', borderTopRightRadius: '12px', flexShrink: 0 }}>
+                        <button onClick={() => setIsEventModalOpen(false)} style={{ background: 'none', border: 'none', color: '#aebac1', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={24} /></button>
+                        <div style={{ flex: 1, marginLeft: '20px' }}>
+                            <span style={{ fontSize: '19px', fontWeight: '500' }}>Create event</span>
+                        </div>
+                    </div>
+
+                    <div className="custom-scrollbar" style={{ padding: '20px', flex: 1, overflowY: 'auto' }}>
+                        {/* Event Name */}
+                        <div style={{ marginBottom: '24px', position: 'relative' }}>
+                            <input
+                                autoFocus
+                                value={eventName}
+                                onChange={e => setEventName(e.target.value)}
+                                placeholder="Event name"
+                                style={{ width: '100%', border: 'none', borderBottom: '2px solid #00a884', padding: '8px 40px 8px 0', fontSize: '16px', outline: 'none', background: 'transparent', color: '#e9edef' }}
+                            />
+                            <Smile size={24} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px', cursor: 'pointer' }} />
+                        </div>
+
+                        {/* Description */}
+                        <div style={{ marginBottom: '24px', position: 'relative', background: '#2a3942', borderRadius: '12px', padding: '12px' }}>
+                            <textarea
+                                value={eventDescription}
+                                onChange={e => setEventDescription(e.target.value)}
+                                placeholder="Description (optional)"
+                                rows={3}
+                                style={{ width: '100%', border: 'none', fontSize: '15px', outline: 'none', background: 'transparent', color: '#e9edef', resize: 'none' }}
+                            />
+                            <Smile size={24} color="#8696a0" style={{ position: 'absolute', right: '12px', top: '12px', cursor: 'pointer' }} />
+                        </div>
+
+                        {/* Start Date & Time */}
+                        <div style={{ marginBottom: '20px' }}>
+                            <div style={{ fontSize: '14px', color: '#8696a0', marginBottom: '12px' }}>Start date and time</div>
+                            <div style={{ display: 'flex', gap: '20px' }}>
+                                <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #8696a0' }}>
+                                    <input
+                                        type="date"
+                                        value={eventStartDate}
+                                        onChange={e => setEventStartDate(e.target.value)}
+                                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#e9edef', padding: '8px 0', outline: 'none' }}
+                                    />
+                                    <Calendar size={20} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px', pointerEvents: 'none' }} />
+                                </div>
+                                <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #8696a0', cursor: 'pointer' }} onClick={() => setShowStartTimePicker(!showStartTimePicker)}>
+                                    <div style={{ padding: '8px 0', color: '#e9edef' }}>{eventStartTime}</div>
+                                    <Clock size={20} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px' }} />
+                                    {showStartTimePicker && (
+                                        <TimePicker value={eventStartTime} onChange={setEventStartTime} onClose={() => setShowStartTimePicker(false)} />
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* End Date & Time */}
+                        {!eventEndDate && (
+                            <div
+                                onClick={() => {
+                                    setEventEndDate(eventStartDate);
+                                    setEventEndTime(eventStartTime);
+                                }}
+                                style={{ color: '#53bdeb', fontSize: '15px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}
+                            >
+                                <Plus size={20} /> Add end time
+                            </div>
+                        )}
+                        {eventEndDate && (
+                            <div style={{ marginBottom: '20px' }}>
+                                <div style={{ fontSize: '14px', color: '#8696a0', marginBottom: '12px' }}>End date and time</div>
+                                <div style={{ display: 'flex', gap: '20px', marginBottom: '12px' }}>
+                                    <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #8696a0' }}>
+                                        <input
+                                            type="date"
+                                            value={eventEndDate}
+                                            onChange={e => setEventEndDate(e.target.value)}
+                                            style={{ width: '100%', background: 'transparent', border: 'none', color: '#e9edef', padding: '8px 0', outline: 'none' }}
+                                        />
+                                        <Calendar size={20} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px', pointerEvents: 'none' }} />
+                                    </div>
+                                    <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #8696a0', cursor: 'pointer' }} onClick={() => setShowEndTimePicker(!showEndTimePicker)}>
+                                        <div style={{ padding: '8px 0', color: '#e9edef' }}>{eventEndTime}</div>
+                                        <Clock size={20} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px' }} />
+                                        {showEndTimePicker && (
+                                            <TimePicker value={eventEndTime} onChange={setEventEndTime} onClose={() => setShowEndTimePicker(false)} />
+                                        )}
+                                    </div>
+                                </div>
+                                <div
+                                    onClick={() => {
+                                        setEventEndDate('');
+                                        setEventEndTime('');
+                                    }}
+                                    style={{ color: '#8696a0', fontSize: '15px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}
+                                >
+                                    <X size={20} /> Remove end time
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Location */}
+                        <div style={{ marginBottom: '24px', position: 'relative' }}>
+                            <input
+                                value={eventLocation}
+                                onChange={e => setEventLocation(e.target.value)}
+                                placeholder="Location (optional)"
+                                style={{ width: '100%', border: 'none', borderBottom: '1px solid #8696a0', padding: '8px 40px 8px 0', fontSize: '16px', outline: 'none', background: 'transparent', color: '#e9edef' }}
+                            />
+                            <MapPin size={22} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px' }} />
+                        </div>
+
+                        {/* Call Toggle */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+                            <div style={{ color: '#e9edef', fontSize: '16px' }}>Call</div>
+                            <div
+                                onClick={() => setEventCallOn(!eventCallOn)}
+                                style={{
+                                    width: '40px', height: '20px', borderRadius: '12px',
+                                    background: eventCallOn ? '#00a884' : '#3b4a54',
+                                    position: 'relative', cursor: 'pointer', transition: 'background 0.3s'
+                                }}
+                            >
+                                <div style={{
+                                    width: '14px', height: '14px', borderRadius: '50%', background: '#fff',
+                                    position: 'absolute', top: '3px', left: eventCallOn ? '23px' : '3px',
+                                    transition: 'left 0.3s'
+                                }} />
+                            </div>
+                        </div>
+
+                        {/* Call Type Dropdown */}
+                        {eventCallOn && (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+                                <div style={{ color: '#e9edef', fontSize: '16px' }}>Call type</div>
+                                <div style={{ position: 'relative' }}>
+                                    <button
+                                        onClick={() => setShowEventCallTypeDropdown(!showEventCallTypeDropdown)}
+                                        style={{ background: '#2a3942', border: 'none', borderRadius: '18px', padding: '6px 16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#00a884', cursor: 'pointer' }}
+                                    >
+                                        {eventCallType === 'Video' ? <Video size={18} /> : <Phone size={18} />}
+                                        {eventCallType}
+                                        <ChevronDown size={14} />
+                                    </button>
+                                    {showEventCallTypeDropdown && (
+                                        <div style={{ position: 'absolute', bottom: '100%', right: 0, background: '#233138', borderRadius: '8px', padding: '8px 0', minWidth: '120px', marginBottom: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', zIndex: 1000 }}>
+                                            <div onClick={() => { setEventCallType('Video'); setShowEventCallTypeDropdown(false); }} style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '10px', color: '#e9edef', cursor: 'pointer' }}>
+                                                <Video size={18} /> Video {eventCallType === 'Video' && <Check size={16} color="#00a884" style={{ marginLeft: 'auto' }} />}
+                                            </div>
+                                            <div onClick={() => { setEventCallType('Voice'); setShowEventCallTypeDropdown(false); }} style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '10px', color: '#e9edef', cursor: 'pointer' }}>
+                                                <Phone size={18} /> Voice {eventCallType === 'Voice' && <Check size={16} color="#00a884" style={{ marginLeft: 'auto' }} />}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div style={{ padding: '15px 20px', display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
+                        <button
+                            onClick={handleSendEvent}
+                            style={{ background: '#00a884', width: '54px', height: '54px', borderRadius: '50%', border: 'none', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.3)' }}
+                        >
+                            <Send size={24} />
+                        </button>
                     </div>
                 </div>
             </div>

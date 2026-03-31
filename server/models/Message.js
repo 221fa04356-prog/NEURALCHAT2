@@ -6,7 +6,7 @@ const messageSchema = new mongoose.Schema({
     receiver_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // Added for P2P
     role: { type: String, required: true }, // 'user', 'ai' (model)
     content: { type: String },
-    type: { type: String, enum: ['text', 'image', 'file', 'video', 'audio', 'contact', 'poll'], default: 'text' },
+    type: { type: String, enum: ['text', 'image', 'file', 'video', 'audio', 'contact', 'poll', 'event'], default: 'text' },
     duration: { type: Number }, // in seconds
     file_path: { type: String },
     fileName: { type: String },
@@ -57,6 +57,18 @@ const messageSchema = new mongoose.Schema({
             voters: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
         }],
         allowMultipleAnswers: { type: Boolean, default: true }
+    },
+    event: {
+        name: { type: String },
+        description: { type: String },
+        startDate: { type: Date },
+        startTime: { type: String },
+        endDate: { type: Date },
+        endTime: { type: String },
+        location: { type: String },
+        callOn: { type: Boolean },
+        callType: { type: String }, // 'Video' or 'Voice'
+        participants: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }] // Users who are 'going'
     },
     edited_at: { type: Date, default: null },
     reactions: [{
