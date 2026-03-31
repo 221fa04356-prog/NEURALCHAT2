@@ -515,7 +515,7 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             pageCount: req.body.pageCount || 0,
             thumbnail_path: req.body.thumbnail_path || null,
             link_preview: linkPreview,
-            duration: req.body.duration,
+            duration: Number(req.body.duration || 0),
             is_view_once: is_view_once === 'true' || is_view_once === true,
             is_forwarded: isForwarded === true || isForwarded === 'true',
             forward_count: forward_count || 0,

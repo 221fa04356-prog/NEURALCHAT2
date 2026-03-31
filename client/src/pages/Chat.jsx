@@ -32,6 +32,7 @@ import { countryCodes } from '../utils/countryCodes';
 import NeuralBackground from '../components/NeuralBackground';
 import ConfirmModal from '../components/ConfirmModal';
 import CountryCodeSelect from '../components/CountryCodeSelect';
+import EmojiPicker from '../components/EmojiPicker';
 
 // --- Socket Link ---
 // --- Socket Link ---
@@ -766,6 +767,9 @@ export default function Chat() {
     const [filterType, setFilterType] = useState('all'); // 'all' | 'unread' | 'favorites'
     const [openDropdown, setOpenDropdown] = useState(null); // { type: 'msg'|'contact', id: string, data: any }
     const [dropdownPos, setDropdownPos] = useState({ x: 0, y: 0 });
+    const [fullEmojiPicker, setFullEmojiPicker] = useState(null); // { msgId, isGroup, pos }
+    const [showInputEmojiPicker, setShowInputEmojiPicker] = useState(false);
+    const [inputEmojiPickerPos, setInputEmojiPickerPos] = useState({ x: 0, y: 0 });
     const [chatContextMenu, setChatContextMenu] = useState(null); // { x: number, y: number }
     const [replyingTo, setReplyingTo] = useState(null); // { _id: string, content: string, senderName: string }
     const [infoMessage, setInfoMessage] = useState(null); // Message details view
@@ -2462,6 +2466,7 @@ export default function Chat() {
                             type: data.type || 'text',
                             is_view_once: data.is_view_once || false,
                             fileName: data.fileName,
+                            duration: data.duration,
                             ciphertext: data.ciphertext,
                             session_header: data.session_header
                         }
@@ -9165,7 +9170,17 @@ export default function Chat() {
                                     <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '😮', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Wow" data-tooltip-pos="center">😮</span>
                                     <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '😢', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Sad" data-tooltip-pos="center">😢</span>
                                     <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '🙏', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Thanks" data-tooltip-pos="center">🙏</span>
-                                    <Plus size={18} onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }} data-tooltip="More" data-tooltip-pos="center" />
+                                    <Plus 
+                                        size={18} 
+                                        className="wa-plus-icon-reaction"
+                                        onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            setFullEmojiPicker({ id, isGroup: selectedGroup?._id || !!selectedGroup, pos: { x: dropdownPos.x, y: dropdownPos.y } }); 
+                                            setOpenDropdown(null); 
+                                        }} 
+                                        data-tooltip="More" 
+                                        data-tooltip-pos="center" 
+                                    />
                                 </div>
                                 <div className="wa-dropdown-divider"></div>
                             </>
@@ -10506,7 +10521,13 @@ export default function Chat() {
                             return (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 15 }}>
                                     <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                        {communityOwner.profile_photo ? <img src={communityOwner.profile_photo} alt={communityOwner.name || 'owner'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Users size={20} color="#8696a0" />}
+                                        {communityOwner.profile_photo ? (
+                                            <img src={communityOwner.profile_photo} alt={communityOwner.name || 'owner'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                        ) : (
+                                            <div className="wa-avatar-letter" style={{ display: 'flex', width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center', fontSize: 18, color: '#0EA5BE', fontWeight: 600 }}>
+                                                {(communityOwner.name || 'U')[0].toUpperCase()}
+                                            </div>
+                                        )}
                                     </div>
                                     <div style={{ flex: 1 }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -10564,7 +10585,9 @@ export default function Chat() {
                                                     alt={member.name}
                                                 />
                                             ) : (
-                                                <Users size={20} color="#8696a0" />
+                                                <div className="wa-avatar-letter" style={{ display: 'flex', width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center', fontSize: 18, color: '#0EA5BE', fontWeight: 600 }}>
+                                                    {(member.name || 'U')[0].toUpperCase()}
+                                                </div>
                                             )}
                                         </div>
                                         <div style={{ flex: 1 }}>
@@ -11986,7 +12009,8 @@ export default function Chat() {
                         file_path: msg.file_path,
                         fileName: msg.fileName,
                         fileSize: msg.fileSize,
-                        isForwarded: true
+                        isForwarded: true,
+                        duration: msg.duration || 0
                     } : new FormData();
 
                     if (!isGroup) {
@@ -11998,6 +12022,7 @@ export default function Chat() {
                             formData.append('type', msg.type);
                             formData.append('fileName', msg.fileName || '');
                             formData.append('fileSize', msg.fileSize || 0);
+                            formData.append('duration', msg.duration || 0);
                         } else {
                             formData.append('type', msg.type || 'text');
                         }
@@ -12031,6 +12056,7 @@ export default function Chat() {
                             content: sentMsg.content,
                             type: sentMsg.type,
                             file_path: sentMsg.file_path,
+                            duration: sentMsg.duration,
                             isForwarded: true,
                             created_at: sentMsg.created_at
                         });
@@ -13461,8 +13487,16 @@ export default function Chat() {
                                                             accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
                                                             onChange={handleFileSelect}
                                                         />
-                                                        <button className="wa-nav-icon-btn">
-                                                            <Smile size={22} color="#54656f" />
+                                                        <button 
+                                                            className={`wa-nav-icon-btn ${showInputEmojiPicker ? 'active' : ''}`}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                const rect = e.currentTarget.getBoundingClientRect();
+                                                                setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
+                                                                setShowInputEmojiPicker(!showInputEmojiPicker);
+                                                            }}
+                                                        >
+                                                            <Smile size={22} color={showInputEmojiPicker ? "#0EA5BE" : "#54656f"} />
                                                         </button>
                                                     </div>
                                                     <div className="wa-input-area">
@@ -14160,9 +14194,9 @@ export default function Chat() {
                                                                                             ) : (
                                                                                                 <>
                                                                                                     {isMeMsg(msg) ? (
-                                                                                                        <img src={user?.profile_pic || user?.avatar || '/default-avatar.png'} alt="me" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                                                                                        ((userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo) ? (<img src={userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo} alt="me" style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} />) : (<div className="wa-avatar-letter" style={{ display: "flex", width: "100%", height: "100%", justifyContent: "center", alignItems: "center", fontSize: 13, background: "#dfe5e7", borderRadius: "50%", color: "#3b4a54", fontWeight: 600 }}>{(userData?.name || user?.name || "M")[0].toUpperCase()}</div>))
                                                                                                     ) : (
-                                                                                                        <img src={msg.sender_id?.profile_pic || msg.sender_id?.avatar || '/default-avatar.png'} alt="user" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                                                                                        ((msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar) ? (<img src={msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar} alt="user" style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} />) : (<div className="wa-avatar-letter" style={{ display: "flex", width: "100%", height: "100%", justifyContent: "center", alignItems: "center", fontSize: 13, background: "#dfe5e7", borderRadius: "50%", color: "#3b4a54", fontWeight: 600 }}>{(msg.sender_id?.name || "U")[0].toUpperCase()}</div>))
                                                                                                     )}
                                                                                                 </>
                                                                                             )}
@@ -14792,8 +14826,8 @@ export default function Chat() {
                                                 <div className="wa-input-pill">
                                                     <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
                                                         {renderAttachmentMenu()}
-                                                        <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)">
-                                                            <Paperclip size={22} color="#54656f" />
+                                                        <button className={`wa-nav-icon-btn ${isAttachmentMenuOpen ? 'active' : ''}`} onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)">
+                                                            <Paperclip size={22} color={isAttachmentMenuOpen ? "#0EA5BE" : "#54656f"} />
                                                         </button>
                                                         <input
                                                             type="file"
@@ -14802,8 +14836,16 @@ export default function Chat() {
                                                             accept=".jpg,.jpeg,.png,.doc,.docx,.ppt,.pptx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
                                                             onChange={handleFileSelect}
                                                         />
-                                                        <button className="wa-nav-icon-btn">
-                                                            <Smile size={22} color="#54656f" />
+                                                        <button 
+                                                            className={`wa-nav-icon-btn ${showInputEmojiPicker ? 'active' : ''}`}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                const rect = e.currentTarget.getBoundingClientRect();
+                                                                setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
+                                                                setShowInputEmojiPicker(!showInputEmojiPicker);
+                                                            }}
+                                                        >
+                                                            <Smile size={22} color={showInputEmojiPicker ? "#0EA5BE" : "#54656f"} />
                                                         </button>
                                                     </div>
                                                     <div className="wa-input-area">
@@ -17523,7 +17565,28 @@ export default function Chat() {
             {renderContactSelectionPanel()}
             {renderConfirmContactSendPanel()}
             {renderContactDetailPopup()}
-
+            {fullEmojiPicker && (
+                <EmojiPicker 
+                    position={fullEmojiPicker.pos}
+                    zoom={typeof getAppZoom === 'function' ? getAppZoom() : 1}
+                    onSelect={(emoji) => {
+                        handleReaction(fullEmojiPicker.id, emoji, fullEmojiPicker.isGroup);
+                        setFullEmojiPicker(null);
+                    }}
+                    onClose={() => setFullEmojiPicker(null)}
+                />
+            )}
+            {showInputEmojiPicker && (
+                <EmojiPicker 
+                    position={inputEmojiPickerPos}
+                    zoom={typeof getAppZoom === 'function' ? getAppZoom() : 1}
+                    className="input-mode"
+                    onSelect={(emoji) => {
+                        setInput(prev => prev + emoji);
+                    }}
+                    onClose={() => setShowInputEmojiPicker(false)}
+                />
+            )}
         </>
     );
 }
