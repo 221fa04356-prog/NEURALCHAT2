@@ -2138,4 +2138,72 @@ router.post('/messages/:messageId/react', authenticateToken, async (req, res) =>
     }
 });
 
+// Send Event (P2P)
+router.post('/event/send', authenticateToken, async (req, res) => {
+    const userId = req.user.id;
+    const { toUserId, eventData } = req.body;
+
+    if (!toUserId || !eventData || !eventData.name) {
+        return res.status(400).json({ error: 'Missing toUserId or eventData' });
+    }
+
+    try {
+        const msg = await Message.create({
+            user_id: userId,
+            receiver_id: toUserId,
+            role: 'user',
+            type: 'event',
+            event: {
+                ...eventData,
+                participants: [userId] // Creator is participant
+            }
+        });
+
+        const msgObj = msg.toObject();
+
+        if (req.io) {
+            req.io.to(String(toUserId)).emit('receive_message', msgObj);
+        }
+
+        res.json({ status: 'sent', message: msgObj });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Join Event (P2P)
+router.post('/event/:messageId/join', authenticateToken, async (req, res) => {
+    const userId = req.user.id;
+    try {
+        const msg = await Message.findById(req.params.messageId);
+        if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
+
+        if (!msg.event.participants) msg.event.participants = [];
+        const index = msg.event.participants.indexOf(userId);
+        if (index === -1) {
+            msg.event.participants.push(userId);
+        } else {
+            msg.event.participants.splice(index, 1);
+        }
+
+        msg.markModified('event');
+        await msg.save();
+
+        const msgObj = msg.toObject();
+        
+        if (req.io) {
+            [String(msg.user_id), String(msg.receiver_id)].forEach(pId => {
+                req.io.to(pId).emit('event_updated', {
+                    messageId: msg._id,
+                    event: msgObj.event
+                });
+            });
+        }
+
+        res.json({ status: 'success', event: msgObj.event });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

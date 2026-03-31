@@ -962,4 +962,97 @@ router.post('/:groupId/join', authenticateToken, async (req, res) => {
 });
 
 
+// POST /api/groups/event/send - Send a group event message
+router.post('/event/send', authenticateToken, async (req, res) => {
+    try {
+        const { groupId, eventData } = req.body;
+        const senderId = req.user.id;
+
+        if (!groupId) return res.status(400).json({ error: 'Group ID required' });
+        if (!eventData || !eventData.name) return res.status(400).json({ error: 'Event name required' });
+
+        const group = await Group.findById(groupId);
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+
+        const isMem = (group.members || []).some(m => String(m) === String(senderId));
+        const isOwner = String(group.admin) === String(senderId);
+
+        if (!isMem && !isOwner) {
+            return res.status(403).json({ error: 'Not a group member' });
+        }
+
+        const msg = await GroupMessage.create({
+            group_id: groupId,
+            sender_id: senderId,
+            role: 'user',
+            content: eventData.name,
+            type: 'event',
+            event: {
+                ...eventData,
+                participants: [senderId] // Creator is participant
+            }
+        });
+
+        const populated = await GroupMessage.findById(msg._id).populate('sender_id', 'name _id __enc_name');
+        const msgObj = populated.toObject();
+
+        if (req.io) {
+            group.members.forEach(memberId => {
+                req.io.to(memberId.toString()).emit('group_message', {
+                    groupId,
+                    message: msgObj
+                });
+            });
+        }
+
+        res.json({ status: 'sent', message: msgObj });
+    } catch (err) {
+        console.error('[EVENT SEND GROUP]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/groups/event/:messageId/join - Join a group event
+router.post('/event/:messageId/join', authenticateToken, async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const userId = req.user.id;
+
+        const msg = await GroupMessage.findById(messageId);
+        if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
+
+        if (!msg.event.participants) msg.event.participants = [];
+        const index = msg.event.participants.indexOf(userId);
+        if (index === -1) {
+            msg.event.participants.push(userId);
+        } else {
+            msg.event.participants.splice(index, 1);
+        }
+
+        msg.markModified('event');
+        await msg.save();
+
+        const msgObj = msg.toObject();
+
+        if (req.io) {
+            const group = await Group.findById(msg.group_id);
+            if (group) {
+                group.members.forEach(memberId => {
+                    req.io.to(memberId.toString()).emit('event_updated', {
+                        messageId: msg._id,
+                        event: msgObj.event,
+                        isGroup: true,
+                        groupId: String(msg.group_id)
+                    });
+                });
+            }
+        }
+        
+        res.json({ status: 'success', event: msgObj.event });
+    } catch (err) {
+        console.error('[EVENT JOIN GROUP] Error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;
