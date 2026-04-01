@@ -20,6 +20,20 @@ const searchSlideStyles = `
     from { transform: translateX(20px); opacity: 0; }
     to { transform: translateX(0); opacity: 1; }
 }
+@keyframes waTypingDot {
+    0% { opacity: 0.3; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1.1); }
+    100% { opacity: 0.3; transform: scale(0.8); }
+}
+.wa-typing-dot {
+    width: 6px;
+    height: 6px;
+    background: #8696a0;
+    border-radius: 50%;
+    animation: waTypingDot 1.4s infinite ease-in-out;
+}
+.wa-typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.wa-typing-dot:nth-child(3) { animation-delay: 0.4s; }
 `;
 import io from 'socket.io-client';
 import '../styles/Chat.css';
@@ -813,6 +827,7 @@ export default function Chat() {
     const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
     const attachmentMenuRef = useRef(null);
     const attachmentTypeRef = useRef('all');
+    const processedMessageIdsRef = useRef(new Set());
 
 
     const [userData, setUserData] = useState(user); // For Profile Display
@@ -827,6 +842,51 @@ export default function Chat() {
     const [messageSearchQuery, setMessageSearchQuery] = useState('');
     const [filterType, setFilterType] = useState('all'); // 'all' | 'unread' | 'favorites'
     const [openDropdown, setOpenDropdown] = useState(null); // { type: 'msg'|'contact', id: string, data: any }
+    const [customLists, setCustomLists] = useState(() => JSON.parse(localStorage.getItem('wa-custom-lists') || '[]'));
+    const [isCreateListOpen, setIsCreateListOpen] = useState(false);
+    const [isAddToListModalOpen, setIsAddToListModalOpen] = useState(false);
+    const [newListName, setNewListName] = useState('');
+    const [newListMembers, setNewListMembers] = useState([]);
+    const [searchListQuery, setSearchListQuery] = useState('');
+    const [showCustomListsDropdown, setShowCustomListsDropdown] = useState(false);
+    const [typingUsers, setTypingUsers] = useState({}); // { [chatId]: Set<userId> }
+    const typingTimeoutRef = useRef({}); // { [chatId]: timeoutId }
+
+    // Fetch custom lists from backend on mount
+    useEffect(() => {
+        const fetchCustomLists = async () => {
+            try {
+                const token = localStorage.getItem('token');
+                if (!token) return;
+                const res = await axios.get('/api/chat/custom-lists', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.data && res.data.length > 0) {
+                    setCustomLists(res.data);
+                }
+            } catch (err) {
+                console.error('[FETCH CUSTOM LISTS ERROR]', err);
+            }
+        };
+        fetchCustomLists();
+    }, []);
+
+    // Sync custom lists to backend whenever they change
+    useEffect(() => {
+        const syncCustomLists = async () => {
+            try {
+                localStorage.setItem('wa-custom-lists', JSON.stringify(customLists));
+                const token = localStorage.getItem('token');
+                if (!token) return;
+                await axios.post('/api/chat/custom-lists/sync', { customLists }, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+            } catch (err) {
+                console.error('[SYNC CUSTOM LISTS ERROR]', err);
+            }
+        };
+        syncCustomLists();
+    }, [customLists]);
     const [dropdownPos, setDropdownPos] = useState({ x: 0, y: 0 });
     const [fullEmojiPicker, setFullEmojiPicker] = useState(null); // { msgId, isGroup, pos }
     const [showInputEmojiPicker, setShowInputEmojiPicker] = useState(false);
@@ -1387,7 +1447,14 @@ export default function Chat() {
         }
     };
 
-    const renderLastMessagePreview = (msg, isGroup = false, defaultText = 'No messages yet') => {
+    const renderLastMessagePreview = (msg, isGroup = false, defaultText = 'No messages yet', chatId = null) => {
+        if (chatId && typingUsers[String(chatId)] && typingUsers[String(chatId)].size > 0) {
+            return (
+                <span style={{ color: '#00a884', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    typing...
+                </span>
+            );
+        }
         if (!msg) return defaultText;
 
         if (msg.is_deleted_by_admin) {
@@ -2459,6 +2526,20 @@ export default function Chat() {
                 }
             }
 
+            // Stop typing status if a message is received
+            const senderIdForTyping = data.sender_id || data.user_id;
+            const currentSelectedForTyping = selectedUserRef.current;
+            const chatIdForTyping = (currentSelectedForTyping && String(senderIdForTyping) === String(currentSelectedForTyping._id))
+                ? String(senderIdForTyping) : null;
+
+            if (chatIdForTyping) {
+                setTypingUsers(prev => {
+                    const next = { ...prev };
+                    delete next[chatIdForTyping];
+                    return next;
+                });
+            }
+
             const senderId = data.sender_id || data.user_id;
             const currentSelected = selectedUserRef.current;
             const myId = userRef.current?.id || userRef.current?._id;
@@ -2515,49 +2596,55 @@ export default function Chat() {
                 }
             }
 
-            fetchUsers();
+            const exists = (usersRef.current || []).some(u => String(u._id) === String(senderId));
+            if (!exists) {
+                fetchUsers();
+            }
 
             // Optimistic Update for Sidebar (Unread Count + Last Message + Counts)
-            setUsers(prev => prev.map(u => {
-                if (String(u._id) === String(senderId)) {
-                    // If chat is active, don't increment unread (it's read immediately)
-                    // If chat is NOT active, increment unread
-                    const newUnread = isActiveChat ? 0 : (u.unreadCount || 0) + 1;
+            if (data._id && !processedMessageIdsRef.current.has(String(data._id))) {
+                processedMessageIdsRef.current.add(String(data._id));
 
-                    // Increment specific counters based on type
-                    let newMediaCount = u.mediaCount || 0;
-                    let newDocCount = u.docCount || 0;
-                    let newLinkCount = u.linkCount || 0;
+                setUsers(prev => prev.map(u => {
+                    if (String(u._id) === String(senderId)) {
+                        // If chat is active, don't increment unread (it's read immediately)
+                        // If chat is NOT active, increment unread
+                        const newUnread = isActiveChat ? 0 : (u.unreadCount || 0) + 1;
 
-                    if (data.type === 'image' || data.type === 'video') newMediaCount++;
-                    if (data.type === 'file') newDocCount++;
-                    if (data.link_preview && data.link_preview.url) newLinkCount++;
+                        // Increment specific counters based on type
+                        let newMediaCount = u.mediaCount || 0;
+                        let newDocCount = u.docCount || 0;
+                        let newLinkCount = u.linkCount || 0;
 
-                    return {
-                        ...u,
-                        unreadCount: newUnread,
-                        mediaCount: newMediaCount,
-                        docCount: newDocCount,
-                        linkCount: newLinkCount,
-                        lastMessage: {
-                            content: data.content,
-                            created_at: new Date().toISOString(),
-                            type: data.type || 'text',
-                            is_view_once: data.is_view_once || false,
-                            fileName: data.fileName,
-                            duration: data.duration,
-                            ciphertext: data.ciphertext,
-                            session_header: data.session_header
-                        }
-                    };
-                }
-                return u;
-            }).sort((a, b) => {
-                // Sort by time
-                const timeA = a.lastMessage?.created_at ? new Date(a.lastMessage.created_at) : 0;
-                const timeB = b.lastMessage?.created_at ? new Date(b.lastMessage.created_at) : 0;
-                return timeB - timeA;
-            }));
+                        if (data.type === 'image' || data.type === 'video') newMediaCount++;
+                        if (data.type === 'file') newDocCount++;
+                        if (data.link_preview && data.link_preview.url) newLinkCount++;
+
+                        return {
+                            ...u,
+                            unreadCount: newUnread,
+                            mediaCount: newMediaCount,
+                            docCount: newDocCount,
+                            linkCount: newLinkCount,
+                            lastMessage: {
+                                content: data.content,
+                                created_at: new Date().toISOString(),
+                                type: data.type || 'text',
+                                is_view_once: data.is_view_once || false,
+                                fileName: data.fileName,
+                                duration: data.duration,
+                                ciphertext: data.ciphertext,
+                                session_header: data.session_header
+                            }
+                        };
+                    }
+                    return u;
+                }).sort((a, b) => {
+                    const timeA = a.lastMessage?.created_at ? new Date(a.lastMessage.created_at) : 0;
+                    const timeB = b.lastMessage?.created_at ? new Date(b.lastMessage.created_at) : 0;
+                    return timeB - timeA;
+                }));
+            }
 
             // REMOVED fetchUsers() to prevent race condition overwriting optimistic state
         };
@@ -2857,6 +2944,44 @@ export default function Chat() {
                 setMessages(updateFn);
             }
         };
+        const onUserTyping = (data) => {
+            const { userId, groupId } = data;
+            // Use String() conversion and handle id/_id consistently
+            const chatId = String(groupId || userId || '');
+            if (!chatId) return;
+
+            setTypingUsers(prev => {
+                const current = prev[chatId] || new Set();
+                const uId = String(userId);
+                if (current.has(uId)) return prev;
+                const next = new Set(current);
+                next.add(uId);
+                return { ...prev, [chatId]: next };
+            });
+        };
+
+        const onUserStopTyping = (data) => {
+            const { userId, groupId } = data;
+            const chatId = String(groupId || userId || '');
+            if (!chatId) return;
+
+            setTypingUsers(prev => {
+                const current = prev[chatId];
+                if (!current) return prev;
+                const uId = String(userId);
+                const next = new Set(current);
+                next.delete(uId);
+                if (next.size === 0) {
+                    const copy = { ...prev };
+                    delete copy[chatId];
+                    return copy;
+                }
+                return { ...prev, [chatId]: next };
+            });
+        };
+
+        socket.on('user_typing', onUserTyping);
+        socket.on('user_stop_typing', onUserStopTyping);
         socket.on('message_reaction_updated', onMessageReactionUpdated);
 
 
@@ -2986,8 +3111,11 @@ export default function Chat() {
         // Listen for new group messages
         const onGroupMessage = (data) => {
             console.log('[DEBUG] group_message received:', data);
-            fetchGroups();
-            fetchCommunities(); // Added for unread counts & last message sync in communities
+            const exists = (groupsRef.current || []).some(g => String(g._id) === String(data.groupId));
+            if (!exists) {
+                fetchGroups();
+                fetchCommunities();
+            }
             const currentSelectedGroup = selectedGroupRef?.current;
             // Only consider it 'current' if we have an active selection AND we are looking at the chat
             const isCurrentGroup = !!(currentSelectedGroup && String(currentSelectedGroup._id) === String(data.groupId));
@@ -3051,63 +3179,67 @@ export default function Chat() {
             }
 
             // Update sidebars/drawers
-            const lastMsg = {
-                _id: data.message?._id,
-                content: data.message?.content || '',
-                type: data.message?.type || 'text',
-                is_view_once: data.message?.is_view_once || false,
-                fileName: data.message?.fileName,
-                created_at: data.message?.created_at || new Date().toISOString(),
-                sender_id: data.message?.sender_id,
-                is_deleted_by_user: data.message?.is_deleted_by_user,
-                is_deleted_by_admin: data.message?.is_deleted_by_admin,
-                deleted_for: data.message?.deleted_for,
-                duration: data.message?.duration,
-                is_system: data.message?.is_system,
-                ciphertext: data.message?.ciphertext,
-                sender_key_id: data.message?.sender_key_id
-            };
+            if (!data.message?._id || !processedMessageIdsRef.current.has(String(data.message._id))) {
+                if (data.message?._id) processedMessageIdsRef.current.add(String(data.message._id));
 
-            // 1. Update regular groups list
-            setGroups(prev => prev.map(g => {
-                if (String(g._id) === String(data.groupId)) {
-                    const currentUnread = g.unreadCount || 0;
-                    const newUnread = (isCurrentGroup || isMyOwnMessage) ? 0 : (currentUnread + 1);
-                    return { ...g, lastMessage: lastMsg, unreadCount: newUnread };
-                }
-                return g;
-            }));
+                const lastMsg = {
+                    _id: data.message?._id,
+                    content: data.message?.content || '',
+                    type: data.message?.type || 'text',
+                    is_view_once: data.message?.is_view_once || false,
+                    fileName: data.message?.fileName,
+                    created_at: data.message?.created_at || new Date().toISOString(),
+                    sender_id: data.message?.sender_id,
+                    is_deleted_by_user: data.message?.is_deleted_by_user,
+                    is_deleted_by_admin: data.message?.is_deleted_by_admin,
+                    deleted_for: data.message?.deleted_for,
+                    duration: data.message?.duration,
+                    is_system: data.message?.is_system,
+                    ciphertext: data.message?.ciphertext,
+                    sender_key_id: data.message?.sender_key_id
+                };
 
-            // 2. Update communities drawer
-            const updateComm = (c) => {
-                const annId = String(c.announcements?._id || c.announcements?.id || c.announcements);
-                const isAnn = String(data.groupId) === annId;
-                const hasGroup = (c.groups || []).some(g => String(g._id || g.id || g) === String(data.groupId));
-
-                if (hasGroup || isAnn) {
-                    let updatedC = { ...c };
-                    if (isAnn) {
-                        updatedC.unreadCount = (isCurrentGroup || isMyOwnMessage) ? 0 : (c.unreadCount || 0) + 1;
-                        updatedC.announcements = {
-                            ...c.announcements,
-                            lastMessage: lastMsg
-                        };
-                    } else {
-                        updatedC.groups = (c.groups || []).map(g => {
-                            if (String(g._id || g.id) === String(data.groupId)) {
-                                const newU = (isCurrentGroup || isMyOwnMessage) ? 0 : (g.unreadCount || 0) + 1;
-                                return { ...g, lastMessage: lastMsg, unreadCount: newU };
-                            }
-                            return g;
-                        });
+                // 1. Update regular groups list
+                setGroups(prev => prev.map(g => {
+                    if (String(g._id) === String(data.groupId)) {
+                        const currentUnread = g.unreadCount || 0;
+                        const newUnread = (isCurrentGroup || isMyOwnMessage) ? 0 : (currentUnread + 1);
+                        return { ...g, lastMessage: lastMsg, unreadCount: newUnread };
                     }
-                    return updatedC;
-                }
-                return c;
-            };
+                    return g;
+                }));
 
-            setCommunities(prev => prev.map(updateComm));
-            setSelectedCommunity(prev => prev ? updateComm(prev) : null);
+                // 2. Update communities drawer
+                const updateComm = (c) => {
+                    const annId = String(c.announcements?._id || c.announcements?.id || c.announcements);
+                    const isAnn = String(data.groupId) === annId;
+                    const hasGroup = (c.groups || []).some(g => String(g._id || g.id || g) === String(data.groupId));
+
+                    if (hasGroup || isAnn) {
+                        let updatedC = { ...c };
+                        if (isAnn) {
+                            updatedC.unreadCount = (isCurrentGroup || isMyOwnMessage) ? 0 : (c.unreadCount || 0) + 1;
+                            updatedC.announcements = {
+                                ...c.announcements,
+                                lastMessage: lastMsg
+                            };
+                        } else {
+                            updatedC.groups = (c.groups || []).map(g => {
+                                if (String(g._id || g.id) === String(data.groupId)) {
+                                    const newU = (isCurrentGroup || isMyOwnMessage) ? 0 : (g.unreadCount || 0) + 1;
+                                    return { ...g, lastMessage: lastMsg, unreadCount: newU };
+                                }
+                                return g;
+                            });
+                        }
+                        return updatedC;
+                    }
+                    return c;
+                };
+
+                setCommunities(prev => prev.map(updateComm));
+                setSelectedCommunity(prev => prev ? updateComm(prev) : null);
+            }
         };
         socket.on('group_message', onGroupMessage);
 
@@ -3290,6 +3422,8 @@ export default function Chat() {
             socket.off('request_accepted', onRequestAccepted);
             socket.off('account_banned', onAccountBanned);
             socket.off('account_locked', onAccountLocked);
+            socket.off('user_typing', onUserTyping);
+            socket.off('user_stop_typing', onUserStopTyping);
             if (socket.connected) socket.disconnect();
         };
     }, [user.id, navigate]);
@@ -6430,19 +6564,21 @@ export default function Chat() {
             { icon: Camera, label: t('chat_window.camera'), color: '#ff2e74', onClick: () => { setIsAttachmentMenuOpen(false); handleCameraAction('chat'); } },
             { icon: User, label: t('chat_window.contact'), color: '#009de2', onClick: () => { setIsAttachmentMenuOpen(false); setIsContactSelectionOpen(true); setSelectedContacts([]); setContactSearchQuery(''); } },
             { icon: List, label: t('chat_window.poll'), color: '#ffbc38', onClick: () => { setIsAttachmentMenuOpen(false); setPollQuestion(''); setPollOptions(['', '']); setAllowMultipleAnswers(true); setPollErrors({}); setIsPollModalOpen(true); } },
-            { icon: Calendar, label: t('chat_window.event'), color: '#ef0b33', onClick: () => { 
-                setIsAttachmentMenuOpen(false); 
-                setEventName('');
-                setEventDescription('');
-                setEventStartDate(new Date().toISOString().split('T')[0]);
-                setEventStartTime('11:00');
-                setEventEndDate('');
-                setEventEndTime('');
-                setEventLocation('');
-                setEventCallOn(false);
-                setEventCallType('Video');
-                setIsEventModalOpen(true);
-            } },
+            {
+                icon: Calendar, label: t('chat_window.event'), color: '#ef0b33', onClick: () => {
+                    setIsAttachmentMenuOpen(false);
+                    setEventName('');
+                    setEventDescription('');
+                    setEventStartDate(new Date().toISOString().split('T')[0]);
+                    setEventStartTime('11:00');
+                    setEventEndDate('');
+                    setEventEndTime('');
+                    setEventLocation('');
+                    setEventCallOn(false);
+                    setEventCallType('Video');
+                    setIsEventModalOpen(true);
+                }
+            },
         ];
 
         return (
@@ -7776,7 +7912,6 @@ export default function Chat() {
             const createdAt = activeTarget.created_at || new Date().toISOString();
             const creatorName = activeTarget.creatorName || (activeTarget.members && activeTarget.members.length > 0 ? activeTarget.members[0].name : 'Group Admin');
 
-            const isDark = false;
             const bgColor = '#ffffff';
             const itemBgColor = '#ffffff';
             const headerBgColor = '#ffffff';
@@ -7811,11 +7946,11 @@ export default function Chat() {
                                     {activeTarget.isCommunityAnnouncements ? activeTarget.communityName : displayName}
                                 </span>
                                 {!activeTarget.isCommunityAnnouncements && (
-                                    <Pencil size={20} color={isDark ? '#aebac1' : '#54656f'} style={{ cursor: 'pointer' }} />
+                                    <Pencil size={20} color={subTextColor} style={{ cursor: 'pointer' }} />
                                 )}
                             </div>
                             <div style={{ fontSize: 16, color: subTextColor, marginTop: 8 }}>
-                                {activeTarget.isCommunityAnnouncements ? 'Announcements' : 'Group'} Ã‚Â· <span style={{ color: '#0EA5BE' }}>{membersCount} members</span>
+                                {activeTarget.isCommunityAnnouncements ? 'Announcements' : 'Group'} · <span style={{ color: '#0EA5BE' }}>{membersCount} members</span>
                             </div>
 
                             <div style={{ display: 'flex', gap: 12, marginTop: 24, width: '100%', justifyContent: 'center' }}>
@@ -7844,77 +7979,64 @@ export default function Chat() {
 
                         <div style={{ width: '100%', borderBottom: thickDivider }}></div>
 
-                        <div style={{ background: itemBgColor }}>
-                            <div className="clickable" onClick={() => setIsSharedMediaOpen(true)} style={{ padding: '14px 30px', display: 'flex', flexDirection: 'column', cursor: 'pointer' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span style={{ color: textColor, fontSize: 16 }}>Media, links and docs</span>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <span style={{ color: subTextColor, fontSize: 15 }}>{(activeTarget.mediaCount || 0) + (activeTarget.linkCount || 0) + (activeTarget.docCount || 0)}</span>
-                                        <ChevronRight size={20} color={subTextColor} />
+                        {(() => {
+                            const chatMsgs = groupMessages || [];
+                            const activeMsgs = chatMsgs.filter(m => !m.is_deleted_by_user && !m.is_deleted_by_admin);
+                            const images = activeMsgs.filter(m => m.type === 'image' || m.type === 'video').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                            const links = activeMsgs.filter(m => (m.link_preview?.url || /(https?:\/\/[^\s]+)/.test(m.content || '')) && m.type !== 'image' && m.type !== 'video').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                            const docs = activeMsgs.filter(m => m.type === 'file').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                            const totalCount = images.length + links.length + docs.length;
+                            const previewItems = [...images, ...links, ...docs].slice(0, 4);
+
+                            return (
+                                <div style={{ background: itemBgColor }}>
+                                    <div className="clickable" onClick={() => setIsSharedMediaOpen(true)} style={{ padding: '14px 30px', display: 'flex', flexDirection: 'column', cursor: 'pointer' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ color: textColor, fontSize: 16 }}>Media, links and docs</span>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                <span style={{ color: subTextColor, fontSize: 15 }}>{totalCount}</span>
+                                                <ChevronRight size={20} color={subTextColor} />
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12, color: subTextColor, fontSize: 14 }}>
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Image size={16} /> {images.length} Media</span>
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><LinkIcon size={16} /> {links.length} Links</span>
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><FileText size={16} /> {docs.length} Docs</span>
+                                        </div>
                                     </div>
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12, color: subTextColor, fontSize: 14 }}>
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Image size={16} /> {activeTarget.mediaCount || 0} Media</span>
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><LinkIcon size={16} /> {activeTarget.linkCount || 0} Links</span>
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><FileText size={16} /> {activeTarget.docCount || 0} Docs</span>
-                                </div>
-                            </div>
-
-                            <div style={{ padding: '0 30px 14px 30px', display: 'flex', gap: 6, overflowX: 'auto' }}>
-                                {(() => {
-                                    const chatMsgs = groupMessages;
-                                    const activeMsgs = chatMsgs.filter(m => !m.is_deleted_by_user && !m.is_deleted_by_admin);
-
-                                    // Prioritize: Images > Links > Docs
-                                    const images = chatMsgs.filter(m => m.type === 'image' || m.type === 'video').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                                    const links = chatMsgs.filter(m => (m.link_preview?.url || /(https?:\/\/[^\s]+)/.test(m.content)) && m.type !== 'image' && m.type !== 'video').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                                    const docs = chatMsgs.filter(m => m.type === 'file').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-                                    const previewItems = [...images, ...links, ...docs].slice(0, 4);
-
-                                    return (
-                                        <>
-                                            {previewItems.map((m, i) => {
-                                                if (m.type === 'image' || m.type === 'video') {
-                                                    return (
-                                                        <div key={i} onClick={(e) => { e.stopPropagation(); setViewingImage(m); }} style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }}>
-                                                            <img src={m.file_path} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                        </div>
-                                                    );
-                                                }
-                                                if (m.type === 'file') {
-                                                    return (
-                                                        <div key={i} style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px', overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDownload(m.file_path, m.fileName); }}>
-                                                            <FileText size={20} color="#8696a0" />
-                                                            <div style={{ fontSize: 9, color: '#667781', textAlign: 'center', marginTop: 4, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                                {m.fileName || 'Doc'}
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                }
-                                                // Link
-                                                if (m.link_preview && m.link_preview.image) {
-                                                    return (
-                                                        <div key={i} style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }} onClick={(e) => { e.stopPropagation(); window.open(m.link_preview.url, '_blank'); }}>
-                                                            <img src={m.link_preview.image} alt="link" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                        </div>
-                                                    );
-                                                }
-                                                const fallbackLink = m.link_preview?.url || m.content?.match(/(https?:\/\/[^\s]+)/)?.[0];
+                                    <div style={{ padding: '0 30px 14px 30px', display: 'flex', gap: 6, overflowX: 'auto' }}>
+                                        {previewItems.map((m, i) => {
+                                            if (m.type === 'image' || m.type === 'video') {
                                                 return (
-                                                    <div key={i} style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); if (fallbackLink) window.open(fallbackLink, '_blank'); }}>
-                                                        <LinkIcon size={24} color="#8696a0" />
+                                                    <div key={i} onClick={(e) => { e.stopPropagation(); setViewingImage(m); }} style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }}>
+                                                        <img src={m.file_path} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                     </div>
                                                 );
-                                            })}
-                                            {[...Array(Math.max(0, 4 - previewItems.length))].map((_, i) => (
-                                                <div key={`empty-${i}`} style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', flexShrink: 0 }}></div>
-                                            ))}
-                                        </>
-                                    );
-                                })()}
-                            </div>
-                        </div>
+                                            }
+                                            if (m.type === 'file') {
+                                                return (
+                                                    <div key={i} style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px', overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDownload(m.file_path, m.fileName); }}>
+                                                        <FileText size={20} color="#8696a0" />
+                                                        <div style={{ fontSize: 9, color: '#667781', textAlign: 'center', marginTop: 4, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                            {m.fileName || 'Document'}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+                                            const lImg = m.link_preview?.image;
+                                            return (
+                                                <div key={i} style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); window.open(m.link_preview?.url || m.content, '_blank'); }}>
+                                                    {lImg ? <img src={lImg} alt="link" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <LinkIcon size={24} color="#8696a0" />}
+                                                </div>
+                                            );
+                                        })}
+                                        {[...Array(Math.max(0, 4 - previewItems.length))].map((_, i) => (
+                                            <div key={`empty-${i}`} style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', flexShrink: 0 }}></div>
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })()}
 
                         <div style={{ width: '100%', borderBottom: thickDivider }}></div>
 
@@ -7942,7 +8064,6 @@ export default function Chat() {
                                 <span style={{ color: subTextColor, fontSize: 14, fontWeight: 500 }}>{membersCount} members</span>
                                 <Search size={20} color={subTextColor} style={{ cursor: 'pointer' }} />
                             </div>
-
                             <div style={{ padding: '0 30px', display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, cursor: 'pointer' }} onClick={() => setIsGroupAddMemberOpen(true)}>
                                 <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#0EA5BE', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
                                     <UserPlus size={20} color="#ffffff" />
@@ -7957,93 +8078,35 @@ export default function Chat() {
                             </div>
 
                             <div className="wa-member-list">
-                                {(() => {
-                                    const myId = String(user.id || user._id);
-                                    let amIGroupAdmin = false;
-                                    if (activeTarget && activeTarget.members) {
-                                        const meObj = activeTarget.members.find(m => String(m._id) === myId);
-                                        if (meObj) {
-                                            amIGroupAdmin = String(meObj._id) === String(activeTarget.creator_id) ||
-                                                String(meObj._id) === String(activeTarget.creatorId) ||
-                                                meObj.name === creatorName ||
-                                                meObj.isAdmin ||
-                                                (activeTarget.admins && activeTarget.admins.some(a => String(a._id || a) === String(meObj._id))) ||
-                                                (creatorName === user.name) ||
-                                                (myId === String(activeTarget.creator_id || activeTarget.creatorId));
-                                        }
-                                    }
+                                {activeTarget.members?.map(m => {
+                                    const isMe = String(m._id) === String(user.id || user._id);
+                                    let phoneValue = m.mobile ? `+${m.mobile}` : '';
+                                    const isGroupAdmin = activeTarget.creatorId === m._id || activeTarget.admins?.some(a => (a._id || a) === m._id);
 
-                                    return activeTarget.members?.map(m => {
-                                        const isMe = String(m._id) === String(user.id || user._id);
-                                        let phoneValue = m.mobile ? `+${m.mobile}` : '';
-                                        if (phoneValue.includes('91') && phoneValue.length <= 13) {
-                                            phoneValue = `+91 ${phoneValue.replace('+91', '').substring(0, 5)} ${phoneValue.replace('+91', '').substring(5)}`;
-                                        } else if (!phoneValue.startsWith('+') && m.mobile) phoneValue = `+91 ${m.mobile}`;
-
-                                        const isGroupAdmin = String(m._id) === String(activeTarget.creator_id) ||
-                                            String(m._id) === String(activeTarget.creatorId) ||
-                                            m.name === creatorName ||
-                                            m.isAdmin ||
-                                            (activeTarget.admins && activeTarget.admins.some(a => String(a._id || a) === String(m._id))) ||
-                                            (isMe && creatorName === user.name) ||
-                                            (isMe && String(user.id || user._id) === String(activeTarget.creator_id || activeTarget.creatorId));
-
-                                        return (
-                                            <div key={m._id} className="wa-setting-item clickable" style={{ display: 'flex', alignItems: 'center', padding: '12px 30px', cursor: 'pointer', justifyContent: 'space-between' }}
-                                                onClick={(e) => {
-                                                    if (amIGroupAdmin && !isGroupAdmin) {
-                                                        setAdminConfirmModal({ type: 'add', member: m });
-                                                    }
-                                                }}
-                                                onContextMenu={(e) => {
-                                                    e.preventDefault();
-                                                    if (amIGroupAdmin && isGroupAdmin && m.name !== activeTarget.creatorName && String(m._id) !== String(activeTarget.creator_id) && String(m._id) !== String(activeTarget.creatorId)) {
-                                                        setAdminConfirmModal({ type: 'remove', member: m });
-                                                    }
-                                                }}
-                                            >
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                                    <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', flexShrink: 0 }}>
-                                                        {m.image ? <img src={m.image} alt="mem" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#54656f', fontSize: 18 }}>{m.name?.charAt(0)}</span>}
-                                                    </div>
-                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                                                        <span style={{ color: textColor, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                            {isMe ? 'You' : m.name}
-                                                            {(m.name === 'Kiki' || m.name === 'Kothi') && <span style={{ fontSize: 14 }}>{m.name === 'Kiki' ? 'Ã°Å¸â„¢â€ž' : 'Ã°Å¸Ââ€™'}</span>}
-                                                        </span>
-                                                        <span style={{ color: subTextColor, fontSize: 14 }}>{m.about || (isMe ? 'Available' : 'Hey there! I am using WhatsApp.')}</span>
-                                                    </div>
+                                    return (
+                                        <div key={m._id} className="wa-setting-item clickable" style={{ display: 'flex', alignItems: 'center', padding: '12px 30px', cursor: 'pointer', justifyContent: 'space-between' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', flexShrink: 0 }}>
+                                                    {m.image ? <img src={m.image} alt="mem" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#54656f', fontSize: 18 }}>{m.name?.charAt(0)}</span>}
                                                 </div>
-
-                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                                                    {isGroupAdmin && <div style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: 'none', color: '#0EA5BE', background: '#e6f2f7', fontWeight: 500 }}>Group admin</div>}
-                                                    {!isMe && phoneValue && <span style={{ color: subTextColor, fontSize: 13 }}>{phoneValue}</span>}
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                                    <span style={{ color: textColor, fontSize: 16 }}>{isMe ? 'You' : m.name}</span>
+                                                    <span style={{ color: subTextColor, fontSize: 14 }}>{m.about || 'Available'}</span>
                                                 </div>
                                             </div>
-                                        );
-                                    });
-                                })()}
+                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                                                {isGroupAdmin && <div style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, color: '#0EA5BE', background: '#e6f2f7', fontWeight: 500 }}>Group admin</div>}
+                                                {!isMe && phoneValue && <span style={{ color: subTextColor, fontSize: 13 }}>{phoneValue}</span>}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
 
                         <div style={{ width: '100%', borderBottom: thickDivider }}></div>
 
                         <div style={{ background: itemBgColor, padding: '14px 0' }}>
-                            <div className="wa-setting-item clickable" style={{ padding: '14px 30px', display: 'flex', alignItems: 'center' }}>
-                                <span style={{ color: '#0EA5BE', fontSize: 16, width: '100%' }}>View past members</span>
-                            </div>
-                            <div className="wa-setting-item clickable" style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 24 }}>
-                                <Heart size={24} color={subTextColor} />
-                                <span style={{ color: textColor, fontSize: 16, width: '100%' }}>Add to favourites</span>
-                            </div>
-                            <div className="wa-setting-item clickable" style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 24 }}>
-                                <List size={24} color={subTextColor} />
-                                <span style={{ color: textColor, fontSize: 16, width: '100%' }}>Add to list</span>
-                            </div>
-                            <div className="wa-setting-item clickable danger" style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 24, cursor: 'pointer' }}>
-                                <Minus size={24} color="#f15c6d" />
-                                <span style={{ color: '#f15c6d', fontSize: 16, width: '100%' }}>Clear chat</span>
-                            </div>
                             <div className="wa-setting-item clickable danger" style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 24, cursor: 'pointer' }} onClick={() => { /* Exit logic */ }}>
                                 <LogOut size={24} color="#f15c6d" />
                                 <span style={{ color: '#f15c6d', fontSize: 16, width: '100%' }}>Exit group</span>
@@ -9369,16 +9432,16 @@ export default function Chat() {
                                     <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '😮', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Wow" data-tooltip-pos="center">😮</span>
                                     <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '😢', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Sad" data-tooltip-pos="center">😢</span>
                                     <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '🙏', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Thanks" data-tooltip-pos="center">🙏</span>
-                                    <Plus 
-                                        size={18} 
+                                    <Plus
+                                        size={18}
                                         className="wa-plus-icon-reaction"
-                                        onClick={(e) => { 
-                                            e.stopPropagation(); 
-                                            setFullEmojiPicker({ id, isGroup: selectedGroup?._id || !!selectedGroup, pos: { x: dropdownPos.x, y: dropdownPos.y } }); 
-                                            setOpenDropdown(null); 
-                                        }} 
-                                        data-tooltip="More" 
-                                        data-tooltip-pos="center" 
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setFullEmojiPicker({ id, isGroup: selectedGroup?._id || !!selectedGroup, pos: { x: dropdownPos.x, y: dropdownPos.y } });
+                                            setOpenDropdown(null);
+                                        }}
+                                        data-tooltip="More"
+                                        data-tooltip-pos="center"
                                     />
                                 </div>
                                 <div className="wa-dropdown-divider"></div>
@@ -11399,19 +11462,29 @@ export default function Chat() {
             </div>
         );
     };
-    const totalUnread = users.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0) +
-        groups.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0) +
-        communities.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0);
-    const totalActiveUnread = users.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id) ? 0 : (curr.unreadCount || 0)), 0) +
-        groups.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id || curr.id) ? 0 : (curr.unreadCount || 0)), 0) +
-        communities.reduce((acc, curr) => acc + (archivedChatIds.includes(curr._id || curr.id) ? 0 : (curr.unreadCount || 0)), 0);
+    const totalUnread = users.filter(u => (u.unreadCount || 0) > 0).length +
+        groups.filter(g => (g.unreadCount || 0) > 0).length +
+        communities.filter(c => (c.unreadCount || 0) > 0).length;
+    const totalActiveUnread = users.filter(u => !archivedChatIds.includes(u._id) && (u.unreadCount || 0) > 0).length +
+        groups.filter(g => !archivedChatIds.includes(g._id || g.id) && (g.unreadCount || 0) > 0).length +
+        communities.filter(c => !archivedChatIds.includes(c._id || c.id) && (c.unreadCount || 0) > 0).length;
     const totalUnreadArchived = users.filter(u => archivedChatIds.includes(u._id) && (u.unreadCount || 0) > 0).length +
         groups.filter(g => archivedChatIds.includes(g._id) && (g.unreadCount || 0) > 0).length +
         communities.filter(c => archivedChatIds.includes(c.id || c._id) && (c.unreadCount || 0) > 0).length;
     const totalFavorites = users.filter(u => u.isFavorite && !archivedChatIds.includes(u._id)).length +
         groups.filter(g => g.isFavorite && !archivedChatIds.includes(g._id)).length +
         communities.filter(c => c.isFavorite && !archivedChatIds.includes(c.id || c._id)).length;
+    const totalUnreadGroups = groups.filter(g => (g.unreadCount || 0) > 0).length;
 
+    const getCustomListUnread = (list) => {
+        return list.members.reduce((acc, memberId) => {
+            const u = users.find(x => String(x._id) === String(memberId));
+            const g = groups.find(x => String(x._id || x.id) === String(memberId));
+            const c = communities.find(x => String(x._id || x.id) === String(memberId));
+            const target = u || g || c;
+            return acc + ((target && !archivedChatIds.includes(target._id || target.id) && target.unreadCount > 0) ? 1 : 0);
+        }, 0);
+    };
 
     const renderNotificationDetails = () => {
         const unreadChats = [
@@ -11519,9 +11592,191 @@ export default function Chat() {
         document.addEventListener('mouseup', handleMouseUp);
     };
 
+    const renderAddToListModal = () => (
+        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'white', zIndex: 110, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '14px 23px', borderBottom: '1px solid #e9edef', background: '#f0f2f5' }}>
+                <button style={{ background: 'none', border: 'none', cursor: 'pointer', marginRight: 20 }} onClick={() => setIsAddToListModalOpen(false)}>
+                    <X size={24} color="#54656f" />
+                </button>
+                <span style={{ fontSize: '16px', color: '#111b21', fontWeight: 500 }}>Add to list</span>
+            </div>
+
+            <div style={{ padding: '14px' }}>
+                <div style={{ background: '#f0f2f5', borderRadius: '8px', padding: '6px 12px', display: 'flex', alignItems: 'center' }}>
+                    <Search size={20} color="#54656f" />
+                    <input
+                        type="text"
+                        placeholder="Search name or number"
+                        value={searchListQuery}
+                        onChange={(e) => setSearchListQuery(e.target.value)}
+                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#111b21', padding: '8px 10px', outline: 'none' }}
+                    />
+                </div>
+            </div>
+
+            <div style={{ padding: '4px 14px', color: '#8696a0', fontSize: '14px' }}>Chats</div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 14px' }}>
+                {[...users, ...groups, ...communities].filter(item => {
+                    if (archivedChatIds.includes(item._id || item.id)) return false;
+                    const name = item.name || (item.firstName ? `${item.firstName} ${item.lastName || ''}` : 'Unknown');
+                    return name.toLowerCase().includes(searchListQuery.toLowerCase());
+                }).map(item => {
+                    const id = item._id || item.id;
+                    const isSelected = newListMembers.includes(id);
+                    const name = item.name || (item.firstName ? `${item.firstName} ${item.lastName || ''}` : 'Unknown');
+                    const isComm = communities.some(c => c.id === id);
+                    const isGroup = groups.some(g => (g._id || g.id) === id);
+                    const icon = isComm ? <Users size={20} color="white" /> : (isGroup ? <Users size={20} color="white" /> : <User size={20} color="white" />);
+                    const avatar = item.profilePic || item.avatar || item.icon;
+
+                    return (
+                        <div key={id} onClick={() => {
+                            if (isSelected) setNewListMembers(prev => prev.filter(m => m !== id));
+                            else setNewListMembers(prev => [...prev, id]);
+                        }} style={{ display: 'flex', alignItems: 'center', marginBottom: 20, cursor: 'pointer' }}>
+                            <div style={{ width: 22, height: 22, borderRadius: '4px', border: isSelected ? 'none' : '2px solid #8696a0', background: isSelected ? '#0EA5BE' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 15, flexShrink: 0 }}>
+                                {isSelected && <Check size={16} color="white" strokeWidth={3} />}
+                            </div>
+                            <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 15, overflow: 'hidden', flexShrink: 0 }}>
+                                {avatar ? <img src={avatar} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : icon}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: '16px', color: '#111b21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+                                <div style={{ fontSize: '13px', color: '#667781', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {isComm ? 'Community' : (isGroup ? 'Group' : 'Contact')}
+                                </div>
+                            </div>
+                        </div>
+                    )
+                })}
+            </div>
+
+            {newListMembers.length > 0 && (
+                <div style={{ position: 'absolute', bottom: 20, right: 20 }}>
+                    <button
+                        className="wa-edit-fab"
+                        onClick={() => setIsAddToListModalOpen(false)}
+                        style={{ background: '#0EA5BE', border: 'none', width: 50, height: 50, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.3)' }}
+                    >
+                        <Check size={24} color="white" strokeWidth={3} />
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+
+    const renderCreateListDrawer = () => (
+        <div className={`wa-drawer ${isCreateListOpen ? 'open' : ''}`} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 100, display: 'flex', flexDirection: 'column', background: '#f0f2f5' }}>
+            <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'white', borderBottom: '1px solid #e9edef', position: 'relative', padding: '0 20px' }}>
+                <button className="wa-back-btn" style={{ position: 'absolute', left: 20, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center' }} onClick={() => setIsCreateListOpen(false)}>
+                    <ArrowLeft size={24} color="#54656f" />
+                </button>
+                <span className="wa-drawer-title" style={{ fontSize: 16, fontWeight: 500, color: '#111b21', whiteSpace: 'nowrap' }}>Create new list</span>
+            </div>
+
+            <div className="wa-drawer-content" style={{ padding: '20px', background: '#f0f2f5', color: '#111b21', display: 'flex', flexDirection: 'column', flex: 1 }}>
+                <div style={{ position: 'relative', marginBottom: 20 }}>
+                    <input
+                        type="text"
+                        placeholder="New list name"
+                        value={newListName}
+                        onChange={(e) => setNewListName(e.target.value)}
+                        style={{
+                            width: '100%', background: 'transparent', border: 'none',
+                            borderBottom: '2px solid #0EA5BE', color: '#111b21', fontSize: '15px',
+                            padding: '10px 40px 10px 0', outline: 'none'
+                        }}
+                    />
+                    <Smile size={20} color="#54656f" style={{ position: 'absolute', right: 5, top: 12, cursor: 'pointer' }} />
+                </div>
+
+                <div style={{ fontSize: '14px', color: '#667781', marginBottom: 15 }}>Included</div>
+
+                <div
+                    onClick={() => setIsAddToListModalOpen(true)}
+                    style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', marginBottom: 20 }}
+                >
+                    <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#0EA5BE', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 15, flexShrink: 0 }}>
+                        <Plus size={24} color="white" />
+                    </div>
+                    <span style={{ fontSize: '15px', color: '#111b21' }}>Add people or groups</span>
+                </div>
+
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                    {newListMembers.map(member => {
+                        const targetUser = users.find(u => String(u._id) === String(member));
+                        const targetGroup = groups.find(g => String(g._id || g.id) === String(member));
+                        const targetComm = communities.find(c => String(c._id || c.id) === String(member));
+                        const target = targetUser || targetGroup || targetComm;
+                        if (!target) return null;
+
+                        const isComm = !!targetComm;
+                        const isGroup = !!targetGroup;
+                        const name = target.name || (target.firstName ? `${target.firstName} ${target.lastName || ''}` : 'Unknown');
+                        const icon = isComm ? <Users size={20} color="white" /> : (isGroup ? <Users size={20} color="white" /> : <User size={20} color="white" />);
+                        const avatar = target.profilePic || target.avatar || target.icon;
+
+                        return (
+                            <div key={member} style={{ display: 'flex', alignItems: 'center', marginBottom: 20, justifyContent: 'space-between' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
+                                    <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 15, overflow: 'hidden', flexShrink: 0 }}>
+                                        {avatar ? <img src={avatar} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : icon}
+                                    </div>
+                                    <div style={{ flex: 1, minWidth: 0, paddingRight: 10 }}>
+                                        <div style={{ fontSize: '16px', color: '#111b21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+                                        <div style={{ fontSize: '13px', color: '#667781', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isComm ? 'Community' : (isGroup ? 'Group' : 'Contact')}</div>
+                                    </div>
+                                </div>
+                                <Trash2
+                                    size={18}
+                                    color="#f15c6d"
+                                    style={{ cursor: 'pointer', flexShrink: 0 }}
+                                    onClick={() => setNewListMembers(prev => prev.filter(id => id !== member))}
+                                />
+                            </div>
+                        )
+                    })}
+                </div>
+
+                <div style={{ marginTop: 'auto', paddingTop: 20, textAlign: 'center' }}>
+                    <button
+                        disabled={!newListName.trim() || newListMembers.length === 0}
+                        onClick={() => {
+                            const extList = customLists.find(l => l.name.toLowerCase() === newListName.trim().toLowerCase());
+                            if (extList) {
+                                setSnackbar({ message: 'List already exists', type: 'error' });
+                                return;
+                            }
+                            const newList = {
+                                _id: Date.now().toString(), // Temporary _id for new list
+                                name: newListName.trim(),
+                                members: newListMembers
+                            };
+                            setCustomLists(prev => [...prev, newList]);
+                            setIsCreateListOpen(false);
+                            setNewListName('');
+                            setNewListMembers([]);
+                        }}
+                        style={{
+                            background: (!newListName.trim() || newListMembers.length === 0) ? '#e9edef' : '#0EA5BE',
+                            color: (!newListName.trim() || newListMembers.length === 0) ? '#a6b0b5' : 'white',
+                            border: 'none', padding: '10px 24px', borderRadius: '24px',
+                            fontSize: '14px', fontWeight: 500, cursor: (!newListName.trim() || newListMembers.length === 0) ? 'default' : 'pointer'
+                        }}
+                    >
+                        Create list
+                    </button>
+                </div>
+            </div>
+            {isAddToListModalOpen && renderAddToListModal()}
+        </div>
+    );
+
     const renderLeftPanel = () => (
         <div className="wa-left-panel" style={{ width: leftPanelWidth, minWidth: isMobile ? '100%' : 260, flex: 'none', position: 'relative', overflow: 'hidden' }}>
             {/* Drawers */}
+            {isCreateListOpen && renderCreateListDrawer()}
             {isProfileOpen && renderProfileDrawer()}
             {isNewChatOpen && renderNewChatDrawer()}
             {isPhoneNumberPanelOpen && renderPhoneNumberPanel()}
@@ -11776,10 +12031,77 @@ export default function Chat() {
                     className={`wa-filter-pill ${filterType === 'groups' ? 'active' : ''}`}
                     onClick={() => setFilterType('groups')}
                 >
-                    {t('chat_list.filter_groups')} {groups.filter(g => g.unreadCount > 0).length > 0 && <span className="wa-pill-count">{groups.filter(g => g.unreadCount > 0).length}</span>}
+                    {t('chat_list.filter_groups')} {totalUnreadGroups > 0 && <span className="wa-pill-count">{totalUnreadGroups}</span>}
                 </button>
-                <button className="wa-nav-icon-btn wa-filter-plus-btn"><Plus size={18} /></button>
+                {customLists.length === 0 ? (
+                    <button className="wa-nav-icon-btn wa-filter-plus-btn" onClick={() => setIsCreateListOpen(true)}><Plus size={18} /></button>
+                ) : (
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginLeft: 4 }}>
+                        <button
+                            className={`wa-nav-icon-btn wa-filter-plus-btn ${showCustomListsDropdown ? 'active' : ''}`}
+                            onClick={(e) => { e.stopPropagation(); setShowCustomListsDropdown(!showCustomListsDropdown); }}
+                            style={{ width: 26, height: 26, padding: 0, justifyContent: 'center', display: 'flex', alignItems: 'center', background: showCustomListsDropdown ? '#e9edef' : '#f0f2f5', borderRadius: '50%' }}
+                        >
+                            <ChevronDown size={14} color="#54656f" />
+                        </button>
+                    </div>
+                )}
             </div>
+
+            {customLists.length > 0 && showCustomListsDropdown && (
+                <>
+                    <div
+                        style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999 }}
+                        onClick={(e) => { e.stopPropagation(); setShowCustomListsDropdown(false); }}
+                    />
+                    <div style={{ position: 'absolute', top: 150, right: 15, width: 220, zIndex: 1000, background: '#ffffff', borderRadius: '8px', padding: '8px 0', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', border: '1px solid #e9edef' }}>
+                        {customLists.map(list => {
+                            const unreadCount = getCustomListUnread(list);
+                            return (
+                                <div
+                                    key={list._id || list.id}
+                                    className="wa-menu-item"
+                                    onClick={(e) => { e.stopPropagation(); setFilterType('custom_' + (list._id || list.id)); setShowCustomListsDropdown(false); }}
+                                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', cursor: 'pointer', color: '#111b21', backgroundColor: '#ffffff' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f0f2f5'}
+                                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ffffff'}
+                                >
+                                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px', fontSize: '15px' }}>{list.name}</span>
+                                    {unreadCount > 0 && (
+                                        <span style={{
+                                            background: '#027eb5',
+                                            color: '#ffffff',
+                                            fontSize: '12px',
+                                            fontWeight: 'bold',
+                                            height: '20px',
+                                            minWidth: '20px',
+                                            borderRadius: '10px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            padding: '0 6px',
+                                            marginLeft: '8px'
+                                        }}>
+                                            {unreadCount}
+                                        </span>
+                                    )}
+                                </div>
+                            )
+                        })}
+                        <div style={{ borderTop: '1px solid #e9edef', margin: '4px 0' }}></div>
+                        <div
+                            className="wa-menu-item"
+                            onClick={(e) => { e.stopPropagation(); setIsCreateListOpen(true); setShowCustomListsDropdown(false); }}
+                            style={{ display: 'flex', alignItems: 'center', padding: '10px 20px', cursor: 'pointer', color: '#111b21', backgroundColor: '#ffffff' }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f0f2f5'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ffffff'}
+                        >
+                            <Plus size={18} style={{ marginRight: 15, color: '#54656f' }} />
+                            <span style={{ fontSize: '15px' }}>New list</span>
+                        </div>
+                    </div>
+                </>
+            )}
 
             {/* Chat List: Groups + Users combined */}
             <div className="wa-user-list" onScroll={() => { setOpenDropdown(null); }}>
@@ -11803,8 +12125,15 @@ export default function Chat() {
                                     const matchesSearch = nameMatch || msgMatch || mobileMatch || emailMatch;
 
                                     if (filterType === 'groups') {
-                                        return matchesSearch && (item.is_group || item.is_community);
+                                        return matchesSearch && item.is_group;
                                     }
+
+                                    if (filterType.startsWith('custom_')) {
+                                        const listId = filterType.replace('custom_', '');
+                                        const activeList = customLists.find(l => String(l._id || l.id) === listId);
+                                        return matchesSearch && activeList && activeList.members.includes(String(item._id || item.id));
+                                    }
+
 
                                     if (archivedChatIds.includes(item._id)) return false;
 
@@ -11993,7 +12322,7 @@ export default function Chat() {
                                                         if (isRestricted) {
                                                             return <span style={{ color: '#ef4444', fontStyle: 'italic' }}>Messaging restricted</span>;
                                                         }
-                                                        const preview = renderLastMessagePreview(item.lastMessage, isGroup || item.is_community, '');
+                                                        const preview = renderLastMessagePreview(item.lastMessage, isGroup || item.is_community, '', item._id || item.id);
                                                         return typeof preview === 'string' ? renderHighlightedContent(preview) : preview;
                                                     })()}
                                                 </span>
@@ -13672,7 +14001,7 @@ export default function Chat() {
                                                             accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
                                                             onChange={handleFileSelect}
                                                         />
-                                                        <button 
+                                                        <button
                                                             className={`wa-nav-icon-btn ${showInputEmojiPicker ? 'active' : ''}`}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
@@ -14708,7 +15037,7 @@ export default function Chat() {
                                                                                 <div style={{ fontSize: '13px', color: '#8696a0', marginBottom: '8px', textTransform: 'uppercase', fontWeight: '500' }}>Event</div>
                                                                                 <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '4px' }}>{msg.event.name}</div>
                                                                                 <div style={{ fontSize: '14px', color: '#8696a0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                                                                    <Calendar size={14} /> 
+                                                                                    <Calendar size={14} />
                                                                                     {new Date(msg.event.startDate).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}, {msg.event.startTime}
                                                                                 </div>
                                                                                 {msg.event.location && (
@@ -14718,21 +15047,21 @@ export default function Chat() {
                                                                                 )}
                                                                             </div>
                                                                             <div style={{ padding: '12px 15px', background: '#fff' }}>
-                                                                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                                                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                                                                                     <div style={{ display: 'flex', alignItems: 'center' }}>
                                                                                         <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#e9edef', border: '2px solid #fff', overflow: 'hidden' }}>
-                                                                                             <UserIcon size={14} color="#8696a0" style={{ margin: '3px' }} />
+                                                                                            <UserIcon size={14} color="#8696a0" style={{ margin: '3px' }} />
                                                                                         </div>
                                                                                         <span style={{ fontSize: '14px', color: '#54656f', marginLeft: '8px' }}>{msg.event.participants?.length || 0} going</span>
                                                                                     </div>
-                                                                                    <button 
+                                                                                    <button
                                                                                         onClick={(e) => { e.stopPropagation(); handleJoinEvent(msg); }}
                                                                                         style={{ background: '#f0f2f5', border: 'none', borderRadius: '18px', padding: '6px 16px', color: '#00a884', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
                                                                                     >
                                                                                         {msg.event.participants?.includes(user.id || user._id) ? 'Going' : 'Respond'}
                                                                                     </button>
-                                                                               </div>
-                                                                               <button 
+                                                                                </div>
+                                                                                <button
                                                                                     style={{ width: '100%', background: '#f8f9fa', border: '1px solid #e9edef', borderRadius: '8px', padding: '8px', color: '#00a884', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
                                                                                 >
                                                                                     View event
@@ -14798,7 +15127,47 @@ export default function Chat() {
                                 ));
                             })()}
 
-                            <div ref={bottomRef} />
+                            {/* Aligned Typing Indicator Bubble - Enhanced for visibility */}
+                            {(() => {
+                                const currentId = String(selectedUser?._id || selectedUser?.id || selectedGroup?._id || selectedGroup?.id || '').toLowerCase();
+                                if (!currentId) return null;
+
+                                // Robust lookup through typingUsers
+                                const matchEntry = Object.entries(typingUsers).find(([id]) => String(id).toLowerCase() === currentId);
+                                const typingSet = matchEntry ? matchEntry[1] : null;
+
+                                if (!typingSet || typingSet.size === 0) return null;
+
+                                return (
+                                    <div className="wa-typing-bubble-container" style={{
+                                        display: 'flex',
+                                        padding: '6px 12px',
+                                        margin: '4px 0',
+                                        animation: 'wa-slide-left 0.3s ease-out',
+                                        position: 'relative',
+                                        zIndex: 1000
+                                    }}>
+                                        <div className="wa-typing-indicator" style={{
+                                            display: 'flex',
+                                            gap: 4,
+                                            alignItems: 'center',
+                                            padding: '12px 18px',
+                                            background: '#ffffff',
+                                            borderRadius: '18px',
+                                            borderTopLeftRadius: '2px',
+                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                                            border: '1px solid #e9edef',
+                                            width: 'fit-content'
+                                        }}>
+                                            <div className="wa-typing-dot" />
+                                            <div className="wa-typing-dot" />
+                                            <div className="wa-typing-dot" />
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+
+                            <div ref={bottomRef} style={{ height: '4px' }} />
                         </div>
 
                         {/* Forward Bottom Bar for Groups */}
@@ -15027,8 +15396,7 @@ export default function Chat() {
                                             })()}
                                         </div>
                                     ) : (
-
-                                        <div style={{ display: 'flex', width: '100%', alignItems: 'center' }}>
+                                        <div style={{ position: 'relative', width: '100%', display: 'flex', alignItems: 'center' }}>
                                             {isRecording ? (
                                                 <VoiceRecordingUI
                                                     isMobile={isMobile}
@@ -15047,7 +15415,7 @@ export default function Chat() {
                                                     isMeMsg={isMeMsg}
                                                 />
                                             ) : (
-                                                <div className="wa-input-pill">
+                                                <div className="wa-input-pill" style={{ width: '100%' }}>
                                                     <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
                                                         {renderAttachmentMenu()}
                                                         <button className={`wa-nav-icon-btn ${isAttachmentMenuOpen ? 'active' : ''}`} onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)">
@@ -15060,7 +15428,7 @@ export default function Chat() {
                                                             accept=".jpg,.jpeg,.png,.doc,.docx,.ppt,.pptx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
                                                             onChange={handleFileSelect}
                                                         />
-                                                        <button 
+                                                        <button
                                                             className={`wa-nav-icon-btn ${showInputEmojiPicker ? 'active' : ''}`}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
@@ -15086,7 +15454,25 @@ export default function Chat() {
                                                             className="wa-input-box"
                                                             placeholder={t('chat_window.input_placeholder')}
                                                             value={input}
-                                                            onChange={(e) => setInput(e.target.value)}
+                                                            onChange={(e) => {
+                                                                const val = e.target.value;
+                                                                setInput(val);
+
+                                                                const targetId = selectedUser?._id || selectedGroup?._id;
+                                                                if (!targetId) return;
+
+                                                                const isGroup = !!selectedGroup;
+                                                                socket.emit('typing', { receiverId: targetId, isGroup });
+
+                                                                if (typingTimeoutRef.current[targetId]) {
+                                                                    clearTimeout(typingTimeoutRef.current[targetId]);
+                                                                }
+
+                                                                typingTimeoutRef.current[targetId] = setTimeout(() => {
+                                                                    socket.emit('stop_typing', { receiverId: targetId, isGroup });
+                                                                    delete typingTimeoutRef.current[targetId];
+                                                                }, 3000);
+                                                            }}
                                                             onPaste={handlePaste}
                                                             onKeyDown={(e) => {
                                                                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -17968,7 +18354,7 @@ export default function Chat() {
             {renderConfirmContactSendPanel()}
             {renderContactDetailPopup()}
             {fullEmojiPicker && (
-                <EmojiPicker 
+                <EmojiPicker
                     position={fullEmojiPicker.pos}
                     zoom={typeof getAppZoom === 'function' ? getAppZoom() : 1}
                     onSelect={(emoji) => {
@@ -17979,7 +18365,7 @@ export default function Chat() {
                 />
             )}
             {showInputEmojiPicker && (
-                <EmojiPicker 
+                <EmojiPicker
                     position={inputEmojiPickerPos}
                     zoom={typeof getAppZoom === 'function' ? getAppZoom() : 1}
                     className="input-mode"

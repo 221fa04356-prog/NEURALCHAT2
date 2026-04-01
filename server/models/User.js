@@ -22,6 +22,11 @@ const userSchema = new mongoose.Schema({
     bannedUntil: { type: Date, default: null },       // Temporary ban on sending requests
     rejectionCount: { type: Number, default: 0 },     // Strike counter (banned after each rejection, locked after 3)
     adminLock: { type: Boolean, default: false },       // Locked by admin after 3 strikes
+    customLists: [{
+        _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
+        name: { type: String, required: true },
+        members: [{ type: String }] // Storing IDs as strings to match frontend implementation (could be User, Group, or Community IDs)
+    }],
     
     // E2EE (Signal Protocol) Keys
     signal_keys: {
