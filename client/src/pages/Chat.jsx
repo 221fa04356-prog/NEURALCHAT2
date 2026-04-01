@@ -741,6 +741,7 @@ export default function Chat() {
     const navigate = useNavigate();
     const bottomRef = useRef(null);
     const chatMessagesRef = useRef(null);
+    const isApplyingSuggestionRef = useRef(false);
     const [showScrollBtn, setShowScrollBtn] = useState(false);
 
     // --- File Upload State ---
@@ -1477,6 +1478,7 @@ export default function Chat() {
     const [grammarSuggestions, setGrammarSuggestions] = useState(null);
     const [isGrammarLoading, setIsGrammarLoading] = useState(false);
     const [showGrammarBar, setShowGrammarBar] = useState(false);
+    const [suggestionApplied, setSuggestionApplied] = useState(false);
 
     const [isEditingProfileName, setIsEditingProfileName] = useState(false);
 
@@ -2266,11 +2268,22 @@ export default function Chat() {
 
     // --- Grammar Suggestion Logic ---
     useEffect(() => {
-        if (!input.trim() || input.length < 5) {
-            setGrammarSuggestions(null);
-            setShowGrammarBar(false);
+        if (isApplyingSuggestionRef.current) {
+            isApplyingSuggestionRef.current = false;
             return;
         }
+
+        // --- Grammar check ONLY for text messages (no files or link previews) ---
+        const containsUrl = /https?:\/\/[^\s]+/.test(input);
+        if (file || !input.trim() || typingLinkPreview || containsUrl) {
+            setGrammarSuggestions(null);
+            setShowGrammarBar(false);
+            setSuggestionApplied(true); // Bypass AI check requirement
+            return;
+        }
+
+        // For all inputs 1+, we instantly block the send button while waiting for AI
+        setSuggestionApplied(false);
 
         const timer = setTimeout(async () => {
             setIsGrammarLoading(true);
@@ -2289,36 +2302,61 @@ export default function Chat() {
         }, 1000);
 
         return () => clearTimeout(timer);
-    }, [input]);
+    }, [input, file, typingLinkPreview]);
 
     const applyGrammarSuggestion = (text) => {
+        if (input.trim().length <= 1) {
+            setSnackbar({ message: "write/type atleast one meaningful character", type: 'info' });
+            return;
+        }
+        isApplyingSuggestionRef.current = true;
         setInput(text);
         setShowGrammarBar(false);
         setGrammarSuggestions(null);
+        setSuggestionApplied(true);
     };
 
     const renderGrammarBar = () => {
         if (!showGrammarBar || !grammarSuggestions) return null;
 
         return (
-            <div className="wa-grammar-bar">
-                <div className="wa-grammar-header">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: '#0EA5BE' }}>Neural Chat AI</span>
+            <div className="wa-grammar-bar" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', flex: 1, flexDirection: 'column', gap: '4px', overflow: 'hidden' }}>
+                    <div className="wa-grammar-header-inner" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ color: '#027EB5', fontSize: '13px', fontWeight: '600', whiteSpace: 'nowrap' }}>Neural Chat AI</span>
                         {isGrammarLoading && <div className="wa-grammar-loader" />}
                     </div>
-                    <X size={16} style={{ cursor: 'pointer', color: '#667781' }} onClick={() => setShowGrammarBar(false)} />
+                    
+                    <div className="wa-grammar-options">
+                        <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.basic)}>
+                            <span className="pill-tag basic">
+                                <MessageSquare size={11} strokeWidth={2.5} />
+                                BASIC
+                            </span>
+                        </div>
+                        <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.fluent)}>
+                            <span className="pill-tag fluent">
+                                <MessageSquare size={11} strokeWidth={2.5} />
+                                FLUENT
+                            </span>
+                        </div>
+                        <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.formal)}>
+                            <span className="pill-tag formal">
+                                <MessageSquare size={11} strokeWidth={2.5} />
+                                FORMAL
+                            </span>
+                        </div>
+                    </div>
+
                 </div>
-                <div className="wa-grammar-options">
-                    <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.basic)}>
-                        <span className="pill-tag basic">BASIC</span>
-                    </div>
-                    <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.fluent)}>
-                        <span className="pill-tag fluent">FLUENT</span>
-                    </div>
-                    <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.formal)}>
-                        <span className="pill-tag formal">FORMAL</span>
-                    </div>
+                
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px' }}>
+                    <X 
+                        size={18} 
+                        style={{ cursor: 'pointer', color: '#667781', opacity: 0.7 }} 
+                        onClick={() => setShowGrammarBar(false)} 
+                        className="wa-grammar-close-btn"
+                    />
                 </div>
             </div>
         );
@@ -5126,6 +5164,7 @@ export default function Chat() {
 
     const handleSend = async (e, contentOverride = null, voiceFile = null, voiceDuration = null, voiceIsViewOnce = null) => {
         if (e) e.preventDefault();
+        if (showGrammarBar) return;
 
         const textToSend = contentOverride !== null ? contentOverride : input;
         const targetFile = voiceFile || file;
@@ -5168,6 +5207,7 @@ export default function Chat() {
         setFile(null); // Clear file immediately from UI
         setReplyingTo(null); // Clear reply context immediately
         setTypingLinkPreview(null); // Clear typing preview immediately
+        setSuggestionApplied(false); // Reset correction state for next message
 
         try {
             const formData = new FormData();
@@ -12908,6 +12948,7 @@ export default function Chat() {
                                                     <div key={msg._id || msg.id || msgIdx}
                                                         id={`msg-${msg._id}`}
                                                         className={`wa-message-container ${isForwardingMode ? 'forward-mode' : ''}`}
+                                                        onDoubleClick={() => { if (!isForwardingMode) setReplyingTo(msg); }}
                                                         onClick={() => {
                                                             if (isForwardingMode) {
                                                                 const isSelected = forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id));
@@ -12960,6 +13001,8 @@ export default function Chat() {
                                                                         {(() => {
                                                                             if (msg.reply_to.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
                                                                             if (msg.reply_to.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
+                                                                            if (msg.reply_to.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>📊 <span>{msg.reply_to.poll?.question || 'Poll'}</span></span>;
+                                                                            if (msg.reply_to.type === 'voice' || msg.reply_to.type === 'audio') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mic size={14} color="#027EB5" /> <span>Voice message</span></span>;
                                                                             if (msg.reply_to.type === 'contact') {
                                                                                 try {
                                                                                     const parsed = JSON.parse(msg.reply_to.content);
@@ -13503,7 +13546,7 @@ export default function Chat() {
                         ) : (
                             // Footer Input Area
                             <div className="wa-footer-wrapper">
-                                {renderGrammarBar()}
+
 
                                 <div style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '4px' }}>
                                     {/* Typing Link Preview */}
@@ -13546,72 +13589,7 @@ export default function Chat() {
                                         </div>
                                     )}
 
-                                    {replyingTo && (
-                                        <div className="wa-reply-preview-container">
-                                            <div style={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
-                                                <div className="wa-reply-preview-header">
-                                                    <span className="wa-reply-preview-name">
-                                                        {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || 'User')}
-                                                    </span>
-                                                </div>
-                                                <div className="wa-reply-preview-content">
-                                                    {(() => {
-                                                        if (replyingTo.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
-                                                        if (replyingTo.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
-                                                        if (replyingTo.type === 'contact') {
-                                                            try {
-                                                                const parsed = JSON.parse(replyingTo.content);
-                                                                const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
-                                                                return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
-                                                            } catch (e) {
-                                                                return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
-                                                            }
-                                                        }
-                                                        return replyingTo.content;
-                                                    })()}
-                                                </div>
-                                            </div>
-                                            {(() => {
-                                                if (replyingTo.type === 'image' && replyingTo.file_path) {
-                                                    return (
-                                                        <div className="wa-reply-preview-thumb">
-                                                            <img src={replyingTo.file_path} alt="thumbnail" />
-                                                        </div>
-                                                    );
-                                                }
-                                                if (replyingTo.type === 'contact') {
-                                                    try {
-                                                        const parsed = JSON.parse(replyingTo.content);
-                                                        if (Array.isArray(parsed)) {
-                                                            return (
-                                                                <div className="wa-reply-preview-thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(2, 126, 181, 0.1)' }}>
-                                                                    <UserIcon size={24} color="#027EB5" />
-                                                                </div>
-                                                            );
-                                                        } else {
-                                                            if (parsed.image || parsed.profile_photo) {
-                                                                return (
-                                                                    <div className="wa-reply-preview-thumb">
-                                                                        <img src={parsed.image || parsed.profile_photo} alt="thumbnail" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                                    </div>
-                                                                );
-                                                            } else {
-                                                                return (
-                                                                    <div className="wa-reply-preview-thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(2, 126, 181, 0.1)' }}>
-                                                                        <UserIcon size={24} color="#027EB5" />
-                                                                    </div>
-                                                                );
-                                                            }
-                                                        }
-                                                    } catch (e) {
-                                                        return null;
-                                                    }
-                                                }
-                                                return null;
-                                            })()}
-                                            <X size={16} className="wa-reply-preview-close" onClick={() => setReplyingTo(null)} />
-                                        </div>
-                                    )}
+
 
                                     {accountLocked ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
@@ -13638,28 +13616,68 @@ export default function Chat() {
                                                 return selectedGroup ? 'You were removed from this group and cannot send messages.' : 'Messaging is restricted.';
                                             })()}
                                         </div>
+                                    ) : isRecording ? (
+                                        <VoiceRecordingUI
+                                            isMobile={isMobile}
+                                            onSend={async (blob, duration, isViewOnce) => {
+                                                const ext = 'webm';
+                                                const filename = `voice_${Date.now()}.${ext}`;
+                                                const fileObj = new File([blob], filename, { type: 'audio/webm' });
+                                                await handleSend(null, null, fileObj, duration, isViewOnce);
+                                                setIsRecording(false);
+                                            }}
+                                            onCancel={() => setIsRecording(false)}
+                                            setSnackbar={setSnackbar}
+                                            t={t}
+                                            userData={userData}
+                                            replyingTo={replyingTo}
+                                            isMeMsg={isMeMsg}
+                                        />
                                     ) : (
-
                                         <div style={{ display: 'flex', width: '100%', alignItems: 'center' }}>
-                                            {isRecording ? (
-                                                <VoiceRecordingUI
-                                                    isMobile={isMobile}
-                                                    onSend={async (blob, duration, isViewOnce) => {
-                                                        const ext = 'webm';
-                                                        const filename = `voice_${Date.now()}.${ext}`;
-                                                        const fileObj = new File([blob], filename, { type: 'audio/webm' });
-                                                        await handleSend(null, null, fileObj, duration, isViewOnce);
-                                                        setIsRecording(false);
-                                                    }}
-                                                    onCancel={() => setIsRecording(false)}
-                                                    setSnackbar={setSnackbar}
-                                                    t={t}
-                                                    userData={userData}
-                                                    replyingTo={replyingTo}
-                                                    isMeMsg={isMeMsg}
-                                                />
-                                            ) : (
-                                                <div className="wa-input-pill">
+                                            <div className="wa-input-pill" style={{ background: 'white', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: (replyingTo || showGrammarBar) ? '16px' : '30px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', transition: 'border-radius 0.2s' }}>
+                                                {renderGrammarBar()}
+                                                {replyingTo && (
+
+                                                    <div className="wa-reply-preview-container">
+                                                        <div style={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
+                                                            <div className="wa-reply-preview-header">
+                                                                <span className="wa-reply-preview-name">
+                                                                    {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || replyingTo.sender_name || replyingTo.senderName || selectedUser?.name || 'Contact')}
+                                                                </span>
+                                                            </div>
+                                                            <div className="wa-reply-preview-content">
+                                                                {(() => {
+                                                                    if (replyingTo.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
+                                                                    if (replyingTo.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>{replyingTo.file_name || replyingTo.content || 'File'}</span></span>;
+                                                                    if (replyingTo.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>📊 <span>{replyingTo.poll?.question || 'Poll'}</span></span>;
+                                                                    if (replyingTo.type === 'voice' || replyingTo.type === 'audio') {
+                                                                        const m = Math.floor((replyingTo.duration || 0) / 60);
+                                                                        const s = Math.floor((replyingTo.duration || 0) % 60);
+                                                                        return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mic size={14} color="#027EB5" /> <span>{replyingTo.duration ? `${m}:${s.toString().padStart(2, '0')}` : 'Voice message'}</span></span>;
+                                                                    }
+                                                                    if (replyingTo.type === 'contact') {
+                                                                        try {
+                                                                            const parsed = JSON.parse(replyingTo.content);
+                                                                            const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
+                                                                            return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
+                                                                        } catch (e) {
+                                                                            return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+                                                                        }
+                                                                    }
+                                                                    return replyingTo.content;
+                                                                })()}
+                                                            </div>
+                                                        </div>
+                                                        {replyingTo.type === 'image' && replyingTo.file_path && (
+                                                            <div className="wa-reply-preview-thumb">
+                                                                <img src={replyingTo.file_path} alt="thumbnail" />
+                                                            </div>
+                                                        )}
+                                                        <X size={24} className="wa-reply-preview-close" onClick={() => setReplyingTo(null)} />
+                                                    </div>
+                                                )}
+                                                <div style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '0 4px 0 12px', minHeight: '54px' }}>
                                                     <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
                                                         {renderAttachmentMenu()}
                                                         <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} data-tooltip="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
@@ -13688,7 +13706,7 @@ export default function Chat() {
                                                         {file && (
                                                             <div className="wa-file-preview-badge">
                                                                 {file.name.substring(0, 15)}...
-                                                                <button onClick={() => setFile(null)}>Ãƒâ€”</button>
+                                                                <button onClick={() => setFile(null)}>✕</button>
                                                             </div>
                                                         )}
                                                         <textarea
@@ -13712,7 +13730,16 @@ export default function Chat() {
                                                     </div>
                                                     <div className="wa-footer-right-icons-inner">
                                                         {(input.trim() || file) ? (
-                                                            <button onClick={handleSend} className="wa-send-btn-inner" data-tooltip="Send">
+                                                            <button 
+                                                                onClick={handleSend} 
+                                                                className="wa-send-btn-inner" 
+                                                                data-tooltip={(!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? "Please select a grammar level" : "Send"}
+                                                                disabled={!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))}
+                                                                style={{ 
+                                                                    opacity: (!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? 0.5 : 1, 
+                                                                    cursor: (!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? 'not-allowed' : 'pointer'
+                                                                }}
+                                                            >
                                                                 <Send size={30} color="white" strokeWidth={2.5} />
                                                             </button>
                                                         ) : (
@@ -13722,7 +13749,7 @@ export default function Chat() {
                                                         )}
                                                     </div>
                                                 </div>
-                                            )}
+                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -14220,6 +14247,7 @@ export default function Chat() {
                                                     <div key={msg._id}
                                                         id={`msg-${msg._id}`}
                                                         className={`wa-message-container ${isForwardingMode ? 'forward-mode' : ''}`}
+                                                        onDoubleClick={() => { if (!isForwardingMode) setReplyingTo(msg); }}
                                                         onClick={() => {
                                                             if (isForwardingMode) {
                                                                 const isSelected = forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id));
@@ -14258,6 +14286,8 @@ export default function Chat() {
                                                                         {(() => {
                                                                             if (msg.reply_to.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
                                                                             if (msg.reply_to.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
+                                                                            if (msg.reply_to.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>📊 <span>{msg.reply_to.poll?.question || 'Poll'}</span></span>;
+                                                                            if (msg.reply_to.type === 'voice' || msg.reply_to.type === 'audio') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mic size={14} color="#027EB5" /> <span>Voice message</span></span>;
                                                                             if (msg.reply_to.type === 'contact') {
                                                                                 try {
                                                                                     const parsed = JSON.parse(msg.reply_to.content);
@@ -14854,7 +14884,7 @@ export default function Chat() {
                             </div>
                         ) : (
                             <div className="wa-footer-wrapper">
-                                {renderGrammarBar()}
+
                                 <div style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '4px' }}>
                                     {/* Typing Link Preview */}
                                     {typingLinkPreview && typingLinkPreview.title && (
@@ -14873,72 +14903,6 @@ export default function Chat() {
                                         </div>
                                     )}
 
-                                    {replyingTo && (
-                                        <div className="wa-reply-preview-container">
-                                            <div style={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
-                                                <div className="wa-reply-preview-header">
-                                                    <span className="wa-reply-preview-name">
-                                                        {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || 'User')}
-                                                    </span>
-                                                </div>
-                                                <div className="wa-reply-preview-content">
-                                                    {(() => {
-                                                        if (replyingTo.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
-                                                        if (replyingTo.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
-                                                        if (replyingTo.type === 'contact') {
-                                                            try {
-                                                                const parsed = JSON.parse(replyingTo.content);
-                                                                const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
-                                                                return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
-                                                            } catch (e) {
-                                                                return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
-                                                            }
-                                                        }
-                                                        return replyingTo.content;
-                                                    })()}
-                                                </div>
-                                            </div>
-                                            {(() => {
-                                                if (replyingTo.type === 'image' && replyingTo.file_path) {
-                                                    return (
-                                                        <div className="wa-reply-preview-thumb">
-                                                            <img src={replyingTo.file_path} alt="thumbnail" />
-                                                        </div>
-                                                    );
-                                                }
-                                                if (replyingTo.type === 'contact') {
-                                                    try {
-                                                        const parsed = JSON.parse(replyingTo.content);
-                                                        if (Array.isArray(parsed)) {
-                                                            return (
-                                                                <div className="wa-reply-preview-thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(2, 126, 181, 0.1)' }}>
-                                                                    <UserIcon size={24} color="#027EB5" />
-                                                                </div>
-                                                            );
-                                                        } else {
-                                                            if (parsed.image || parsed.profile_photo) {
-                                                                return (
-                                                                    <div className="wa-reply-preview-thumb">
-                                                                        <img src={parsed.image || parsed.profile_photo} alt="thumbnail" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                                    </div>
-                                                                );
-                                                            } else {
-                                                                return (
-                                                                    <div className="wa-reply-preview-thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(2, 126, 181, 0.1)' }}>
-                                                                        <UserIcon size={24} color="#027EB5" />
-                                                                    </div>
-                                                                );
-                                                            }
-                                                        }
-                                                    } catch (e) {
-                                                        return null;
-                                                    }
-                                                }
-                                                return null;
-                                            })()}
-                                            <X size={16} className="wa-reply-preview-close" onClick={() => setReplyingTo(null)} />
-                                        </div>
-                                    )}
 
                                     {accountLocked ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
@@ -15047,8 +15011,81 @@ export default function Chat() {
                                                     isMeMsg={isMeMsg}
                                                 />
                                             ) : (
-                                                <div className="wa-input-pill">
-                                                    <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
+                                                <div className="wa-input-pill" style={{ background: 'white', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: replyingTo ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                                                    {replyingTo && (
+                                                        <div className="wa-reply-preview-container">
+                                                            <div style={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
+                                                                <div className="wa-reply-preview-header">
+                                                                    <span className="wa-reply-preview-name">
+                                                                        {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || replyingTo.sender_name || replyingTo.senderName || 'Member')}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="wa-reply-preview-content">
+                                                                    {(() => {
+                                                                        if (replyingTo.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
+                                                                        if (replyingTo.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>{replyingTo.file_name || replyingTo.content || 'File'}</span></span>;
+                                                                        if (replyingTo.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>📊 <span>{replyingTo.poll?.question || 'Poll'}</span></span>;
+                                                                        if (replyingTo.type === 'voice' || replyingTo.type === 'audio') {
+                                                                            const m = Math.floor((replyingTo.duration || 0) / 60);
+                                                                            const s = Math.floor((replyingTo.duration || 0) % 60);
+                                                                            return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mic size={14} color="#027EB5" /> <span>{replyingTo.duration ? `${m}:${s.toString().padStart(2, '0')}` : 'Voice message'}</span></span>;
+                                                                        }
+                                                                        if (replyingTo.type === 'contact') {
+                                                                            try {
+                                                                                const parsed = JSON.parse(replyingTo.content);
+                                                                                const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
+                                                                                return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
+                                                                            } catch (e) {
+                                                                                return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+                                                                            }
+                                                                        }
+                                                                        return replyingTo.content;
+                                                                    })()}
+                                                                </div>
+                                                            </div>
+                                                            {(() => {
+                                                                if (replyingTo.type === 'image' && replyingTo.file_path) {
+                                                                    return (
+                                                                        <div className="wa-reply-preview-thumb">
+                                                                            <img src={replyingTo.file_path} alt="thumbnail" />
+                                                                        </div>
+                                                                    );
+                                                                }
+                                                                if (replyingTo.type === 'contact') {
+                                                                    try {
+                                                                        const parsed = JSON.parse(replyingTo.content);
+                                                                        if (Array.isArray(parsed)) {
+                                                                            return (
+                                                                                <div className="wa-reply-preview-thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(2, 126, 181, 0.1)' }}>
+                                                                                    <UserIcon size={24} color="#027EB5" />
+                                                                                </div>
+                                                                            );
+                                                                        } else {
+                                                                            if (parsed.image || parsed.profile_photo) {
+                                                                                return (
+                                                                                    <div className="wa-reply-preview-thumb">
+                                                                                        <img src={parsed.image || parsed.profile_photo} alt="thumbnail" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                                                    </div>
+                                                                                );
+                                                                            } else {
+                                                                                return (
+                                                                                    <div className="wa-reply-preview-thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(2, 126, 181, 0.1)' }}>
+                                                                                        <UserIcon size={24} color="#027EB5" />
+                                                                                    </div>
+                                                                                );
+                                                                            }
+                                                                        }
+                                                                    } catch (e) {
+                                                                        return null;
+                                                                    }
+                                                                }
+                                                                return null;
+                                                            })()}
+                                                            <X size={24} className="wa-reply-preview-close" onClick={() => setReplyingTo(null)} />
+                                                        </div>
+                                                    )}
+                                                    <div style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '0 4px 0 12px', minHeight: '54px' }}>
+                                                        <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
                                                         {renderAttachmentMenu()}
                                                         <button className={`wa-nav-icon-btn ${isAttachmentMenuOpen ? 'active' : ''}`} onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)">
                                                             <Paperclip size={22} color={isAttachmentMenuOpen ? "#0EA5BE" : "#54656f"} />
@@ -15100,7 +15137,16 @@ export default function Chat() {
                                                     </div>
                                                     <div className="wa-footer-right-icons-inner">
                                                         {(input.trim() || file) ? (
-                                                            <button onClick={handleSend} className="wa-send-btn-inner" data-tooltip="Send">
+                                                            <button 
+                                                                onClick={handleSend} 
+                                                                className="wa-send-btn-inner" 
+                                                                data-tooltip={(!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? "Please select a grammar level" : "Send"}
+                                                                disabled={!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))}
+                                                                style={{ 
+                                                                    opacity: (!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? 0.5 : 1, 
+                                                                    cursor: (!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? 'not-allowed' : 'pointer'
+                                                                }}
+                                                            >
                                                                 <Send size={30} color="white" strokeWidth={2.5} />
                                                             </button>
                                                         ) : (
@@ -15110,8 +15156,9 @@ export default function Chat() {
                                                         )}
                                                     </div>
                                                 </div>
-                                            )}
-                                        </div>
+                                            </div>
+                                        )}
+                                    </div>
                                     )}
                                 </div>
                             </div>

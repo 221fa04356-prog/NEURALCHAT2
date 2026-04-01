@@ -1956,7 +1956,7 @@ html {
     border-radius: 8px;
     overflow: hidden;
     margin-bottom: 2px;
-    border: 1px solid rgba(0,0,0,0.05);
+    border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .wa-msg-document-preview {
@@ -2285,18 +2285,18 @@ html {
 
 /* Reply Preview inside the pill */
 .wa-reply-preview-container {
-    background: #f5f6f6;
-    padding: 8px 14px;
-    border-left: 4px solid #159edd;
-    border-top-left-radius: 20px;
-    border-top-right-radius: 20px;
-    border-bottom-left-radius: 8px;
-    border-bottom-right-radius: 8px;
-    margin: 6px 8px 4px 8px;
+    background: #f0f2f5;
+    padding: 6px 12px;
+    border-radius: 8px;
+    margin: 8px 10px 4px 10px;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
+    z-index: 10;
+    border-left: 4px solid #027EB5;
     animation: slideUp 0.15s ease-out;
+    position: relative;
+    max-height: 60px;
 }
 
 .wa-reply-preview-header {
@@ -2307,9 +2307,26 @@ html {
 }
 
 .wa-reply-preview-name {
-    color: #1ea8e9;
+    color: #027EB5;
     font-size: 13px;
     font-weight: 600;
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.wa-reply-preview-close {
+    cursor: pointer;
+    color: #54656f;
+    opacity: 0.8;
+    transition: opacity 0.2s;
+    padding: 4px;
+    margin-left: auto;
+}
+
+.wa-reply-preview-close:hover {
+    opacity: 1;
 }
 
 /* Group Chat Specifics */
@@ -2443,6 +2460,7 @@ html {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    margin-top: 1px;
 }
 
 .wa-reply-preview-thumb {
@@ -4456,22 +4474,30 @@ html {
     }
 }
 
-/* --- Grammar Suggestion Bar --- */
+/* --- Grammar Suggestion Bar (WhatsApp Reply Style) --- */
 .wa-grammar-bar {
-    position: absolute;
-    bottom: calc(100% + 4px);
-    left: 10px;
-    right: 10px;
-    background: rgba(255, 255, 255, 0.98);
-    border: 1px solid #e9edef;
-    border-radius: 12px;
-    padding: 4px 12px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-    animation: slideUpFade 0.2s ease-out;
-    z-index: 1000;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: #f0f2f5;
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin: 8px 12px 4px 12px;
+    z-index: 10;
+    border-left: 4px solid #027EB5;
+    animation: slideUp 0.15s ease-out;
+    position: relative;
+    max-height: 120px;
+    box-sizing: border-box;
 }
+
+.wa-grammar-close-btn {
+    transition: opacity 0.2s, color 0.2s;
+}
+
+.wa-grammar-close-btn:hover {
+    opacity: 1 !important;
+    color: #111b21 !important;
+}
+
+
 
 @keyframes slideUpFade {
     from {
@@ -4985,9 +5011,9 @@ html {
 
 .wa-grammar-options {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     overflow-x: auto;
-    padding-bottom: 2px;
+    padding: 2px 0;
     scrollbar-width: none;
 }
 
@@ -4998,10 +5024,8 @@ html {
 .wa-grammar-pill-wrapper {
     background: transparent;
     border: none;
-    border-radius: 8px;
-    padding: 2px 4px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -5009,34 +5033,67 @@ html {
 }
 
 .wa-grammar-pill-wrapper:hover {
-    border-color: #027eb5;
-    background: #f0f9ff;
-    transform: translateY(-1px);
+    transform: translateY(-1.5px) scale(1.02);
+}
+
+.wa-grammar-pill-wrapper:active {
+    transform: scale(0.96);
 }
 
 .pill-tag {
     font-size: 10px;
-    font-weight: 800;
-    padding: 2px 6px;
-    border-radius: 4px;
-    letter-spacing: 0.5px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 10px;
+    letter-spacing: 0.6px;
     text-align: center;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid transparent;
+    background: white; 
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px; /* Slightly tighter gap */
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
+
 .pill-tag.basic {
-    background: #e0f2f1;
-    color: #00796b;
+    color: #087f5b;
+    border-color: #087f5b;
+}
+
+.pill-tag.basic:hover {
+    background: #087f5b;
+    color: white;
+    box-shadow: 0 3px 6px rgba(8, 127, 91, 0.2);
 }
 
 .pill-tag.fluent {
-    background: #e3f2fd;
-    color: #1976d2;
+    color: #1971c2;
+    border-color: #1971c2;
+}
+
+.pill-tag.fluent:hover {
+    background: #1971c2;
+    color: white;
+    box-shadow: 0 3px 6px rgba(25, 113, 194, 0.2);
 }
 
 .pill-tag.formal {
-    background: #f3e5f5;
-    color: #7b1fa2;
+    color: #6741d9;
+    border-color: #6741d9;
 }
+
+.pill-tag.formal:hover {
+    background: #6741d9;
+    color: white;
+    box-shadow: 0 3px 6px rgba(103, 65, 217, 0.2);
+}
+
+
+
 
 @media (max-width: 768px) {
     .wa-grammar-bar {
@@ -7438,7 +7495,8 @@ html {
 .wa-playback-speed-badge {
     position: absolute;
     inset: 0;
-    background: #667781e6; /* WhatsApp style grayish badge */
+    background: #667781e6;
+    /* WhatsApp style grayish badge */
     color: white;
     font-size: 11px;
     font-weight: 700;
@@ -7562,12 +7620,33 @@ html {
 
 
 
-@keyframes wa-status-loop { 0% { opacity: 0.5; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-1px); } 100% { opacity: 0.5; transform: translateY(0); } } .wa-status-animation { animation: wa-status-loop 3s infinite ease-in-out; display: inline-block; }
+@keyframes wa-status-loop {
+    0% {
+        opacity: 0.5;
+        transform: translateY(0);
+    }
+
+    50% {
+        opacity: 1;
+        transform: translateY(-1px);
+    }
+
+    100% {
+        opacity: 0.5;
+        transform: translateY(0);
+    }
+}
+
+.wa-status-animation {
+    animation: wa-status-loop 3s infinite ease-in-out;
+    display: inline-block;
+}
 
 /* Reaction Badges on Messages */
 .wa-reaction-badges {
     position: absolute;
-    bottom: -16px; /* Moved lower so it does not touch text */
+    bottom: -16px;
+    /* Moved lower so it does not touch text */
     display: flex;
     gap: 4px;
     z-index: 2;
@@ -7576,7 +7655,8 @@ html {
 }
 
 .wa-reaction-badges-sent {
-    left: 5px; /* User specifically requested left side */
+    left: 5px;
+    /* User specifically requested left side */
     right: auto;
 }
 
@@ -7586,7 +7666,8 @@ html {
 }
 
 .wa-reaction-badge {
-    border: none; /* Removed the outline */
+    border: none;
+    /* Removed the outline */
     border-radius: 50px;
     padding: 2px 5px;
     font-size: 13px;
@@ -7596,7 +7677,8 @@ html {
     min-width: 24px;
     height: 24px;
     gap: 3px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15); /* Shadow defines it instead of outline */
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    /* Shadow defines it instead of outline */
     cursor: pointer;
     transition: all 0.2s;
     user-select: none;
@@ -7628,13 +7710,21 @@ html {
     font-size: 11px;
     font-weight: 500;
 }
+
 .wa-reaction-badge.reacted .wa-reaction-count {
     color: #0ea5be;
 }
 
 @keyframes wa-popover-in {
-    from { opacity: 0; transform: scale(0.92) translateY(6px); }
-    to   { opacity: 1; transform: scale(1) translateY(0); }
+    from {
+        opacity: 0;
+        transform: scale(0.92) translateY(6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
 }
 
 /* --- WhatsApp Full Emoji Picker --- */
@@ -7647,7 +7737,7 @@ html {
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
     border-radius: 20px;
-    box-shadow: 0 12px 40px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.05);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.05);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -7655,8 +7745,15 @@ html {
 }
 
 @keyframes wa-emoji-pop {
-    from { scale: 0.5; opacity: 0; }
-    to { scale: 1; opacity: 1; }
+    from {
+        scale: 0.5;
+        opacity: 0;
+    }
+
+    to {
+        scale: 1;
+        opacity: 1;
+    }
 }
 
 .wa-full-emoji-picker.input-mode {
@@ -7664,8 +7761,15 @@ html {
 }
 
 @keyframes wa-emoji-pop-up {
-    from { scale: 0.5; opacity: 0; }
-    to { scale: 1; opacity: 1; }
+    from {
+        scale: 0.5;
+        opacity: 0;
+    }
+
+    to {
+        scale: 1;
+        opacity: 1;
+    }
 }
 
 .wa-emoji-picker-container {
