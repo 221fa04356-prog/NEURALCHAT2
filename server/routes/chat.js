@@ -369,6 +369,39 @@ router.post('/toggle-favorite', authenticateToken, async (req, res) => {
     }
 });
 
+// --- Custom Lists (Persistence for Unread/Favorite/Custom Filters) ---
+
+// Get all custom lists for the current user
+router.get('/custom-lists', authenticateToken, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select('customLists');
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        res.json(user.customLists || []);
+    } catch (err) {
+        console.error('[GET CUSTOM LISTS ERROR]', err);
+        res.status(500).json({ error: 'Failed to fetch custom lists' });
+    }
+});
+
+// Sync entire customLists array (for simplicity matching frontend)
+router.post('/custom-lists/sync', authenticateToken, async (req, res) => {
+    try {
+        const { customLists } = req.body;
+        
+        const user = await User.findByIdAndUpdate(
+            req.user.id,
+            { $set: { customLists: customLists || [] } },
+            { new: true }
+        ).select('customLists');
+        
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        res.json({ status: 'success', customLists: user.customLists });
+    } catch (err) {
+        console.error('[SYNC CUSTOM LISTS ERROR]', err);
+        res.status(500).json({ error: 'Failed to sync custom lists' });
+    }
+});
+
 // --- E2EE (Signal Protocol) Key Management ---
 
 // Upload Signal public keys
