@@ -9,7 +9,7 @@ import {
     Eye, EyeOff, Menu, AlertTriangle, ArrowLeft, Smile,
     User as UserIcon, Search, Bell, Settings, LayoutDashboard,
     TrendingUp, Calendar, ChevronRight, X, Layers, Check, RefreshCw, Forward, ChevronDown, XCircle,
-    Mic, Pause, Play, List, History, MapPin, Video, Phone
+    Mic, Pause, Play, List, History, ShieldCheck, MapPin, Video, Phone
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import {
@@ -577,6 +577,23 @@ export default function AdminDashboard() {
             fetchStats();
         });
 
+        socket.on('new_unblock_request', (data) => {
+            console.log('Admin Dashboard: !! NEW UNBLOCK REQUEST !!', data);
+            fetchData();
+            fetchStats();
+            showSnackbar(`New Unblock Request from: ${data.userName}`, 'info');
+            // Add to notifications
+            const newNotif = {
+                id: `unblock-${data.userId}-${Date.now()}`,
+                type: 'unblock_request',
+                userId: data.userId,
+                userName: data.userName,
+                reason: data.reason,
+                timestamp: new Date()
+            };
+            setAdminNotifications(prev => [newNotif, ...prev]);
+        });
+
         socket.on('user_approved', ({ userId }) => {
             setUsers(prev => prev.map(u => u.id === userId ? { ...u, status: 'approved' } : u));
             fetchStats();
@@ -773,6 +790,7 @@ export default function AdminDashboard() {
     const fetchStats = async () => {
         try {
             const res = await axios.get('/api/admin/stats');
+            console.log('Admin: Fetched Stats:', res.data); // Debug log
             setStats(res.data);
         } catch (err) {
             console.error('Stats fetch failed:', err);
@@ -825,6 +843,34 @@ export default function AdminDashboard() {
         } catch (err) {
             showSnackbar(err.response?.data?.error || 'Reset failed', 'error');
         }
+    };
+
+    const handleApproveUnblock = async (userId) => {
+        try {
+            await axios.post('/api/admin/approve-unblock', { userId });
+            const user = users.find(u => u.id === userId || u._id === userId);
+            showSnackbar(`Messaging restored for: ${user?.name || ''}`, 'success');
+            fetchData();
+            fetchStats();
+        } catch (err) {
+            showSnackbar(err.response?.data?.error || 'Approval failed', 'error');
+        }
+    };
+
+    const handleRejectUnblock = async (userId) => {
+        const user = users.find(u => u.id === userId || u._id === userId);
+        triggerConfirm('Reject Unblock Request?', `Reject messaging restoration for ${user?.name || 'this user'}?`, async () => {
+            try {
+                await axios.post('/api/admin/reject-unblock', { userId });
+                showSnackbar(`Unblock request rejected for: ${user?.name || ''}`, 'info');
+                fetchData();
+                fetchStats();
+                closeConfirm();
+            } catch (err) {
+                showSnackbar(err.response?.data?.error || 'Rejection failed', 'error');
+                closeConfirm();
+            }
+        });
     };
 
     // ... (Chat logic remains similar but UI is overhauled) ...
@@ -1207,9 +1253,9 @@ export default function AdminDashboard() {
                                     const userId = String(log.user_id?._id || log.user_id);
                                     if (!acc[userId]) {
                                         const foundUser = users.find(u => String(u.id || u._id) === userId);
-                                        acc[userId] = { 
+                                        acc[userId] = {
                                             user: foundUser || { name: 'Unknown User', _id: userId },
-                                            logs: [] 
+                                            logs: []
                                         };
                                     }
                                     acc[userId].logs.push(log);
@@ -1229,7 +1275,7 @@ export default function AdminDashboard() {
                                             {group.logs.map((log, i) => {
                                                 const statusColor = log.status === 'Going' ? '#2dce89' : log.status === 'Maybe' ? '#fb6340' : '#f5365c';
                                                 const logText = i === 0 ? `Voted for "${log.status}"` : `Changed voting to "${log.status}"`;
-                                                
+
                                                 return (
                                                     <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', width: '100%' }}>
                                                         <span style={{ fontWeight: '700', color: statusColor, fontSize: '0.85rem', whiteSpace: 'nowrap' }}>{logText}</span>
@@ -1768,6 +1814,14 @@ export default function AdminDashboard() {
                         gradient="linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)"
                         icon={Key}
                         onClick={() => setActiveTab('resets')}
+                    />
+                    <StatCard
+                        title="Unblock Requests"
+                        value={stats?.unblockRequests || 0}
+                        subtext="Users requesting restoration"
+                        gradient="linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)"
+                        icon={ShieldCheck}
+                        onClick={() => setActiveTab('unblock')}
                     />
                 </div>
 
@@ -2480,7 +2534,6 @@ export default function AdminDashboard() {
                                                 textTransform: 'capitalize',
                                                 display: 'inline-flex', alignItems: 'center', gap: '4px'
                                             }}>
-                                                {log.action === 'added' ? <Check size={10} /> : <XCircle size={10} />}
                                                 {log.action}
                                             </span>
                                         </td>
@@ -2509,6 +2562,111 @@ export default function AdminDashboard() {
                         </table>
                     </div>
                 )}
+            </div>
+        );
+    };
+
+    const renderUnblockRequests = () => {
+        const unblockReqs = users.filter(u => u.unblockRequested);
+
+        if (unblockReqs.length === 0) {
+            return (
+                <div style={{ background: 'white', borderRadius: '1rem', padding: '3rem', textAlign: 'center', boxShadow: '0 0 2rem rgba(0,0,0,0.05)' }}>
+                    <ShieldCheck size={48} color="#e9ecef" style={{ marginBottom: '1rem' }} />
+                    <h3 style={{ margin: 0, color: '#32325d' }}>No pending unblock requests</h3>
+                    <p style={{ color: '#8898aa', marginTop: '0.5rem' }}>All messaging restrictions are currently active or resolved.</p>
+                </div>
+            );
+        }
+
+        return (
+            <div style={{ background: 'white', borderRadius: '1rem', overflowX: 'auto', boxShadow: '0 0 2rem rgba(0,0,0,0.05)' }}>
+                <table style={{ minWidth: isMobile ? '800px' : '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                        <tr style={{ background: '#f6f9fc', borderBottom: '1px solid #e9ecef' }}>
+                            <th style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>SL.NO</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>USER</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>JUSTIFICATION / REASON</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>STRIKES</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>MANAGE</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {unblockReqs.map((u, i) => (
+                            <tr key={u.id} className="hover-row" style={{ borderBottom: '1px solid #f6f9fc' }}>
+                                <td style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.9rem', color: '#525f7f' }}>{i + 1}</td>
+                                <td style={{ padding: '1rem' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
+                                        <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#e9ecef', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                            {u.image ? <img src={u.image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={16} color="#adb5bd" />}
+                                        </div>
+                                        <div style={{ textAlign: 'left' }}>
+                                            <div style={{ fontWeight: '700', color: '#32325d', fontSize: '0.9rem' }}>{u.name}</div>
+                                            <div style={{ fontSize: '0.75rem', color: '#8898aa' }}>ID: {u.login_id}</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td style={{ padding: '1rem', textAlign: 'center' }}>
+                                    <div style={{
+                                        background: '#f8f9fe',
+                                        padding: '10px 15px',
+                                        borderRadius: '8px',
+                                        fontSize: '0.85rem',
+                                        color: '#525f7f',
+                                        maxWidth: '300px',
+                                        margin: '0 auto',
+                                        fontStyle: 'italic',
+                                        border: '1px solid #e9ecef'
+                                    }}>
+                                        "{u.unblockRequestReason || 'No reason provided'}"
+                                    </div>
+                                </td>
+                                <td style={{ padding: '1rem', textAlign: 'center' }}>
+                                    <span style={{
+                                        padding: '4px 10px',
+                                        background: '#fee2e2',
+                                        color: '#ef4444',
+                                        borderRadius: '12px',
+                                        fontSize: '0.75rem',
+                                        fontWeight: '700'
+                                    }}>
+                                        {u.strikes || 0} / 5 Strikes
+                                    </span>
+                                </td>
+                                <td style={{ padding: '1rem', textAlign: 'center' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem' }}>
+                                        <button
+                                            onClick={() => handleApproveUnblock(u.id)}
+                                            style={{
+                                                background: '#2dce89', color: 'white', border: 'none',
+                                                padding: '8px 16px', borderRadius: '8px', cursor: 'pointer',
+                                                fontSize: '0.85rem', fontWeight: '700', display: 'flex',
+                                                alignItems: 'center', gap: '6px', transition: 'all 0.2s'
+                                            }}
+                                            onMouseOver={e => e.currentTarget.style.transform = 'translateY(-1px)'}
+                                            onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}
+                                        >
+                                            <Check size={16} /> Restore
+                                        </button>
+                                        <button
+                                            onClick={() => handleRejectUnblock(u.id)}
+                                            style={{
+                                                background: '#f5365c', color: 'white', border: 'none',
+                                                padding: '8px 16px', borderRadius: '8px', cursor: 'pointer',
+                                                fontSize: '0.85rem', fontWeight: '700', display: 'flex',
+                                                alignItems: 'center', gap: '6px', transition: 'all 0.2s'
+                                            }}
+                                            onMouseOver={e => e.currentTarget.style.transform = 'translateY(-1px)'}
+                                            onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}
+                                        >
+                                            <X size={16} /> Reject
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
         );
     };
@@ -2570,7 +2728,8 @@ export default function AdminDashboard() {
                         { id: 'overview', name: 'Dashboard', icon: LayoutDashboard, color: '#0A7C8F' },
                         { id: 'management', name: 'Total Users', icon: Users, count: stats?.totalUsers, color: '#0A7C8F' },
                         { id: 'pending', name: 'Pending Approvals', icon: UserCheck, count: stats?.pendingApprovals, color: '#0FB5D0' },
-                        { id: 'resets', name: 'Reset Requests', icon: Key, count: stats?.activeResets, color: '#2BC9E4' }
+                        { id: 'resets', name: 'Reset Requests', icon: Key, count: stats?.activeResets, color: '#2BC9E4' },
+                        { id: 'unblock', name: 'Unblock Requests', icon: ShieldCheck, count: stats?.unblockRequests, color: '#0FB5D0' }
                     ].map(item => (
                         <div
                             key={item.id}
@@ -2768,6 +2927,7 @@ export default function AdminDashboard() {
                                 {activeTab === 'management' && renderUsersList('management')}
                                 {activeTab === 'pending' && renderUsersList('pending')}
                                 {activeTab === 'resets' && renderResets()}
+                                {activeTab === 'unblock' && renderUnblockRequests()}
                                 {activeTab === 'reactions' && renderReactionLogs()}
                             </>
                         )}
@@ -3230,50 +3390,50 @@ export default function AdminDashboard() {
                                                                         })()}
 
                                                                         {msg.type === 'event' && msg.event && (
-                                                                             <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'default', opacity: msg.event.cancelled ? 0.7 : 1, marginTop: '8px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
-                                                                                 <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
-                                                                                     <div style={{ display: 'flex', gap: '14px' }}>
-                                                                                         <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                                                                             <Calendar size={24} color="#0EA5BE" />
-                                                                                         </div>
-                                                                                         <div style={{ flex: 1, minWidth: 0 }}>
-                                                                                             <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{msg.event.name}</div>
-                                                                                             <div style={{ fontSize: '14px', color: '#667781' }}>
-                                                                                                 {formatEventTimeString(msg.event.startDate, msg.event.startTime, msg.event.endDate, msg.event.endTime)}
-                                                                                             </div>
-                                                                                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
-                                                                                                 <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
-                                                                                                     <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                                                                                                         <UserIcon size={12} color="#8696a0" style={{ marginTop: '1px' }} />
-                                                                                                     </div>
-                                                                                                 </div>
-                                                                                                 <span style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500 }}>{msg.event.participants?.length || 0} going</span>
-                                                                                             </div>
-                                                                                         </div>
-                                                                                     </div>
-                                                                                 </div>
-                                                                                 <div style={{ padding: '12px 0', margin: '0 16px', borderTop: '1px solid #f0f2f5', textAlign: 'center' }}>
-                                                                                      <span style={{ color: msg.event.cancelled ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
-                                                                                          {msg.event.cancelled ? 'Event cancelled' : ''}
-                                                                                      </span>
-                                                                                      {!msg.event.cancelled && (
-                                                                                          <button
-                                                                                              onClick={(e) => { e.stopPropagation(); setSelectedEventMsg(msg); }}
-                                                                                              style={{
-                                                                                                  cursor: 'pointer', padding: '6px 12px', borderRadius: '12px', background: 'rgba(15, 181, 208, 0.1)',
-                                                                                                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0FB5D0',
-                                                                                                  transition: 'all 0.2s', border: '1px solid rgba(0,0,0,0.05)',
-                                                                                                  gap: '6px', fontSize: '12px', fontWeight: 'bold', marginLeft: '12px'
-                                                                                              }}
-                                                                                          >
-                                                                                               <History size={16} /> Event History
+                                                                            <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'default', opacity: msg.event.cancelled ? 0.7 : 1, marginTop: '8px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                                <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
+                                                                                    <div style={{ display: 'flex', gap: '14px' }}>
+                                                                                        <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                                            <Calendar size={24} color="#0EA5BE" />
+                                                                                        </div>
+                                                                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                                                                            <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{msg.event.name}</div>
+                                                                                            <div style={{ fontSize: '14px', color: '#667781' }}>
+                                                                                                {formatEventTimeString(msg.event.startDate, msg.event.startTime, msg.event.endDate, msg.event.endTime)}
+                                                                                            </div>
+                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+                                                                                                <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
+                                                                                                    <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                                                                                        <UserIcon size={12} color="#8696a0" style={{ marginTop: '1px' }} />
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                                <span style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500 }}>{msg.event.participants?.length || 0} going</span>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div style={{ padding: '12px 0', margin: '0 16px', borderTop: '1px solid #f0f2f5', textAlign: 'center' }}>
+                                                                                    <span style={{ color: msg.event.cancelled ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
+                                                                                        {msg.event.cancelled ? 'Event cancelled' : ''}
+                                                                                    </span>
+                                                                                    {!msg.event.cancelled && (
+                                                                                        <button
+                                                                                            onClick={(e) => { e.stopPropagation(); setSelectedEventMsg(msg); }}
+                                                                                            style={{
+                                                                                                cursor: 'pointer', padding: '6px 12px', borderRadius: '12px', background: 'rgba(15, 181, 208, 0.1)',
+                                                                                                display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0FB5D0',
+                                                                                                transition: 'all 0.2s', border: '1px solid rgba(0,0,0,0.05)',
+                                                                                                gap: '6px', fontSize: '12px', fontWeight: 'bold', marginLeft: '12px'
+                                                                                            }}
+                                                                                        >
+                                                                                            <History size={16} /> Event History
 
 
-                                                                                          </button>
-                                                                                      )}
-                                                                                 </div>
-                                                                             </div>
-                                                                         )}
+                                                                                        </button>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
 
                                                                         {msg.content && msg.type !== 'poll' && msg.type !== 'contact' && msg.type !== 'event' && (
                                                                             <div style={{ opacity: isDeleted ? 0.6 : 1, marginTop: (msg.link_preview || msg.type !== 'text') ? '8px' : '0', whiteSpace: 'pre-wrap' }}>

@@ -9,10 +9,10 @@ import {
     Search, Settings, Phone, Video, Paperclip, Smile, Send, Mic, MicOff, Pause, PauseCircle, PlayCircle, StopCircle,
     ArrowLeft, CheckCheck, User as UserIcon, FileText, Calendar, X, Star, ChevronDown, ChevronRight, ChevronLeft, Bell,
     Info, Reply, Copy, Forward, Pin, CheckSquare, Download, Trash2, Archive, BellOff, HeartOff, XCircle, Lock, List, Heart, ThumbsDown, Share, Pencil, Image, StarOff, Camera, Link2 as LinkIcon,
-    LayoutGrid, UserPlus, ArrowRight, Share2, Crop, Check, RotateCcw, Minus, Delete, User, Play, MapPin, IndianRupee, Sticker,
+    LayoutGrid, UserPlus, ArrowRight, Share2, Crop, Check, RotateCcw, Minus, Delete, User, Play, MapPin, IndianRupee, Sticker, PlusCircle,
     ShieldCheck, Monitor, BellRing, Laptop, LogOut, Globe, Clock, Building2, Mail, Briefcase, ExternalLink,
     ShieldAlert, Fingerprint, HardDrive, Keyboard, HelpCircle, Settings2, Volume2, MonitorSmartphone, Shield,
-    AlertCircle, UserCheck, Loader2, ChevronUp
+    AlertCircle, UserCheck, Loader2, Ban, ChevronUp
 } from 'lucide-react';
 
 const searchSlideStyles = `
@@ -28,12 +28,27 @@ const searchSlideStyles = `
 .wa-typing-dot {
     width: 6px;
     height: 6px;
-    background: #8696a0;
+    background: #027EB5;
     border-radius: 50%;
     animation: waTypingDot 1.4s infinite ease-in-out;
 }
 .wa-typing-dot:nth-child(2) { animation-delay: 0.2s; }
 .wa-typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+.wa-grammar-loader-dots {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+}
+.wa-grammar-dot {
+    width: 4px;
+    height: 4px;
+    background: #027EB5;
+    border-radius: 50%;
+    animation: waTypingDot 1.4s infinite ease-in-out;
+}
+.wa-grammar-dot:nth-child(2) { animation-delay: 0.2s; }
+.wa-grammar-dot:nth-child(3) { animation-delay: 0.4s; }
 `;
 import io from 'socket.io-client';
 import '../styles/Chat.css';
@@ -750,8 +765,17 @@ const getYouTubeVideoId = (url) => {
 export default function Chat() {
     const [users, setUsers] = useState([]);
     const [selectedUser, setSelectedUser] = useState(null);
+    const [selectedGroup, setSelectedGroup] = useState(null);
+    const selectedGroupRef = useRef(null);
+
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
+    const [isMessagingBlocked, setIsMessagingBlocked] = useState(false);
+    const [unblockRequested, setUnblockRequested] = useState(false);
+    const [showUnblockModal, setShowUnblockModal] = useState(false);
+    const [unblockReason, setUnblockReason] = useState('');
+    const [showUnblockTooltip, setShowUnblockTooltip] = useState(false);
+
 
     const handleReaction = async (messageId, emoji, isGroup) => {
         try {
@@ -931,7 +955,14 @@ export default function Chat() {
     const [infoMessage, setInfoMessage] = useState(null); // Message details view
     const infoMessageRef = useRef(null); // Keep ref in sync for socket handler closures
     useEffect(() => { infoMessageRef.current = infoMessage; }, [infoMessage]);
-    const [snackbar, setSnackbar] = useState(null); // For feedback
+    const [snackbar, setSnackbarRaw] = useState(null); // For feedback
+    const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+
+    const setSnackbar = (config) => {
+        if (!config || notificationsEnabled || (config && config.forceShow)) {
+            setSnackbarRaw(config);
+        }
+    };
     const [reactionDetails, setReactionDetails] = useState(null); // { msg, isGroup }
     const [typingLinkPreview, setTypingLinkPreview] = useState(null); // For typing preview overlay
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -1119,6 +1150,33 @@ export default function Chat() {
 
     const [browserScale, setBrowserScale] = useState(1);
 
+    useEffect(() => {
+        const fetchProfile = async () => {
+            try {
+                const token = localStorage.getItem('token');
+                if (!token) return;
+                const res = await axios.get('/api/chat/me', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.data) {
+                    setIsMessagingBlocked(res.data.messagingBlocked || false);
+                    setUnblockRequested(res.data.unblockRequested || false);
+                    setAccountLocked(res.data.adminLock || false);
+                    setAccountBanned(res.data.bannedUntil || null);
+
+                    // Auto-show modal if blocked upon login/load
+                    if (res.data.messagingBlocked && !res.data.unblockRequested) {
+                        setShowUnblockModal(true);
+                    }
+                }
+            } catch (err) {
+                console.error('[PROFILE FETCH ERROR]', err);
+            }
+        };
+        fetchProfile();
+    }, []);
+
+
     // --- Utility Functions ---
     const formatDuration = (seconds) => {
         if (!seconds || isNaN(seconds)) return '0:00';
@@ -1258,7 +1316,7 @@ export default function Chat() {
         const myId = userRef.current?._id || userRef.current?.id || user?._id || user?.id;
         if (!myId) return false;
 
-        if (accountLocked || isAccountBanned()) return true;
+        if (accountLocked || isAccountBanned() || isMessagingBlocked) return true;
 
         if (selectedUser) {
             const isRejected = selectedUser?.requestStatus === 'rejected';
@@ -1419,8 +1477,8 @@ export default function Chat() {
 
     const handleOpenFileActual = (filePath, fileName) => {
         setOpeningFile(fileName);
-        // Hide status after 3 seconds
-        setTimeout(() => setOpeningFile(null), 3500);
+        // Hide status after 5 seconds
+        setTimeout(() => setOpeningFile(null), 5000);
 
         const ext = fileName.split('.').pop().toLowerCase();
         const microsoftProtocols = {
@@ -1491,10 +1549,51 @@ export default function Chat() {
     };
 
     const renderLastMessagePreview = (msg, isGroup = false, defaultText = 'No messages yet', chatId = null) => {
-        if (chatId && typingUsers[String(chatId)] && typingUsers[String(chatId)].size > 0) {
+        const idKey = String(chatId || '').toLowerCase();
+
+        // Use a more robust lookup to handle various ID formats used in the app
+        const matchEntry = idKey ? Object.entries(typingUsers || {}).find(([id]) => String(id).toLowerCase() === idKey) : null;
+        const typingSet = matchEntry ? matchEntry[1] : null;
+
+        if (typingSet && typingSet.size > 0) {
+            let typingLabel = 'typing...';
+            try {
+                if (t && typeof t === 'function') {
+                    const trans = t('chat_window.typing');
+                    if (trans && trans !== 'chat_window.typing') typingLabel = trans;
+                }
+            } catch (e) { console.error('Error during translation in typing preview:', e); }
+
+            // Ensure the dots aren't duplicated if translation already has them
+            if (typingLabel.endsWith('...')) typingLabel = typingLabel.slice(0, -3);
+
             return (
-                <span style={{ color: '#00a884', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    typing...
+                <span className="wa-typing-indicator-sidebar" style={{
+                    color: '#027EB5',
+                    fontWeight: 500,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                }}>
+                    {isGroup ? (
+                        <>
+                            <span style={{ maxWidth: '80px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {(() => {
+                                    const uids = Array.from(typingSet);
+                                    const names = uids.map(uid => {
+                                        const u = users.find(user => String(user._id || user.id) === String(uid));
+                                        return u?.name || 'Someone';
+                                    });
+                                    if (names.length === 1) return names[0];
+                                    if (names.length === 2) return `${names[0]}, ${names[1]}`;
+                                    return `${names[0]} and ${names.length - 1} others`;
+                                })()}
+                            </span>
+                            <span> {typingLabel}...</span>
+                        </>
+                    ) : (
+                        <span>{typingLabel}...</span>
+                    )}
                 </span>
             );
         }
@@ -1574,47 +1673,49 @@ export default function Chat() {
                     const eventDisplayName = msg.event.name || 'an event';
                     return (
                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <Calendar size={14} color="#667781" /> 
+                            <Calendar size={14} color="#667781" />
                             {isMe ? `You created an event ${eventDisplayName}` : `${senderName} created an event ${eventDisplayName}`}
                         </span>
                     );
                 }
                 return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Calendar size={14} color="#667781" /> Event</span>;
-                         case 'poll':
-                             return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><List size={14} color="#667781" /> Poll: {msg.poll?.question || 'Question'}</span>;
-                         default:
-                             if (msg.is_request_placeholder) {
-                                 return <span style={{ color: '#0EA5BE', fontWeight: '500' }}>{msg.content}</span>;
-                             }
-                             if (msg.is_system) {
-                                 let content = msg.content;
-                                 const myId = user.id || user._id || userData?.id || userData?._id;
-                                 const senderId = msg.sender_id?._id || msg.sender_id || msg.user_id?._id || msg.user_id;
-                                 const isMe = String(senderId) === String(myId);
-                                 
-                                 if (content.includes('cancelled the event:')) {
-                                     const eventName = content.split('cancelled the event:')[1].trim();
-                                     return (
-                                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                             <Calendar size={14} color="#667781" /> 
-                                             {isMe ? `You cancelled ${eventName}` : `${msg.sender_id?.name || 'Someone'} cancelled ${eventName}`}
-                                         </span>
-                                     );
-                                 }
-                                 if (content.includes('deleted the event:')) {
-                                     const eventName = content.split('deleted the event:')[1].trim();
-                                     return (
-                                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                             <Trash2 size={14} color="#667781" /> 
-                                             {isMe ? `You deleted ${eventName}` : `${msg.sender_id?.name || 'Someone'} deleted ${eventName}`}
-                                         </span>
-                                     );
-                                 }
-                                 return `${msg.sender_id?.name || 'Someone'} ${content}`;
-                             }
+            case 'poll':
+                return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><List size={14} color="#667781" /> Poll: {msg.poll?.question || 'Question'}</span>;
+            default:
+                if (msg.is_request_placeholder) {
+                    return <span style={{ color: '#0EA5BE', fontWeight: '500' }}>{msg.content}</span>;
+                }
+                if (msg.is_system) {
+                    let content = msg.content;
+                    const myId = user.id || user._id || userData?.id || userData?._id;
+                    const senderId = msg.sender_id?._id || msg.sender_id || msg.user_id?._id || msg.user_id;
+                    const isMe = String(senderId) === String(myId);
+
+                    if (content.includes('cancelled the event:')) {
+                        const eventName = content.split('cancelled the event:')[1].trim();
+                        return (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <Calendar size={14} color="#667781" />
+                                {isMe ? `You cancelled ${eventName}` : `${msg.sender_id?.name || 'Someone'} cancelled ${eventName}`}
+                            </span>
+                        );
+                    }
+                    if (content.includes('deleted the event:')) {
+                        const eventName = content.split('deleted the event:')[1].trim();
+                        return (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <Trash2 size={14} color="#667781" />
+                                {isMe ? `You deleted ${eventName}` : `${msg.sender_id?.name || 'Someone'} deleted ${eventName}`}
+                            </span>
+                        );
+                    }
+                    return `${msg.sender_id?.name || 'Someone'} ${content}`;
+                }
                 return msg.content || defaultText;
         }
     };
+
+
 
     const getAppZoom = () => {
         if (window.innerWidth <= 768) return 1;
@@ -1628,6 +1729,7 @@ export default function Chat() {
     const [isGrammarLoading, setIsGrammarLoading] = useState(false);
     const [showGrammarBar, setShowGrammarBar] = useState(false);
     const [suggestionApplied, setSuggestionApplied] = useState(false);
+    const [isGarbageMessage, setIsGarbageMessage] = useState(false);
 
     const [isEditingProfileName, setIsEditingProfileName] = useState(false);
 
@@ -1756,8 +1858,7 @@ export default function Chat() {
     const [groups, setGroups] = useState([]);
     const [isDataLoaded, setIsDataLoaded] = useState(false);
     const [leftPanelWidth, setLeftPanelWidth] = useState(window.innerWidth <= 768 ? window.innerWidth : 450);
-    const [selectedGroup, setSelectedGroup] = useState(null);
-    const selectedGroupRef = useRef(null);
+
     const communitiesRef = useRef([]);
     const selectedCommunityRef = useRef(null);
     const [groupMessages, setGroupMessages] = useState([]);
@@ -1780,6 +1881,43 @@ export default function Chat() {
     const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
     const [isPhoneNumberPanelOpen, setIsPhoneNumberPanelOpen] = useState(false);
     const [phoneNumberInput, setPhoneNumberInput] = useState('');
+
+    // --- Typing Indication Logic (Emitters) ---
+    const lastEmitRef = useRef(0);
+    useEffect(() => {
+        const targetId = selectedUser?._id || selectedGroup?._id;
+        if (!targetId || !socket) return;
+
+        const isGroup = !!selectedGroup;
+        const now = Date.now();
+
+        if (input.trim().length > 0) {
+            // Throttle: only emit every 1.5 seconds if still typing
+            if (now - lastEmitRef.current > 1500) {
+                socket.emit('typing', { receiverId: targetId, isGroup });
+                lastEmitRef.current = now;
+            }
+
+
+            // Set/Reset the stop-typing timeout
+            if (typingTimeoutRef.current[targetId]) {
+                clearTimeout(typingTimeoutRef.current[targetId]);
+            }
+            typingTimeoutRef.current[targetId] = setTimeout(() => {
+                socket.emit('stop_typing', { receiverId: targetId, isGroup });
+                delete typingTimeoutRef.current[targetId];
+                lastEmitRef.current = 0; // Reset for next interaction
+            }, 3000);
+        } else {
+            // If input is cleared, stop typing immediately
+            if (typingTimeoutRef.current[targetId]) {
+                clearTimeout(typingTimeoutRef.current[targetId]);
+                socket.emit('stop_typing', { receiverId: targetId, isGroup });
+                delete typingTimeoutRef.current[targetId];
+                lastEmitRef.current = 0;
+            }
+        }
+    }, [input, selectedUser?._id, selectedGroup?._id]);
     const [isNewCommunityOpen, setIsNewCommunityOpen] = useState(false);
     const [communityStep, setCommunityStep] = useState(0); // 0: Intro, 1: Details
     const [communityName, setCommunityName] = useState('');
@@ -1865,7 +2003,7 @@ export default function Chat() {
         setPermissionToasts(prev => [...prev, { id, message }]);
         setTimeout(() => {
             setPermissionToasts(prev => prev.filter(t => t.id !== id));
-        }, 3000);
+        }, 5000);
     };
 
 
@@ -2435,16 +2573,64 @@ export default function Chat() {
         setSuggestionApplied(false);
 
         const timer = setTimeout(async () => {
+            const trimmedInput = input.trim();
+            const hasVowels = /[aeiouy]/i.test(trimmedInput);
+            const hasNumbers = /[0-9]/.test(trimmedInput);
+            const isMeaningful = trimmedInput.length >= 2 && /[a-zA-Z0-9]/.test(trimmedInput);
+
+            // Catch repeats like "fff", "jgjg" and vowel-less strings
+            const isProbablyGarbage = (trimmedInput.length >= 3 && !hasVowels && !hasNumbers) ||
+                /([^aeiouy0-9\s])\1{2,}/i.test(trimmedInput) ||
+                (trimmedInput.length >= 4 && !hasVowels && !hasNumbers);
+
+            if (isProbablyGarbage || !isMeaningful) {
+                setIsGarbageMessage(true);
+                setShowGrammarBar(true);
+                if ((isProbablyGarbage || !isMeaningful) && trimmedInput.length >= 3) {
+                    setSnackbar({
+                        message: "Please write a meaningful word or sentence to start the chat",
+                        type: 'error',
+                        duration: 5000,
+                        variant: 'system'
+                    });
+                }
+                setIsGrammarLoading(false);
+                return;
+            }
+
+            setIsGarbageMessage(false);
             setIsGrammarLoading(true);
+            setShowGrammarBar(true); // Show bar immediately with loader
             try {
                 const token = localStorage.getItem('token');
                 const res = await axios.post('/api/chat/grammar-check', { text: input }, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
-                setGrammarSuggestions(res.data);
-                setShowGrammarBar(true);
+                const suggestions = res.data;
+                setGrammarSuggestions(suggestions);
+
+                if (trimmedInput.toLowerCase() === suggestions.fluent.trim().toLowerCase() ||
+                    trimmedInput.toLowerCase() === suggestions.basic.trim().toLowerCase()
+                ) {
+                    // Check if it's unethical before praising grammar
+                    const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole'];
+                    const isUnethical = badWords.some(word => {
+                        const regex = new RegExp(`\\b${word}\\b`, 'i');
+                        return regex.test(trimmedInput);
+                    });
+
+                    if (!isUnethical) {
+                        setSnackbar({ message: "made with proper grammar", type: 'success', duration: 5000, variant: 'system' });
+                    }
+
+                    setSuggestionApplied(true);
+                    setShowGrammarBar(false);
+                } else {
+                    setShowGrammarBar(true);
+                }
             } catch (err) {
                 console.error("Grammar check failed", err);
+                setShowGrammarBar(false);
             } finally {
                 setIsGrammarLoading(false);
             }
@@ -2454,8 +2640,9 @@ export default function Chat() {
     }, [input, file, typingLinkPreview]);
 
     const applyGrammarSuggestion = (text) => {
-        if (input.trim().length <= 1) {
-            setSnackbar({ message: "write/type atleast one meaningful character", type: 'info' });
+        const trimmedInput = input.trim();
+        if (trimmedInput.length < 2 || !/[a-zA-Z0-9]/.test(trimmedInput)) {
+            setSnackbar({ message: "write a meaningful word or sentence to start the chat", type: 'info' });
             return;
         }
         isApplyingSuggestionRef.current = true;
@@ -2466,35 +2653,63 @@ export default function Chat() {
     };
 
     const renderGrammarBar = () => {
-        if (!showGrammarBar || !grammarSuggestions) return null;
+        if (!showGrammarBar || (!grammarSuggestions && !isGrammarLoading) || isGarbageMessage) return null;
 
         return (
             <div className="wa-grammar-bar" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
-                <div style={{ display: 'flex', flex: 1, flexDirection: 'column', gap: '4px', overflow: 'hidden' }}>
+                <div style={{
+                    display: 'flex',
+                    flex: 1,
+                    flexDirection: 'column',
+                    gap: '4px',
+                    overflow: 'hidden',
+                    borderLeft: isGarbageMessage ? '4px solid #ef4444' : '4px solid transparent',
+                    paddingLeft: isGarbageMessage ? '12px' : '0',
+                    transition: 'all 0.3s ease'
+                }}>
                     <div className="wa-grammar-header-inner" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ color: '#027EB5', fontSize: '13px', fontWeight: '600', whiteSpace: 'nowrap' }}>Neural Chat AI</span>
-                        {isGrammarLoading && <div className="wa-grammar-loader" />}
+                        <span style={{ color: isGarbageMessage ? '#ef4444' : '#027EB5', fontSize: '13px', fontWeight: '600', whiteSpace: 'nowrap' }}>
+                            {isGarbageMessage ? 'System Alert' : 'Neural Chat AI'}
+                        </span>
+                        {isGrammarLoading && (
+                            <div className="wa-grammar-loader-dots">
+                                <div className="wa-grammar-dot" />
+                                <div className="wa-grammar-dot" />
+                                <div className="wa-grammar-dot" />
+                            </div>
+                        )}
                     </div>
 
                     <div className="wa-grammar-options">
-                        <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.basic)}>
-                            <span className="pill-tag basic">
-                                <MessageSquare size={11} strokeWidth={2.5} />
-                                BASIC
-                            </span>
-                        </div>
-                        <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.fluent)}>
-                            <span className="pill-tag fluent">
-                                <MessageSquare size={11} strokeWidth={2.5} />
-                                FLUENT
-                            </span>
-                        </div>
-                        <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.formal)}>
-                            <span className="pill-tag formal">
-                                <MessageSquare size={11} strokeWidth={2.5} />
-                                FORMAL
-                            </span>
-                        </div>
+                        {isGarbageMessage ? (
+                            <div style={{ color: '#ef4444', fontSize: '14px', padding: '4px 0', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '500' }}>
+                                <AlertCircle size={16} />
+                                <span>Please write a meaningful word or sentence to start the chat</span>
+                            </div>
+                        ) : grammarSuggestions ? (
+                            <>
+                                <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.basic)}>
+                                    <span className="pill-tag basic">
+                                        <MessageSquare size={11} strokeWidth={2.5} />
+                                        BASIC
+                                    </span>
+                                </div>
+                                <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.fluent)}>
+                                    <span className="pill-tag fluent">
+                                        <MessageSquare size={11} strokeWidth={2.5} />
+                                        FLUENT
+                                    </span>
+                                </div>
+                                <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.formal)}>
+                                    <span className="pill-tag formal">
+                                        <MessageSquare size={11} strokeWidth={2.5} />
+                                        FORMAL
+                                    </span>
+                                </div>
+                            </>
+                        ) : (
+                            <div style={{ color: '#667781', fontSize: '12px', paddingLeft: '4px' }}>AI is thinking...</div>
+                        )}
                     </div>
 
                 </div>
@@ -2629,7 +2844,6 @@ export default function Chat() {
         };
 
         const onReceiveMessage = async (data) => {
-            console.log('[DEBUG] Socket: receive_message', data);
 
             // Decrypt incoming E2EE messages
             if (data.ciphertext) {
@@ -2648,14 +2862,15 @@ export default function Chat() {
 
             // Stop typing status if a message is received
             const senderIdForTyping = data.sender_id || data.user_id;
-            const currentSelectedForTyping = selectedUserRef.current;
-            const chatIdForTyping = (currentSelectedForTyping && String(senderIdForTyping) === String(currentSelectedForTyping._id))
-                ? String(senderIdForTyping) : null;
 
-            if (chatIdForTyping) {
+            if (senderIdForTyping) {
                 setTypingUsers(prev => {
                     const next = { ...prev };
-                    delete next[chatIdForTyping];
+                    const idKey = String(senderIdForTyping).toLowerCase();
+                    // Clean up P2P entry
+                    Object.keys(next).forEach(k => {
+                        if (String(k).toLowerCase() === idKey) delete next[k];
+                    });
                     return next;
                 });
             }
@@ -2783,7 +2998,7 @@ export default function Chat() {
                     const myId = userRef.current?.id || userRef.current?._id;
                     const senderId = (msg.sender_id?._id || msg.sender_id) || (msg.user_id?._id || msg.user_id);
                     const isMyMsg = String(senderId) === String(myId);
-                    
+
                     if (isMyMsg && !msg.is_read) {
                         return { ...msg, is_read: true, read_at: data.read_at };
                     }
@@ -3064,6 +3279,26 @@ export default function Chat() {
         };
         socket.on('account_locked', onAccountLocked);
 
+        socket.on('user_blocked', () => {
+            console.log('[SOCKET] user_blocked event received');
+            setIsMessagingBlocked(true);
+            setShowUnblockModal(true);
+        });
+
+        socket.on('user_unblocked', () => {
+            console.log('[SOCKET] user_unblocked event received');
+            setIsMessagingBlocked(false);
+            setUnblockRequested(false);
+            setShowUnblockModal(false);
+            setSnackbar({ message: 'Your messaging service has been restored!', type: 'success', variant: 'system' });
+        });
+
+        socket.on('unblock_request_rejected', () => {
+            console.log('[SOCKET] unblock_request_rejected received');
+            setUnblockRequested(false);
+            setSnackbar({ message: 'Your unblock request was reviewed and rejected.', type: 'error', variant: 'system' });
+        });
+
         const onMessageReactionUpdated = (data) => {
             console.log('Socket: message_reaction_updated', data);
             const { messageId, reactions, isGroup } = data;
@@ -3076,37 +3311,51 @@ export default function Chat() {
         };
         const onUserTyping = (data) => {
             const { userId, groupId } = data;
-            // Use String() conversion and handle id/_id consistently
-            const chatId = String(groupId || userId || '');
+            // Robust ID handling - consistent with other listeners
+            const uId = String(userId || data.senderId || data.sender_id || '');
+            const gId = groupId ? String(groupId) : null;
+
+            if (!uId) return;
+
+            const chatId = String(gId || uId).toLowerCase();
             if (!chatId) return;
 
+
+
+
             setTypingUsers(prev => {
-                const current = prev[chatId] || new Set();
-                const uId = String(userId);
-                if (current.has(uId)) return prev;
+                const updated = { ...prev };
+                // Find existing key using case-insensitive match to avoid duplication
+                const existingKey = Object.keys(updated).find(k => k.toLowerCase() === chatId);
+                const actualKey = existingKey || chatId;
+
+                const current = updated[actualKey] || new Set();
                 const next = new Set(current);
                 next.add(uId);
-                return { ...prev, [chatId]: next };
+
+                updated[actualKey] = next;
+                return updated;
             });
         };
 
         const onUserStopTyping = (data) => {
             const { userId, groupId } = data;
-            const chatId = String(groupId || userId || '');
-            if (!chatId) return;
+            const uId = String(userId || data.senderId || data.sender_id || '');
+            const idKey = String(groupId || uId || '').toLowerCase();
+            if (!idKey) return;
 
             setTypingUsers(prev => {
-                const current = prev[chatId];
-                if (!current) return prev;
-                const uId = String(userId);
-                const next = new Set(current);
-                next.delete(uId);
-                if (next.size === 0) {
-                    const copy = { ...prev };
-                    delete copy[chatId];
-                    return copy;
+                const next = { ...prev };
+                const matchEntry = Object.entries(next).find(([id]) => String(id).toLowerCase() === idKey);
+
+                if (matchEntry) {
+                    const [id, set] = matchEntry;
+                    const newSet = new Set(set);
+                    newSet.delete(uId);
+                    if (newSet.size === 0) delete next[id];
+                    else next[id] = newSet;
                 }
-                return { ...prev, [chatId]: next };
+                return next;
             });
         };
 
@@ -3240,7 +3489,24 @@ export default function Chat() {
 
         // Listen for new group messages
         const onGroupMessage = (data) => {
-            console.log('[DEBUG] group_message received:', data);
+
+            // Cleanup typing status for this sender in this group
+            if (data.groupId && (data.message?.sender_id?._id || data.message?.sender_id)) {
+                const sId = String(data.message.sender_id?._id || data.message.sender_id);
+                const gId = String(data.groupId).toLowerCase();
+                setTypingUsers(prev => {
+                    const next = { ...prev };
+                    const matchEntry = Object.entries(next).find(([id]) => String(id).toLowerCase() === gId);
+                    if (matchEntry) {
+                        const [id, set] = matchEntry;
+                        const newSet = new Set(set);
+                        newSet.delete(sId); // Remove specific user
+                        if (newSet.size === 0) delete next[id];
+                        else next[id] = newSet;
+                    }
+                    return next;
+                });
+            }
             const exists = (groupsRef.current || []).some(g => String(g._id) === String(data.groupId));
             if (!exists) {
                 fetchGroups();
@@ -3255,7 +3521,7 @@ export default function Chat() {
 
             const isMyOwnMessage = !!(myId && msgSenderId && String(myId) === String(msgSenderId));
 
-            console.log(`[DEBUG] Group Message Evaluation: Group: ${data.groupId}, Sender: ${msgSenderId}, Me: ${myId}, isCurrent: ${isCurrentGroup}, isMine: ${isMyOwnMessage}`);
+
 
             if (isCurrentGroup) {
                 // Refresh group metadata (sync members, removedMembers)
@@ -4029,7 +4295,7 @@ export default function Chat() {
             const isGroup = !!msg.group_id;
             const msgId = msg._id || msg.id;
             const url = isGroup ? `/api/groups/event/${msgId}/respond` : `/api/chat/event/${msgId}/respond`;
-            
+
             const res = await axios.post(url, { status }, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -4042,17 +4308,17 @@ export default function Chat() {
                     setGroups(prev => prev.map(g => String(g._id) === String(msg.group_id) ? { ...g, lastMessage: { ...g.lastMessage, event: updatedEvent } } : g));
                 } else {
                     setMessages(updateFn);
-                    const otherId = String(msg.sender_id?._id || msg.sender_id) === String(user.id) 
-                        ? String(msg.receiver_id?._id || msg.receiver_id) 
+                    const otherId = String(msg.sender_id?._id || msg.sender_id) === String(user.id)
+                        ? String(msg.receiver_id?._id || msg.receiver_id)
                         : String(msg.sender_id?._id || msg.sender_id);
                     setUsers(prev => prev.map(u => String(u._id) === otherId ? { ...u, lastMessage: { ...u.lastMessage, event: updatedEvent } } : u));
                 }
-                
+
                 // If this is the current event details being viewed, update it
                 if (eventDetailsMsg && String(eventDetailsMsg._id || eventDetailsMsg.id) === String(msgId)) {
                     setEventDetailsMsg(prev => ({ ...prev, event: updatedEvent }));
                 }
-                
+
                 setOpenEventRespondId(null);
             }
         } catch (err) {
@@ -4505,37 +4771,47 @@ export default function Chat() {
     };
 
     // --- Mute Handlers ---
-    const handleMuteAction = () => {
-        if (!muteTargetUser) return;
-
+    const handleMuteAction = (targetId = null, hours = null, name = null) => {
         const myId = user.id || user._id;
         const mutedKey = `mutedChats_${myId}`;
         const mutedMap = JSON.parse(localStorage.getItem(mutedKey)) || {};
 
+        let actualId = targetId || (muteTargetUser ? (muteTargetUser.id || muteTargetUser._id) : null);
+        let actualName = name || (muteTargetUser ? muteTargetUser.name : 'Chat');
+
+        if (!actualId) return;
+
         let muteUntil;
-        if (muteDuration === '8 hours') {
-            muteUntil = Date.now() + (8 * 60 * 60 * 1000);
-        } else if (muteDuration === '1 week') {
-            muteUntil = Date.now() + (7 * 24 * 60 * 60 * 1000);
+        if (hours) {
+            muteUntil = Date.now() + (hours * 60 * 60 * 1000);
         } else {
-            muteUntil = 'Always';
+            if (muteDuration === '8 hours') {
+                muteUntil = Date.now() + (8 * 60 * 60 * 1000);
+            } else if (muteDuration === '1 week') {
+                muteUntil = Date.now() + (7 * 24 * 60 * 60 * 1000);
+            } else {
+                muteUntil = 'Always';
+            }
         }
 
-        mutedMap[muteTargetUser.id] = muteUntil;
+        mutedMap[String(actualId)] = muteUntil;
         localStorage.setItem(mutedKey, JSON.stringify(mutedMap));
 
         setIsMuteModalOpen(false);
         fetchUsers();
         fetchGroups();
-        setCommunities(prev => prev.map(c => String(c.id) === String(muteTargetUser.id) ? { ...c, isMuted: true } : c));
+        if (setCommunities) {
+            setCommunities(prev => prev.map(c => String(c.id || c._id) === String(actualId) ? { ...c, isMuted: true } : c));
+        }
 
         setSnackbar({
-            message: `Chat ${muteTargetUser.name} is muted`,
+            message: `Notifications muted for ${hours ? hours + (hours > 1 ? ' hours' : ' hour') : (muteDuration || 'selected period')} for ${actualName}`,
             type: 'info',
             variant: 'system',
-            onAction: () => handleUnmuteAction(muteTargetUser.id, muteTargetUser.name),
+            onAction: () => handleUnmuteAction(actualId, actualName),
             actionLabel: 'Undo'
         });
+        setOpenDropdown(null);
     };
 
     const handleUnmuteAction = (targetId, name) => {
@@ -4543,12 +4819,14 @@ export default function Chat() {
         const mutedKey = `mutedChats_${myId}`;
         const mutedMap = JSON.parse(localStorage.getItem(mutedKey)) || {};
 
-        delete mutedMap[targetId];
+        delete mutedMap[String(targetId)];
         localStorage.setItem(mutedKey, JSON.stringify(mutedMap));
 
         fetchUsers();
         fetchGroups();
-        setCommunities(prev => prev.map(c => String(c.id) === String(targetId) ? { ...c, isMuted: false } : c));
+        if (setCommunities) {
+            setCommunities(prev => prev.map(c => String(c.id || c._id) === String(targetId) ? { ...c, isMuted: false } : c));
+        }
         setSnackbar({ message: `Notifications unmuted for ${name}`, type: 'success', variant: 'system' });
         setOpenDropdown(null);
     };
@@ -5211,7 +5489,13 @@ export default function Chat() {
             if (selectedGroup) fetchGroups(); else fetchUsers();
         } catch (err) {
             console.error('Failed to send contact:', err);
-            setSnackbar({ message: 'Failed to share contacts', type: 'error' });
+            if (err.response && err.response.status === 403 && err.response.data.blocked) {
+                setIsMessagingBlocked(true);
+                setUnblockRequested(err.response.data.unblockRequested || false);
+                setShowUnblockModal(true);
+            } else {
+                setSnackbar({ message: 'Failed to share contacts', type: 'error' });
+            }
         }
     };
 
@@ -5283,7 +5567,13 @@ export default function Chat() {
             setSnackbar({ message: 'Poll created!', type: 'success', variant: 'system' });
         } catch (err) {
             console.error('Poll send failed:', err);
-            setSnackbar({ message: 'Failed to create poll', type: 'error', variant: 'system' });
+            if (err.response && err.response.status === 403 && err.response.data.blocked) {
+                setIsMessagingBlocked(true);
+                setUnblockRequested(err.response.data.unblockRequested || false);
+                setShowUnblockModal(true);
+            } else {
+                setSnackbar({ message: 'Failed to create poll', type: 'error', variant: 'system' });
+            }
         }
     };
 
@@ -5365,9 +5655,15 @@ export default function Chat() {
             setEventLocation('');
             setSnackbar({ message: 'Event created!', type: 'success', variant: 'system' });
         } catch (err) {
-            console.error('Failed to send event:', err);
-            const errMsg = err.response?.data?.error || err.message || 'Failed to create event';
-            setSnackbar({ message: errMsg, type: 'error', variant: 'system' });
+            console.error('Event send failed:', err);
+            if (err.response && err.response.status === 403 && err.response.data.blocked) {
+                setIsMessagingBlocked(true);
+                setUnblockRequested(err.response.data.unblockRequested || false);
+                setShowUnblockModal(true);
+            } else {
+                const errMsg = err.response?.data?.error || err.message || 'Failed to create event';
+                setSnackbar({ message: errMsg, type: 'error', variant: 'system' });
+            }
         }
     };
 
@@ -5452,10 +5748,10 @@ export default function Chat() {
             const endObj = new Date(endStr);
 
             if (endObj < startObj) {
-                setSnackbar({ 
-                    message: 'Event cannot end before it starts. Please check your dates and times.', 
-                    type: 'error', 
-                    variant: 'system' 
+                setSnackbar({
+                    message: 'Event cannot end before it starts. Please check your dates and times.',
+                    type: 'error',
+                    variant: 'system'
                 });
                 return;
             }
@@ -5562,12 +5858,25 @@ export default function Chat() {
 
     const handleSend = async (e, contentOverride = null, voiceFile = null, voiceDuration = null, voiceIsViewOnce = null) => {
         if (e) e.preventDefault();
-        if (showGrammarBar) return;
 
         const textToSend = contentOverride !== null ? contentOverride : input;
         const targetFile = voiceFile || file;
 
+        // 1. Basic empty check
         if ((!textToSend.trim() && !targetFile) || (!selectedUser && !selectedGroup)) return;
+
+        // 2. Grammar & AI Validation Gate (ONLY for text messages)
+        if (!targetFile && textToSend.trim().length > 0) {
+            // Strict check: Must have applied an AI suggestion or be marked as "proper grammar" by the earlier effect
+            if (showGrammarBar || !suggestionApplied) {
+                setSnackbar({
+                    message: "Please write a meaningful word or sentence to start the chat",
+                    type: 'error',
+                    variant: 'system'
+                });
+                return;
+            }
+        }
 
         // Optimistic UI Update (Temporary)
         const tempId = Date.now();
@@ -5717,6 +6026,12 @@ export default function Chat() {
             }
 
             if (err.response && err.response.status === 403) {
+                if (err.response.data.blocked) {
+                    setIsMessagingBlocked(true);
+                    setUnblockRequested(err.response.data.unblockRequested || false);
+                    setShowUnblockModal(true);
+                    return;
+                }
                 setSnackbar({ message: err.response.data.error || 'Permission denied', type: 'error' });
                 fetchUsers(); // Refresh to catch status changes
             }
@@ -6123,7 +6438,14 @@ export default function Chat() {
             }
         } catch (err) {
             console.error('[DEBUG] handleNotificationReply: Error sending message:', err);
-            setSnackbar({ message: 'Failed to send reply', type: 'error' });
+            if (err.response && err.response.status === 403 && err.response.data.blocked) {
+                setIsMessagingBlocked(true);
+                setUnblockRequested(err.response.data.unblockRequested || false);
+                setShowUnblockModal(true);
+                setMessages(prev => prev.filter(m => m.id !== tempId && m._id !== tempId));
+            } else {
+                setSnackbar({ message: 'Failed to send reply', type: 'error' });
+            }
         }
     };
 
@@ -6169,7 +6491,13 @@ export default function Chat() {
             }
         } catch (err) {
             console.error("[DEBUG] handleGroupNotificationReply: Error sending message:", err);
-            setSnackbar({ message: 'Failed to send group reply', type: 'error' });
+            if (err.response && err.response.status === 403 && err.response.data.blocked) {
+                setIsMessagingBlocked(true);
+                setUnblockRequested(err.response.data.unblockRequested || false);
+                setShowUnblockModal(true);
+            } else {
+                setSnackbar({ message: 'Failed to send group reply', type: 'error' });
+            }
             if (isChatOpenWithTarget) {
                 setGroupMessages(prev => prev.filter(m => m._id !== tempId));
             }
@@ -9059,50 +9387,50 @@ export default function Chat() {
                                             );
                                         })}
                                     </div>
-                                     <div style={{ borderTop: '1px solid #e9edef', marginTop: '15px', paddingTop: '10px' }}>
-                                         <button
-                                             // Make it visually disabled when no votes
-                                             disabled={infoMessage.poll.options.every(o => !(o.voters?.length > 0))}
-                                             style={{ background: 'none', border: 'none', width: '100%', color: infoMessage.poll.options.some(o => o.voters?.length > 0) ? '#0EA5BE' : '#8696a0', fontSize: '14px', fontWeight: 'bold', padding: '6px 0', cursor: infoMessage.poll.options.some(o => o.voters?.length > 0) ? 'pointer' : 'default', transition: 'color 0.2s' }}
-                                         >
-                                             View votes
-                                         </button>
-                                     </div>
-                                 </div>
-                             ) : infoMessage.type === 'event' ? (
-                                  infoMessage.event ? (
-                                 <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'default', opacity: infoMessage.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
-                                     <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
-                                         <div style={{ display: 'flex', gap: '14px' }}>
-                                             <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                                 <Calendar size={24} color="#0EA5BE" />
-                                             </div>
-                                             <div style={{ flex: 1, minWidth: 0 }}>
-                                                 <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: infoMessage.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{infoMessage.event.name}</div>
-                                                 <div style={{ fontSize: '14px', color: '#667781' }}>
-                                                     {formatEventTimeString(infoMessage.event.startDate, infoMessage.event.startTime, infoMessage.event.endDate, infoMessage.event.endTime)}
-                                                 </div>
-                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
-                                                     <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
-                                                         <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                                                             <UserIcon size={12} color="#8696a0" style={{ marginTop: '1px' }} />
-                                                         </div>
-                                                     </div>
-                                                     <span style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500 }}>{infoMessage.event.participants?.length || 0} going</span>
-                                                 </div>
-                                             </div>
-                                         </div>
-                                     </div>
-                                     <div style={{ padding: '12px 0', margin: '0 16px', borderTop: '1px solid #f0f2f5', textAlign: 'center' }}>
-                                         <span style={{ color: infoMessage.event.cancelled ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
-                                             {infoMessage.event.cancelled ? 'Event cancelled' : 'View event'}
-                                         </span>
-                                     </div>
-                                 </div>
-                                  ) : (
-                                      <div style={{ padding: '15px', textAlign: 'center', background: '#f8f9fa', borderRadius: '12px' }}>Event</div>
-                                  )
-                              ) : (
+                                    <div style={{ borderTop: '1px solid #e9edef', marginTop: '15px', paddingTop: '10px' }}>
+                                        <button
+                                            // Make it visually disabled when no votes
+                                            disabled={infoMessage.poll.options.every(o => !(o.voters?.length > 0))}
+                                            style={{ background: 'none', border: 'none', width: '100%', color: infoMessage.poll.options.some(o => o.voters?.length > 0) ? '#0EA5BE' : '#8696a0', fontSize: '14px', fontWeight: 'bold', padding: '6px 0', cursor: infoMessage.poll.options.some(o => o.voters?.length > 0) ? 'pointer' : 'default', transition: 'color 0.2s' }}
+                                        >
+                                            View votes
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : infoMessage.type === 'event' ? (
+                                infoMessage.event ? (
+                                    <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'default', opacity: infoMessage.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
+                                        <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
+                                            <div style={{ display: 'flex', gap: '14px' }}>
+                                                <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                    <Calendar size={24} color="#0EA5BE" />
+                                                </div>
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: infoMessage.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{infoMessage.event.name}</div>
+                                                    <div style={{ fontSize: '14px', color: '#667781' }}>
+                                                        {formatEventTimeString(infoMessage.event.startDate, infoMessage.event.startTime, infoMessage.event.endDate, infoMessage.event.endTime)}
+                                                    </div>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+                                                        <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
+                                                            <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                                                <UserIcon size={12} color="#8696a0" style={{ marginTop: '1px' }} />
+                                                            </div>
+                                                        </div>
+                                                        <span style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500 }}>{infoMessage.event.participants?.length || 0} going</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div style={{ padding: '12px 0', margin: '0 16px', borderTop: '1px solid #f0f2f5', textAlign: 'center' }}>
+                                            <span style={{ color: infoMessage.event.cancelled ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
+                                                {infoMessage.event.cancelled ? 'Event cancelled' : 'View event'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div style={{ padding: '15px', textAlign: 'center', background: '#f8f9fa', borderRadius: '12px' }}>Event</div>
+                                )
+                            ) : (
                                 <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{infoMessage.content}</p>
                             )}
                             <div className="wa-msg-meta">
@@ -9929,18 +10257,22 @@ export default function Chat() {
             );
         }
 
-        if (type === 'community_home') {
+        if (type === 'community_home' || type === 'sidebar_menu' || type === 'header_chat' || type === 'header_group' || type === 'snackbar_menu') {
             const { coords } = openDropdown;
             const menuStyleHome = {
                 position: 'fixed',
-                top: (coords?.y || 0) + 10,
-                left: (coords?.x || 0) - 180,
+                top: (type === 'snackbar_menu' && mouseY > vHeight - 200)
+                    ? (mouseY - 130) // Open upwards if too low
+                    : (type === 'sidebar_menu' ? (mouseY + 20) : (mouseY + 10)),
+                left: (type.includes('header') || type === 'sidebar_menu' || type === 'snackbar_menu') ? 'auto' : (mouseX - 180),
+                right: (type.includes('header') || type === 'sidebar_menu' || type === 'snackbar_menu') ? (vWidth - mouseX - 10) : 'auto',
                 zIndex: 10002,
-                minWidth: 200,
+                minWidth: 240,
                 background: 'white',
-                borderRadius: '8px',
-                boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
-                padding: '8px 0'
+                borderRadius: '12px',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+                padding: '8px 0',
+                border: '1px solid #f0f2f5'
             };
 
             return (
@@ -9952,29 +10284,166 @@ export default function Chat() {
                         onContextMenu={(e) => { e.preventDefault(); setOpenDropdown(null); }}
                     />
                     <div
-                        className="wa-dropdown-menu contact-dropdown active-fixed"
+                        className="wa-dropdown-menu active-fixed premium-menu"
                         style={menuStyleHome}
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="wa-dropdown-item" onClick={() => { setIsCommunityInfoOpen(true); setOpenDropdown(null); }}>
-                            <Info size={16} style={{ marginRight: 10, color: '#54656f' }} /> Community info
-                        </div>
-                        <div className="wa-dropdown-item" onClick={() => { setOpenDropdown(null); }}>
-                            <Users size={16} style={{ marginRight: 10, color: '#54656f' }} /> View members
-                        </div>
-                        <div className="wa-dropdown-item" onClick={() => {
-                            setIsCommunitySettingsOpen(true);
-                            setOpenDropdown(null);
-                        }}>
-                            <Settings size={16} style={{ marginRight: 10, color: '#54656f' }} /> Community settings
-                        </div>
-                        <div style={{ height: '1px', background: '#f0f2f5', margin: '4px 0' }}></div>
-                        <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => {
-                            handleExitCommunity(selectedCommunity);
-                            setOpenDropdown(null);
-                        }}>
-                            <LogOut size={16} style={{ marginRight: 10, color: '#ea0038' }} /> Exit community
-                        </div>
+                        {type === 'sidebar_menu' && (
+                            <>
+                                <div className="wa-dropdown-item" onClick={() => { setIsNewGroupOpen(true); setOpenDropdown(null); }}>
+                                    <PlusCircle size={18} style={{ marginRight: 12, color: '#54656f' }} /> New group
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => { setIsNewCommunityOpen(true); setOpenDropdown(null); }}>
+                                    <Users size={18} style={{ marginRight: 12, color: '#54656f' }} /> New community
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => { setIsGlobalStarredOpen(true); setOpenDropdown(null); }}>
+                                    <Star size={18} style={{ marginRight: 12, color: '#54656f' }} /> Starred messages
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => { setIsArchivedChatsOpen(true); setOpenDropdown(null); }}>
+                                    <Archive size={18} style={{ marginRight: 12, color: '#54656f' }} /> Archived
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => { setIsProfileOpen(true); setOpenDropdown(null); }}>
+                                    <User size={18} style={{ marginRight: 12, color: '#54656f' }} /> Profile
+                                </div>
+                                <div className="wa-dropdown-divider"></div>
+                                <div className="wa-dropdown-item" onClick={() => { logout(); setOpenDropdown(null); }}>
+                                    <LogOut size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Log out
+                                </div>
+                            </>
+                        )}
+
+                        {type === 'header_chat' && (
+                            <>
+                                <div className="wa-dropdown-item" onClick={() => { setIsContactInfoOpen(true); setOpenDropdown(null); }}>
+                                    <Info size={18} style={{ marginRight: 12, color: '#54656f' }} /> Contact info
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => { setIsForwardingMode(true); setIsChatSelectionMode(true); setOpenDropdown(null); }}>
+                                    <CheckSquare size={18} style={{ marginRight: 12, color: '#54656f' }} /> Select messages
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => {
+                                    if (archivedChatIds.includes(String(id))) handleUnarchiveChat(id, data.name);
+                                    else handleArchiveChat(id, data.name);
+                                    setOpenDropdown(null);
+                                }}>
+                                    <Archive size={18} style={{ marginRight: 12, color: '#54656f' }} /> {archivedChatIds.includes(String(id)) ? 'Unarchive chat' : 'Archive chat'}
+                                </div>
+                                <div className="wa-dropdown-divider"></div>
+
+                                {/* Premium Mute Sub-Menu Style Items */}
+                                <div className="wa-dropdown-item" onClick={() => { handleUnmuteAction(id, data.name); setOpenDropdown(null); }} style={{ display: data.isMuted ? 'flex' : 'none' }}>
+                                    <Bell size={18} style={{ marginRight: 12, color: '#54656f' }} /> Turn on notifications
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => { handleMuteAction(id, 1, data.name); setOpenDropdown(null); }}>
+                                    <BellOff size={18} style={{ marginRight: 12, color: '#54656f' }} /> Mute for 1 hour
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => { handleMuteAction(id, 8, data.name); setOpenDropdown(null); }}>
+                                    <BellOff size={18} style={{ marginRight: 12, color: '#54656f' }} /> Mute for 8 hours
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => { handleMuteAction(id, 24, data.name); setOpenDropdown(null); }}>
+                                    <BellOff size={18} style={{ marginRight: 12, color: '#54656f' }} /> Mute for 1 day
+                                </div>
+
+                                <div className="wa-dropdown-divider"></div>
+                                <div className="wa-dropdown-item" onClick={() => { setIsNotificationSettingsOpen(true); setOpenDropdown(null); }}>
+                                    <Settings size={18} style={{ marginRight: 12, color: '#54656f' }} /> Notification settings
+                                </div>
+                                <div className="wa-dropdown-divider"></div>
+                                <div className="wa-dropdown-item" onClick={() => { setIsClearChatConfirmOpen(true); setOpenDropdown(null); }}>
+                                    <Trash2 size={18} style={{ marginRight: 12, color: '#54656f' }} /> Clear messages
+                                </div>
+                                <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => {
+                                    setDeleteTarget({ _id: id, id, name: data.name, isGroup: false });
+                                    setIsDeleteChatConfirmOpen(true);
+                                    setOpenDropdown(null);
+                                }}>
+                                    <Trash2 size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Delete chat
+                                </div>
+                            </>
+                        )}
+
+                        {type === 'header_group' && (
+                            <>
+                                <div className="wa-dropdown-item" onClick={() => {
+                                    if (data.isCommunityAnnouncements) setIsCommunityInfoOpen(true);
+                                    else setIsContactInfoOpen(true);
+                                    setOpenDropdown(null);
+                                }}>
+                                    <Info size={18} style={{ marginRight: 12, color: '#54656f' }} /> {data.isCommunityAnnouncements ? 'Community info' : 'Group info'}
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => { setIsForwardingMode(true); setIsChatSelectionMode(true); setOpenDropdown(null); }}>
+                                    <CheckSquare size={18} style={{ marginRight: 12, color: '#54656f' }} /> Select messages
+                                </div>
+                                <div className="wa-dropdown-divider"></div>
+
+                                {/* Premium Mute Sub-Menu Style Items */}
+                                <div className="wa-dropdown-item" onClick={() => { handleUnmuteAction(id, data.name); setOpenDropdown(null); }} style={{ display: data.isMuted ? 'flex' : 'none' }}>
+                                    <Bell size={18} style={{ marginRight: 12, color: '#54656f' }} /> Turn on notifications
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => { handleMuteAction(id, 1, data.name); setOpenDropdown(null); }}>
+                                    <BellOff size={18} style={{ marginRight: 12, color: '#54656f' }} /> Mute for 1 hour
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => { handleMuteAction(id, 8, data.name); setOpenDropdown(null); }}>
+                                    <BellOff size={18} style={{ marginRight: 12, color: '#54656f' }} /> Mute for 8 hours
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => { handleMuteAction(id, 24, data.name); setOpenDropdown(null); }}>
+                                    <BellOff size={18} style={{ marginRight: 12, color: '#54656f' }} /> Mute for 1 day
+                                </div>
+
+                                <div className="wa-dropdown-item" onClick={() => { setIsNotificationSettingsOpen(true); setOpenDropdown(null); }}>
+                                    <Settings size={18} style={{ marginRight: 12, color: '#54656f' }} /> Notification settings
+                                </div>
+                                <div className="wa-dropdown-divider"></div>
+                                <div className="wa-dropdown-item" onClick={() => { setIsClearChatConfirmOpen(true); setOpenDropdown(null); }}>
+                                    <Trash2 size={18} style={{ marginRight: 12, color: '#54656f' }} /> Clear messages
+                                </div>
+                                <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => { setIsExitGroupConfirmOpen(true); setOpenDropdown(null); }}>
+                                    <LogOut size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Exit group
+                                </div>
+                            </>
+                        )}
+
+                        {type === 'community_home' && (
+                            <>
+                                <div className="wa-dropdown-item" onClick={() => { setIsCommunityInfoOpen(true); setOpenDropdown(null); }}>
+                                    <Info size={18} style={{ marginRight: 12, color: '#54656f' }} /> Community info
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => { setOpenDropdown(null); }}>
+                                    <Users size={18} style={{ marginRight: 12, color: '#54656f' }} /> View members
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => {
+                                    setIsCommunitySettingsOpen(true);
+                                    setOpenDropdown(null);
+                                }}>
+                                    <Settings size={18} style={{ marginRight: 12, color: '#54656f' }} /> Community settings
+                                </div>
+                                <div className="wa-dropdown-divider"></div>
+                                <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => {
+                                    handleExitCommunity(selectedCommunity);
+                                    setOpenDropdown(null);
+                                }}>
+                                    <LogOut size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Exit community
+                                </div>
+                            </>
+                        )}
+
+                        {type === 'snackbar_menu' && (
+                            <>
+                                <div className="wa-dropdown-item" onClick={() => {
+                                    setNotificationsEnabled(false);
+                                    setOpenDropdown(null);
+                                    // No snackbar here because they are now disabled! 
+                                    // Just close the menu.
+                                }}>
+                                    <Ban size={18} style={{ marginRight: 12, color: '#54656f' }} /> Turn off all notifications from the application
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => {
+                                    setIsNotificationSettingsOpen(true);
+                                    setOpenDropdown(null);
+                                }}>
+                                    <Settings size={18} style={{ marginRight: 12, color: '#54656f' }} /> Go to notification settings
+                                </div>
+                            </>
+                        )}
                     </div>
                 </>
             );
@@ -12147,26 +12616,16 @@ export default function Chat() {
                         setIsNewChatOpen(true);
                     }}><Plus size={20} /></button>
                     <button
-                        className="wa-nav-icon-btn"
+                        className={`wa-nav-icon-btn ${(openDropdown?.type === 'sidebar_menu') ? 'active' : ''}`}
                         title="Menu"
-                        onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setDropdownPos({ x: e.clientX, y: e.clientY });
+                            setOpenDropdown({ type: 'sidebar_menu', id: 'sidebar', data: { sidebar: true } });
+                        }}
                     >
                         <MoreVertical size={20} />
                     </button>
-                    {/* Simple Menu Dropdown */}
-                    {showMenu && (
-                        <div className="wa-menu-dropdown">
-                            <div className="wa-menu-item" onClick={logout}>Log out</div>
-                            <div className="wa-menu-item" onClick={(e) => { e.stopPropagation(); setIsNewGroupOpen(true); setShowMenu(false); }}>New group</div>
-
-                            <div className="wa-menu-item" onClick={(e) => { e.stopPropagation(); setIsGlobalStarredOpen(true); setShowMenu(false); }}>Starred messages</div>
-                            <div className="wa-menu-item" onClick={() => { setIsArchivedChatsOpen(true); setShowMenu(false); }} style={{ display: 'flex', alignItems: 'center', whiteSpace: 'nowrap' }}>
-                                <Archive size={18} style={{ marginRight: 12, flexShrink: 0 }} />
-                                <span style={{ flex: 1 }}>{t('chat_list.archived')}</span>
-                                {totalUnreadArchived > 0 && <span style={{ background: 'var(--primary, #23D2EF)', color: '#111b21', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '600', marginLeft: 8, flexShrink: 0 }}>{totalUnreadArchived}</span>}
-                            </div>
-                        </div>
-                    )}
                 </div>
             </div>
 
@@ -12493,7 +12952,16 @@ export default function Chat() {
                                     return matchesSearch;
                                 })
                                 .sort((a, b) => {
-                                    // Pinned always first
+                                    // Typing contacts always first (instant visibility)
+                                    const aId = String(a._id || a.id || '').toLowerCase();
+                                    const bId = String(b._id || b.id || '').toLowerCase();
+
+                                    const aMatch = aId ? Object.entries(typingUsers || {}).find(([id, set]) => String(id).toLowerCase() === aId && set?.size > 0) : null;
+                                    const bMatch = bId ? Object.entries(typingUsers || {}).find(([id, set]) => String(id).toLowerCase() === bId && set?.size > 0) : null;
+
+                                    if (aMatch && !bMatch) return -1;
+                                    if (!aMatch && bMatch) return 1;
+                                    // Pinned always next
                                     if (a.isPinned && !b.isPinned) return -1;
                                     if (!a.isPinned && b.isPinned) return 1;
                                     // Then by date, defaulting to 0 if none
@@ -12920,6 +13388,12 @@ export default function Chat() {
 
                 } catch (err) {
                     console.error("Forwarding failed for contact", contact._id, err);
+                    if (err.response && err.response.status === 403 && err.response.data.blocked) {
+                        setIsMessagingBlocked(true);
+                        setUnblockRequested(err.response.data.unblockRequested || false);
+                        setShowUnblockModal(true);
+                        break; // Stop loop if blocked
+                    }
                 }
             }
         }
@@ -13320,6 +13794,16 @@ export default function Chat() {
                                     }}
                                 >
                                     <Search size={20} />
+                                </button>
+                                <button
+                                    className="wa-nav-icon-btn"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setDropdownPos({ x: e.clientX, y: e.clientY });
+                                        setOpenDropdown({ type: 'header_chat', id: selectedUser._id, data: selectedUser });
+                                    }}
+                                >
+                                    <MoreVertical size={20} />
                                 </button>
                             </div>
                         </div>
@@ -14089,7 +14573,7 @@ export default function Chat() {
                                                                     {msg.type === 'event' && msg.event && (() => {
                                                                         const myId = String(user.id || user._id);
                                                                         const myResponse = (msg.event.responses || []).find(r => String(r.user_id) === myId);
-                                                                        
+
                                                                         return (
                                                                             <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
                                                                                 <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
@@ -14108,7 +14592,7 @@ export default function Chat() {
                                                                                                         {msg.event.participants?.length > 0 ? (
                                                                                                             (() => {
                                                                                                                 const p = users.find(u => String(u._id || u.id) === String(msg.event.participants[0]));
-                                                                                                                return p && (p.avatar || p.image || p.profile_photo) ? <img src={p.avatar || p.image || p.profile_photo} alt="" style={{width: '100%', height:'100%', objectFit: 'cover'}} /> : <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />;
+                                                                                                                return p && (p.avatar || p.image || p.profile_photo) ? <img src={p.avatar || p.image || p.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />;
                                                                                                             })()
                                                                                                         ) : (
                                                                                                             <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />
@@ -14121,61 +14605,61 @@ export default function Chat() {
                                                                                     </div>
                                                                                 </div>
                                                                                 <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
-                                                                                     {msg.event.cancelled ? (
-                                                                                         <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
-                                                                                     ) : isMe ? (
-                                                                                         <span onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer' }}>Edit event</span>
-                                                                                     ) : (
-                                                                                         <div style={{ width: '100%', textAlign: 'center' }}>
-                                                                                             <div 
-                                                                                                 onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
-                                                                                                 style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
-                                                                                             >
-                                                                                                 {myResponse ? myResponse.status : 'Respond'}
-                                                                                                 <ChevronDown size={18} />
-                                                                                             </div>
-                                                                                         </div>
-                                                                                     )}
+                                                                                    {msg.event.cancelled ? (
+                                                                                        <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
+                                                                                    ) : isMe ? (
+                                                                                        <span onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer' }}>Edit event</span>
+                                                                                    ) : (
+                                                                                        <div style={{ width: '100%', textAlign: 'center' }}>
+                                                                                            <div
+                                                                                                onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
+                                                                                                style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
+                                                                                            >
+                                                                                                {myResponse ? myResponse.status : 'Respond'}
+                                                                                                <ChevronDown size={18} />
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )}
 
-                                                                                     {openEventRespondId === msg._id && !msg.event.cancelled && (
-                                                                                         <div style={{
-                                                                                             position: 'absolute',
-                                                                                             bottom: 'calc(100% + 5px)',
-                                                                                             left: '50%',
-                                                                                             transform: 'translateX(-50%)',
-                                                                                             background: '#ffffff',
-                                                                                             borderRadius: '10px',
-                                                                                             boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
-                                                                                             zIndex: 1000,
-                                                                                             minWidth: '130px',
-                                                                                             padding: '4px 0',
-                                                                                             overflow: 'hidden',
-                                                                                             border: '1px solid #e9edef'
-                                                                                         }}>
-                                                                                             {['Going', 'Maybe', 'Not going'].map(status => (
-                                                                                                 <div 
-                                                                                                     key={status} 
-                                                                                                     onClick={(e) => { e.stopPropagation(); handleEventRespond(msg, status); setOpenEventRespondId(null); }}
-                                                                                                     style={{ 
-                                                                                                         padding: '12px 16px', 
-                                                                                                         fontSize: '14px', 
-                                                                                                         color: '#111b21', 
-                                                                                                         textAlign: 'left', 
-                                                                                                         cursor: 'pointer',
-                                                                                                         borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none', 
-                                                                                                         background: myResponse?.status === status ? '#f0f2f5' : 'white',
-                                                                                                         fontWeight: myResponse?.status === status ? '600' : 'normal',
-                                                                                                         display: 'flex',
-                                                                                                         alignItems: 'center',
-                                                                                                         justifyContent: 'space-between'
-                                                                                                     }}
-                                                                                                 >
-                                                                                                     {status}
-                                                                                                     {myResponse?.status === status && <Check size={14} color="#0EA5BE" />}
-                                                                                                 </div>
-                                                                                             ))}
-                                                                                         </div>
-                                                                                     )}
+                                                                                    {openEventRespondId === msg._id && !msg.event.cancelled && (
+                                                                                        <div style={{
+                                                                                            position: 'absolute',
+                                                                                            bottom: 'calc(100% + 5px)',
+                                                                                            left: '50%',
+                                                                                            transform: 'translateX(-50%)',
+                                                                                            background: '#ffffff',
+                                                                                            borderRadius: '10px',
+                                                                                            boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+                                                                                            zIndex: 1000,
+                                                                                            minWidth: '130px',
+                                                                                            padding: '4px 0',
+                                                                                            overflow: 'hidden',
+                                                                                            border: '1px solid #e9edef'
+                                                                                        }}>
+                                                                                            {['Going', 'Maybe', 'Not going'].map(status => (
+                                                                                                <div
+                                                                                                    key={status}
+                                                                                                    onClick={(e) => { e.stopPropagation(); handleEventRespond(msg, status); setOpenEventRespondId(null); }}
+                                                                                                    style={{
+                                                                                                        padding: '12px 16px',
+                                                                                                        fontSize: '14px',
+                                                                                                        color: '#111b21',
+                                                                                                        textAlign: 'left',
+                                                                                                        cursor: 'pointer',
+                                                                                                        borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none',
+                                                                                                        background: myResponse?.status === status ? '#f0f2f5' : 'white',
+                                                                                                        fontWeight: myResponse?.status === status ? '600' : 'normal',
+                                                                                                        display: 'flex',
+                                                                                                        alignItems: 'center',
+                                                                                                        justifyContent: 'space-between'
+                                                                                                    }}
+                                                                                                >
+                                                                                                    {status}
+                                                                                                    {myResponse?.status === status && <Check size={14} color="#0EA5BE" />}
+                                                                                                </div>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
                                                                             </div>
                                                                         );
@@ -14234,6 +14718,31 @@ export default function Chat() {
                                         </div>
                                     </div>
                                 ));
+                            })()}
+                            {(() => {
+                                const targetId = String(selectedUser?._id || '').toLowerCase();
+                                const typingSet = typingUsers[targetId];
+                                if (typingSet && typingSet.size > 0) {
+                                    return (
+                                        <div className="wa-message-container" style={{ marginBottom: '10px', marginTop: '5px' }}>
+                                            <div className="wa-message-bubble wa-msg-rec" style={{
+                                                padding: '12px 16px',
+                                                borderRadius: '0 12px 12px 12px',
+                                                width: 'fit-content',
+                                                background: 'white',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '5px',
+                                                boxShadow: '0 1px 0.5px rgba(0,0,0,0.13)'
+                                            }}>
+                                                <div className="wa-typing-dot"></div>
+                                                <div className="wa-typing-dot"></div>
+                                                <div className="wa-typing-dot"></div>
+                                            </div>
+                                        </div>
+                                    );
+                                }
+                                return null;
                             })()}
                             <div ref={bottomRef} />
                         </div>
@@ -14297,50 +14806,23 @@ export default function Chat() {
                         ) : (
                             // Footer Input Area
                             <div className="wa-footer-wrapper">
-
-
                                 <div style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '4px' }}>
                                     {/* Typing Link Preview */}
                                     {typingLinkPreview && typingLinkPreview.title && (
                                         <div className="wa-typing-link-preview">
                                             <div className="wa-typing-preview-header" style={{ justifyContent: 'flex-end' }}>
-                                                <X
-                                                    size={16}
-                                                    style={{ cursor: 'pointer', color: '#667781' }}
-                                                    onClick={() => setTypingLinkPreview(null)}
-                                                />
+                                                <X size={16} style={{ cursor: 'pointer', color: '#667781' }} onClick={() => setTypingLinkPreview(null)} />
                                             </div>
                                             <div className="wa-typing-preview-card">
-                                                {typingLinkPreview.image && (
-                                                    <img
-                                                        src={typingLinkPreview.image}
-                                                        alt={typingLinkPreview.title}
-                                                        className="wa-typing-preview-image"
-                                                    />
-                                                )}
+                                                {typingLinkPreview.image && <img src={typingLinkPreview.image} alt={typingLinkPreview.title} className="wa-typing-preview-image" />}
                                                 <div className="wa-typing-preview-text">
                                                     <div className="wa-typing-preview-title">{typingLinkPreview.title}</div>
-                                                    {typingLinkPreview.description && (
-                                                        <div className="wa-typing-preview-description">{typingLinkPreview.description}</div>
-                                                    )}
-                                                    <div className="wa-typing-preview-domain">
-                                                        {typingLinkPreview.domain === 'youtube.com' || typingLinkPreview.domain === 'www.youtube.com' ? (
-                                                            <>
-                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#FF0000" />
-                                                                </svg>
-                                                                <span>{typingLinkPreview.domain}</span>
-                                                            </>
-                                                        ) : (
-                                                            <span>{typingLinkPreview.domain}</span>
-                                                        )}
-                                                    </div>
+                                                    {typingLinkPreview.description && <div className="wa-typing-preview-description">{typingLinkPreview.description}</div>}
+                                                    <div className="wa-typing-preview-domain"><span>{typingLinkPreview.domain}</span></div>
                                                 </div>
                                             </div>
                                         </div>
                                     )}
-
-
 
                                     {accountLocked ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
@@ -14349,6 +14831,32 @@ export default function Chat() {
                                     ) : isAccountBanned() ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
                                             Messaging is temporarily restricted.
+                                        </div>
+                                    ) : isMessagingBlocked ? (
+                                        <div
+                                            onClick={() => setShowUnblockModal(true)}
+                                            style={{
+                                                width: '100%',
+                                                padding: '16px',
+                                                background: '#fff1f2',
+                                                borderRadius: '16px',
+                                                textAlign: 'center',
+                                                color: '#be123c',
+                                                fontSize: '0.95rem',
+                                                fontWeight: '600',
+                                                border: '1.5px dashed #fecdd3',
+                                                cursor: 'pointer',
+                                                transition: 'all 0.2s',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                gap: '10px'
+                                            }}
+                                            onMouseEnter={(e) => { e.currentTarget.style.background = '#ffe4e6'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                                            onMouseLeave={(e) => { e.currentTarget.style.background = '#fff1f2'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                                        >
+                                            <ShieldAlert size={18} />
+                                            Messaging Suspended. Action Required for Restoration.
                                         </div>
                                     ) : isMessagingRestricted() ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#f8fafc', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem', border: '1px solid #e2e8f0' }}>
@@ -14367,140 +14875,141 @@ export default function Chat() {
                                                 return selectedGroup ? 'You were removed from this group and cannot send messages.' : 'Messaging is restricted.';
                                             })()}
                                         </div>
-                                    ) : isRecording ? (
-                                        <VoiceRecordingUI
-                                            isMobile={isMobile}
-                                            onSend={async (blob, duration, isViewOnce) => {
-                                                const ext = 'webm';
-                                                const filename = `voice_${Date.now()}.${ext}`;
-                                                const fileObj = new File([blob], filename, { type: 'audio/webm' });
-                                                await handleSend(null, null, fileObj, duration, isViewOnce);
-                                                setIsRecording(false);
-                                            }}
-                                            onCancel={() => setIsRecording(false)}
-                                            setSnackbar={setSnackbar}
-                                            t={t}
-                                            userData={userData}
-                                            replyingTo={replyingTo}
-                                            isMeMsg={isMeMsg}
-                                        />
                                     ) : (
-                                        <div style={{ display: 'flex', width: '100%', alignItems: 'center' }}>
-                                            <div className="wa-input-pill" style={{ background: 'white', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: (replyingTo || showGrammarBar) ? '16px' : '30px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', transition: 'border-radius 0.2s' }}>
-                                                {renderGrammarBar()}
-                                                {replyingTo && (
-
-                                                    <div className="wa-reply-preview-container">
-                                                        <div style={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
-                                                            <div className="wa-reply-preview-header">
-                                                                <span className="wa-reply-preview-name">
-                                                                    {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || replyingTo.sender_name || replyingTo.senderName || selectedUser?.name || 'Contact')}
-                                                                </span>
-                                                            </div>
-                                                            <div className="wa-reply-preview-content">
-                                                                {(() => {
-                                                                    if (replyingTo.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
-                                                                    if (replyingTo.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>{replyingTo.file_name || replyingTo.content || 'File'}</span></span>;
-                                                                    if (replyingTo.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>📊 <span>{replyingTo.poll?.question || 'Poll'}</span></span>;
-                                                                    if (replyingTo.type === 'voice' || replyingTo.type === 'audio') {
-                                                                        const m = Math.floor((replyingTo.duration || 0) / 60);
-                                                                        const s = Math.floor((replyingTo.duration || 0) % 60);
-                                                                        return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mic size={14} color="#027EB5" /> <span>{replyingTo.duration ? `${m}:${s.toString().padStart(2, '0')}` : 'Voice message'}</span></span>;
-                                                                    }
-                                                                    if (replyingTo.type === 'contact') {
-                                                                        try {
-                                                                            const parsed = JSON.parse(replyingTo.content);
-                                                                            const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
-                                                                            return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
-                                                                        } catch (e) {
-                                                                            return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+                                        <div style={{ position: 'relative', width: '100%', display: 'flex', alignItems: 'center' }}>
+                                            {isRecording ? (
+                                                <VoiceRecordingUI
+                                                    isMobile={isMobile}
+                                                    onSend={async (blob, duration, isViewOnce) => {
+                                                        const ext = 'webm';
+                                                        const filename = `voice_${Date.now()}.${ext}`;
+                                                        const fileObj = new File([blob], filename, { type: 'audio/webm' });
+                                                        await handleSend(null, null, fileObj, duration, isViewOnce);
+                                                        setIsRecording(false);
+                                                    }}
+                                                    onCancel={() => setIsRecording(false)}
+                                                    setSnackbar={setSnackbar}
+                                                    t={t}
+                                                    userData={userData}
+                                                    replyingTo={replyingTo}
+                                                    isMeMsg={isMeMsg}
+                                                />
+                                            ) : (
+                                                <div className="wa-input-pill" style={{ background: 'white', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: (replyingTo || showGrammarBar) ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                                                    {renderGrammarBar()}
+                                                    {replyingTo && (
+                                                        <div className="wa-reply-preview-container">
+                                                            <div style={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
+                                                                <div className="wa-reply-preview-header">
+                                                                    <span className="wa-reply-preview-name">
+                                                                        {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || replyingTo.sender_name || replyingTo.senderName || selectedUser?.name || 'Contact')}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="wa-reply-preview-content">
+                                                                    {(() => {
+                                                                        if (replyingTo.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
+                                                                        if (replyingTo.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>{replyingTo.file_name || replyingTo.content || 'File'}</span></span>;
+                                                                        if (replyingTo.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>📊 <span>{replyingTo.poll?.question || 'Poll'}</span></span>;
+                                                                        if (replyingTo.type === 'voice' || replyingTo.type === 'audio') {
+                                                                            const m = Math.floor((replyingTo.duration || 0) / 60);
+                                                                            const s = Math.floor((replyingTo.duration || 0) % 60);
+                                                                            return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mic size={14} color="#027EB5" /> <span>{replyingTo.duration ? `${m}:${s.toString().padStart(2, '0')}` : 'Voice message'}</span></span>;
                                                                         }
-                                                                    }
-                                                                    return replyingTo.content;
-                                                                })()}
+                                                                        if (replyingTo.type === 'contact') {
+                                                                            try {
+                                                                                const parsed = JSON.parse(replyingTo.content);
+                                                                                const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
+                                                                                return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
+                                                                            } catch (e) {
+                                                                                return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+                                                                            }
+                                                                        }
+                                                                        return replyingTo.content;
+                                                                    })()}
+                                                                </div>
                                                             </div>
+                                                            {replyingTo.type === 'image' && replyingTo.file_path && (
+                                                                <div className="wa-reply-preview-thumb">
+                                                                    <img src={replyingTo.file_path} alt="thumbnail" />
+                                                                </div>
+                                                            )}
+                                                            <X size={24} className="wa-reply-preview-close" onClick={() => setReplyingTo(null)} />
                                                         </div>
-                                                        {replyingTo.type === 'image' && replyingTo.file_path && (
-                                                            <div className="wa-reply-preview-thumb">
-                                                                <img src={replyingTo.file_path} alt="thumbnail" />
-                                                            </div>
-                                                        )}
-                                                        <X size={24} className="wa-reply-preview-close" onClick={() => setReplyingTo(null)} />
-                                                    </div>
-                                                )}
-                                                <div style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '0 4px 0 12px', minHeight: '54px' }}>
-                                                    <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
-                                                        {renderAttachmentMenu()}
-                                                        <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} data-tooltip="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
-                                                            <Paperclip size={22} color="#54656f" />
-                                                        </button>
-                                                        <input
-                                                            type="file"
-                                                            ref={fileInputRef}
-                                                            style={{ display: 'none' }}
-                                                            accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
-                                                            onChange={handleFileSelect}
-                                                        />
-                                                        <button
-                                                            className={`wa-nav-icon-btn ${showInputEmojiPicker ? 'active' : ''}`}
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                const rect = e.currentTarget.getBoundingClientRect();
-                                                                setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
-                                                                setShowInputEmojiPicker(!showInputEmojiPicker);
-                                                            }}
-                                                        >
-                                                            <Smile size={22} color={showInputEmojiPicker ? "#0EA5BE" : "#54656f"} />
-                                                        </button>
-                                                    </div>
-                                                    <div className="wa-input-area">
-                                                        {file && (
-                                                            <div className="wa-file-preview-badge">
-                                                                {file.name.substring(0, 15)}...
-                                                                <button onClick={() => setFile(null)}>✕</button>
-                                                            </div>
-                                                        )}
-                                                        <textarea
-                                                            id="p2p-message-input"
-                                                            name="message"
-                                                            aria-label="Type a message"
-                                                            className="wa-input-box"
-                                                            placeholder={t('chat_window.input_placeholder')}
-                                                            value={input}
-                                                            onChange={(e) => setInput(e.target.value)}
-                                                            onPaste={handlePaste}
-                                                            onKeyDown={(e) => {
-                                                                if (e.key === 'Enter' && !e.shiftKey) {
-                                                                    e.preventDefault();
-                                                                    handleSend(e);
-                                                                }
-                                                            }}
-                                                            rows={1}
-                                                            style={{ resize: 'none', overflowY: 'auto' }}
-                                                        />
-                                                    </div>
-                                                    <div className="wa-footer-right-icons-inner">
-                                                        {(input.trim() || file) ? (
+                                                    )}
+                                                    <div style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '0 4px 0 12px', minHeight: '54px' }}>
+                                                        <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
+                                                            {renderAttachmentMenu()}
+                                                            <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} data-tooltip="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
+                                                                <Paperclip size={22} color="#54656f" />
+                                                            </button>
+                                                            <input
+                                                                type="file"
+                                                                ref={fileInputRef}
+                                                                style={{ display: 'none' }}
+                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
+                                                                onChange={handleFileSelect}
+                                                            />
                                                             <button
-                                                                onClick={handleSend}
-                                                                className="wa-send-btn-inner"
-                                                                data-tooltip={(!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? "Please select a grammar level" : "Send"}
-                                                                disabled={!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))}
-                                                                style={{
-                                                                    opacity: (!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? 0.5 : 1,
-                                                                    cursor: (!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? 'not-allowed' : 'pointer'
+                                                                className={`wa-nav-icon-btn ${showInputEmojiPicker ? 'active' : ''}`}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    const rect = e.currentTarget.getBoundingClientRect();
+                                                                    setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
+                                                                    setShowInputEmojiPicker(!showInputEmojiPicker);
                                                                 }}
                                                             >
-                                                                <Send size={30} color="white" strokeWidth={2.5} />
+                                                                <Smile size={22} color={showInputEmojiPicker ? "#0EA5BE" : "#54656f"} />
                                                             </button>
-                                                        ) : (
-                                                            <button className="wa-mic-btn-idle" data-tooltip="Voice message" onClick={startRecording}>
-                                                                <Mic size={26} color="currentColor" />
-                                                            </button>
-                                                        )}
+                                                        </div>
+                                                        <div className="wa-input-area">
+                                                            {file && (
+                                                                <div className="wa-file-preview-badge">
+                                                                    {file.name.substring(0, 15)}...
+                                                                    <button onClick={() => setFile(null)}>✕</button>
+                                                                </div>
+                                                            )}
+                                                            <textarea
+                                                                id="p2p-message-input"
+                                                                name="message"
+                                                                aria-label="Type a message"
+                                                                className="wa-input-box"
+                                                                placeholder={t('chat_window.input_placeholder')}
+                                                                value={input}
+                                                                onChange={(e) => setInput(e.target.value)}
+                                                                onPaste={handlePaste}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                                                        e.preventDefault();
+                                                                        handleSend(e);
+                                                                    }
+                                                                }}
+                                                                rows={1}
+                                                                style={{ resize: 'none', overflowY: 'auto' }}
+                                                            />
+                                                        </div>
+                                                        <div className="wa-footer-right-icons-inner">
+                                                            {(input.trim() || file) ? (
+                                                                <button
+                                                                    onClick={handleSend}
+                                                                    className="wa-send-btn-inner"
+                                                                    data-tooltip={(!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? "Please select a grammar level" : "Send"}
+                                                                    disabled={!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))}
+                                                                    style={{
+                                                                        opacity: (!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? 0.5 : 1,
+                                                                        cursor: (!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? 'not-allowed' : 'pointer'
+                                                                    }}
+                                                                >
+                                                                    <Send size={30} color="white" strokeWidth={2.5} />
+                                                                </button>
+                                                            ) : (
+                                                                <button className="wa-mic-btn-idle" data-tooltip="Voice message" onClick={startRecording}>
+                                                                    <Mic size={26} color="currentColor" />
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 </div>
-                                            </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -14572,52 +15081,16 @@ export default function Chat() {
                                 >
                                     <Search size={20} />
                                 </button>
-                                <div style={{ position: 'relative' }} ref={groupMenuRef}>
-                                    <button
-                                        className="wa-nav-icon-btn"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setShowGroupMenu(!showGroupMenu);
-                                        }}
-                                    >
-                                        <MoreVertical size={20} />
-                                    </button>
-                                    {showGroupMenu && (
-                                        <div className="wa-menu-dropdown right" style={{ top: '100%', right: 0 }}>
-                                            <div className="wa-menu-item" onClick={() => {
-                                                setIsEventDetailsOpen(false);
-                                                if (selectedGroup.isCommunityAnnouncements) {
-                                                    setIsCommunityInfoOpen(true);
-                                                } else {
-                                                    setIsContactInfoOpen(true);
-                                                }
-                                                setShowGroupMenu(false);
-                                            }}>
-                                                {selectedGroup.isCommunityAnnouncements ? 'Community info' : 'Group info'}
-                                            </div>
-                                            <div className="wa-menu-item" onClick={() => {
-                                                setIsForwardingMode(true);
-                                                setIsChatSelectionMode(true);
-                                                setShowGroupMenu(false);
-                                            }}>Select messages</div>
-                                            <div className="wa-menu-item" onClick={() => {
-                                                const id = selectedGroup._id;
-                                                const displayName = selectedGroup.name || 'Group';
-                                                if (archivedChatIds.includes(String(id))) {
-                                                    handleUnarchiveChat(id, displayName);
-                                                } else {
-                                                    handleArchiveChat(id, displayName);
-                                                }
-                                                setShowGroupMenu(false);
-                                            }}>
-                                                {archivedChatIds.includes(String(selectedGroup._id)) ? 'Unarchive group' : 'Archive group'}
-                                            </div>
-                                            <div className="wa-menu-item" onClick={() => { setShowMuteModal(true); setMuteTarget(selectedGroup); setShowGroupMenu(false); }}>Mute notifications</div>
-                                            <div className="wa-menu-item" onClick={() => { setIsClearChatConfirmOpen(true); setShowGroupMenu(false); }}>Clear messages</div>
-                                            <div className="wa-menu-item" style={{ color: '#ea0038' }} onClick={() => { setIsExitGroupConfirmOpen(true); setShowGroupMenu(false); }}>Exit group</div>
-                                        </div>
-                                    )}
-                                </div>
+                                <button
+                                    className="wa-nav-icon-btn"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setDropdownPos({ x: e.clientX, y: e.clientY });
+                                        setOpenDropdown({ type: 'header_group', id: selectedGroup._id, data: selectedGroup });
+                                    }}
+                                >
+                                    <MoreVertical size={20} />
+                                </button>
                             </div>
 
                             {/* Community Description Banner */}
@@ -15494,7 +15967,7 @@ export default function Chat() {
                                                                     {msg.type === 'event' && msg.event && (() => {
                                                                         const myId = String(user.id || user._id);
                                                                         const myResponse = (msg.event.responses || []).find(r => String(r.user_id) === myId);
-                                                                        
+
                                                                         return (
                                                                             <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
                                                                                 <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
@@ -15513,7 +15986,7 @@ export default function Chat() {
                                                                                                         {msg.event.participants?.length > 0 ? (
                                                                                                             (() => {
                                                                                                                 const p = users.find(u => String(u._id || u.id) === String(msg.event.participants[0]));
-                                                                                                                return p && (p.avatar || p.image || p.profile_photo) ? <img src={p.avatar || p.image || p.profile_photo} alt="" style={{width: '100%', height:'100%', objectFit: 'cover'}} /> : <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />;
+                                                                                                                return p && (p.avatar || p.image || p.profile_photo) ? <img src={p.avatar || p.image || p.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />;
                                                                                                             })()
                                                                                                         ) : (
                                                                                                             <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />
@@ -15526,47 +15999,47 @@ export default function Chat() {
                                                                                     </div>
                                                                                 </div>
                                                                                 <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
-                                                                                     {msg.event.cancelled ? (
-                                                                                         <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
-                                                                                     ) : isMe ? (
-                                                                                         <span onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>Edit event</span>
-                                                                                     ) : (
-                                                                                         <div style={{ width: '100%', textAlign: 'center' }}>
-                                                                                             <div 
-                                                                                                 onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
-                                                                                                 style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
-                                                                                             >
-                                                                                                 {myResponse ? myResponse.status : 'Respond'}
-                                                                                                 <ChevronDown size={18} />
-                                                                                             </div>
-                                                                                             {openEventRespondId === msg._id && (
-                                                                                                 <div style={{
-                                                                                                     position: 'absolute',
-                                                                                                     bottom: '100%',
-                                                                                                     left: '50%',
-                                                                                                     transform: 'translateX(-50%)',
-                                                                                                     background: 'white',
-                                                                                                     borderRadius: '8px',
-                                                                                                     boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                                                                                                     zIndex: 10,
-                                                                                                     minWidth: '120px',
-                                                                                                     marginBottom: '4px',
-                                                                                                     overflow: 'hidden',
-                                                                                                     border: '1px solid #e9edef'
-                                                                                                 }}>
-                                                                                                     {['Going', 'Maybe', 'Not going'].map(status => (
-                                                                                                         <div 
-                                                                                                             key={status} 
-                                                                                                             onClick={(e) => { e.stopPropagation(); handleEventRespond(msg, status); setOpenEventRespondId(null); }}
-                                                                                                             style={{ padding: '10px 16px', fontSize: '14px', color: '#111b21', textAlign: 'left', borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none', background: myResponse?.status === status ? '#f0f2f5' : 'white' }}
-                                                                                                         >
-                                                                                                             {status}
-                                                                                                         </div>
-                                                                                                     ))}
-                                                                                                 </div>
-                                                                                             )}
-                                                                                         </div>
-                                                                                     )}
+                                                                                    {msg.event.cancelled ? (
+                                                                                        <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
+                                                                                    ) : isMe ? (
+                                                                                        <span onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>Edit event</span>
+                                                                                    ) : (
+                                                                                        <div style={{ width: '100%', textAlign: 'center' }}>
+                                                                                            <div
+                                                                                                onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
+                                                                                                style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                                                                                            >
+                                                                                                {myResponse ? myResponse.status : 'Respond'}
+                                                                                                <ChevronDown size={18} />
+                                                                                            </div>
+                                                                                            {openEventRespondId === msg._id && (
+                                                                                                <div style={{
+                                                                                                    position: 'absolute',
+                                                                                                    bottom: '100%',
+                                                                                                    left: '50%',
+                                                                                                    transform: 'translateX(-50%)',
+                                                                                                    background: 'white',
+                                                                                                    borderRadius: '8px',
+                                                                                                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                                                                                    zIndex: 10,
+                                                                                                    minWidth: '120px',
+                                                                                                    marginBottom: '4px',
+                                                                                                    overflow: 'hidden',
+                                                                                                    border: '1px solid #e9edef'
+                                                                                                }}>
+                                                                                                    {['Going', 'Maybe', 'Not going'].map(status => (
+                                                                                                        <div
+                                                                                                            key={status}
+                                                                                                            onClick={(e) => { e.stopPropagation(); handleEventRespond(msg, status); setOpenEventRespondId(null); }}
+                                                                                                            style={{ padding: '10px 16px', fontSize: '14px', color: '#111b21', textAlign: 'left', borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none', background: myResponse?.status === status ? '#f0f2f5' : 'white' }}
+                                                                                                        >
+                                                                                                            {status}
+                                                                                                        </div>
+                                                                                                    ))}
+                                                                                                </div>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
                                                                             </div>
                                                                         );
@@ -15753,6 +16226,32 @@ export default function Chat() {
                                         <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
                                             Messaging is temporarily restricted.
                                         </div>
+                                    ) : isMessagingBlocked ? (
+                                        <div
+                                            onClick={() => setShowUnblockModal(true)}
+                                            style={{
+                                                width: '100%',
+                                                padding: '16px',
+                                                background: '#fff1f2',
+                                                borderRadius: '16px',
+                                                textAlign: 'center',
+                                                color: '#be123c',
+                                                fontSize: '0.95rem',
+                                                fontWeight: '600',
+                                                border: '1.5px dashed #fecdd3',
+                                                cursor: 'pointer',
+                                                transition: 'all 0.2s',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                gap: '10px'
+                                            }}
+                                            onMouseEnter={(e) => { e.currentTarget.style.background = '#ffe4e6'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                                            onMouseLeave={(e) => { e.currentTarget.style.background = '#fff1f2'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                                        >
+                                            <ShieldAlert size={18} />
+                                            Messaging Suspended. Action Required for Restoration.
+                                        </div>
                                     ) : isMessagingRestricted() ? (
                                         <div style={{
                                             width: '100%',
@@ -15870,25 +16369,25 @@ export default function Chat() {
                                                                             const s = Math.floor((replyingTo.duration || 0) % 60);
                                                                             return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mic size={14} color="#027EB5" /> <span>{replyingTo.duration ? `${m}:${s.toString().padStart(2, '0')}` : 'Voice message'}</span></span>;
                                                                         }
-                                                                         if (replyingTo.type === 'contact') {
-                                                                             try {
-                                                                                 const parsed = JSON.parse(replyingTo.content);
-                                                                                 const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
-                                                                                 return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
-                                                                             } catch (e) {
-                                                                                 return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
-                                                                             }
-                                                                         }
-                                                                          if (replyingTo.type === 'event' && replyingTo.event) {
-                                                                             const ev = replyingTo.event;
-                                                                             return (
-                                                                                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                                                                     <Calendar size={14} color="#667781" />
-                                                                                     <span>{ev.name} - {formatEventTimeString(ev.startDate, ev.startTime, ev.endDate, ev.endTime)}</span>
-                                                                                 </span>
-                                                                             );
-                                                                         }
-                                                                         return replyingTo.content;
+                                                                        if (replyingTo.type === 'contact') {
+                                                                            try {
+                                                                                const parsed = JSON.parse(replyingTo.content);
+                                                                                const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
+                                                                                return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
+                                                                            } catch (e) {
+                                                                                return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+                                                                            }
+                                                                        }
+                                                                        if (replyingTo.type === 'event' && replyingTo.event) {
+                                                                            const ev = replyingTo.event;
+                                                                            return (
+                                                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                                                                    <Calendar size={14} color="#667781" />
+                                                                                    <span>{ev.name} - {formatEventTimeString(ev.startDate, ev.startTime, ev.endDate, ev.endTime)}</span>
+                                                                                </span>
+                                                                            );
+                                                                        }
+                                                                        return replyingTo.content;
                                                                     })()}
                                                                 </div>
                                                             </div>
@@ -15969,7 +16468,7 @@ export default function Chat() {
                                                             {file && (
                                                                 <div className="wa-file-preview-badge">
                                                                     {file.name.substring(0, 15)}...
-                                                                    <button onClick={() => setFile(null)}>Ãƒâ€”</button>
+                                                                    <button onClick={() => setFile(null)}>×</button>
                                                                 </div>
                                                             )}
                                                             <textarea
@@ -15979,25 +16478,7 @@ export default function Chat() {
                                                                 className="wa-input-box"
                                                                 placeholder={t('chat_window.input_placeholder')}
                                                                 value={input}
-                                                                onChange={(e) => {
-                                                                    const val = e.target.value;
-                                                                    setInput(val);
-
-                                                                    const targetId = selectedUser?._id || selectedGroup?._id;
-                                                                    if (!targetId) return;
-
-                                                                    const isGroup = !!selectedGroup;
-                                                                    socket.emit('typing', { receiverId: targetId, isGroup });
-
-                                                                    if (typingTimeoutRef.current[targetId]) {
-                                                                        clearTimeout(typingTimeoutRef.current[targetId]);
-                                                                    }
-
-                                                                    typingTimeoutRef.current[targetId] = setTimeout(() => {
-                                                                        socket.emit('stop_typing', { receiverId: targetId, isGroup });
-                                                                        delete typingTimeoutRef.current[targetId];
-                                                                    }, 3000);
-                                                                }}
+                                                                onChange={(e) => setInput(e.target.value)}
                                                                 onPaste={handlePaste}
                                                                 onKeyDown={(e) => {
                                                                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -16014,7 +16495,7 @@ export default function Chat() {
                                                                 <button
                                                                     onClick={handleSend}
                                                                     className="wa-send-btn-inner"
-                                                                    data-tooltip={(!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? "Please select a grammar level" : "Send"}
+                                                                    data-tooltip={(!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? (isGarbageMessage ? "Please write a meaningful message" : "Please select a grammar level") : "Send"}
                                                                     disabled={!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))}
                                                                     style={{
                                                                         opacity: (!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? 0.5 : 1,
@@ -16082,9 +16563,125 @@ export default function Chat() {
             {renderPollModal()}
             {renderPollDetailsPanel()}
             {renderEventModal()}
+            {renderUnblockModal()}
             {renderEventDetailsPanel()}
         </div >
     );
+
+    const handleRequestUnblock = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.post('/api/chat/request-unblock', { reason: unblockReason }, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.data.status === 'requested') {
+                setUnblockRequested(true);
+                setSnackbar({ message: 'A formal restoration request has been submitted for administrative review.', type: 'success', variant: 'system' });
+                setShowUnblockModal(false);
+            }
+        } catch (err) {
+            setSnackbar({ message: 'Failed to send request', type: 'error' });
+        }
+    };
+
+    const renderUnblockModal = () => {
+        if (!showUnblockModal) return null;
+        return (
+            <div className="wa-mute-modal-overlay" style={{ zIndex: 5000, background: 'rgba(11, 20, 26, 0.85)', backdropFilter: 'blur(4px)' }}>
+                <div className="wa-mute-modal" style={{ maxWidth: '450px', background: '#ffffff', borderRadius: '24px', padding: '32px', textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
+                    <div style={{ background: '#fff5f6', width: '80px', height: '80px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', border: '1px solid #fee2e2' }}>
+                        <ShieldAlert size={40} color="#dc2626" />
+                    </div>
+                    <h2 style={{ color: '#111b21', fontSize: '24px', fontWeight: '700', marginBottom: '12px' }}>Messaging Suspended</h2>
+                    <p style={{ color: '#54656f', fontSize: '15px', lineHeight: '1.6', marginBottom: '24px' }}>
+                        Access to messaging has been temporarily suspended following multiple breaches of our community standards regarding acceptable content.
+                    </p>
+
+                    {!unblockRequested ? (
+                        <>
+                            <div style={{ position: 'relative' }}>
+                                <textarea
+                                    value={unblockReason}
+                                    onChange={(e) => setUnblockReason(e.target.value)}
+                                    placeholder="Please provide a detailed justification for the restoration of your messaging privileges..."
+                                    style={{ width: '100%', padding: '16px', borderRadius: '12px', border: '1.5px solid #e9edef', marginBottom: '8px', minHeight: '120px', fontSize: '14px', outline: 'none', resize: 'none', transition: 'all 0.2s' }}
+                                    onFocus={(e) => e.target.style.borderColor = '#0EA5BE'}
+                                    onBlur={(e) => e.target.style.borderColor = '#e9edef'}
+                                />
+                                <span style={{ position: 'absolute', top: '8px', right: '8px', color: '#dc2626', fontWeight: 'bold', fontSize: '20px' }}>*</span>
+                            </div>
+
+                            {!unblockReason.trim() && (
+                                <p style={{ color: '#dc2626', fontSize: '12px', textAlign: 'left', marginBottom: '24px', paddingLeft: '4px', fontWeight: '500' }}>
+                                    This field is mandatory for the submission of an unblock request.
+                                </p>
+                            )}
+
+                            <div style={{ display: 'flex', gap: '12px', marginTop: unblockReason.trim() ? '24px' : '0' }}>
+                                <button onClick={() => setShowUnblockModal(false)} style={{ flex: 1, padding: '12px', borderRadius: '24px', border: '1.5px solid #e9edef', background: 'white', color: '#54656f', fontWeight: '600', cursor: 'pointer' }}>Cancel</button>
+                                <div style={{ flex: 1, position: 'relative' }}>
+                                    <button
+                                        onClick={handleRequestUnblock}
+                                        disabled={!unblockReason.trim()}
+                                        onMouseEnter={() => !unblockReason.trim() && setShowUnblockTooltip(true)}
+                                        onMouseLeave={() => setShowUnblockTooltip(false)}
+                                        style={{
+                                            width: '100%',
+                                            padding: '12px',
+                                            borderRadius: '24px',
+                                            border: 'none',
+                                            background: unblockReason.trim() ? '#0EA5BE' : '#E9EDEF',
+                                            color: unblockReason.trim() ? 'white' : '#AAB8C2',
+                                            fontWeight: '600',
+                                            cursor: unblockReason.trim() ? 'pointer' : 'not-allowed',
+                                            boxShadow: unblockReason.trim() ? '0 4px 12px rgba(14, 165, 190, 0.25)' : 'none',
+                                            transition: 'all 0.3s ease'
+                                        }}
+                                    >
+                                        Request Unblock
+                                    </button>
+
+                                    {showUnblockTooltip && !unblockReason.trim() && (
+                                        <div style={{
+                                            position: 'absolute',
+                                            bottom: 'calc(100% + 12px)',
+                                            left: '50%',
+                                            transform: 'translateX(-50%)',
+                                            background: '#0EA5BE',
+                                            color: 'white',
+                                            padding: '8px 16px',
+                                            borderRadius: '8px',
+                                            fontSize: '12px',
+                                            whiteSpace: 'nowrap',
+                                            zIndex: 10,
+                                            boxShadow: '0 4px 12px rgba(14, 165, 190, 0.2)',
+                                            pointerEvents: 'none'
+                                        }}>
+                                            This field is mandatory for the submission of a restoration request.
+                                            <div style={{
+                                                position: 'absolute',
+                                                top: '100%',
+                                                left: '50%',
+                                                transform: 'translateX(-50%)',
+                                                border: '6px solid transparent',
+                                                borderTopColor: '#0EA5BE'
+                                            }} />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '16px', color: '#15803d', fontWeight: '500', fontSize: '14px', marginBottom: '12px', border: '1px solid #dcfce7' }}>
+                            <CheckSquare size={18} style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+                            Your restoration request is currently under administrative review.
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    };
+
 
     const handlePollOptionChange = (idx, val) => {
         const newOpts = [...pollOptions];
@@ -16241,7 +16838,7 @@ export default function Chat() {
 
     const renderEventDetailsPanel = () => {
         if (!isEventDetailsOpen || !eventDetailsMsg) return null;
-        
+
         // Aggregate responses
         const responses = eventDetailsMsg.event?.responses || [];
         const goingCount = responses.filter(r => r.status === 'Going').length;
@@ -16278,7 +16875,7 @@ export default function Chat() {
                     <div style={{ padding: '24px 20px 16px', borderBottom: '1px solid #f0f2f5' }}>
                         <div style={{ fontSize: 22, fontWeight: 500, color: '#111b21', marginBottom: 6 }}>{eventDetailsMsg.event?.name}</div>
                         {eventDetailsMsg.event?.description && <div style={{ color: '#667781', fontSize: 16, marginBottom: 20, wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>{eventDetailsMsg.event.description}</div>}
-                        
+
                         <div style={{ display: 'flex', gap: 16, marginTop: 12, alignItems: 'flex-start' }}>
                             <Calendar size={20} color="#667781" style={{ marginTop: 2, flexShrink: 0 }} />
                             <div style={{ flex: 1 }}>
@@ -16442,17 +17039,17 @@ export default function Chat() {
                                     ))}
                                 </div>
                             ) : null}
-                            <button 
+                            <button
                                 onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === eventDetailsMsg._id ? null : eventDetailsMsg._id); }}
-                                style={{ 
-                                    background: '#0EA5BE', 
-                                    color: 'white', 
-                                    border: 'none', 
-                                    padding: '12px 24px', 
-                                    borderRadius: '24px', 
-                                    fontSize: 16, 
-                                    fontWeight: 600, 
-                                    cursor: 'pointer', 
+                                style={{
+                                    background: '#0EA5BE',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '12px 24px',
+                                    borderRadius: '24px',
+                                    fontSize: 16,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
                                     width: '100%',
                                     display: 'flex',
                                     alignItems: 'center',
@@ -18014,6 +18611,8 @@ export default function Chat() {
                 <Snackbar
                     {...snackbar}
                     onClose={() => setSnackbar(null)}
+                    setOpenDropdown={setOpenDropdown}
+                    setDropdownPos={setDropdownPos}
                 />
             )}
 

@@ -8,10 +8,38 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const UnethicalLog = require('../models/UnethicalLog');
+
 
 const JWT_SECRET = process.env.JWT_SECRET || 'neural_secret_77';
 const { handleMembershipJoin, handleMembershipExit } = require('../utils/membership');
 const axios = require('axios');
+const Groq = require('groq-sdk');
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole']; // Precise bad words
+
+const checkUnethicalWithAI = async (text) => {
+    if (!text) return { isUnethical: false };
+    try {
+        const completion = await groq.chat.completions.create({
+            messages: [
+                { role: "system", content: "Analyze this message for unethical content (hate speech, harassment, explicit violence, self-harm, sexual content). Return ONLY a JSON object: { \"isUnethical\": boolean, \"reason\": \"short reason\" }." },
+                { role: "user", content: text }
+            ],
+            model: "llama-3.3-70b-versatile",
+        });
+        const content = completion.choices[0]?.message?.content;
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            return JSON.parse(jsonMatch[0]);
+        }
+        return { isUnethical: false };
+    } catch (e) {
+        console.error("AI Moderation Error:", e);
+        return { isUnethical: false };
+    }
+};
 
 // --- Link Preview Helper ---
 const fetchLinkPreview = async (url) => {
@@ -725,6 +753,53 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             fileSize = req.body.fileSize;
             req.body.pageCount = req.body.pageCount || 0;
             req.body.thumbnail_path = req.body.thumbnail_path || null;
+        }
+
+        // --- PRE-SEND BLOCK CHECK ---
+        const currentUserProfile = await User.findById(senderId);
+        if (currentUserProfile && currentUserProfile.messagingBlocked) {
+            return res.status(403).json({ 
+                error: 'Messaging Blocked', 
+                blocked: true,
+                unblockRequested: currentUserProfile.unblockRequested 
+            });
+        }
+
+        // === Global Safety & Ethics Check (AI-Driven) ===
+        let isFlagged = false;
+        let flagReason = "";
+
+        if (content && content.length > 0) {
+            const aiResult = await checkUnethicalWithAI(content);
+            if (aiResult.isUnethical) {
+                isFlagged = true;
+                flagReason = aiResult.reason;
+            }
+        }
+
+        if (isFlagged) {
+            // Log violation and increment count
+            const updatedUser = await User.findById(senderId);
+            const count = (updatedUser.unethicalCount || 0) + 1;
+            await User.findByIdAndUpdate(senderId, { $set: { unethicalCount: count } });
+
+            // Create entry for admin dashboard
+            await UnethicalLog.create({
+                user_id: senderId,
+                content: content || 'Group Media/File',
+                reason: flagReason,
+                type: content && badWords.some(word => content.toLowerCase().includes(word)) ? 'direct' : 'indirect'
+            });
+
+            // Check if this violation pushes them over the limit
+            if (count > 5) {
+                await User.findByIdAndUpdate(senderId, { $set: { messagingBlocked: true } });
+                
+                // Emit socket event for real-time blocking
+                if (req.io) {
+                    req.io.to(senderId).emit('user_blocked', { blocked: true });
+                }
+            }
         }
 
         // Detect URL for preview

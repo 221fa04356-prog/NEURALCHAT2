@@ -219,10 +219,7 @@ export default function HumanVerification({ onVerified, context, identifier }) {
                         </div>
                     )}
                     <div className="hv-modal-content scale-in">
-                        <button className="hv-modal-close" type="button" onClick={closeModal}>
-                            <X size={20} />
-                        </button>
-
+                        <button className="hv-modal-close-btn" type="button" onClick={closeModal}>Close</button>
                         <h3 className="hv-modal-title">Human Verification</h3>
 
                         {isSuccess ? (

@@ -24,7 +24,8 @@ const generateSignature = (password) => {
 // Get all users
 router.get('/users', async (req, res) => {
     try {
-        const users = await User.find().select('-password -password_signature').then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
+        const rawUsers = await User.find().select('-password -password_signature');
+        const users = rawUsers.map(u => u.toObject());
 
         // Add flagged count for each user
         const usersWithFlags = await Promise.all(users.map(async (u) => {
@@ -106,17 +107,18 @@ router.post('/approve', async (req, res) => {
 // Get Password Reset Requests
 router.get('/resets', async (req, res) => {
     try {
-        const resets = await PasswordReset.find({ status: 'pending' }).populate('user_id', 'name email login_id');
+        const resets = await PasswordReset.find({ status: 'pending' }).populate({ path: 'user_id', select: 'name email login_id __enc_name __enc_email' });
 
         // Transform to match previous flat structure
         const formatted = resets.map(r => {
-            if (!r.user_id) return null; // Handle deleted users
+            if (!r.user_id) return null; 
+            const user = r.user_id;
             return {
                 id: r.id,
-                user_id: r.user_id.id,
-                name: r.user_id.name,
-                email: r.user_id.email,
-                login_id: r.user_id.login_id,
+                user_id: user?._id || user?.id,
+                name: user?.name,
+                email: user?.email,
+                login_id: user?.login_id,
                 created_at: r.created_at
             };
         }).filter(item => item !== null);
@@ -234,6 +236,52 @@ router.delete('/user/:id', async (req, res) => {
     }
 });
 
+// Approve Unblock Request
+router.post('/approve-unblock', async (req, res) => {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'Missing userId' });
+
+    try {
+        await User.findByIdAndUpdate(userId, {
+            messagingBlocked: false,
+            unblockRequested: false,
+            unethicalCount: 0,
+            unblockRequestReason: null
+        });
+
+        res.json({ message: 'User messaging unblocked' });
+
+        // Emit Socket Event
+        if (req.io) {
+            req.io.emit('user_unblocked', { userId });
+        }
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Reject Unblock Request
+router.post('/reject-unblock', async (req, res) => {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'Missing userId' });
+
+    try {
+        await User.findByIdAndUpdate(userId, {
+            unblockRequested: false,
+            unblockRequestReason: "Request Rejected by Admin" // Optional: Update reason or clear it
+        });
+
+        res.json({ message: 'Unblock request rejected' });
+
+        // Emit Socket Event
+        if (req.io) {
+            req.io.emit('unblock_request_rejected', { userId });
+        }
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Delete Chat for a user
 router.delete('/chat/:userId', async (req, res) => {
     const userId = req.params.userId;
@@ -277,7 +325,8 @@ router.get('/chat/contacts/:userId', async (req, res) => {
         const contactIds = [...new Set([...sentTo.map(id => id.toString()), ...receivedFrom.map(id => id.toString())])];
 
         // Fetch user details for these contacts
-        const contacts = await User.find({ _id: { $in: contactIds } }).select('name email __enc_name __enc_email');
+        const contactsRaw = await User.find({ _id: { $in: contactIds } }).select('name email __enc_name __enc_email');
+        const contacts = contactsRaw.map(c => c.toObject());
 
         // Fetch groups this user is a member of
         const groups = await Group.find({ members: new mongoose.Types.ObjectId(userId) }).select('name').then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
@@ -381,6 +430,7 @@ router.get('/stats', async (req, res) => {
         });
         const pendingApprovals = await User.countDocuments({ status: 'pending', role: 'user' });
         const activeResets = await PasswordReset.countDocuments({ status: 'pending' });
+        const unblockRequests = await User.countDocuments({ unblockRequested: true });
 
         // Status Distribution for Pie Chart
         const statusDistribution = await User.aggregate([
@@ -547,10 +597,12 @@ router.get('/stats', async (req, res) => {
             return result;
         };
 
+        console.log('Sending Stats:', { totalUsers, pendingApprovals, activeResets, unblockRequests });
         res.json({
             totalUsers,
             pendingApprovals,
             activeResets,
+            unblockRequests,
             statusDistribution,
             chartData: {
                 day: fillMissing(thirtyDaysAgo, 30, 'day', dailyTrends, dailyResets),
@@ -558,6 +610,15 @@ router.get('/stats', async (req, res) => {
                 year: fillMissing(tenYearsAgo, 10, 'year', yearlyTrends, yearlyResets)
             }
         });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.get('/debug-unblock', async (req, res) => {
+    try {
+        const users = await User.find({ unblockRequested: true });
+        res.json({ count: users.length, users });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

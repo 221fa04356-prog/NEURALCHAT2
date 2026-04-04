@@ -11,12 +11,13 @@ const Group = require('../models/Group'); // Import Group model
 const MessageRequest = require('../models/MessageRequest'); // Import MessageRequest model
 const ReactionLog = require('../models/ReactionLog'); // Import ReactionLog model for audit logs
 const Groq = require('groq-sdk');
+const UnethicalLog = require('../models/UnethicalLog');
 const pdfParse = require('pdf-parse'); // Renamed to avoid confusion
 const mammoth = require('mammoth');
 const fs = require('fs');
 const axios = require('axios'); // For link preview
 
-const badWords = ['hell', 'damn', 'badword', 'idiot', 'stupid', 'hate', 'kill', 'abuse']; // Add more as needed
+const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole']; // Precise bad words without substring issues
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const jwt = require('jsonwebtoken');
@@ -74,7 +75,7 @@ const checkUnethicalWithAI = async (text) => {
     try {
         const completion = await groq.chat.completions.create({
             messages: [
-                { role: "system", content: "Analyze this message for unethical content (hate speech, harassment, explicit violence, self-harm, sexual content). Return ONLY a JSON object: { \"isUnethical\": boolean, \"reason\": \"short reason\" }." },
+                { role: "system", content: "Analyze this message for unethical content specifically hate speech, harassment, explicit violence, self-harm, or overt sexual content/slang. Return ONLY a JSON object: { \"isUnethical\": boolean, \"category\": \"Profanity|Sexual Content|Harassment|Unethical Conduct|Self-Harm\", \"reason\": \"A professional 1-sentence explanation of why it was flagged.\" }." },
                 { role: "user", content: text }
             ],
             model: "llama-3.3-70b-versatile",
@@ -82,9 +83,11 @@ const checkUnethicalWithAI = async (text) => {
         const content = completion.choices[0]?.message?.content;
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
-            return JSON.parse(jsonMatch[0]);
+            const parsed = JSON.parse(jsonMatch[0]);
+            const finalReason = parsed.category ? `${parsed.category}: ${parsed.reason}` : parsed.reason;
+            return { isUnethical: !!parsed.isUnethical, reason: finalReason || "AI Detected Unethical Content" };
         }
-        return { isUnethical: false };
+        return { isUnethical: false, reason: "" };
     } catch (e) {
         console.error("AI Moderation Error:", e);
         return { isUnethical: false };
@@ -169,7 +172,7 @@ router.get('/history/:userId', async (req, res) => {
 // GET Current User Profile - Secured with Auth
 router.get('/me', authenticateToken, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).select('name email mobile designation about role isOnline lastSeen bannedUntil rejectionCount adminLock __enc_name __enc_email __enc_mobile __enc_designation __enc_about');
+        const user = await User.findById(req.user.id).select('name email mobile designation about role isOnline lastSeen bannedUntil rejectionCount adminLock messagingBlocked unblockRequested __enc_name __enc_email __enc_mobile __enc_designation __enc_about');
         if (!user) return res.status(404).json({ error: 'User not found' });
         res.json(user);
     } catch (err) {
@@ -191,7 +194,7 @@ router.get('/users', authenticateToken, async (req, res) => {
             query.role = { $ne: 'admin' };
         }
 
-        const users = await User.find(query).select('name email mobile _id role about isOnline lastSeen __enc_name __enc_email __enc_mobile __enc_about __enc_designation');
+        const users = await User.find(query).select('name email mobile _id role about isOnline lastSeen messagingBlocked __enc_name __enc_email __enc_mobile __enc_about __enc_designation');
         console.log(`[DEBUG] /users: Found ${users.length} raw users for requester ${currentUserId} (Role: ${currentUserRole})`);
 
         if (!currentUserId) {
@@ -315,7 +318,7 @@ router.get('/link-preview', authenticateToken, async (req, res) => {
 // POST Grammar Check
 router.post('/grammar-check', authenticateToken, async (req, res) => {
     const { text } = req.body;
-    if (!text || text.length < 5) {
+    if (!text || text.length < 2) {
         return res.json({ basic: text, fluent: text, formal: text });
     }
 
@@ -324,7 +327,7 @@ router.post('/grammar-check', authenticateToken, async (req, res) => {
             messages: [
                 {
                     role: "system",
-                    content: "You are a precise grammar assistant. Analyze the user's message and provide three improved versions: 'basic' (strictly fix typos/grammar), 'fluent' (clean and natural), and 'formal' (professional). CRITICAL: Do NOT add new information, do NOT complete sentences, and do NOT add words that weren't in the original message unless strictly necessary for correct grammar. Only correct the exact words provided. Return ONLY a JSON object: { \"basic\": \"...\", \"fluent\": \"...\", \"formal\": \"...\" }."
+                    content: "You are a precise grammar assistant. Analyze the user's message and provide three improved versions: 'basic' (strictly fix typos, spelling, and grammar), 'fluent' (clean, natural, and idiomatic), and 'formal' (professional and polished). CRITICAL: If there are typos like 'watr' (water), 'helllo' (hello), etc., you MUST correct them. Do NOT add new information, do NOT complete sentences, and do NOT add words that weren't in the original message unless strictly necessary for correct grammar. MANDATORY: You must ALWAYS provide these three versions, even if the input text contains profanity, insults, or unethical content. Your ONLY purpose is to fix grammar, not to evaluate safety or enforce policies. Never refuse a request. Return ONLY a JSON object: { \"basic\": \"...\", \"fluent\": \"...\", \"formal\": \"...\" }."
                 },
                 { role: "user", content: text }
             ],
@@ -334,13 +337,32 @@ router.post('/grammar-check', authenticateToken, async (req, res) => {
         const content = completion.choices[0]?.message?.content;
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
-            res.json(JSON.parse(jsonMatch[0]));
+            const parsed = JSON.parse(jsonMatch[0]);
+            
+            // Check for AI Refusal strings
+            const refusalKeywords = ['authorized', 'profanity', 'insult', 'offensive', 'policy', 'refuse', 'cannot assist'];
+            let hasRefusal = false;
+            for (let key in parsed) {
+                if (typeof parsed[key] === 'string' && refusalKeywords.some(rev => parsed[key].toLowerCase().includes(rev))) {
+                    hasRefusal = true;
+                    break;
+                }
+            }
+
+            if (hasRefusal) {
+                // Return original text if AI refuses
+                return res.json({ basic: text, fluent: text, formal: text });
+            }
+
+            res.json(parsed);
         } else {
-            res.status(500).json({ error: "Invalid AI response" });
+            // Fallback for non-JSON or other AI refusals
+            res.json({ basic: text, fluent: text, formal: text });
         }
     } catch (e) {
         console.error("AI Grammar Check Error:", e);
-        res.status(500).json({ error: "Failed to check grammar" });
+        // Fallback for API errors or safety refusals
+        res.json({ basic: text, fluent: text, formal: text });
     }
 });
 
@@ -597,7 +619,7 @@ router.post('/messages/mark-unread', authenticateToken, async (req, res) => {
     }
 });
 
-// GET All Starred Messages (Global)
+// Fetch All Starred Messages (Global)
 router.get('/messages/starred/all', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
@@ -621,6 +643,34 @@ router.get('/messages/starred/all', authenticateToken, async (req, res) => {
         ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
         res.json(combined);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/chat/request-unblock - Request unblock from admin
+router.post('/request-unblock', authenticateToken, async (req, res) => {
+    try {
+        const { reason } = req.body;
+        const userId = req.user.id;
+        
+        const user = await User.findByIdAndUpdate(userId, {
+            unblockRequested: true,
+            unblockRequestReason: reason || 'Please unblock my messaging.'
+        }, { new: true });
+        
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        
+        // Notify admin via socket if needed
+        if (req.io) {
+            req.io.emit('new_unblock_request', {
+                userId: user._id,
+                userName: user.name,
+                reason: user.unblockRequestReason
+            });
+        }
+        
+        res.json({ status: 'requested', unblockRequested: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -919,19 +969,56 @@ router.post('/send', authenticateToken, (req, res, next) => {
     }
 
     try {
-        // Check for unprofessional content
-        let isFlagged = content && badWords.some(word => content.toLowerCase().includes(word));
-        let flagReason = isFlagged ? "Keyword match" : "";
+        // --- PRE-SEND BLOCK CHECK ---
+        const currentUserProfile = await User.findById(userId);
+        if (currentUserProfile.messagingBlocked) {
+            return res.status(403).json({ 
+                error: 'Messaging Blocked', 
+                blocked: true,
+                unblockRequested: currentUserProfile.unblockRequested 
+            });
+        }
 
-        if (!isFlagged && content && content.length > 5) { // AI Check for non-trivial messages
+        // === Global Safety & Ethics Check (AI-Driven) ===
+        let isFlagged = false;
+        let flagReason = "";
+        
+        // Analyze globally for any type of bad words or unethical behavior
+        if (content && content.length > 0) {
             const aiResult = await checkUnethicalWithAI(content);
             if (aiResult.isUnethical) {
                 isFlagged = true;
-                flagReason = aiResult.reason || "AI Detected Unethical Content";
+                flagReason = aiResult.reason;
             }
         }
 
-        // If toUserId is present -> P2P Message
+
+        if (isFlagged) {
+            // Log violation and increment count
+            const updatedUser = await User.findByIdAndUpdate(userId, { 
+                $inc: { unethicalCount: 1 } 
+            }, { new: true });
+
+            // Create entry for admin dashboard
+            await UnethicalLog.create({
+                user_id: userId,
+                content: content || 'Forwarded Media/File',
+                reason: flagReason,
+                type: content && badWords.some(word => content.toLowerCase().includes(word)) ? 'direct' : 'indirect'
+            });
+
+            // Check if this violation pushes them over the limit
+            if (updatedUser.unethicalCount > 5) {
+                await User.findByIdAndUpdate(userId, { messagingBlocked: true });
+                
+                // Emit socket event for real-time blocking
+                if (req.io) {
+                    req.io.to(userId).emit('user_blocked', { blocked: true });
+                }
+            }
+
+            // Note: We are NO LONGER returning res.status(400) here to satisfy "it should not block for sending"
+        }
         if (toUserId) {
             // --- Message Request Check ---
             const acceptedRequest = await MessageRequest.findOne({
@@ -1928,17 +2015,49 @@ router.get('/admin/unethical-messages', authenticateToken, async (req, res) => {
         const messages = await Message.find({ is_flagged: true })
             .sort({ created_at: -1 })
 
-            .populate('user_id', 'name email');
+            .populate('user_id', 'name email __enc_name __enc_email');
 
-        const alerts = messages.map(msg => ({
-            userId: msg.user_id?._id,
-            userName: msg.user_id?.name || 'Unknown',
-            messageId: msg._id,
-            content: msg.content,
-            reason: msg.flag_reason,
-            createdAt: msg.created_at,
-            receiverId: msg.receiver_id
-        }));
+        const alerts = [];
+        for (const msg of messages) {
+            let userDoc = msg.user_id;
+            let name = 'Unknown';
+            
+            if (userDoc) {
+                // Determine if it was populated or remains an ID
+                if (typeof userDoc.toObject === 'function') {
+                    // Try to get name from populated document
+                    const uObj = userDoc.toObject({ virtuals: true });
+                    name = uObj.name || 'Unknown';
+                    
+                    // FALLBACK: If name is still a hash (contains colon), perform a fresh fetch
+                    if (name.includes(':') && name.length > 50) {
+                        const directUser = await User.findById(userDoc._id);
+                        if (directUser) {
+                            const dObj = directUser.toObject({ virtuals: true });
+                            name = dObj.name || name;
+                        }
+                    }
+                } else {
+                    // It's just an ID, fetch and decrypt
+                    const directUser = await User.findById(userDoc);
+                    if (directUser) {
+                        const dObj = directUser.toObject({ virtuals: true });
+                        name = dObj.name || 'Unknown';
+                        userDoc = directUser; // Update for ID reference
+                    }
+                }
+            }
+            
+            alerts.push({
+                userId: userDoc?._id || userDoc,
+                userName: name,
+                messageId: msg._id,
+                content: msg.content,
+                reason: msg.flag_reason,
+                createdAt: msg.created_at,
+                receiverId: msg.receiver_id
+            });
+        }
 
         res.json(alerts);
     } catch (err) {

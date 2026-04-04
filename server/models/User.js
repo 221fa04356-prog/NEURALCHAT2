@@ -28,6 +28,12 @@ const userSchema = new mongoose.Schema({
         members: [{ type: String }] // Storing IDs as strings to match frontend implementation (could be User, Group, or Community IDs)
     }],
     
+    // Unethical Messaging Features
+    unethicalCount: { type: Number, default: 0 },
+    messagingBlocked: { type: Boolean, default: false },
+    unblockRequested: { type: Boolean, default: false },
+    unblockRequestReason: { type: String },
+
     // E2EE (Signal Protocol) Keys
     signal_keys: {
         identityKey: { type: String },
