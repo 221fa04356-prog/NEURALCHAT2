@@ -20,8 +20,8 @@ const userSchema = new mongoose.Schema({
     lastSeen: { type: Date, default: Date.now },
     created_at: { type: Date, default: Date.now },
     bannedUntil: { type: Date, default: null },       // Temporary ban on sending requests
-    rejectionCount: { type: Number, default: 0 },     // Strike counter (banned after each rejection, locked after 3)
-    adminLock: { type: Boolean, default: false },       // Locked by admin after 3 strikes
+    rejectionCount: { type: Number, default: 0 },     // Strike counter (banned after each rejection, locked after 5)
+    adminLock: { type: Boolean, default: false },       // Locked by admin after 5 strikes
     customLists: [{
         _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
         name: { type: String, required: true },
