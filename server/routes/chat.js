@@ -214,7 +214,7 @@ router.get('/users', authenticateToken, async (req, res) => {
                         { user_id: new mongoose.Types.ObjectId(u._id), receiver_id: new mongoose.Types.ObjectId(currentUserId) }
                     ],
                     deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
-                }).sort({ created_at: -1 }).then(r => r ? (typeof r.toObject === 'function' ? r.toObject() : r) : null);
+                }).sort({ created_at: -1 }).populate('user_id', 'name _id').then(r => r ? (typeof r.toObject === 'function' ? r.toObject() : r) : null);
 
                 // 2. Get Unread Count
                 const unreadCount = await Message.countDocuments({
@@ -722,7 +722,7 @@ router.post('/poll/send', authenticateToken, async (req, res) => {
             }
         });
 
-        const populated = await Message.findById(msg._id);
+        const populated = await Message.findById(msg._id).populate('user_id', 'name _id');
         const msgObj = populated.toObject();
 
         if (req.io) {
@@ -785,6 +785,70 @@ router.post('/poll/:messageId/vote', authenticateToken, async (req, res) => {
         res.json({ status: 'voted', poll: msgObj.poll });
     } catch (err) {
         console.error('[POLL VOTE P2P]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/chat/event/:messageId/respond - Respond to an event
+router.post('/event/:messageId/respond', authenticateToken, async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const { status } = req.body; // 'Going', 'Maybe', 'Not going'
+        const userId = req.user.id;
+        const userObjId = new mongoose.Types.ObjectId(userId);
+
+        if (!['Going', 'Maybe', 'Not going'].includes(status)) {
+            return res.status(400).json({ error: 'Invalid sort status' });
+        }
+
+        const msg = await Message.findById(messageId);
+        if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event message not found' });
+
+        // Update participants array for backward compatibility
+        msg.event.participants = (msg.event.participants || []).filter(id => String(id) !== String(userId));
+        if (status === 'Going') {
+            msg.event.participants.push(userObjId);
+        }
+
+        // Update responses array
+        msg.event.responses = msg.event.responses || [];
+        const responseIdx = msg.event.responses.findIndex(r => String(r.user_id) === String(userId));
+        if (responseIdx >= 0) {
+            msg.event.responses[responseIdx].status = status;
+            msg.event.responses[responseIdx].updated_at = new Date();
+        } else {
+            msg.event.responses.push({ user_id: userObjId, status, updated_at: new Date() });
+        }
+
+        // Maintain response history (avoid duplicates if same status)
+        msg.event.response_history = msg.event.response_history || [];
+        const lastUserResponse = [...msg.event.response_history].reverse().find(h => String(h.user_id) === String(userId));
+        
+        if (!lastUserResponse || lastUserResponse.status !== status) {
+            msg.event.response_history.push({
+                user_id: userObjId,
+                status,
+                timestamp: new Date()
+            });
+        }
+
+        msg.markModified('event');
+        await msg.save();
+
+        const updated = await Message.findById(messageId);
+        const msgObj = updated.toObject();
+
+        if (req.io) {
+            [String(msg.user_id), String(msg.receiver_id)].filter(Boolean).forEach(uid => {
+                req.io.to(uid).emit('event_responded', { messageId, event: msgObj.event, isGroup: false });
+            });
+            // Also notify admins for real-time dashboard updates
+            req.io.to('admins').emit('event_responded', { messageId, event: msgObj.event, isGroup: false });
+        }
+
+        res.json({ status: 'success', event: msgObj.event });
+    } catch (err) {
+        console.error('[EVENT RESPOND P2P]', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -2186,6 +2250,7 @@ router.post('/event/send', authenticateToken, async (req, res) => {
             user_id: userId,
             receiver_id: toUserId,
             role: 'user',
+            content: eventData.name,
             type: 'event',
             event: {
                 ...eventData,
@@ -2193,7 +2258,8 @@ router.post('/event/send', authenticateToken, async (req, res) => {
             }
         });
 
-        const msgObj = msg.toObject();
+        const populated = await Message.findById(msg._id).populate('user_id', 'name _id');
+        const msgObj = populated.toObject();
 
         if (req.io) {
             req.io.to(String(toUserId)).emit('receive_message', msgObj);
@@ -2236,6 +2302,95 @@ router.post('/event/:messageId/join', authenticateToken, async (req, res) => {
 
         res.json({ status: 'success', event: msgObj.event });
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Edit Event (P2P)
+router.post('/event/:messageId/edit', authenticateToken, async (req, res) => {
+    const userId = req.user.id;
+    try {
+        const msg = await Message.findById(req.params.messageId);
+        if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
+
+        // Only creator can edit for now
+        if (String(msg.user_id) !== String(userId)) return res.status(403).json({ error: 'Not allowed' });
+
+        const { name, description, location, startDate, startTime, endDate, endTime } = req.body;
+        if (name) msg.event.name = name;
+        if (description !== undefined) msg.event.description = description;
+        if (location !== undefined) msg.event.location = location;
+        if (startDate !== undefined) msg.event.startDate = startDate;
+        if (startTime !== undefined) msg.event.startTime = startTime;
+        if (endDate !== undefined) msg.event.endDate = endDate;
+        if (endTime !== undefined) msg.event.endTime = endTime;
+
+        msg.markModified('event');
+        await msg.save();
+
+        const msgObj = msg.toObject();
+
+        if (req.io) {
+            [String(msg.user_id), String(msg.receiver_id)].forEach(pId => {
+                if (pId && pId !== 'null') req.io.to(pId).emit('event_updated', { messageId: msg._id, event: msgObj.event });
+            });
+        }
+
+        res.json({ status: 'success', event: msgObj.event });
+    } catch (err) {
+        console.error('[EVENT EDIT P2P] Error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Cancel Event (P2P)
+router.post('/event/:messageId/cancel', authenticateToken, async (req, res) => {
+    const userId = req.user.id;
+    try {
+        const msg = await Message.findById(req.params.messageId);
+        if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
+
+        // Only creator can cancel for now
+        if (String(msg.user_id) !== String(userId)) return res.status(403).json({ error: 'Not allowed' });
+
+        msg.event = msg.event || {};
+        msg.event.cancelled = true;
+        msg.event.cancelledBy = userId;
+        msg.event.cancelledAt = new Date();
+        msg.markModified('event');
+        await msg.save();
+
+        const msgObj = msg.toObject();
+
+        // Emit update
+        if (req.io) {
+            [String(msg.user_id), String(msg.receiver_id)].forEach(pId => {
+                if (pId && pId !== 'null') req.io.to(pId).emit('event_updated', { messageId: msg._id, event: msgObj.event });
+            });
+        }
+
+        // Create a system message informing about cancellation
+        const otherId = String(msg.user_id) === String(userId) ? String(msg.receiver_id) : String(msg.user_id);
+        const sys = await Message.create({
+            user_id: userId,
+            receiver_id: otherId,
+            role: 'system',
+            type: 'system',
+            is_system: true,
+            content: `cancelled the event: ${msg.event.name}`
+        });
+
+        const sysRes = await Message.findById(sys._id);
+        const sysObj = sysRes ? sysRes.toObject() : sys.toObject();
+        if (req.io) {
+            [String(msg.user_id), String(msg.receiver_id)].forEach(pId => {
+                if (pId && pId !== 'null') req.io.to(pId).emit('receive_message', sysObj);
+            });
+        }
+
+        res.json({ status: 'success', event: msgObj.event, system: sysObj });
+    } catch (err) {
+        console.error('[EVENT CANCEL P2P] Error:', err);
         res.status(500).json({ error: err.message });
     }
 });
