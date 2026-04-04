@@ -1,23 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import '../styles/Snackbar.css';
-import { X, MoreHorizontal, Send } from 'lucide-react';
+import { X, MoreHorizontal, Send, AlertCircle, CheckCircle, Info } from 'lucide-react';
 import logo from '../assets/logo.png'; // Import App Logo
 
-const Snackbar = ({ message, senderName, senderAvatar, type = 'info', onClose, duration = 5000, onReply, onAction, actionLabel, variant = 'default' }) => {
+const Snackbar = ({ message, senderName, senderAvatar, type = 'info', onClose, duration = 5000, onReply, onAction, actionLabel, variant = 'default', setOpenDropdown, setDropdownPos }) => {
     const [replyText, setReplyText] = useState('');
     const [isPaused, setIsPaused] = useState(false);
 
     const [isFocused, setIsFocused] = useState(false);
 
     useEffect(() => {
-        const isTyping = replyText.trim().length > 0;
-        if (!isPaused && !isTyping && !isFocused && duration && duration > 0) {
+        if (duration && duration > 0) {
             const timer = setTimeout(() => {
                 onClose();
             }, duration);
             return () => clearTimeout(timer);
         }
-    }, [duration, onClose, isPaused, replyText, isFocused]);
+    }, [duration, onClose]);
 
     const handleSendReply = () => {
         if (replyText.trim() && onReply) {
@@ -49,7 +48,11 @@ const Snackbar = ({ message, senderName, senderAvatar, type = 'info', onClose, d
                             <span className="snackbar-app-name">Neural Chat</span>
                         </div>
                         <div className="snackbar-header-actions">
-                            <MoreHorizontal size={16} className="snackbar-more-icon" />
+                            <MoreHorizontal
+                                size={16}
+                                className="snackbar-more-icon"
+                                style={{ cursor: 'default' }}
+                            />
                             <X size={16} className="snackbar-close-icon" onClick={onClose} />
                         </div>
                     </div>
@@ -86,10 +89,19 @@ const Snackbar = ({ message, senderName, senderAvatar, type = 'info', onClose, d
                     )}
 
                     <div className="snackbar-content-text">
-                        <div className="snackbar-sender-name">
-                            {senderName || JSON.parse(localStorage.getItem('user') || '{}').name || 'You'}
+                        {variant !== 'system' && (
+                            <div className="snackbar-sender-name">
+                                {senderName || JSON.parse(localStorage.getItem('user') || '{}').name || 'You'}
+                            </div>
+                        )}
+                        <div className={`snackbar-message-preview ${type}`}>
+                            {(variant === 'system' || type === 'error' || type === 'success') && (
+                                <span className={`snackbar-inline-icon ${type}`} style={{ marginRight: '6px', verticalAlign: 'middle', display: 'inline-flex' }}>
+                                    {type === 'error' ? <AlertCircle size={14} /> : type === 'success' ? <CheckCircle size={14} /> : <Info size={14} />}
+                                </span>
+                            )}
+                            {message}
                         </div>
-                        <div className="snackbar-message-preview">{message}</div>
                     </div>
 
                     {onAction && actionLabel && (

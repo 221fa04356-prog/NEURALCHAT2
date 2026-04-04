@@ -1,12 +1,12 @@
 /* Main Container */
 .snackbar-container {
     position: fixed;
-    bottom: 25px;
-    right: 25px;
+    bottom: 120px;
+    right: 20px;
     z-index: 9999;
     display: flex;
     flex-direction: column-reverse;
-    gap: 10px;
+    gap: 15px;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
@@ -16,12 +16,12 @@
     backdrop-filter: blur(12px); /* Blur effect */
     -webkit-backdrop-filter: blur(12px);
     width: 360px;
-    border-radius: 18px; /* Softer rounded corners */
+    border-radius: 18px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12); /* Deeper shadow */
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    animation: slideInCard 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: slideInFromRight 0.4s cubic-bezier(0.16, 1, 0.3, 1);
     color: #111b21;
     border: 1px solid rgba(255, 255, 255, 0.2); /* Subtle border */
 }
@@ -57,6 +57,8 @@
     align-items: center;
     gap: 10px;
     color: #8696a0;
+    position: relative;
+    z-index: 100;
 }
 
 .snackbar-close-icon,
@@ -148,16 +150,46 @@
     text-decoration: none;
 }
 
+/* Status Icons */
+.snackbar-status-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 4px;
+}
+
+.snackbar-status-icon.error {
+    color: #ef4444;
+}
+
+.snackbar-status-icon.success {
+    color: #00a884;
+}
+
+.snackbar-status-icon.info {
+    color: #0EA5BE;
+}
+
 /* System Variant Overrides */
 .snackbar-card.system .snackbar-body {
-    padding-top: 8px;
-    padding-bottom: 24px;
+    padding-top: 15px;
+    padding-bottom: 15px;
+    align-items: center;
+    gap: 16px;
 }
 
 .snackbar-card.system .snackbar-message-preview {
     color: #111b21;
-    font-size: 15px;
-    font-weight: 500;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.snackbar-message-preview.error {
+    color: #ef4444 !important;
+}
+
+.snackbar-message-preview.success {
+    color: #00a884 !important;
 }
 
 /* Simple/Dark Toast */
@@ -260,14 +292,14 @@
     }
 }
 
-@keyframes slideInCard {
+@keyframes slideInFromRight {
     from {
-        transform: translateY(20px);
+        transform: translateX(100%);
         opacity: 0;
     }
 
     to {
-        transform: translateY(0);
+        transform: translateX(0);
         opacity: 1;
     }
 }
