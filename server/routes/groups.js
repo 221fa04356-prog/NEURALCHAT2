@@ -354,12 +354,13 @@ router.post('/poll/send', authenticateToken, async (req, res) => {
         const isMem = (group.members || []).some(m => String(m) === String(senderId));
         const isRemoved = (group.removedMembers || []).some(m => String(m) === String(senderId));
         const isOwner = String(group.admin) === String(senderId);
+        const isAdmin = (group.admins || []).some(a => String(a) === String(senderId));
 
-        if (isRemoved && !isMem && !isOwner) {
+        if (isRemoved && !isMem && !isOwner && !isAdmin) {
             return res.status(403).json({ error: 'You have been removed from this group and cannot send polls.' });
         }
 
-        if (!isMem && !isOwner) {
+        if (!isMem && !isOwner && !isAdmin) {
             return res.status(403).json({ error: 'Not a group member' });
         }
 
@@ -456,6 +457,236 @@ router.post('/poll/:messageId/vote', authenticateToken, async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// POST /api/groups/event/send - Send a group event message
+router.post('/event/send', authenticateToken, async (req, res) => {
+    try {
+        const { groupId, eventData } = req.body;
+        const senderId = req.user.id;
+
+        if (!groupId) return res.status(400).json({ error: 'Group ID required' });
+        if (!eventData || !eventData.name) return res.status(400).json({ error: 'Event name required' });
+
+        const group = await Group.findById(groupId);
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+
+        const isMem = (group.members || []).some(m => String(m) === String(senderId));
+        const isOwner = String(group.admin) === String(senderId);
+        const isAdmin = (group.admins || []).some(a => String(a) === String(senderId));
+
+        if (!isMem && !isOwner && !isAdmin) {
+            return res.status(403).json({ error: 'Not a group member' });
+        }
+
+        const msg = await GroupMessage.create({
+            group_id: groupId,
+            sender_id: senderId,
+            role: 'user',
+            content: eventData.name,
+            type: 'event',
+            event: {
+                ...eventData,
+                participants: [senderId] // Creator is participant
+            }
+        });
+
+        const populated = await GroupMessage.findById(msg._id).populate('sender_id', 'name _id __enc_name');
+        const msgObj = populated.toObject();
+
+        if (req.io) {
+            group.members.forEach(memberId => {
+                req.io.to(memberId.toString()).emit('group_message', {
+                    groupId,
+                    message: msgObj
+                });
+            });
+        }
+
+        res.json({ status: 'sent', message: msgObj });
+    } catch (err) {
+        console.error('[EVENT SEND GROUP]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/groups/event/:messageId/respond - Respond to a group event
+router.post('/event/:messageId/respond', authenticateToken, async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const { status } = req.body; // 'Going', 'Maybe', 'Not going'
+        const userId = req.user.id;
+        const userObjId = new mongoose.Types.ObjectId(userId);
+
+        if (!['Going', 'Maybe', 'Not going'].includes(status)) {
+            return res.status(400).json({ error: 'Invalid status' });
+        }
+
+        const msg = await GroupMessage.findById(messageId);
+        if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
+
+        // Update participants array for backward compatibility
+        msg.event.participants = (msg.event.participants || []).filter(id => String(id) !== String(userId));
+        if (status === 'Going') {
+            msg.event.participants.push(userObjId);
+        }
+
+        // Update responses array
+        msg.event.responses = msg.event.responses || [];
+        const responseIdx = msg.event.responses.findIndex(r => String(r.user_id) === String(userId));
+        if (responseIdx >= 0) {
+            msg.event.responses[responseIdx].status = status;
+            msg.event.responses[responseIdx].updated_at = new Date();
+        } else {
+            msg.event.responses.push({ user_id: userObjId, status, updated_at: new Date() });
+        }
+
+        // Maintain response history (avoid duplicates if same status)
+        msg.event.response_history = msg.event.response_history || [];
+        const lastUserResponse = [...msg.event.response_history].reverse().find(h => String(h.user_id) === String(userId));
+        
+        if (!lastUserResponse || lastUserResponse.status !== status) {
+            msg.event.response_history.push({
+                user_id: userObjId,
+                status,
+                timestamp: new Date()
+            });
+        }
+
+        msg.markModified('event');
+        await msg.save();
+
+        const msgObj = msg.toObject();
+
+        if (req.io) {
+            const group = await Group.findById(msg.group_id);
+            if (group) {
+                group.members.forEach(memberId => {
+                    req.io.to(memberId.toString()).emit('event_responded', {
+                        messageId: msg._id,
+                        event: msgObj.event,
+                        isGroup: true,
+                        groupId: String(msg.group_id)
+                    });
+                });
+            }
+            // Also notify admins
+            req.io.to('admins').emit('event_responded', {
+                messageId: msg._id,
+                event: msgObj.event,
+                isGroup: true,
+                groupId: String(msg.group_id)
+            });
+        }
+        
+        res.json({ status: 'success', event: msgObj.event });
+    } catch (err) {
+        console.error('[EVENT RESPOND GROUP] Error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/groups/event/:messageId/edit - Edit a group event
+router.post('/event/:messageId/edit', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { messageId } = req.params;
+        const msg = await GroupMessage.findById(messageId);
+        if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
+
+        // Only creator can edit for now
+        if (String(msg.sender_id) !== String(userId)) return res.status(403).json({ error: 'Not allowed' });
+
+        const { name, description, location, startDate, startTime, endDate, endTime } = req.body;
+        if (name) msg.event.name = name;
+        if (description !== undefined) msg.event.description = description;
+        if (location !== undefined) msg.event.location = location;
+        if (startDate !== undefined) msg.event.startDate = startDate;
+        if (startTime !== undefined) msg.event.startTime = startTime;
+        if (endDate !== undefined) msg.event.endDate = endDate;
+        if (endTime !== undefined) msg.event.endTime = endTime;
+
+        msg.markModified('event');
+        await msg.save();
+
+        const msgObj = msg.toObject();
+
+        if (req.io) {
+            const group = await Group.findById(msg.group_id);
+            if (group) {
+                group.members.forEach(memberId => {
+                    req.io.to(memberId.toString()).emit('event_updated', { messageId: msg._id, event: msgObj.event, isGroup: true, groupId: String(msg.group_id) });
+                });
+            }
+            // Also notify admins
+            req.io.to('admins').emit('event_updated', { messageId: msg._id, event: msgObj.event, isGroup: true, groupId: String(msg.group_id) });
+        }
+
+        res.json({ status: 'success', event: msgObj.event });
+    } catch (err) {
+        console.error('[EVENT EDIT GROUP] Error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/groups/event/:messageId/cancel - Cancel a group event
+router.post('/event/:messageId/cancel', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { messageId } = req.params;
+        const msg = await GroupMessage.findById(messageId);
+        if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
+
+        // Only creator can cancel for now
+        if (String(msg.sender_id) !== String(userId)) return res.status(403).json({ error: 'Not allowed' });
+
+        msg.event = msg.event || {};
+        msg.event.cancelled = true;
+        msg.event.cancelledBy = userId;
+        msg.event.cancelledAt = new Date();
+        msg.markModified('event');
+        await msg.save();
+
+        const msgObj = msg.toObject();
+
+        if (req.io) {
+            const group = await Group.findById(msg.group_id);
+            if (group) {
+                group.members.forEach(memberId => {
+                    req.io.to(memberId.toString()).emit('event_updated', { messageId: msg._id, event: msgObj.event, isGroup: true, groupId: String(msg.group_id) });
+                });
+            }
+            // Also notify admins
+            req.io.to('admins').emit('event_updated', { messageId: msg._id, event: msgObj.event, isGroup: true, groupId: String(msg.group_id) });
+        }
+
+        // Create a system message in the group about cancellation
+        const sysMsg = await GroupMessage.create({
+            group_id: msg.group_id,
+            sender_id: userId,
+            role: 'system',
+            type: 'system',
+            is_system: true,
+            content: `cancelled the event: ${msg.event.name}`
+        });
+
+        const populated = await GroupMessage.findById(sysMsg._id).populate('sender_id', 'name _id __enc_name');
+        const sysObj = populated.toObject();
+
+        if (req.io) {
+            const group = await Group.findById(msg.group_id);
+            if (group) {
+                group.members.forEach(memberId => {
+                    req.io.to(memberId.toString()).emit('group_message', { groupId: msg.group_id, message: sysObj });
+                });
+            }
+        }
+
+        res.json({ status: 'success', event: msgObj.event, system: sysObj });
+    } catch (err) {
+        console.error('[EVENT CANCEL GROUP] Error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // POST /api/groups/:groupId/send - Send a message to a group
 router.post('/:groupId/send', authenticateToken, (req, res, next) => {
     upload.single('file')(req, res, (err) => {
@@ -1036,98 +1267,5 @@ router.post('/:groupId/join', authenticateToken, async (req, res) => {
     }
 });
 
-
-// POST /api/groups/event/send - Send a group event message
-router.post('/event/send', authenticateToken, async (req, res) => {
-    try {
-        const { groupId, eventData } = req.body;
-        const senderId = req.user.id;
-
-        if (!groupId) return res.status(400).json({ error: 'Group ID required' });
-        if (!eventData || !eventData.name) return res.status(400).json({ error: 'Event name required' });
-
-        const group = await Group.findById(groupId);
-        if (!group) return res.status(404).json({ error: 'Group not found' });
-
-        const isMem = (group.members || []).some(m => String(m) === String(senderId));
-        const isOwner = String(group.admin) === String(senderId);
-
-        if (!isMem && !isOwner) {
-            return res.status(403).json({ error: 'Not a group member' });
-        }
-
-        const msg = await GroupMessage.create({
-            group_id: groupId,
-            sender_id: senderId,
-            role: 'user',
-            content: eventData.name,
-            type: 'event',
-            event: {
-                ...eventData,
-                participants: [senderId] // Creator is participant
-            }
-        });
-
-        const populated = await GroupMessage.findById(msg._id).populate('sender_id', 'name _id __enc_name');
-        const msgObj = populated.toObject();
-
-        if (req.io) {
-            group.members.forEach(memberId => {
-                req.io.to(memberId.toString()).emit('group_message', {
-                    groupId,
-                    message: msgObj
-                });
-            });
-        }
-
-        res.json({ status: 'sent', message: msgObj });
-    } catch (err) {
-        console.error('[EVENT SEND GROUP]', err);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// POST /api/groups/event/:messageId/join - Join a group event
-router.post('/event/:messageId/join', authenticateToken, async (req, res) => {
-    try {
-        const { messageId } = req.params;
-        const userId = req.user.id;
-
-        const msg = await GroupMessage.findById(messageId);
-        if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
-
-        if (!msg.event.participants) msg.event.participants = [];
-        const index = msg.event.participants.indexOf(userId);
-        if (index === -1) {
-            msg.event.participants.push(userId);
-        } else {
-            msg.event.participants.splice(index, 1);
-        }
-
-        msg.markModified('event');
-        await msg.save();
-
-        const msgObj = msg.toObject();
-
-        if (req.io) {
-            const group = await Group.findById(msg.group_id);
-            if (group) {
-                group.members.forEach(memberId => {
-                    req.io.to(memberId.toString()).emit('event_updated', {
-                        messageId: msg._id,
-                        event: msgObj.event,
-                        isGroup: true,
-                        groupId: String(msg.group_id)
-                    });
-                });
-            }
-        }
-        
-        res.json({ status: 'success', event: msgObj.event });
-    } catch (err) {
-        console.error('[EVENT JOIN GROUP] Error:', err);
-        res.status(500).json({ error: err.message });
-    }
-});
 
 module.exports = router;

@@ -12,18 +12,22 @@
 
 /* Base Card Style */
 .snackbar-card {
-    background: rgba(240, 242, 245, 0.85); /* Semi-transparent background */
-    backdrop-filter: blur(12px); /* Blur effect */
+    background: rgba(240, 242, 245, 0.85);
+    /* Semi-transparent background */
+    backdrop-filter: blur(12px);
+    /* Blur effect */
     -webkit-backdrop-filter: blur(12px);
     width: 360px;
     border-radius: 18px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12); /* Deeper shadow */
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+    /* Deeper shadow */
     display: flex;
     flex-direction: column;
     overflow: hidden;
     animation: slideInFromRight 0.4s cubic-bezier(0.16, 1, 0.3, 1);
     color: #111b21;
-    border: 1px solid rgba(255, 255, 255, 0.2); /* Subtle border */
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    /* Subtle border */
 }
 
 /* Header - Branded */
@@ -75,7 +79,8 @@
 /* Body Layout */
 .snackbar-body {
     display: flex;
-    align-items: flex-start; /* Align to top for multi-line */
+    align-items: flex-start;
+    /* Align to top for multi-line */
     padding: 8px 18px 20px 18px;
     gap: 14px;
 }
@@ -92,7 +97,7 @@
     height: 100%;
     border-radius: 50%;
     object-fit: cover;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .snackbar-initial-avatar {
@@ -106,7 +111,7 @@
     justify-content: center;
     font-weight: 600;
     font-size: 20px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 /* Content Text */

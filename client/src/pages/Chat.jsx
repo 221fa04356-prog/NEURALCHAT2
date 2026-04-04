@@ -12,7 +12,7 @@ import {
     LayoutGrid, UserPlus, ArrowRight, Share2, Crop, Check, RotateCcw, Minus, Delete, User, Play, MapPin, IndianRupee, Sticker, PlusCircle,
     ShieldCheck, Monitor, BellRing, Laptop, LogOut, Globe, Clock, Building2, Mail, Briefcase, ExternalLink,
     ShieldAlert, Fingerprint, HardDrive, Keyboard, HelpCircle, Settings2, Volume2, MonitorSmartphone, Shield,
-    AlertCircle, UserCheck, Loader2, Ban
+    AlertCircle, UserCheck, Loader2, Ban, ChevronUp
 } from 'lucide-react';
 
 const searchSlideStyles = `
@@ -74,6 +74,40 @@ const socket = io(SOCKET_URL, {
     reconnectionAttempts: 10,
     reconnectionDelay: 1000,
 });
+
+const formatEventTimeString = (startDate, startTime, endDate, endTime) => {
+    if (!startDate && !startTime) return '';
+    const isToday = (d) => {
+        const today = new Date();
+        return d.getDate() === today.getDate() &&
+            d.getMonth() === today.getMonth() &&
+            d.getFullYear() === today.getFullYear();
+    };
+    const isTomorrow = (d) => {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        return d.getDate() === tomorrow.getDate() &&
+            d.getMonth() === tomorrow.getMonth() &&
+            d.getFullYear() === tomorrow.getFullYear();
+    };
+    const formatPart = (ds, ts) => {
+        if (!ds) return ts || '';
+        const d = new Date(ds);
+        if (isNaN(d.getTime())) return '';
+        let dateStr = '';
+        if (isToday(d)) dateStr = 'Today';
+        else if (isTomorrow(d)) dateStr = 'Tomorrow';
+        else dateStr = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+        return ts ? `${dateStr}, ${ts}` : dateStr;
+    };
+
+    const startStr = formatPart(startDate, startTime);
+    if (endDate && endTime) {
+        const endStr = formatPart(endDate, endTime);
+        return `${startStr} - ${endStr}`;
+    }
+    return startStr;
+};
 
 const TimePicker = ({ value, onChange, onClose }) => {
     const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
@@ -1008,9 +1042,17 @@ export default function Chat() {
     const [showEndTimePicker, setShowEndTimePicker] = useState(false);
     const [showEventCallTypeDropdown, setShowEventCallTypeDropdown] = useState(false);
 
+    // Event details / edit state
+    const [isEventDetailsOpen, setIsEventDetailsOpen] = useState(false);
+    const [eventDetailsMsg, setEventDetailsMsg] = useState(null);
+    const [isEventEditOpen, setIsEventEditOpen] = useState(false);
+    const [eventEditTarget, setEventEditTarget] = useState(null);
+    const [isCancelEventConfirmOpen, setIsCancelEventConfirmOpen] = useState(false);
+
     const [showNotificationDetails, setShowNotificationDetails] = useState(false);
     const [messageRequests, setMessageRequests] = useState([]); // Message request list
     const [isRequestsModalOpen, setIsRequestsModalOpen] = useState(false); // Requests modal
+    const [openEventRespondId, setOpenEventRespondId] = useState(null); // ID of event message with open respond dropdown
     const [accountBanned, setAccountBanned] = useState(user.bannedUntil || null); // Temporary ban
     const [accountLocked, setAccountLocked] = useState(user.adminLock || false); // Permanent lock
     const [isContactSelectionOpen, setIsContactSelectionOpen] = useState(false);
@@ -1508,7 +1550,7 @@ export default function Chat() {
 
     const renderLastMessagePreview = (msg, isGroup = false, defaultText = 'No messages yet', chatId = null) => {
         const idKey = String(chatId || '').toLowerCase();
-        
+
         // Use a more robust lookup to handle various ID formats used in the app
         const matchEntry = idKey ? Object.entries(typingUsers || {}).find(([id]) => String(id).toLowerCase() === idKey) : null;
         const typingSet = matchEntry ? matchEntry[1] : null;
@@ -1526,8 +1568,8 @@ export default function Chat() {
             if (typingLabel.endsWith('...')) typingLabel = typingLabel.slice(0, -3);
 
             return (
-                <span className="wa-typing-indicator-sidebar" style={{ 
-                    color: '#027EB5', 
+                <span className="wa-typing-indicator-sidebar" style={{
+                    color: '#027EB5',
                     fontWeight: 500,
                     display: 'flex',
                     alignItems: 'center',
@@ -1622,12 +1664,52 @@ export default function Chat() {
                 } catch (e) {
                     return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><UserIcon size={14} /> Contact</span>;
                 }
+            case 'event':
+                if (msg.event) {
+                    const myId = user.id || user._id || userData?.id || userData?._id;
+                    const senderId = msg.sender_id?._id || msg.sender_id || msg.user_id?._id || msg.user_id;
+                    const isMe = String(senderId) === String(myId);
+                    const senderName = msg.sender_id?.name || msg.user_id?.name || 'Someone';
+                    const eventDisplayName = msg.event.name || 'an event';
+                    return (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <Calendar size={14} color="#667781" />
+                            {isMe ? `You created an event ${eventDisplayName}` : `${senderName} created an event ${eventDisplayName}`}
+                        </span>
+                    );
+                }
+                return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Calendar size={14} color="#667781" /> Event</span>;
+            case 'poll':
+                return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><List size={14} color="#667781" /> Poll: {msg.poll?.question || 'Question'}</span>;
             default:
                 if (msg.is_request_placeholder) {
                     return <span style={{ color: '#0EA5BE', fontWeight: '500' }}>{msg.content}</span>;
                 }
                 if (msg.is_system) {
-                    return `${msg.sender_id?.name || 'Someone'} ${msg.content}`;
+                    let content = msg.content;
+                    const myId = user.id || user._id || userData?.id || userData?._id;
+                    const senderId = msg.sender_id?._id || msg.sender_id || msg.user_id?._id || msg.user_id;
+                    const isMe = String(senderId) === String(myId);
+
+                    if (content.includes('cancelled the event:')) {
+                        const eventName = content.split('cancelled the event:')[1].trim();
+                        return (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <Calendar size={14} color="#667781" />
+                                {isMe ? `You cancelled ${eventName}` : `${msg.sender_id?.name || 'Someone'} cancelled ${eventName}`}
+                            </span>
+                        );
+                    }
+                    if (content.includes('deleted the event:')) {
+                        const eventName = content.split('deleted the event:')[1].trim();
+                        return (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <Trash2 size={14} color="#667781" />
+                                {isMe ? `You deleted ${eventName}` : `${msg.sender_id?.name || 'Someone'} deleted ${eventName}`}
+                            </span>
+                        );
+                    }
+                    return `${msg.sender_id?.name || 'Someone'} ${content}`;
                 }
                 return msg.content || defaultText;
         }
@@ -2495,22 +2577,22 @@ export default function Chat() {
             const hasVowels = /[aeiouy]/i.test(trimmedInput);
             const hasNumbers = /[0-9]/.test(trimmedInput);
             const isMeaningful = trimmedInput.length >= 2 && /[a-zA-Z0-9]/.test(trimmedInput);
-            
+
             // Catch repeats like "fff", "jgjg" and vowel-less strings
-            const isProbablyGarbage = (trimmedInput.length >= 3 && !hasVowels && !hasNumbers) || 
-                                      /([^aeiouy0-9\s])\1{2,}/i.test(trimmedInput) ||
-                                      (trimmedInput.length >= 4 && !hasVowels && !hasNumbers);
+            const isProbablyGarbage = (trimmedInput.length >= 3 && !hasVowels && !hasNumbers) ||
+                /([^aeiouy0-9\s])\1{2,}/i.test(trimmedInput) ||
+                (trimmedInput.length >= 4 && !hasVowels && !hasNumbers);
 
             if (isProbablyGarbage || !isMeaningful) {
                 setIsGarbageMessage(true);
                 setShowGrammarBar(true);
                 if ((isProbablyGarbage || !isMeaningful) && trimmedInput.length >= 3) {
-                     setSnackbar({ 
-                         message: "Please write a meaningful word or sentence to start the chat", 
-                         type: 'error', 
-                         duration: 5000, 
-                         variant: 'system' 
-                     });
+                    setSnackbar({
+                        message: "Please write a meaningful word or sentence to start the chat",
+                        type: 'error',
+                        duration: 5000,
+                        variant: 'system'
+                    });
                 }
                 setIsGrammarLoading(false);
                 return;
@@ -2533,14 +2615,14 @@ export default function Chat() {
                     // Check if it's unethical before praising grammar
                     const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole'];
                     const isUnethical = badWords.some(word => {
-                         const regex = new RegExp(`\\b${word}\\b`, 'i');
-                         return regex.test(trimmedInput);
+                        const regex = new RegExp(`\\b${word}\\b`, 'i');
+                        return regex.test(trimmedInput);
                     });
 
                     if (!isUnethical) {
                         setSnackbar({ message: "made with proper grammar", type: 'success', duration: 5000, variant: 'system' });
                     }
-                    
+
                     setSuggestionApplied(true);
                     setShowGrammarBar(false);
                 } else {
@@ -2575,11 +2657,11 @@ export default function Chat() {
 
         return (
             <div className="wa-grammar-bar" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
-                <div style={{ 
-                    display: 'flex', 
-                    flex: 1, 
-                    flexDirection: 'column', 
-                    gap: '4px', 
+                <div style={{
+                    display: 'flex',
+                    flex: 1,
+                    flexDirection: 'column',
+                    gap: '4px',
                     overflow: 'hidden',
                     borderLeft: isGarbageMessage ? '4px solid #ef4444' : '4px solid transparent',
                     paddingLeft: isGarbageMessage ? '12px' : '0',
@@ -2880,14 +2962,20 @@ export default function Chat() {
                             docCount: newDocCount,
                             linkCount: newLinkCount,
                             lastMessage: {
-                                content: data.content,
-                                created_at: new Date().toISOString(),
+                                _id: data._id,
+                                content: data.content || '',
                                 type: data.type || 'text',
+                                created_at: data.created_at || new Date().toISOString(),
+                                user_id: data.user_id,
+                                sender_id: data.sender_id,
+                                event: data.event,
+                                poll: data.poll,
                                 is_view_once: data.is_view_once || false,
                                 fileName: data.fileName,
                                 duration: data.duration,
                                 ciphertext: data.ciphertext,
-                                session_header: data.session_header
+                                session_header: data.session_header,
+                                is_system: data.is_system
                             }
                         };
                     }
@@ -2907,8 +2995,10 @@ export default function Chat() {
             const currentSelected = selectedUserRef.current;
             if (currentSelected && String(data.reader_id) === String(currentSelected._id)) {
                 setMessages(prev => prev.map(msg => {
-                    const myId = user.id || user._id;
-                    const isMyMsg = (String(msg.sender_id) === String(myId)) || (String(msg.user_id) === String(myId));
+                    const myId = userRef.current?.id || userRef.current?._id;
+                    const senderId = (msg.sender_id?._id || msg.sender_id) || (msg.user_id?._id || msg.user_id);
+                    const isMyMsg = String(senderId) === String(myId);
+
                     if (isMyMsg && !msg.is_read) {
                         return { ...msg, is_read: true, read_at: data.read_at };
                     }
@@ -3088,20 +3178,7 @@ export default function Chat() {
             }
         };
 
-        const onEventUpdated = (data) => {
-            console.log('Socket: event_updated', data);
-            const { messageId, event, isGroup } = data;
 
-            const updateMsgs = prev => prev.map(m =>
-                (String(m._id || m.id) === String(messageId)) ? { ...m, event } : m
-            );
-
-            if (isGroup) {
-                setGroupMessages(updateMsgs);
-            } else {
-                setMessages(updateMsgs);
-            }
-        };
 
         const onUserProfileUpdated = (data) => {
             console.log('Socket: user_profile_updated', data);
@@ -3148,7 +3225,22 @@ export default function Chat() {
         socket.on('message_viewed', onMessageViewed);
         socket.on('user_profile_updated', onUserProfileUpdated);
         socket.on('poll_voted', onPollVoted);
+        const onEventUpdated = (data) => {
+            console.log('Socket: event_updated', data);
+            const { messageId, event, isGroup } = data;
+            const updateFn = prev => prev.map(m => (String(m._id || m.id) === String(messageId)) ? { ...m, event: event } : m);
+            if (isGroup) {
+                setGroupMessages(updateFn);
+            } else {
+                setMessages(updateFn);
+            }
+
+            if (eventDetailsMsg && String(eventDetailsMsg._id || eventDetailsMsg.id) === String(messageId)) {
+                setEventDetailsMsg(prev => ({ ...prev, event: event }));
+            }
+        };
         socket.on('event_updated', onEventUpdated);
+        socket.on('event_responded', onEventUpdated); // Reuse same logic for responses
 
         const onForceLogout = () => {
             console.warn('Socket: force_logout received. Another session was started.');
@@ -3222,7 +3314,7 @@ export default function Chat() {
             // Robust ID handling - consistent with other listeners
             const uId = String(userId || data.senderId || data.sender_id || '');
             const gId = groupId ? String(groupId) : null;
-            
+
             if (!uId) return;
 
             const chatId = String(gId || uId).toLowerCase();
@@ -3236,11 +3328,11 @@ export default function Chat() {
                 // Find existing key using case-insensitive match to avoid duplication
                 const existingKey = Object.keys(updated).find(k => k.toLowerCase() === chatId);
                 const actualKey = existingKey || chatId;
-                
+
                 const current = updated[actualKey] || new Set();
                 const next = new Set(current);
                 next.add(uId);
-                
+
                 updated[actualKey] = next;
                 return updated;
             });
@@ -3500,7 +3592,9 @@ export default function Chat() {
                     duration: data.message?.duration,
                     is_system: data.message?.is_system,
                     ciphertext: data.message?.ciphertext,
-                    sender_key_id: data.message?.sender_key_id
+                    sender_key_id: data.message?.sender_key_id,
+                    event: data.message?.event,
+                    poll: data.message?.poll
                 };
 
                 // 1. Update regular groups list
@@ -3569,7 +3663,11 @@ export default function Chat() {
                 setSelectedCommunity(prev => prev ? clearUnread(prev) : null);
                 fetchGroups();
             }
+        };
+        socket.on('group_messages_read', onGroupMessagesRead);
 
+        const onGroupMessagesAllRead = (data) => {
+            console.log('Socket: group_messages_all_read (all read)', data);
             const currentSelectedGroup = selectedGroupRef?.current;
             if (currentSelectedGroup && String(currentSelectedGroup._id) === String(data.groupId)) {
                 setGroupMessages(prev => prev.map(msg => {
@@ -3580,7 +3678,7 @@ export default function Chat() {
                 }));
             }
         };
-        socket.on('group_messages_read', onGroupMessagesRead);
+        socket.on('group_messages_all_read', onGroupMessagesAllRead);
 
         const onGroupMessagePartialRead = (data) => {
             // Resolve member name/image for live display
@@ -3705,6 +3803,7 @@ export default function Chat() {
             socket.off('group_created', onGroupCreated);
             socket.off('group_message', onGroupMessage);
             socket.off('group_messages_read', onGroupMessagesRead);
+            socket.off('group_messages_all_read', onGroupMessagesAllRead);
             socket.off('group_message_partial_read', onGroupMessagePartialRead);
             socket.off('group_admin_updated', onGroupAdminUpdated);
             socket.off('group_members_updated', onGroupMembersUpdated);
@@ -3721,6 +3820,8 @@ export default function Chat() {
             socket.off('message_pinned', onMessagePinned);
             socket.off('message_opened', onMessageOpened);
             socket.off('message_viewed', onMessageViewed);
+            socket.off('event_updated', onEventUpdated);
+            socket.off('event_responded', onEventUpdated);
             socket.off('force_logout', onForceLogout);
             socket.off('new_message_request', onNewMessageRequest);
             socket.off('request_accepted', onRequestAccepted);
@@ -4185,6 +4286,44 @@ export default function Chat() {
         } catch (err) {
             console.error('handleRejectRequest error:', err);
             setSnackbar({ message: err.response?.data?.error || 'Failed to reject request', type: 'error', variant: 'system' });
+        }
+    };
+
+    const handleEventRespond = async (msg, status) => {
+        try {
+            const token = localStorage.getItem('token');
+            const isGroup = !!msg.group_id;
+            const msgId = msg._id || msg.id;
+            const url = isGroup ? `/api/groups/event/${msgId}/respond` : `/api/chat/event/${msgId}/respond`;
+
+            const res = await axios.post(url, { status }, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            if (res.data.status === 'success') {
+                const updatedEvent = res.data.event;
+                const updateFn = prev => prev.map(m => (String(m._id || m.id) === String(msgId)) ? { ...m, event: updatedEvent } : m);
+                if (isGroup) {
+                    setGroupMessages(updateFn);
+                    setGroups(prev => prev.map(g => String(g._id) === String(msg.group_id) ? { ...g, lastMessage: { ...g.lastMessage, event: updatedEvent } } : g));
+                } else {
+                    setMessages(updateFn);
+                    const otherId = String(msg.sender_id?._id || msg.sender_id) === String(user.id)
+                        ? String(msg.receiver_id?._id || msg.receiver_id)
+                        : String(msg.sender_id?._id || msg.sender_id);
+                    setUsers(prev => prev.map(u => String(u._id) === otherId ? { ...u, lastMessage: { ...u.lastMessage, event: updatedEvent } } : u));
+                }
+
+                // If this is the current event details being viewed, update it
+                if (eventDetailsMsg && String(eventDetailsMsg._id || eventDetailsMsg.id) === String(msgId)) {
+                    setEventDetailsMsg(prev => ({ ...prev, event: updatedEvent }));
+                }
+
+                setOpenEventRespondId(null);
+            }
+        } catch (err) {
+            console.error('[EVENT RESPOND ERROR]', err);
+            setSnackbar({ message: 'Failed to respond to event', type: 'error' });
         }
     };
 
@@ -5484,6 +5623,7 @@ export default function Chat() {
                 });
             } else {
                 setMessages(prev => [...prev, sentMsg]);
+                setUsers(prev => prev.map(u => String(u._id) === String(selectedUser?._id) ? { ...u, lastMessage: sentMsg } : u));
                 socket.emit('send_message', {
                     _id: sentMsg._id,
                     sender_id: user.id || user._id,
@@ -5492,6 +5632,21 @@ export default function Chat() {
                     type: 'event',
                     event: sentMsg.event
                 });
+            }
+
+            // Sync with sidebar list immediately
+            if (selectedGroup) {
+                setGroups(prev => prev.map(g => String(g._id) === String(selectedGroup._id) ? { ...g, lastMessage: sentMsg } : g));
+                setCommunities(prev => prev.map(c => {
+                    let updatedC = { ...c };
+                    const annId = String(c.announcements?._id || c.announcements?.id || c.announcements);
+                    if (String(selectedGroup._id) === annId) {
+                        updatedC.announcements = { ...c.announcements, lastMessage: sentMsg };
+                    } else {
+                        updatedC.groups = (c.groups || []).map(g => String(g._id || g.id) === String(selectedGroup._id) ? { ...g, lastMessage: sentMsg } : g);
+                    }
+                    return updatedC;
+                }));
             }
 
             setIsEventModalOpen(false);
@@ -5506,7 +5661,8 @@ export default function Chat() {
                 setUnblockRequested(err.response.data.unblockRequested || false);
                 setShowUnblockModal(true);
             } else {
-                setSnackbar({ message: 'Failed to create event', type: 'error', variant: 'system' });
+                const errMsg = err.response?.data?.error || err.message || 'Failed to create event';
+                setSnackbar({ message: errMsg, type: 'error', variant: 'system' });
             }
         }
     };
@@ -5537,6 +5693,114 @@ export default function Chat() {
         } catch (err) {
             console.error('Failed to join event:', err);
             setSnackbar({ message: 'Failed to update event status', type: 'error', variant: 'system' });
+        }
+    };
+
+    const openEventDetails = (msg) => {
+        setEventDetailsMsg(msg);
+        setIsEventDetailsOpen(true);
+        setIsContactInfoOpen(false);
+        setIsGroupInfoOpen(false);
+        setIsCommunityInfoOpen(false);
+        setIsMessageSearchOpen(false);
+        setIsStarredMessagesOpen(false);
+        setIsSharedMediaOpen(false);
+        setIsEditContactOpen(false);
+        setIsNotificationSettingsOpen(false);
+        setIsCommunitySettingsOpen(false);
+    };
+
+    const openEditEvent = (msg) => {
+        setEventEditTarget(msg);
+        const ev = msg.event || {};
+        setEventName(ev.name || '');
+        setEventDescription(ev.description || '');
+        setEventLocation(ev.location || '');
+        setEventStartDate(ev.startDate || new Date().toISOString().split('T')[0]);
+        setEventStartTime(ev.startTime || '11:00');
+        setEventEndDate(ev.endDate || '');
+        setEventEndTime(ev.endTime || '');
+        setIsEventEditOpen(true);
+    };
+
+    const submitEventEdit = async () => {
+        if (!eventEditTarget) return;
+        const isGroup = !!eventEditTarget.group_id;
+        const msgId = eventEditTarget._id || eventEditTarget.id;
+        const token = localStorage.getItem('token');
+        const endpoint = isGroup ? `/api/groups/event/${msgId}/edit` : `/api/chat/event/${msgId}/edit`;
+
+        try {
+            const payload = {
+                name: eventName,
+                description: eventDescription,
+                location: eventLocation,
+                startDate: eventStartDate,
+                startTime: eventStartTime,
+                endDate: eventEndDate,
+                endTime: eventEndTime
+            };
+
+            // Chronological Validation
+            const startStr = `${eventStartDate}T${eventStartTime || '00:00'}`;
+            const endStr = `${eventEndDate}T${eventEndTime || '00:00'}`;
+            const startObj = new Date(startStr);
+            const endObj = new Date(endStr);
+
+            if (endObj < startObj) {
+                setSnackbar({
+                    message: 'Event cannot end before it starts. Please check your dates and times.',
+                    type: 'error',
+                    variant: 'system'
+                });
+                return;
+            }
+            const res = await axios.post(endpoint, payload, { headers: { 'Authorization': `Bearer ${token}` } });
+            const updatedEvent = res.data.event;
+
+            const updateFn = prev => prev.map(m => (String(m._id || m.id) === String(msgId)) ? { ...m, event: updatedEvent } : m);
+            if (isGroup) setGroupMessages(updateFn); else setMessages(updateFn);
+
+            setIsEventEditOpen(false);
+            setIsEventDetailsOpen(false);
+            setSnackbar({ message: 'Event updated', type: 'success', variant: 'system' });
+        } catch (err) {
+            console.error('Failed to edit event:', err);
+            setSnackbar({ message: 'Failed to update event', type: 'error', variant: 'system' });
+        }
+    };
+
+    const confirmCancelEvent = (msg) => {
+        setEventDetailsMsg(msg);
+        setIsCancelEventConfirmOpen(true);
+    };
+
+    const submitCancelEvent = async () => {
+        const msg = eventDetailsMsg || eventEditTarget;
+        if (!msg) return;
+        const isGroup = !!msg.group_id;
+        const msgId = msg._id || msg.id;
+        const token = localStorage.getItem('token');
+        const endpoint = isGroup ? `/api/groups/event/${msgId}/cancel` : `/api/chat/event/${msgId}/cancel`;
+
+        try {
+            const res = await axios.post(endpoint, {}, { headers: { 'Authorization': `Bearer ${token}` } });
+            const updatedEvent = res.data.event;
+            const systemMsg = res.data.system;
+
+            const updateFn = prev => prev.map(m => (String(m._id || m.id) === String(msgId)) ? { ...m, event: updatedEvent } : m);
+            if (isGroup) setGroupMessages(updateFn); else setMessages(updateFn);
+
+            if (systemMsg) {
+                if (isGroup) setGroupMessages(prev => [...prev, systemMsg]); else setMessages(prev => [...prev, systemMsg]);
+            }
+
+            setIsCancelEventConfirmOpen(false);
+            setIsEventDetailsOpen(false);
+            setSnackbar({ message: 'Event cancelled', type: 'success', variant: 'system' });
+        } catch (err) {
+            console.error('Failed to cancel event:', err);
+            setSnackbar({ message: 'Failed to cancel event', type: 'error', variant: 'system' });
         }
     };
 
@@ -5594,7 +5858,7 @@ export default function Chat() {
 
     const handleSend = async (e, contentOverride = null, voiceFile = null, voiceDuration = null, voiceIsViewOnce = null) => {
         if (e) e.preventDefault();
-        
+
         const textToSend = contentOverride !== null ? contentOverride : input;
         const targetFile = voiceFile || file;
 
@@ -5605,8 +5869,8 @@ export default function Chat() {
         if (!targetFile && textToSend.trim().length > 0) {
             // Strict check: Must have applied an AI suggestion or be marked as "proper grammar" by the earlier effect
             if (showGrammarBar || !suggestionApplied) {
-                setSnackbar({ 
-                    message: "Please write a meaningful word or sentence to start the chat", 
+                setSnackbar({
+                    message: "Please write a meaningful word or sentence to start the chat",
                     type: 'error',
                     variant: 'system'
                 });
@@ -9133,6 +9397,39 @@ export default function Chat() {
                                         </button>
                                     </div>
                                 </div>
+                            ) : infoMessage.type === 'event' ? (
+                                infoMessage.event ? (
+                                    <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'default', opacity: infoMessage.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
+                                        <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
+                                            <div style={{ display: 'flex', gap: '14px' }}>
+                                                <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                    <Calendar size={24} color="#0EA5BE" />
+                                                </div>
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: infoMessage.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{infoMessage.event.name}</div>
+                                                    <div style={{ fontSize: '14px', color: '#667781' }}>
+                                                        {formatEventTimeString(infoMessage.event.startDate, infoMessage.event.startTime, infoMessage.event.endDate, infoMessage.event.endTime)}
+                                                    </div>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+                                                        <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
+                                                            <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                                                <UserIcon size={12} color="#8696a0" style={{ marginTop: '1px' }} />
+                                                            </div>
+                                                        </div>
+                                                        <span style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500 }}>{infoMessage.event.participants?.length || 0} going</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div style={{ padding: '12px 0', margin: '0 16px', borderTop: '1px solid #f0f2f5', textAlign: 'center' }}>
+                                            <span style={{ color: infoMessage.event.cancelled ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
+                                                {infoMessage.event.cancelled ? 'Event cancelled' : 'View event'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div style={{ padding: '15px', textAlign: 'center', background: '#f8f9fa', borderRadius: '12px' }}>Event</div>
+                                )
                             ) : (
                                 <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{infoMessage.content}</p>
                             )}
@@ -9791,7 +10088,7 @@ export default function Chat() {
                         style={menuStyle}
                         onClick={(e) => e.stopPropagation()}
                     >
-                        {!isDeleted && (
+                        {!isDeleted && data.type !== 'event' && (
                             <>
                                 <div className="wa-reactions-row">
                                     <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '👍', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Like" data-tooltip-pos="center">👍</span>
@@ -9818,12 +10115,12 @@ export default function Chat() {
 
                         {!isDeleted && (
                             <>
-                                {isMe && (
+                                {(isMe || data.type === 'event') && (
                                     <div className="wa-dropdown-item" onClick={(e) => { e.stopPropagation(); setInfoMessage(data); setOpenDropdown(null); }}>
                                         <Info size={16} style={{ marginRight: 10 }} /> Message info
                                     </div>
                                 )}
-                                {canEditMessage(data) && (
+                                {canEditMessage(data) && data.type !== 'event' && (
                                     <div className="wa-dropdown-item" onClick={(e) => { e.stopPropagation(); setEditingMessage(data); setEditInput(data.content); setOpenDropdown(null); }}>
                                         <Pencil size={16} style={{ marginRight: 10 }} /> Edit
                                     </div>
@@ -9831,7 +10128,7 @@ export default function Chat() {
                                 <div className="wa-dropdown-item" onClick={() => { setReplyingTo(data); setOpenDropdown(null); }}>
                                     <Reply size={16} style={{ marginRight: 10 }} /> Reply
                                 </div>
-                                {data.type !== 'poll' && (
+                                {data.type !== 'poll' && data.type !== 'event' && (
                                     <>
                                         {data.type !== 'contact' && (
                                             <div className="wa-dropdown-item" onClick={() => handleCopyMessage(data)}>
@@ -9879,7 +10176,7 @@ export default function Chat() {
                         </div>
 
                         <div className="wa-dropdown-divider"></div>
-                        {!isMe && !isDeleted && <div className="wa-dropdown-item"><ThumbsDown size={16} style={{ marginRight: 10 }} /> Report</div>}
+                        {!isMe && !isDeleted && data.type !== 'event' && <div className="wa-dropdown-item"><ThumbsDown size={16} style={{ marginRight: 10 }} /> Report</div>}
                         {!isDeleted && (data.type === 'image' || data.type === 'file' || data.type === 'video') && (
                             <div className="wa-dropdown-item" onClick={(e) => {
                                 e.stopPropagation();
@@ -9964,7 +10261,7 @@ export default function Chat() {
             const { coords } = openDropdown;
             const menuStyleHome = {
                 position: 'fixed',
-                top: (type === 'snackbar_menu' && mouseY > vHeight - 200) 
+                top: (type === 'snackbar_menu' && mouseY > vHeight - 200)
                     ? (mouseY - 130) // Open upwards if too low
                     : (type === 'sidebar_menu' ? (mouseY + 20) : (mouseY + 10)),
                 left: (type.includes('header') || type === 'sidebar_menu' || type === 'snackbar_menu') ? 'auto' : (mouseX - 180),
@@ -10131,17 +10428,17 @@ export default function Chat() {
 
                         {type === 'snackbar_menu' && (
                             <>
-                                <div className="wa-dropdown-item" onClick={() => { 
+                                <div className="wa-dropdown-item" onClick={() => {
                                     setNotificationsEnabled(false);
-                                    setOpenDropdown(null); 
+                                    setOpenDropdown(null);
                                     // No snackbar here because they are now disabled! 
                                     // Just close the menu.
                                 }}>
                                     <Ban size={18} style={{ marginRight: 12, color: '#54656f' }} /> Turn off all notifications from the application
                                 </div>
-                                <div className="wa-dropdown-item" onClick={() => { 
-                                    setIsNotificationSettingsOpen(true); 
-                                    setOpenDropdown(null); 
+                                <div className="wa-dropdown-item" onClick={() => {
+                                    setIsNotificationSettingsOpen(true);
+                                    setOpenDropdown(null);
                                 }}>
                                     <Settings size={18} style={{ marginRight: 12, color: '#54656f' }} /> Go to notification settings
                                 </div>
@@ -12658,10 +12955,10 @@ export default function Chat() {
                                     // Typing contacts always first (instant visibility)
                                     const aId = String(a._id || a.id || '').toLowerCase();
                                     const bId = String(b._id || b.id || '').toLowerCase();
-                                    
+
                                     const aMatch = aId ? Object.entries(typingUsers || {}).find(([id, set]) => String(id).toLowerCase() === aId && set?.size > 0) : null;
                                     const bMatch = bId ? Object.entries(typingUsers || {}).find(([id, set]) => String(id).toLowerCase() === bId && set?.size > 0) : null;
-                                    
+
                                     if (aMatch && !bMatch) return -1;
                                     if (!aMatch && bMatch) return 1;
                                     // Pinned always next
@@ -13446,12 +13743,12 @@ export default function Chat() {
     const renderMainChat = () => (
         <div className="wa-main-chat-wrapper" style={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden' }}>
             <div
-                className={`wa-main-chat ${(isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen) ? 'wa-main-chat-with-panel' : ''}`}
+                className={`wa-main-chat ${(isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? 'wa-main-chat-with-panel' : ''}`}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 style={{
                     flex: 1,
-                    borderRight: (isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen) ? '1px solid #d1d7db' : 'none'
+                    borderRight: (isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? '1px solid #d1d7db' : 'none'
                 }}
             >
                 <NeuralBackground isRecording={isRecording} />
@@ -13468,7 +13765,11 @@ export default function Chat() {
                                     <ArrowLeft size={24} />
                                 </button>
 
-                                <div className="wa-chat-header-user" onClick={() => setIsContactInfoOpen(true)}>
+                                <div className="wa-chat-header-user" onClick={() => {
+                                    setIsContactInfoOpen(true);
+                                    setIsEventDetailsOpen(false);
+                                    setIsStarredMessagesOpen(false);
+                                }}>
                                     <div className="wa-avatar" style={{ width: 40, height: 40, marginRight: 10 }}>
                                         <span style={{ fontSize: 16 }}>{selectedUser.name?.charAt(0).toUpperCase()}</span>
                                     </div>
@@ -13756,6 +14057,32 @@ export default function Chat() {
                                         <div className="wa-group-messages">
                                             {group.msgs.map((msg, msgIdx) => {
                                                 const isMe = isMeMsg(msg);
+                                                const senderName = isMe ? 'You' : (selectedUser?.name || 'User');
+
+                                                if (msg.is_system || msg.type === 'system') {
+                                                    const content = msg.content || '';
+                                                    let displayContent = content;
+
+                                                    if (content.includes('cancelled the event: ')) {
+                                                        const eventName = content.split('cancelled the event: ')[1];
+                                                        displayContent = `${isMe ? 'You' : senderName} cancelled the "${eventName}" event`;
+                                                    } else {
+                                                        const prefixMe = 'You ';
+                                                        const prefixSender = `${senderName} `;
+                                                        if (!content.toLowerCase().startsWith(prefixMe.toLowerCase()) &&
+                                                            !content.toLowerCase().startsWith(prefixSender.toLowerCase())) {
+                                                            displayContent = `${isMe ? 'You' : senderName} ${content}`;
+                                                        }
+                                                    }
+
+                                                    return (
+                                                        <div key={msg._id || msg.id || msgIdx} style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+                                                            <div className="wa-system-message">
+                                                                {displayContent}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
 
                                                 return (
                                                     <div key={msg._id || msg.id || msgIdx}
@@ -14243,7 +14570,102 @@ export default function Chat() {
                                                                         </div>
                                                                     )}
 
-                                                                    {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && (
+                                                                    {msg.type === 'event' && msg.event && (() => {
+                                                                        const myId = String(user.id || user._id);
+                                                                        const myResponse = (msg.event.responses || []).find(r => String(r.user_id) === myId);
+
+                                                                        return (
+                                                                            <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                                <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
+                                                                                    <div style={{ display: 'flex', gap: '14px' }}>
+                                                                                        <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                                            <Calendar size={24} color="#0EA5BE" />
+                                                                                        </div>
+                                                                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                                                                            <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{msg.event.name}</div>
+                                                                                            <div style={{ fontSize: '14px', color: '#667781' }}>
+                                                                                                {formatEventTimeString(msg.event.startDate, msg.event.startTime, msg.event.endDate, msg.event.endTime)}
+                                                                                            </div>
+                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+                                                                                                <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
+                                                                                                    <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                                                                                        {msg.event.participants?.length > 0 ? (
+                                                                                                            (() => {
+                                                                                                                const p = users.find(u => String(u._id || u.id) === String(msg.event.participants[0]));
+                                                                                                                return p && (p.avatar || p.image || p.profile_photo) ? <img src={p.avatar || p.image || p.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />;
+                                                                                                            })()
+                                                                                                        ) : (
+                                                                                                            <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />
+                                                                                                        )}
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                                <span onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }} style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500, cursor: 'pointer' }}>{msg.event.responses?.length || 0} responded</span>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
+                                                                                    {msg.event.cancelled ? (
+                                                                                        <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
+                                                                                    ) : isMe ? (
+                                                                                        <span onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer' }}>Edit event</span>
+                                                                                    ) : (
+                                                                                        <div style={{ width: '100%', textAlign: 'center' }}>
+                                                                                            <div
+                                                                                                onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
+                                                                                                style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
+                                                                                            >
+                                                                                                {myResponse ? myResponse.status : 'Respond'}
+                                                                                                <ChevronDown size={18} />
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )}
+
+                                                                                    {openEventRespondId === msg._id && !msg.event.cancelled && (
+                                                                                        <div style={{
+                                                                                            position: 'absolute',
+                                                                                            bottom: 'calc(100% + 5px)',
+                                                                                            left: '50%',
+                                                                                            transform: 'translateX(-50%)',
+                                                                                            background: '#ffffff',
+                                                                                            borderRadius: '10px',
+                                                                                            boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+                                                                                            zIndex: 1000,
+                                                                                            minWidth: '130px',
+                                                                                            padding: '4px 0',
+                                                                                            overflow: 'hidden',
+                                                                                            border: '1px solid #e9edef'
+                                                                                        }}>
+                                                                                            {['Going', 'Maybe', 'Not going'].map(status => (
+                                                                                                <div
+                                                                                                    key={status}
+                                                                                                    onClick={(e) => { e.stopPropagation(); handleEventRespond(msg, status); setOpenEventRespondId(null); }}
+                                                                                                    style={{
+                                                                                                        padding: '12px 16px',
+                                                                                                        fontSize: '14px',
+                                                                                                        color: '#111b21',
+                                                                                                        textAlign: 'left',
+                                                                                                        cursor: 'pointer',
+                                                                                                        borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none',
+                                                                                                        background: myResponse?.status === status ? '#f0f2f5' : 'white',
+                                                                                                        fontWeight: myResponse?.status === status ? '600' : 'normal',
+                                                                                                        display: 'flex',
+                                                                                                        alignItems: 'center',
+                                                                                                        justifyContent: 'space-between'
+                                                                                                    }}
+                                                                                                >
+                                                                                                    {status}
+                                                                                                    {myResponse?.status === status && <Check size={14} color="#0EA5BE" />}
+                                                                                                </div>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })()}
+
+                                                                    {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && msg.type !== 'event' && (
                                                                         <span>{renderContent(msg.content)}</span>
                                                                     )}
                                                                 </>
@@ -14303,8 +14725,8 @@ export default function Chat() {
                                 if (typingSet && typingSet.size > 0) {
                                     return (
                                         <div className="wa-message-container" style={{ marginBottom: '10px', marginTop: '5px' }}>
-                                            <div className="wa-message-bubble wa-msg-rec" style={{ 
-                                                padding: '12px 16px', 
+                                            <div className="wa-message-bubble wa-msg-rec" style={{
+                                                padding: '12px 16px',
                                                 borderRadius: '0 12px 12px 12px',
                                                 width: 'fit-content',
                                                 background: 'white',
@@ -14411,26 +14833,26 @@ export default function Chat() {
                                             Messaging is temporarily restricted.
                                         </div>
                                     ) : isMessagingBlocked ? (
-                                        <div 
-                                            onClick={() => setShowUnblockModal(true)} 
-                                            style={{ 
-                                                width: '100%', 
-                                                padding: '16px', 
-                                                background: '#fff1f2', 
-                                                borderRadius: '16px', 
-                                                textAlign: 'center', 
-                                                color: '#be123c', 
-                                                fontSize: '0.95rem', 
+                                        <div
+                                            onClick={() => setShowUnblockModal(true)}
+                                            style={{
+                                                width: '100%',
+                                                padding: '16px',
+                                                background: '#fff1f2',
+                                                borderRadius: '16px',
+                                                textAlign: 'center',
+                                                color: '#be123c',
+                                                fontSize: '0.95rem',
                                                 fontWeight: '600',
-                                                border: '1.5px dashed #fecdd3', 
-                                                cursor: 'pointer', 
+                                                border: '1.5px dashed #fecdd3',
+                                                cursor: 'pointer',
                                                 transition: 'all 0.2s',
                                                 display: 'flex',
                                                 alignItems: 'center',
                                                 justifyContent: 'center',
                                                 gap: '10px'
-                                            }} 
-                                            onMouseEnter={(e) => { e.currentTarget.style.background = '#ffe4e6'; e.currentTarget.style.transform = 'translateY(-1px)'; }} 
+                                            }}
+                                            onMouseEnter={(e) => { e.currentTarget.style.background = '#ffe4e6'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
                                             onMouseLeave={(e) => { e.currentTarget.style.background = '#fff1f2'; e.currentTarget.style.transform = 'translateY(0)'; }}
                                         >
                                             <ShieldAlert size={18} />
@@ -14609,6 +15031,8 @@ export default function Chat() {
                                 <div
                                     className="wa-chat-header-user"
                                     onClick={() => {
+                                        setIsEventDetailsOpen(false);
+                                        setIsStarredMessagesOpen(false);
                                         if (selectedGroup.isCommunityAnnouncements) {
                                             setIsCommunityInfoOpen(true);
                                             setIsContactInfoOpen(false);
@@ -14936,6 +15360,11 @@ export default function Chat() {
                                                         } else {
                                                             displayContent = `${target} is now a Community Owner`;
                                                         }
+                                                    }
+                                                    // Handle event cancellation
+                                                    else if (content.includes('cancelled the event: ')) {
+                                                        const eventName = content.split('cancelled the event: ')[1];
+                                                        displayContent = `${isMe ? 'You' : senderName} cancelled the "${eventName}" event`;
                                                     }
                                                     // Fallback for legacy "You removed/added" messages
                                                     else {
@@ -15535,44 +15964,86 @@ export default function Chat() {
                                                                         </div>
                                                                     )}
 
-                                                                    {msg.type === 'event' && msg.event && (
-                                                                        <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', minWidth: '280px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
-                                                                            <div style={{ background: '#202c33', padding: '15px', color: '#e9edef' }}>
-                                                                                <div style={{ fontSize: '13px', color: '#8696a0', marginBottom: '8px', textTransform: 'uppercase', fontWeight: '500' }}>Event</div>
-                                                                                <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '4px' }}>{msg.event.name}</div>
-                                                                                <div style={{ fontSize: '14px', color: '#8696a0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                                                                    <Calendar size={14} />
-                                                                                    {new Date(msg.event.startDate).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}, {msg.event.startTime}
-                                                                                </div>
-                                                                                {msg.event.location && (
-                                                                                    <div style={{ fontSize: '14px', color: '#8696a0', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
-                                                                                        <MapPin size={14} /> {msg.event.location}
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
-                                                                            <div style={{ padding: '12px 15px', background: '#fff' }}>
-                                                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                                                                                    <div style={{ display: 'flex', alignItems: 'center' }}>
-                                                                                        <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#e9edef', border: '2px solid #fff', overflow: 'hidden' }}>
-                                                                                            <UserIcon size={14} color="#8696a0" style={{ margin: '3px' }} />
+                                                                    {msg.type === 'event' && msg.event && (() => {
+                                                                        const myId = String(user.id || user._id);
+                                                                        const myResponse = (msg.event.responses || []).find(r => String(r.user_id) === myId);
+
+                                                                        return (
+                                                                            <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                                <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
+                                                                                    <div style={{ display: 'flex', gap: '14px' }}>
+                                                                                        <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                                            <Calendar size={24} color="#0EA5BE" />
                                                                                         </div>
-                                                                                        <span style={{ fontSize: '14px', color: '#54656f', marginLeft: '8px' }}>{msg.event.participants?.length || 0} going</span>
+                                                                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                                                                            <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{msg.event.name}</div>
+                                                                                            <div style={{ fontSize: '14px', color: '#667781' }}>
+                                                                                                {formatEventTimeString(msg.event.startDate, msg.event.startTime, msg.event.endDate, msg.event.endTime)}
+                                                                                            </div>
+                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+                                                                                                <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
+                                                                                                    <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                                                                                        {msg.event.participants?.length > 0 ? (
+                                                                                                            (() => {
+                                                                                                                const p = users.find(u => String(u._id || u.id) === String(msg.event.participants[0]));
+                                                                                                                return p && (p.avatar || p.image || p.profile_photo) ? <img src={p.avatar || p.image || p.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />;
+                                                                                                            })()
+                                                                                                        ) : (
+                                                                                                            <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />
+                                                                                                        )}
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                                <span style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500 }}>{msg.event.responses?.length || 0} responded</span>
+                                                                                            </div>
+                                                                                        </div>
                                                                                     </div>
-                                                                                    <button
-                                                                                        onClick={(e) => { e.stopPropagation(); handleJoinEvent(msg); }}
-                                                                                        style={{ background: '#f0f2f5', border: 'none', borderRadius: '18px', padding: '6px 16px', color: '#00a884', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
-                                                                                    >
-                                                                                        {msg.event.participants?.includes(user.id || user._id) ? 'Going' : 'Respond'}
-                                                                                    </button>
                                                                                 </div>
-                                                                                <button
-                                                                                    style={{ width: '100%', background: '#f8f9fa', border: '1px solid #e9edef', borderRadius: '8px', padding: '8px', color: '#00a884', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
-                                                                                >
-                                                                                    View event
-                                                                                </button>
+                                                                                <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
+                                                                                    {msg.event.cancelled ? (
+                                                                                        <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
+                                                                                    ) : isMe ? (
+                                                                                        <span onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>Edit event</span>
+                                                                                    ) : (
+                                                                                        <div style={{ width: '100%', textAlign: 'center' }}>
+                                                                                            <div
+                                                                                                onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
+                                                                                                style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                                                                                            >
+                                                                                                {myResponse ? myResponse.status : 'Respond'}
+                                                                                                <ChevronDown size={18} />
+                                                                                            </div>
+                                                                                            {openEventRespondId === msg._id && (
+                                                                                                <div style={{
+                                                                                                    position: 'absolute',
+                                                                                                    bottom: '100%',
+                                                                                                    left: '50%',
+                                                                                                    transform: 'translateX(-50%)',
+                                                                                                    background: 'white',
+                                                                                                    borderRadius: '8px',
+                                                                                                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                                                                                    zIndex: 10,
+                                                                                                    minWidth: '120px',
+                                                                                                    marginBottom: '4px',
+                                                                                                    overflow: 'hidden',
+                                                                                                    border: '1px solid #e9edef'
+                                                                                                }}>
+                                                                                                    {['Going', 'Maybe', 'Not going'].map(status => (
+                                                                                                        <div
+                                                                                                            key={status}
+                                                                                                            onClick={(e) => { e.stopPropagation(); handleEventRespond(msg, status); setOpenEventRespondId(null); }}
+                                                                                                            style={{ padding: '10px 16px', fontSize: '14px', color: '#111b21', textAlign: 'left', borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none', background: myResponse?.status === status ? '#f0f2f5' : 'white' }}
+                                                                                                        >
+                                                                                                            {status}
+                                                                                                        </div>
+                                                                                                    ))}
+                                                                                                </div>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
                                                                             </div>
-                                                                        </div>
-                                                                    )}
+                                                                        );
+                                                                    })()}
 
                                                                     {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && msg.type !== 'event' && <span>{renderContent(msg.content)}</span>}
                                                                 </>
@@ -15756,26 +16227,26 @@ export default function Chat() {
                                             Messaging is temporarily restricted.
                                         </div>
                                     ) : isMessagingBlocked ? (
-                                        <div 
-                                            onClick={() => setShowUnblockModal(true)} 
-                                            style={{ 
-                                                width: '100%', 
-                                                padding: '16px', 
-                                                background: '#fff1f2', 
-                                                borderRadius: '16px', 
-                                                textAlign: 'center', 
-                                                color: '#be123c', 
-                                                fontSize: '0.95rem', 
+                                        <div
+                                            onClick={() => setShowUnblockModal(true)}
+                                            style={{
+                                                width: '100%',
+                                                padding: '16px',
+                                                background: '#fff1f2',
+                                                borderRadius: '16px',
+                                                textAlign: 'center',
+                                                color: '#be123c',
+                                                fontSize: '0.95rem',
                                                 fontWeight: '600',
-                                                border: '1.5px dashed #fecdd3', 
-                                                cursor: 'pointer', 
+                                                border: '1.5px dashed #fecdd3',
+                                                cursor: 'pointer',
                                                 transition: 'all 0.2s',
                                                 display: 'flex',
                                                 alignItems: 'center',
                                                 justifyContent: 'center',
                                                 gap: '10px'
-                                            }} 
-                                            onMouseEnter={(e) => { e.currentTarget.style.background = '#ffe4e6'; e.currentTarget.style.transform = 'translateY(-1px)'; }} 
+                                            }}
+                                            onMouseEnter={(e) => { e.currentTarget.style.background = '#ffe4e6'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
                                             onMouseLeave={(e) => { e.currentTarget.style.background = '#fff1f2'; e.currentTarget.style.transform = 'translateY(0)'; }}
                                         >
                                             <ShieldAlert size={18} />
@@ -15907,6 +16378,15 @@ export default function Chat() {
                                                                                 return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
                                                                             }
                                                                         }
+                                                                        if (replyingTo.type === 'event' && replyingTo.event) {
+                                                                            const ev = replyingTo.event;
+                                                                            return (
+                                                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                                                                    <Calendar size={14} color="#667781" />
+                                                                                    <span>{ev.name} - {formatEventTimeString(ev.startDate, ev.startTime, ev.endDate, ev.endTime)}</span>
+                                                                                </span>
+                                                                            );
+                                                                        }
                                                                         return replyingTo.content;
                                                                     })()}
                                                                 </div>
@@ -15946,6 +16426,13 @@ export default function Chat() {
                                                                     } catch (e) {
                                                                         return null;
                                                                     }
+                                                                }
+                                                                if (replyingTo.type === 'event') {
+                                                                    return (
+                                                                        <div className="wa-reply-preview-thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(14, 165, 190, 0.1)' }}>
+                                                                            <Calendar size={24} color="#0EA5BE" />
+                                                                        </div>
+                                                                    );
                                                                 }
                                                                 return null;
                                                             })()}
@@ -16040,7 +16527,7 @@ export default function Chat() {
                 )}
 
                 {/* Shared Scroll-to-bottom Button positioned in wa-main-chat parent */}
-                {showScrollBtn && (selectedUser || selectedGroup) && (window.innerWidth > 768 || !(isMessageSearchOpen || isContactInfoOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen)) && (
+                {showScrollBtn && (selectedUser || selectedGroup) && (window.innerWidth > 768 || !(isMessageSearchOpen || isContactInfoOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen)) && (
                     <button
                         className="wa-scroll-to-bottom-btn"
                         onClick={() => {
@@ -16077,6 +16564,7 @@ export default function Chat() {
             {renderPollDetailsPanel()}
             {renderEventModal()}
             {renderUnblockModal()}
+            {renderEventDetailsPanel()}
         </div >
     );
 
@@ -16108,7 +16596,7 @@ export default function Chat() {
                     <p style={{ color: '#54656f', fontSize: '15px', lineHeight: '1.6', marginBottom: '24px' }}>
                         Access to messaging has been temporarily suspended following multiple breaches of our community standards regarding acceptable content.
                     </p>
-                    
+
                     {!unblockRequested ? (
                         <>
                             <div style={{ position: 'relative' }}>
@@ -16122,7 +16610,7 @@ export default function Chat() {
                                 />
                                 <span style={{ position: 'absolute', top: '8px', right: '8px', color: '#dc2626', fontWeight: 'bold', fontSize: '20px' }}>*</span>
                             </div>
-                            
+
                             {!unblockReason.trim() && (
                                 <p style={{ color: '#dc2626', fontSize: '12px', textAlign: 'left', marginBottom: '24px', paddingLeft: '4px', fontWeight: '500' }}>
                                     This field is mandatory for the submission of an unblock request.
@@ -16132,19 +16620,19 @@ export default function Chat() {
                             <div style={{ display: 'flex', gap: '12px', marginTop: unblockReason.trim() ? '24px' : '0' }}>
                                 <button onClick={() => setShowUnblockModal(false)} style={{ flex: 1, padding: '12px', borderRadius: '24px', border: '1.5px solid #e9edef', background: 'white', color: '#54656f', fontWeight: '600', cursor: 'pointer' }}>Cancel</button>
                                 <div style={{ flex: 1, position: 'relative' }}>
-                                    <button 
-                                        onClick={handleRequestUnblock} 
+                                    <button
+                                        onClick={handleRequestUnblock}
                                         disabled={!unblockReason.trim()}
                                         onMouseEnter={() => !unblockReason.trim() && setShowUnblockTooltip(true)}
                                         onMouseLeave={() => setShowUnblockTooltip(false)}
-                                        style={{ 
+                                        style={{
                                             width: '100%',
-                                            padding: '12px', 
-                                            borderRadius: '24px', 
-                                            border: 'none', 
-                                            background: unblockReason.trim() ? '#0EA5BE' : '#E9EDEF', 
-                                            color: unblockReason.trim() ? 'white' : '#AAB8C2', 
-                                            fontWeight: '600', 
+                                            padding: '12px',
+                                            borderRadius: '24px',
+                                            border: 'none',
+                                            background: unblockReason.trim() ? '#0EA5BE' : '#E9EDEF',
+                                            color: unblockReason.trim() ? 'white' : '#AAB8C2',
+                                            fontWeight: '600',
                                             cursor: unblockReason.trim() ? 'pointer' : 'not-allowed',
                                             boxShadow: unblockReason.trim() ? '0 4px 12px rgba(14, 165, 190, 0.25)' : 'none',
                                             transition: 'all 0.3s ease'
@@ -16152,7 +16640,7 @@ export default function Chat() {
                                     >
                                         Request Unblock
                                     </button>
-                                    
+
                                     {showUnblockTooltip && !unblockReason.trim() && (
                                         <div style={{
                                             position: 'absolute',
@@ -16348,14 +16836,245 @@ export default function Chat() {
         );
     };
 
+    const renderEventDetailsPanel = () => {
+        if (!isEventDetailsOpen || !eventDetailsMsg) return null;
+
+        // Aggregate responses
+        const responses = eventDetailsMsg.event?.responses || [];
+        const goingCount = responses.filter(r => r.status === 'Going').length;
+        const maybeCount = responses.filter(r => r.status === 'Maybe').length;
+        const notGoingCount = responses.filter(r => r.status === 'Not going').length;
+        const totalCount = responses.length;
+
+        // Get current user's response
+        const myId = String(user.id || user._id);
+        const myResponse = responses.find(r => String(r.user_id) === myId);
+
+        return (
+            <div
+                className="wa-contact-info-panel active"
+                style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    animation: 'slideInRight 0.25s ease-out',
+                    background: '#ffffff',
+                    color: '#111b21',
+                    height: '100%',
+                    overflow: 'hidden',
+                    borderLeft: '1px solid #e9edef'
+                }}
+            >
+                <div style={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ffffff', borderBottom: '1px solid #f0f2f5', position: 'relative', flexShrink: 0 }}>
+                    <button onClick={() => setIsEventDetailsOpen(false)} style={{ position: 'absolute', left: 16, background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center' }}>
+                        <X size={24} color="#54656f" />
+                    </button>
+                    <div style={{ fontSize: 16, fontWeight: 500, color: '#111b21', whiteSpace: 'nowrap' }}>Event details</div>
+                </div>
+
+                <div style={{ flex: 1, overflowY: 'auto', background: '#ffffff' }}>
+                    <div style={{ padding: '24px 20px 16px', borderBottom: '1px solid #f0f2f5' }}>
+                        <div style={{ fontSize: 22, fontWeight: 500, color: '#111b21', marginBottom: 6 }}>{eventDetailsMsg.event?.name}</div>
+                        {eventDetailsMsg.event?.description && <div style={{ color: '#667781', fontSize: 16, marginBottom: 20, wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>{eventDetailsMsg.event.description}</div>}
+
+                        <div style={{ display: 'flex', gap: 16, marginTop: 12, alignItems: 'flex-start' }}>
+                            <Calendar size={20} color="#667781" style={{ marginTop: 2, flexShrink: 0 }} />
+                            <div style={{ flex: 1 }}>
+                                <div style={{ color: '#111b21', fontSize: 16, lineHeight: '22px' }}>
+                                    {formatEventTimeString(eventDetailsMsg.event?.startDate, eventDetailsMsg.event?.startTime, eventDetailsMsg.event?.endDate, eventDetailsMsg.event?.endTime)}
+                                </div>
+                                <div style={{ color: '#0EA5BE', fontSize: 14, marginTop: 4, fontWeight: 500, cursor: 'pointer' }}>Add to calendar</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style={{ padding: '16px 20px', borderBottom: '1px solid #f0f2f5' }}>
+                        <div style={{ color: '#667781', fontSize: 14, marginBottom: 12 }}>
+                            {totalCount} {totalCount === 1 ? 'person' : 'people'} responded
+                        </div>
+                    </div>
+
+                    {goingCount > 0 && (
+                        <div>
+                            <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ fontSize: 16, color: '#111b21', fontWeight: 500 }}>Going</div>
+                                <div style={{ fontSize: 14, color: '#667781' }}>{goingCount} {goingCount === 1 ? 'person' : 'people'}</div>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                {responses.filter(r => r.status === 'Going').map(resp => {
+                                    const p = users.find(u => String(u._id || u.id) === String(resp.user_id));
+                                    const isMeResp = String(resp.user_id) === myId;
+                                    const isCreator = String(resp.user_id) === String(eventDetailsMsg.user_id || eventDetailsMsg.sender_id?._id || eventDetailsMsg.sender_id);
+                                    return (
+                                        <div key={resp.user_id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px' }}>
+                                            <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                {p ? (p.avatar || p.image || p.profile_photo ? <img src={p.avatar || p.image || p.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={20} color="#8696a0" />) : <UserIcon size={20} color="#8696a0" />}
+                                            </div>
+                                            <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f0f2f5', paddingBottom: 12 }}>
+                                                <div>
+                                                    <div style={{ color: '#111b21', fontSize: 16 }}>{isMeResp ? 'You' : (p ? p.name : 'User')}</div>
+                                                </div>
+                                                {isCreator && (
+                                                    <div style={{ background: 'rgba(14, 165, 190, 0.1)', color: '#0EA5BE', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600 }}>Event creator</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    {maybeCount > 0 && (
+                        <div>
+                            <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ fontSize: 16, color: '#111b21', fontWeight: 500 }}>Maybe</div>
+                                <div style={{ fontSize: 14, color: '#667781' }}>{maybeCount} {maybeCount === 1 ? 'person' : 'people'}</div>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                {responses.filter(r => r.status === 'Maybe').map(resp => {
+                                    const p = users.find(u => String(u._id || u.id) === String(resp.user_id));
+                                    const isMeResp = String(resp.user_id) === myId;
+                                    return (
+                                        <div key={resp.user_id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px' }}>
+                                            <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                {p ? (p.avatar || p.image || p.profile_photo ? <img src={p.avatar || p.image || p.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={20} color="#8696a0" />) : <UserIcon size={20} color="#8696a0" />}
+                                            </div>
+                                            <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f0f2f5', paddingBottom: 12 }}>
+                                                <div>
+                                                    <div style={{ color: '#111b21', fontSize: 16 }}>{isMeResp ? 'You' : (p ? p.name : 'User')}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    {notGoingCount > 0 && (
+                        <div>
+                            <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ fontSize: 16, color: '#111b21', fontWeight: 500 }}>Not going</div>
+                                <div style={{ fontSize: 14, color: '#667781' }}>{notGoingCount} {notGoingCount === 1 ? 'person' : 'people'}</div>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                {responses.filter(r => r.status === 'Not going').map(resp => {
+                                    const p = users.find(u => String(u._id || u.id) === String(resp.user_id));
+                                    const isMeResp = String(resp.user_id) === myId;
+                                    return (
+                                        <div key={resp.user_id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px' }}>
+                                            <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                {p ? (p.avatar || p.image || p.profile_photo ? <img src={p.avatar || p.image || p.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={20} color="#8696a0" />) : <UserIcon size={20} color="#8696a0" />}
+                                            </div>
+                                            <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f0f2f5', paddingBottom: 12 }}>
+                                                <div>
+                                                    <div style={{ color: '#111b21', fontSize: 16 }}>{isMeResp ? 'You' : (p ? p.name : 'User')}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Sticky Bottom Actions */}
+                <div style={{ padding: '20px', background: '#ffffff', borderTop: '1px solid #f0f2f5', flexShrink: 0 }}>
+                    {eventDetailsMsg && !eventDetailsMsg.event?.cancelled && String(eventDetailsMsg.user_id || eventDetailsMsg.sender_id?._id || eventDetailsMsg.sender_id) === String(myId) ? (
+                        <>
+                            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+                                <span onClick={(e) => { e.stopPropagation(); openEditEvent(eventDetailsMsg); }} style={{ color: '#0EA5BE', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>
+                                    Edit event
+                                </span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                <span onClick={(e) => { e.stopPropagation(); confirmCancelEvent(eventDetailsMsg); }} style={{ color: '#ea0038', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>
+                                    Cancel event
+                                </span>
+                            </div>
+                        </>
+                    ) : eventDetailsMsg?.event?.cancelled ? (
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                            <span style={{ color: '#667781', fontSize: 16, fontWeight: 600 }}>
+                                Event cancelled
+                            </span>
+                        </div>
+                    ) : (
+                        <div style={{ position: 'relative' }}>
+                            {openEventRespondId === eventDetailsMsg._id ? (
+                                <div style={{
+                                    position: 'absolute',
+                                    bottom: '100%',
+                                    left: 0,
+                                    right: 0,
+                                    background: 'white',
+                                    borderRadius: '12px',
+                                    boxShadow: '0 -4px 20px rgba(0,0,0,0.15)',
+                                    marginBottom: '10px',
+                                    zIndex: 100,
+                                    overflow: 'hidden'
+                                }}>
+                                    {['Going', 'Maybe', 'Not going'].map(status => (
+                                        <button
+                                            key={status}
+                                            onClick={(e) => { e.stopPropagation(); handleEventRespond(eventDetailsMsg, status); setOpenEventRespondId(null); }}
+                                            style={{
+                                                width: '100%',
+                                                padding: '12px',
+                                                border: 'none',
+                                                background: myResponse?.status === status ? '#f0f2f5' : 'white',
+                                                textAlign: 'left',
+                                                cursor: 'pointer',
+                                                fontSize: '15px',
+                                                color: '#111b21',
+                                                display: 'flex',
+                                                justifyContent: 'space-between',
+                                                alignItems: 'center'
+                                            }}
+                                        >
+                                            {status}
+                                            {myResponse?.status === status && <Check size={18} color="#0EA5BE" />}
+                                        </button>
+                                    ))}
+                                </div>
+                            ) : null}
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === eventDetailsMsg._id ? null : eventDetailsMsg._id); }}
+                                style={{
+                                    background: '#0EA5BE',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '12px 24px',
+                                    borderRadius: '24px',
+                                    fontSize: 16,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    width: '100%',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '8px'
+                                }}
+                            >
+                                {myResponse ? myResponse.status : 'Respond'}
+                                <ChevronUp size={20} />
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    };
+
     const renderEventModal = () => {
         if (!isEventModalOpen) return null;
 
         return (
             <div className="wa-mute-modal-overlay" onClick={() => setIsEventModalOpen(false)} style={{ zIndex: 3000 }}>
-                <div className="wa-mute-modal" onClick={e => e.stopPropagation()} style={{ width: '400px', maxWidth: '90%', padding: '0', background: '#202c33', borderRadius: '12px', display: 'flex', flexDirection: 'column', height: 'auto', maxHeight: '90vh', color: '#e9edef' }}>
+                <div className="wa-mute-modal" onClick={e => e.stopPropagation()} style={{ width: '400px', maxWidth: '90%', padding: '0', background: '#ffffff', borderRadius: '12px', display: 'flex', flexDirection: 'column', height: 'auto', maxHeight: '90vh', color: '#111b21', boxShadow: '0 10px 40px rgba(0,0,0,0.1)' }}>
                     <div style={{ padding: '15px 20px', display: 'flex', alignItems: 'center', borderTopLeftRadius: '12px', borderTopRightRadius: '12px', flexShrink: 0 }}>
-                        <button onClick={() => setIsEventModalOpen(false)} style={{ background: 'none', border: 'none', color: '#aebac1', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={24} /></button>
+                        <button onClick={() => setIsEventModalOpen(false)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={24} /></button>
                         <div style={{ flex: 1, marginLeft: '20px' }}>
                             <span style={{ fontSize: '19px', fontWeight: '500' }}>Create event</span>
                         </div>
@@ -16369,38 +17088,38 @@ export default function Chat() {
                                 value={eventName}
                                 onChange={e => setEventName(e.target.value)}
                                 placeholder="Event name"
-                                style={{ width: '100%', border: 'none', borderBottom: '2px solid #00a884', padding: '8px 40px 8px 0', fontSize: '16px', outline: 'none', background: 'transparent', color: '#e9edef' }}
+                                style={{ width: '100%', border: 'none', borderBottom: '2px solid #0EA5BE', padding: '8px 40px 8px 0', fontSize: '16px', outline: 'none', background: 'transparent', color: '#111b21' }}
                             />
                             <Smile size={24} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px', cursor: 'pointer' }} />
                         </div>
 
                         {/* Description */}
-                        <div style={{ marginBottom: '24px', position: 'relative', background: '#2a3942', borderRadius: '12px', padding: '12px' }}>
+                        <div style={{ marginBottom: '24px', position: 'relative', background: '#f0f2f5', borderRadius: '12px', padding: '12px' }}>
                             <textarea
                                 value={eventDescription}
                                 onChange={e => setEventDescription(e.target.value)}
                                 placeholder="Description (optional)"
                                 rows={3}
-                                style={{ width: '100%', border: 'none', fontSize: '15px', outline: 'none', background: 'transparent', color: '#e9edef', resize: 'none' }}
+                                style={{ width: '100%', border: 'none', fontSize: '15px', outline: 'none', background: 'transparent', color: '#111b21', resize: 'none' }}
                             />
                             <Smile size={24} color="#8696a0" style={{ position: 'absolute', right: '12px', top: '12px', cursor: 'pointer' }} />
                         </div>
 
                         {/* Start Date & Time */}
                         <div style={{ marginBottom: '20px' }}>
-                            <div style={{ fontSize: '14px', color: '#8696a0', marginBottom: '12px' }}>Start date and time</div>
+                            <div style={{ fontSize: '14px', color: '#667781', marginBottom: '12px' }}>Start date and time</div>
                             <div style={{ display: 'flex', gap: '20px' }}>
-                                <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #8696a0' }}>
+                                <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #dfe5e7' }}>
                                     <input
                                         type="date"
                                         value={eventStartDate}
                                         onChange={e => setEventStartDate(e.target.value)}
-                                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#e9edef', padding: '8px 0', outline: 'none' }}
+                                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#111b21', padding: '8px 0', outline: 'none' }}
                                     />
                                     <Calendar size={20} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px', pointerEvents: 'none' }} />
                                 </div>
-                                <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #8696a0', cursor: 'pointer' }} onClick={() => setShowStartTimePicker(!showStartTimePicker)}>
-                                    <div style={{ padding: '8px 0', color: '#e9edef' }}>{eventStartTime}</div>
+                                <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #dfe5e7', cursor: 'pointer' }} onClick={() => setShowStartTimePicker(!showStartTimePicker)}>
+                                    <div style={{ padding: '8px 0', color: '#111b21' }}>{eventStartTime}</div>
                                     <Clock size={20} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px' }} />
                                     {showStartTimePicker && (
                                         <TimePicker value={eventStartTime} onChange={setEventStartTime} onClose={() => setShowStartTimePicker(false)} />
@@ -16416,26 +17135,26 @@ export default function Chat() {
                                     setEventEndDate(eventStartDate);
                                     setEventEndTime(eventStartTime);
                                 }}
-                                style={{ color: '#53bdeb', fontSize: '15px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}
+                                style={{ color: '#0EA5BE', fontSize: '15px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}
                             >
                                 <Plus size={20} /> Add end time
                             </div>
                         )}
                         {eventEndDate && (
                             <div style={{ marginBottom: '20px' }}>
-                                <div style={{ fontSize: '14px', color: '#8696a0', marginBottom: '12px' }}>End date and time</div>
+                                <div style={{ fontSize: '14px', color: '#667781', marginBottom: '12px' }}>End date and time</div>
                                 <div style={{ display: 'flex', gap: '20px', marginBottom: '12px' }}>
-                                    <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #8696a0' }}>
+                                    <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #dfe5e7' }}>
                                         <input
                                             type="date"
                                             value={eventEndDate}
                                             onChange={e => setEventEndDate(e.target.value)}
-                                            style={{ width: '100%', background: 'transparent', border: 'none', color: '#e9edef', padding: '8px 0', outline: 'none' }}
+                                            style={{ width: '100%', background: 'transparent', border: 'none', color: '#111b21', padding: '8px 0', outline: 'none' }}
                                         />
                                         <Calendar size={20} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px', pointerEvents: 'none' }} />
                                     </div>
-                                    <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #8696a0', cursor: 'pointer' }} onClick={() => setShowEndTimePicker(!showEndTimePicker)}>
-                                        <div style={{ padding: '8px 0', color: '#e9edef' }}>{eventEndTime}</div>
+                                    <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #dfe5e7', cursor: 'pointer' }} onClick={() => setShowEndTimePicker(!showEndTimePicker)}>
+                                        <div style={{ padding: '8px 0', color: '#111b21' }}>{eventEndTime}</div>
                                         <Clock size={20} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px' }} />
                                         {showEndTimePicker && (
                                             <TimePicker value={eventEndTime} onChange={setEventEndTime} onClose={() => setShowEndTimePicker(false)} />
@@ -16460,19 +17179,19 @@ export default function Chat() {
                                 value={eventLocation}
                                 onChange={e => setEventLocation(e.target.value)}
                                 placeholder="Location (optional)"
-                                style={{ width: '100%', border: 'none', borderBottom: '1px solid #8696a0', padding: '8px 40px 8px 0', fontSize: '16px', outline: 'none', background: 'transparent', color: '#e9edef' }}
+                                style={{ width: '100%', border: 'none', borderBottom: '1px solid #dfe5e7', padding: '8px 40px 8px 0', fontSize: '16px', outline: 'none', background: 'transparent', color: '#111b21' }}
                             />
                             <MapPin size={22} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px' }} />
                         </div>
 
                         {/* Call Toggle */}
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
-                            <div style={{ color: '#e9edef', fontSize: '16px' }}>Call</div>
+                            <div style={{ color: '#111b21', fontSize: '16px' }}>Call</div>
                             <div
                                 onClick={() => setEventCallOn(!eventCallOn)}
                                 style={{
                                     width: '40px', height: '20px', borderRadius: '12px',
-                                    background: eventCallOn ? '#00a884' : '#3b4a54',
+                                    background: eventCallOn ? '#0EA5BE' : '#3b4a54',
                                     position: 'relative', cursor: 'pointer', transition: 'background 0.3s'
                                 }}
                             >
@@ -16487,23 +17206,23 @@ export default function Chat() {
                         {/* Call Type Dropdown */}
                         {eventCallOn && (
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
-                                <div style={{ color: '#e9edef', fontSize: '16px' }}>Call type</div>
+                                <div style={{ color: '#111b21', fontSize: '16px' }}>Call type</div>
                                 <div style={{ position: 'relative' }}>
                                     <button
                                         onClick={() => setShowEventCallTypeDropdown(!showEventCallTypeDropdown)}
-                                        style={{ background: '#2a3942', border: 'none', borderRadius: '18px', padding: '6px 16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#00a884', cursor: 'pointer' }}
+                                        style={{ background: '#f0f2f5', border: 'none', borderRadius: '18px', padding: '6px 16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#0EA5BE', cursor: 'pointer' }}
                                     >
                                         {eventCallType === 'Video' ? <Video size={18} /> : <Phone size={18} />}
                                         {eventCallType}
                                         <ChevronDown size={14} />
                                     </button>
                                     {showEventCallTypeDropdown && (
-                                        <div style={{ position: 'absolute', bottom: '100%', right: 0, background: '#233138', borderRadius: '8px', padding: '8px 0', minWidth: '120px', marginBottom: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', zIndex: 1000 }}>
-                                            <div onClick={() => { setEventCallType('Video'); setShowEventCallTypeDropdown(false); }} style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '10px', color: '#e9edef', cursor: 'pointer' }}>
-                                                <Video size={18} /> Video {eventCallType === 'Video' && <Check size={16} color="#00a884" style={{ marginLeft: 'auto' }} />}
+                                        <div style={{ position: 'absolute', bottom: '100%', right: 0, background: '#ffffff', borderRadius: '8px', padding: '8px 0', minWidth: '120px', marginBottom: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 1000, border: '1px solid #e9ecef' }}>
+                                            <div onClick={() => { setEventCallType('Video'); setShowEventCallTypeDropdown(false); }} style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '10px', color: '#111b21', cursor: 'pointer' }}>
+                                                <Video size={18} /> Video {eventCallType === 'Video' && <Check size={16} color="#0EA5BE" style={{ marginLeft: 'auto' }} />}
                                             </div>
-                                            <div onClick={() => { setEventCallType('Voice'); setShowEventCallTypeDropdown(false); }} style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '10px', color: '#e9edef', cursor: 'pointer' }}>
-                                                <Phone size={18} /> Voice {eventCallType === 'Voice' && <Check size={16} color="#00a884" style={{ marginLeft: 'auto' }} />}
+                                            <div onClick={() => { setEventCallType('Voice'); setShowEventCallTypeDropdown(false); }} style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '10px', color: '#111b21', cursor: 'pointer' }}>
+                                                <Phone size={18} /> Voice {eventCallType === 'Voice' && <Check size={16} color="#0EA5BE" style={{ marginLeft: 'auto' }} />}
                                             </div>
                                         </div>
                                     )}
@@ -16515,7 +17234,7 @@ export default function Chat() {
                     <div style={{ padding: '15px 20px', display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
                         <button
                             onClick={handleSendEvent}
-                            style={{ background: '#00a884', width: '54px', height: '54px', borderRadius: '50%', border: 'none', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.3)' }}
+                            style={{ background: '#0EA5BE', width: '54px', height: '54px', borderRadius: '50%', border: 'none', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 8px rgba(14, 165, 190, 0.4)' }}
                         >
                             <Send size={24} />
                         </button>
@@ -18643,6 +19362,56 @@ export default function Chat() {
                                 </div>
                             );
                         })()}
+                    </div>
+                </div>
+            )}
+
+
+            {/* Edit Event Modal */}
+            {isEventEditOpen && eventEditTarget && (
+                <div className="wa-mute-modal-overlay" onClick={() => setIsEventEditOpen(false)} style={{ zIndex: 30000 }}>
+                    <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px', width: '94%', borderRadius: '16px', padding: 0, background: '#ffffff', boxShadow: '0 17px 50px rgba(0,0,0,0.19)', overflow: 'hidden' }}>
+                        <div style={{ padding: '18px 20px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: 12, position: 'relative' }}>
+                                <h3 style={{ margin: 0, whiteSpace: 'nowrap' }}>{eventEditTarget.event?.name ? 'Edit event' : 'Edit event'}</h3>
+                                <button onClick={() => setIsEventEditOpen(false)} style={{ position: 'absolute', right: 0, background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={20} color="#54656f" /></button>
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                <input value={eventName} onChange={(e) => setEventName(e.target.value)} placeholder="Event name" style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef' }} />
+                                <textarea value={eventDescription} onChange={(e) => setEventDescription(e.target.value)} placeholder="Description" style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef' }} />
+                                <input value={eventLocation} onChange={(e) => setEventLocation(e.target.value)} placeholder="Location" style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef' }} />
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <input type="date" value={eventStartDate} onChange={(e) => setEventStartDate(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', flex: 1 }} />
+                                    <input type="time" value={eventStartTime} onChange={(e) => setEventStartTime(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', width: 140 }} />
+                                </div>
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <input type="date" value={eventEndDate} onChange={(e) => setEventEndDate(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', flex: 1 }} />
+                                    <input type="time" value={eventEndTime} onChange={(e) => setEventEndTime(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', width: 140 }} />
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+                                <button onClick={() => setIsEventEditOpen(false)} style={{ background: 'none', border: '1px solid #d1d7db', color: '#54656f', padding: '10px 18px', borderRadius: 22 }}>Cancel</button>
+                                <button onClick={submitEventEdit} style={{ background: '#0EA5BE', border: 'none', color: 'white', padding: '10px 18px', borderRadius: 22 }}>Save</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Cancel confirmation modal */}
+            {isCancelEventConfirmOpen && (
+                <div className="wa-mute-modal-overlay" onClick={() => setIsCancelEventConfirmOpen(false)} style={{ zIndex: 30000 }}>
+                    <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '420px', width: '92%', borderRadius: '16px', padding: 0, background: '#ffffff', boxShadow: '0 17px 50px rgba(0,0,0,0.19)', overflow: 'hidden' }}>
+                        <div style={{ padding: '20px' }}>
+                            <h3 style={{ margin: 0 }}>Cancel event?</h3>
+                            <p style={{ color: '#667781' }}>Are you sure you want to cancel this event? This will notify attendees.</p>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
+                                <button onClick={() => setIsCancelEventConfirmOpen(false)} style={{ background: 'none', border: '1px solid #0EA5BE', color: '#0EA5BE', padding: '8px 16px', borderRadius: 20 }}>No</button>
+                                <button onClick={submitCancelEvent} style={{ background: '#0EA5BE', border: 'none', color: 'white', padding: '8px 16px', borderRadius: 20 }}>Cancel event</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

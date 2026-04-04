@@ -6,7 +6,7 @@ const messageSchema = new mongoose.Schema({
     receiver_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // Added for P2P
     role: { type: String, required: true }, // 'user', 'ai' (model)
     content: { type: String },
-    type: { type: String, enum: ['text', 'image', 'file', 'video', 'audio', 'contact', 'poll', 'event'], default: 'text' },
+    type: { type: String, enum: ['text', 'image', 'file', 'video', 'audio', 'contact', 'poll', 'event', 'system'], default: 'text' },
     duration: { type: Number }, // in seconds
     file_path: { type: String },
     fileName: { type: String },
@@ -68,7 +68,20 @@ const messageSchema = new mongoose.Schema({
         location: { type: String },
         callOn: { type: Boolean },
         callType: { type: String }, // 'Video' or 'Voice'
-        participants: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }] // Users who are 'going'
+        participants: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // Users who are 'going'
+        cancelled: { type: Boolean, default: false },
+        cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        cancelledAt: { type: Date },
+        responses: [{
+            user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+            status: { type: String, enum: ['Going', 'Maybe', 'Not going'] },
+            updated_at: { type: Date, default: Date.now }
+        }],
+        response_history: [{
+            user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+            status: { type: String, enum: ['Going', 'Maybe', 'Not going'] },
+            timestamp: { type: Date, default: Date.now }
+        }]
     },
     edited_at: { type: Date, default: null },
     reactions: [{

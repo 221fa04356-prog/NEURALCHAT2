@@ -9,7 +9,7 @@ import {
     Eye, EyeOff, Menu, AlertTriangle, ArrowLeft, Smile,
     User as UserIcon, Search, Bell, Settings, LayoutDashboard,
     TrendingUp, Calendar, ChevronRight, X, Layers, Check, RefreshCw, Forward, ChevronDown, XCircle,
-    Mic, Pause, Play, List, History, ShieldCheck
+    Mic, Pause, Play, List, History, ShieldCheck, MapPin, Video, Phone
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import {
@@ -19,6 +19,39 @@ import {
 import logo from '../assets/logo.png';
 import NeuralBackground from '../components/NeuralBackground';
 
+const formatEventTimeString = (startDate, startTime, endDate, endTime) => {
+    if (!startDate && !startTime) return '';
+    const isToday = (d) => {
+        const today = new Date();
+        return d.getDate() === today.getDate() &&
+            d.getMonth() === today.getMonth() &&
+            d.getFullYear() === today.getFullYear();
+    };
+    const isTomorrow = (d) => {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        return d.getDate() === tomorrow.getDate() &&
+            d.getMonth() === tomorrow.getMonth() &&
+            d.getFullYear() === tomorrow.getFullYear();
+    };
+    const formatPart = (ds, ts) => {
+        if (!ds) return ts || '';
+        const d = new Date(ds);
+        if (isNaN(d.getTime())) return '';
+        let dateStr = '';
+        if (isToday(d)) dateStr = 'Today';
+        else if (isTomorrow(d)) dateStr = 'Tomorrow';
+        else dateStr = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+        return ts ? `${dateStr}, ${ts}` : dateStr;
+    };
+
+    const startStr = formatPart(startDate, startTime);
+    if (endDate && endTime) {
+        const endStr = formatPart(endDate, endTime);
+        return `${startStr} - ${endStr}`;
+    }
+    return startStr;
+};
 
 const CustomTooltip = ({ active, payload, label, coordinate, scrollRef }) => {
     const isMobile = window.innerWidth <= 768;
@@ -155,6 +188,7 @@ export default function AdminDashboard() {
     const [resets, setResets] = useState([]);
     const [reactionLogs, setReactionLogs] = useState([]);
     const [selectedReactionMsg, setSelectedReactionMsg] = useState(null); // For message-specific audit card
+    const [selectedEventMsg, setSelectedEventMsg] = useState(null); // For event-specific audit log
     const [loading, setLoading] = useState(true);
 
     const fetchReactionLogs = async () => {
@@ -616,6 +650,65 @@ export default function AdminDashboard() {
 
                     console.log('Admin Dashboard: Adding message to live view');
                     return { ...prev, messages: [...prev.messages, { ...newMsg, _id: newMsg._id || newMsg.id }] };
+                }
+                return prev;
+            });
+        });
+
+        socket.on('message_updated', (data) => {
+            console.log('Admin Dashboard: Message update received:', data);
+            setViewChat(prev => {
+                if (!prev || !prev.messages) return prev;
+                return {
+                    ...prev,
+                    messages: prev.messages.map(msg =>
+                        (String(msg._id || msg.id) === String(data._id || data.id))
+                            ? { ...msg, ...data }
+                            : msg
+                    )
+                };
+            });
+        });
+
+        socket.on('event_responded', (data) => {
+            console.log('Admin Dashboard: Event Response received:', data);
+            setViewChat(prev => {
+                if (!prev || !prev.messages) return prev;
+                return {
+                    ...prev,
+                    messages: prev.messages.map(msg =>
+                        (String(msg._id || msg.id) === String(data.messageId))
+                            ? { ...msg, event: data.event }
+                            : msg
+                    )
+                };
+            });
+            setSelectedEventMsg(prev => {
+                if (!prev) return prev;
+                if (String(prev._id || prev.id) === String(data.messageId)) {
+                    return { ...prev, event: data.event };
+                }
+                return prev;
+            });
+        });
+
+        socket.on('event_updated', (data) => {
+            console.log('Admin Dashboard: Event Update received:', data);
+            setViewChat(prev => {
+                if (!prev || !prev.messages) return prev;
+                return {
+                    ...prev,
+                    messages: prev.messages.map(msg =>
+                        (String(msg._id || msg.id) === String(data.messageId))
+                            ? { ...msg, event: data.event }
+                            : msg
+                    )
+                };
+            });
+            setSelectedEventMsg(prev => {
+                if (!prev) return prev;
+                if (String(prev._id || prev.id) === String(data.messageId)) {
+                    return { ...prev, event: data.event };
                 }
                 return prev;
             });
@@ -1112,6 +1205,97 @@ export default function AdminDashboard() {
                                 e.currentTarget.style.boxShadow = '0 4px 15px rgba(10, 124, 143, 0.2)';
                                 e.currentTarget.style.filter = 'brightness(1)';
                             }}
+                        >
+                            Done
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderEventAuditModal = () => {
+        if (!selectedEventMsg) return null;
+        const history = selectedEventMsg.event?.response_history || [];
+
+        return (
+            <div
+                style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}
+                onClick={() => setSelectedEventMsg(null)}
+            >
+                <div
+                    style={{ background: 'white', width: '95%', maxWidth: '420px', borderRadius: '1.2rem', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', animation: 'slideUp 0.3s ease-out' }}
+                    onClick={e => e.stopPropagation()}
+                >
+                    <div style={{ padding: '1.2rem 1.5rem', background: 'linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: '0 0 auto' }}>
+                            <div style={{ background: 'rgba(255,255,255,0.2)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <Calendar size={16} />
+                            </div>
+                            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '800', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>Event History</h3>
+                        </div>
+                        <button
+                            onClick={() => setSelectedEventMsg(null)}
+                            style={{ background: 'rgba(255,255,255,0.25)', border: 'none', color: 'white', cursor: 'pointer', padding: '6px 18px', borderRadius: '40px', fontSize: '0.9rem', fontWeight: '700', transition: 'all 0.2s', width: 'fit-content', flexShrink: 0 }}
+                        >
+                            Close
+                        </button>
+                    </div>
+
+                    <div style={{ padding: '1.2rem', maxHeight: '60vh', overflowY: 'auto', background: '#f8f9fe' }}>
+                        {history.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: '2rem', color: '#8898aa' }}>
+                                No RSVP history recorded for this event.
+                            </div>
+                        ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                {Object.values(history.reduce((acc, log) => {
+                                    const userId = String(log.user_id?._id || log.user_id);
+                                    if (!acc[userId]) {
+                                        const foundUser = users.find(u => String(u.id || u._id) === userId);
+                                        acc[userId] = {
+                                            user: foundUser || { name: 'Unknown User', _id: userId },
+                                            logs: []
+                                        };
+                                    }
+                                    acc[userId].logs.push(log);
+                                    return acc;
+                                }, {})).map((group, idx) => (
+                                    <div key={idx} style={{ background: 'white', padding: '16px', borderRadius: '12px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', border: '1px solid #e9ecef', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                        {/* User Info Header */}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', borderBottom: '1px solid #f8f9fe', paddingBottom: '10px' }}>
+                                            <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', flexShrink: 0, fontSize: '0.85rem' }}>
+                                                {group.user?.name?.charAt(0) || <UserIcon size={16} />}
+                                            </div>
+                                            <span style={{ fontWeight: '750', color: '#111b21', fontSize: '1rem' }}>{group.user?.name || 'Unknown User'}</span>
+                                        </div>
+
+                                        {/* Logs Section (Below Name) */}
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft: '48px' }}>
+                                            {group.logs.map((log, i) => {
+                                                const statusColor = log.status === 'Going' ? '#2dce89' : log.status === 'Maybe' ? '#fb6340' : '#f5365c';
+                                                const logText = i === 0 ? `Voted for "${log.status}"` : `Changed voting to "${log.status}"`;
+
+                                                return (
+                                                    <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', width: '100%' }}>
+                                                        <span style={{ fontWeight: '700', color: statusColor, fontSize: '0.85rem', whiteSpace: 'nowrap' }}>{logText}</span>
+                                                        <span style={{ fontSize: '0.7rem', color: '#8898aa', whiteSpace: 'nowrap' }}>
+                                                            {new Date(log.timestamp).toLocaleDateString([], { month: 'short', day: '2-digit' })}, {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    <div style={{ padding: '1rem 1.2rem', background: 'white', borderTop: '1px solid #e9ecef', display: 'flex', justifyContent: 'center' }}>
+                        <button
+                            onClick={() => setSelectedEventMsg(null)}
+                            style={{ width: '100%', padding: '12px 24px', borderRadius: '12px', border: 'none', background: 'linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)', color: 'white', fontWeight: '800', fontSize: '1rem', cursor: 'pointer', transition: 'all 0.3s ease', boxShadow: '0 4px 15px rgba(10, 124, 143, 0.2)', textTransform: 'uppercase', letterSpacing: '1px' }}
                         >
                             Done
                         </button>
@@ -2750,6 +2934,7 @@ export default function AdminDashboard() {
                     </div>
                 </main>
                 {renderReactionAuditModal()}
+                {renderEventAuditModal()}
                 {renderMediaLightbox()}
             </div>
 
@@ -3204,7 +3389,53 @@ export default function AdminDashboard() {
                                                                             );
                                                                         })()}
 
-                                                                        {msg.content && msg.type !== 'poll' && msg.type !== 'contact' && (
+                                                                        {msg.type === 'event' && msg.event && (
+                                                                            <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'default', opacity: msg.event.cancelled ? 0.7 : 1, marginTop: '8px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                                <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
+                                                                                    <div style={{ display: 'flex', gap: '14px' }}>
+                                                                                        <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                                            <Calendar size={24} color="#0EA5BE" />
+                                                                                        </div>
+                                                                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                                                                            <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{msg.event.name}</div>
+                                                                                            <div style={{ fontSize: '14px', color: '#667781' }}>
+                                                                                                {formatEventTimeString(msg.event.startDate, msg.event.startTime, msg.event.endDate, msg.event.endTime)}
+                                                                                            </div>
+                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+                                                                                                <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
+                                                                                                    <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                                                                                        <UserIcon size={12} color="#8696a0" style={{ marginTop: '1px' }} />
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                                <span style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500 }}>{msg.event.participants?.length || 0} going</span>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div style={{ padding: '12px 0', margin: '0 16px', borderTop: '1px solid #f0f2f5', textAlign: 'center' }}>
+                                                                                    <span style={{ color: msg.event.cancelled ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
+                                                                                        {msg.event.cancelled ? 'Event cancelled' : ''}
+                                                                                    </span>
+                                                                                    {!msg.event.cancelled && (
+                                                                                        <button
+                                                                                            onClick={(e) => { e.stopPropagation(); setSelectedEventMsg(msg); }}
+                                                                                            style={{
+                                                                                                cursor: 'pointer', padding: '6px 12px', borderRadius: '12px', background: 'rgba(15, 181, 208, 0.1)',
+                                                                                                display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0FB5D0',
+                                                                                                transition: 'all 0.2s', border: '1px solid rgba(0,0,0,0.05)',
+                                                                                                gap: '6px', fontSize: '12px', fontWeight: 'bold', marginLeft: '12px'
+                                                                                            }}
+                                                                                        >
+                                                                                            <History size={16} /> Event History
+
+
+                                                                                        </button>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {msg.content && msg.type !== 'poll' && msg.type !== 'contact' && msg.type !== 'event' && (
                                                                             <div style={{ opacity: isDeleted ? 0.6 : 1, marginTop: (msg.link_preview || msg.type !== 'text') ? '8px' : '0', whiteSpace: 'pre-wrap' }}>
                                                                                 {renderContent(msg.content)}
                                                                             </div>
