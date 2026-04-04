@@ -3390,7 +3390,7 @@ export default function AdminDashboard() {
                                                                         })()}
 
                                                                         {msg.type === 'event' && msg.event && (
-                                                                            <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'default', opacity: msg.event.cancelled ? 0.7 : 1, marginTop: '8px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                            <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'default', opacity: msg.event.cancelled ? 0.7 : 1, marginTop: '8px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
                                                                                 <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
                                                                                     <div style={{ display: 'flex', gap: '14px' }}>
                                                                                         <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -3407,7 +3407,7 @@ export default function AdminDashboard() {
                                                                                                         <UserIcon size={12} color="#8696a0" style={{ marginTop: '1px' }} />
                                                                                                     </div>
                                                                                                 </div>
-                                                                                                <span style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500 }}>{msg.event.participants?.length || 0} going</span>
+                                                                                                <span style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500 }}>{msg.event.responses?.length || 0} responded</span>
                                                                                             </div>
                                                                                         </div>
                                                                                     </div>

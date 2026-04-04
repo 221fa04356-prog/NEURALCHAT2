@@ -20,6 +20,10 @@ const searchSlideStyles = `
     from { transform: translateX(20px); opacity: 0; }
     to { transform: translateX(0); opacity: 1; }
 }
+@keyframes wa-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
 @keyframes waTypingDot {
     0% { opacity: 0.3; transform: scale(0.8); }
     50% { opacity: 1; transform: scale(1.1); }
@@ -122,7 +126,7 @@ const TimePicker = ({ value, onChange, onClose }) => {
             boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
             borderRadius: '8px',
             display: 'flex',
-            zIndex: 10000,
+            zIndex: 60000,
             bottom: '100%',
             left: 0,
             marginBottom: '8px',
@@ -1049,17 +1053,74 @@ export default function Chat() {
     const [eventEditTarget, setEventEditTarget] = useState(null);
     const [isCancelEventConfirmOpen, setIsCancelEventConfirmOpen] = useState(false);
 
+    // --- Sleep Mode States ---
+    const [isAppAsleep, setIsAppAsleep] = useState(false);
+    const sleepTimerRef = useRef(null);
+    const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes inactivity sleep
+
+
     const [showNotificationDetails, setShowNotificationDetails] = useState(false);
     const [messageRequests, setMessageRequests] = useState([]); // Message request list
     const [isRequestsModalOpen, setIsRequestsModalOpen] = useState(false); // Requests modal
     const [openEventRespondId, setOpenEventRespondId] = useState(null); // ID of event message with open respond dropdown
     const [accountBanned, setAccountBanned] = useState(user.bannedUntil || null); // Temporary ban
     const [accountLocked, setAccountLocked] = useState(user.adminLock || false); // Permanent lock
+    const [viewingContact, setViewingContact] = useState(null); // For Pic 5
     const [isContactSelectionOpen, setIsContactSelectionOpen] = useState(false);
     const [contactSearchQuery, setContactSearchQuery] = useState('');
     const [selectedContacts, setSelectedContacts] = useState([]);
     const [isConfirmContactSendOpen, setIsConfirmContactSendOpen] = useState(false);
-    const [viewingContact, setViewingContact] = useState(null); // For Pic 5
+
+    // Sleep Mode Effect
+    useEffect(() => {
+        const resetSleepTimer = () => {
+            if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current);
+            sleepTimerRef.current = setTimeout(() => {
+                setIsAppAsleep(true);
+            }, INACTIVITY_TIMEOUT);
+        };
+
+        const handleGlobalStateChange = () => {
+            if (document.visibilityState === 'hidden') {
+                setIsAppAsleep(true);
+            }
+        };
+
+        const handleBlur = () => {
+            setIsAppAsleep(true);
+        };
+
+        // Wake on any click if asleep
+        const handleWakeUp = () => {
+            if (isAppAsleep) {
+                setIsAppAsleep(false);
+                resetSleepTimer();
+            }
+        };
+
+        // Register listeners
+        window.addEventListener('mousemove', resetSleepTimer);
+        window.addEventListener('keydown', resetSleepTimer);
+        window.addEventListener('mousedown', resetSleepTimer);
+        window.addEventListener('touchstart', resetSleepTimer);
+        window.addEventListener('visibilitychange', handleGlobalStateChange);
+        window.addEventListener('blur', handleBlur);
+        window.addEventListener('click', handleWakeUp, true); // Use capture to intercept wake clicks
+
+        resetSleepTimer(); // Start timer on mount/chat selection
+
+        return () => {
+            if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current);
+            window.removeEventListener('mousemove', resetSleepTimer);
+            window.removeEventListener('keydown', resetSleepTimer);
+            window.removeEventListener('mousedown', resetSleepTimer);
+            window.removeEventListener('touchstart', resetSleepTimer);
+            window.removeEventListener('visibilitychange', handleGlobalStateChange);
+            window.removeEventListener('blur', handleBlur);
+            window.removeEventListener('click', handleWakeUp, true);
+        };
+    }, [selectedUser, selectedGroup, isAppAsleep]); // Re-run when chat changes or when we enter/exit sleep
+
 
     const isAccountBanned = () => {
         if (!accountBanned) return false;
@@ -3235,9 +3296,12 @@ export default function Chat() {
                 setMessages(updateFn);
             }
 
-            if (eventDetailsMsg && String(eventDetailsMsg._id || eventDetailsMsg.id) === String(messageId)) {
-                setEventDetailsMsg(prev => ({ ...prev, event: event }));
-            }
+            setEventDetailsMsg(prev => {
+                if (prev && String(prev._id || prev.id) === String(messageId)) {
+                    return { ...prev, event: event };
+                }
+                return prev;
+            });
         };
         socket.on('event_updated', onEventUpdated);
         socket.on('event_responded', onEventUpdated); // Reuse same logic for responses
@@ -5598,6 +5662,21 @@ export default function Chat() {
         const target = selectedUser || selectedGroup;
         if (!target) return;
 
+        // Chronological Validation
+        const startStr = `${eventStartDate}T${eventStartTime || '00:00'}`;
+        const endStr = `${eventEndDate}T${eventEndTime || '00:00'}`;
+        const startObj = new Date(startStr);
+        const endObj = new Date(endStr);
+
+        if (eventEndDate && endObj < startObj) {
+            setSnackbar({
+                message: 'Event cannot end before it starts. Please check your dates and times.',
+                type: 'error',
+                variant: 'system'
+            });
+            return;
+        }
+
         const token = localStorage.getItem('token');
         try {
             let endpoint, payload;
@@ -5747,7 +5826,7 @@ export default function Chat() {
             const startObj = new Date(startStr);
             const endObj = new Date(endStr);
 
-            if (endObj < startObj) {
+            if (eventEndDate && endObj < startObj) {
                 setSnackbar({
                     message: 'Event cannot end before it starts. Please check your dates and times.',
                     type: 'error',
@@ -10088,7 +10167,7 @@ export default function Chat() {
                         style={menuStyle}
                         onClick={(e) => e.stopPropagation()}
                     >
-                        {!isDeleted && data.type !== 'event' && (
+                        {!isDeleted && (
                             <>
                                 <div className="wa-reactions-row">
                                     <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '👍', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Like" data-tooltip-pos="center">👍</span>
@@ -13752,6 +13831,7 @@ export default function Chat() {
                 }}
             >
                 <NeuralBackground isRecording={isRecording} />
+
                 {selectedUser ? (
                     <>
                         {/* Header */}
@@ -14604,21 +14684,29 @@ export default function Chat() {
                                                                                         </div>
                                                                                     </div>
                                                                                 </div>
-                                                                                <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
+                                                                                <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', position: 'relative', gap: '8px' }}>
                                                                                     {msg.event.cancelled ? (
                                                                                         <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
-                                                                                    ) : isMe ? (
-                                                                                        <span onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer' }}>Edit event</span>
                                                                                     ) : (
-                                                                                        <div style={{ width: '100%', textAlign: 'center' }}>
-                                                                                            <div
-                                                                                                onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
-                                                                                                style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
-                                                                                            >
-                                                                                                {myResponse ? myResponse.status : 'Respond'}
-                                                                                                <ChevronDown size={18} />
+                                                                                        <>
+                                                                                            {isMe && (
+                                                                                                <div 
+                                                                                                    onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} 
+                                                                                                    style={{ width: '100%', textAlign: 'center', color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer', paddingBottom: '8px', borderBottom: '1px solid #f0f2f5', marginBottom: '4px' }}
+                                                                                                >
+                                                                                                    Edit event
+                                                                                                </div>
+                                                                                            )}
+                                                                                            <div style={{ width: '100%', textAlign: 'center' }}>
+                                                                                                <div
+                                                                                                    onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
+                                                                                                    style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
+                                                                                                >
+                                                                                                    {myResponse ? myResponse.status : 'Respond'}
+                                                                                                    <ChevronDown size={18} />
+                                                                                                </div>
                                                                                             </div>
-                                                                                        </div>
+                                                                                        </>
                                                                                     )}
 
                                                                                     {openEventRespondId === msg._id && !msg.event.cancelled && (
@@ -15969,7 +16057,7 @@ export default function Chat() {
                                                                         const myResponse = (msg.event.responses || []).find(r => String(r.user_id) === myId);
 
                                                                         return (
-                                                                            <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                            <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
                                                                                 <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
                                                                                     <div style={{ display: 'flex', gap: '14px' }}>
                                                                                         <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -15993,52 +16081,62 @@ export default function Chat() {
                                                                                                         )}
                                                                                                     </div>
                                                                                                 </div>
-                                                                                                <span style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500 }}>{msg.event.responses?.length || 0} responded</span>
+                                                                                                <span 
+                                                                                                    onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }} 
+                                                                                                    style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500, cursor: 'pointer' }}>{msg.event.responses?.length || 0} responded</span>
                                                                                             </div>
                                                                                         </div>
                                                                                     </div>
                                                                                 </div>
-                                                                                <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
+                                                                                <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', position: 'relative', gap: '8px' }}>
                                                                                     {msg.event.cancelled ? (
                                                                                         <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
-                                                                                    ) : isMe ? (
-                                                                                        <span onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>Edit event</span>
                                                                                     ) : (
-                                                                                        <div style={{ width: '100%', textAlign: 'center' }}>
-                                                                                            <div
-                                                                                                onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
-                                                                                                style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
-                                                                                            >
-                                                                                                {myResponse ? myResponse.status : 'Respond'}
-                                                                                                <ChevronDown size={18} />
-                                                                                            </div>
-                                                                                            {openEventRespondId === msg._id && (
-                                                                                                <div style={{
-                                                                                                    position: 'absolute',
-                                                                                                    bottom: '100%',
-                                                                                                    left: '50%',
-                                                                                                    transform: 'translateX(-50%)',
-                                                                                                    background: 'white',
-                                                                                                    borderRadius: '8px',
-                                                                                                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                                                                                                    zIndex: 10,
-                                                                                                    minWidth: '120px',
-                                                                                                    marginBottom: '4px',
-                                                                                                    overflow: 'hidden',
-                                                                                                    border: '1px solid #e9edef'
-                                                                                                }}>
-                                                                                                    {['Going', 'Maybe', 'Not going'].map(status => (
-                                                                                                        <div
-                                                                                                            key={status}
-                                                                                                            onClick={(e) => { e.stopPropagation(); handleEventRespond(msg, status); setOpenEventRespondId(null); }}
-                                                                                                            style={{ padding: '10px 16px', fontSize: '14px', color: '#111b21', textAlign: 'left', borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none', background: myResponse?.status === status ? '#f0f2f5' : 'white' }}
-                                                                                                        >
-                                                                                                            {status}
-                                                                                                        </div>
-                                                                                                    ))}
+                                                                                        <>
+                                                                                            {isMe && (
+                                                                                                <div 
+                                                                                                    onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} 
+                                                                                                    style={{ width: '100%', textAlign: 'center', color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer', paddingBottom: '8px', borderBottom: '1px solid #f0f2f5', marginBottom: '4px' }}
+                                                                                                >
+                                                                                                    Edit event
                                                                                                 </div>
                                                                                             )}
-                                                                                        </div>
+                                                                                            <div style={{ width: '100%', textAlign: 'center' }}>
+                                                                                                <div
+                                                                                                    onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
+                                                                                                    style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
+                                                                                                >
+                                                                                                    {myResponse ? myResponse.status : 'Respond'}
+                                                                                                    <ChevronDown size={18} />
+                                                                                                </div>
+                                                                                                {openEventRespondId === msg._id && (
+                                                                                                    <div style={{
+                                                                                                        position: 'absolute',
+                                                                                                        bottom: '100%',
+                                                                                                        left: '50%',
+                                                                                                        transform: 'translateX(-50%)',
+                                                                                                        background: 'white',
+                                                                                                        borderRadius: '8px',
+                                                                                                        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                                                                                        zIndex: 10,
+                                                                                                        minWidth: '120px',
+                                                                                                        marginBottom: '4px',
+                                                                                                        overflow: 'hidden',
+                                                                                                        border: '1px solid #e9edef'
+                                                                                                    }}>
+                                                                                                        {['Going', 'Maybe', 'Not going'].map(status => (
+                                                                                                            <div
+                                                                                                                key={status}
+                                                                                                                onClick={(e) => { e.stopPropagation(); handleEventRespond(msg, status); setOpenEventRespondId(null); }}
+                                                                                                                style={{ padding: '10px 16px', fontSize: '14px', color: '#111b21', textAlign: 'left', borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none', background: myResponse?.status === status ? '#f0f2f5' : 'white' }}
+                                                                                                            >
+                                                                                                                {status}
+                                                                                                            </div>
+                                                                                                        ))}
+                                                                                                    </div>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        </>
                                                                                     )}
                                                                                 </div>
                                                                             </div>
@@ -17075,8 +17173,8 @@ export default function Chat() {
                 <div className="wa-mute-modal" onClick={e => e.stopPropagation()} style={{ width: '400px', maxWidth: '90%', padding: '0', background: '#ffffff', borderRadius: '12px', display: 'flex', flexDirection: 'column', height: 'auto', maxHeight: '90vh', color: '#111b21', boxShadow: '0 10px 40px rgba(0,0,0,0.1)' }}>
                     <div style={{ padding: '15px 20px', display: 'flex', alignItems: 'center', borderTopLeftRadius: '12px', borderTopRightRadius: '12px', flexShrink: 0 }}>
                         <button onClick={() => setIsEventModalOpen(false)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={24} /></button>
-                        <div style={{ flex: 1, marginLeft: '20px' }}>
-                            <span style={{ fontSize: '19px', fontWeight: '500' }}>Create event</span>
+                        <div style={{ flex: 1, textAlign: 'center', marginRight: '34px' }}>
+                            <span style={{ fontSize: '19px', fontWeight: '500', whiteSpace: 'nowrap' }}>Create event</span>
                         </div>
                     </div>
 
@@ -18584,7 +18682,72 @@ export default function Chat() {
                 .wa-opening-file-status { transition: all 0.3s ease; }
             `}</style>
 
-            <div className={`wa-app-container ${(selectedUser || selectedGroup) ? 'chat-active' : 'list-active'}`}>
+            <div className={`wa-app-container ${(selectedUser || selectedGroup) ? 'chat-active' : 'list-active'}`} style={{ position: 'relative' }}>
+                {/* Sleep Mode Overlay - Now at top level to cover everything including panels */}
+                {isAppAsleep && (
+                    <div 
+                        className="wa-sleep-overlay"
+                        onClick={() => setIsAppAsleep(false)}
+                        style={{
+                            position: 'fixed',
+                            inset: 0,
+                            background: 'rgba(11, 20, 26, 0.96)',
+                            backdropFilter: 'blur(12px)',
+                            zIndex: 60000, // Above everything including panels and snackbars/dropdowns
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            animation: 'wa-fade-in 0.3s ease-out',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        {/* Avatar / Icon */}
+                        {(selectedUser || selectedGroup) && (
+                            <div style={{ marginBottom: '24px', textAlign: 'center' }}>
+                                {selectedUser ? (
+                                    <img 
+                                        src={selectedUser.avatar || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png'} 
+                                        alt="User"
+                                        style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid #3b4a54', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}
+                                    />
+                                ) : (
+                                    <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#0EA5BE', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #3b4a54', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
+                                        <Users size={50} color="white" />
+                                    </div>
+                                )}
+                                <h2 style={{ color: 'white', marginTop: '16px', fontSize: '22px', fontWeight: '600' }}>
+                                    {selectedUser ? selectedUser.name : (() => {
+                                        if (selectedGroup?.name === 'Announcements' && selectedGroup?.community_id) {
+                                            const comm = communities.find(c => String(c._id || c.id) === String(selectedGroup.community_id));
+                                            if (comm) return `${comm.name} Announcements`;
+                                        }
+                                        return selectedGroup?.name || '';
+                                    })()}
+                                </h2>
+                            </div>
+                        )}
+
+                        {/* Neural Chat logo Branding */}
+                        <div style={{ marginBottom: '28px', animation: 'wa-popover-in 0.4s ease-out' }}>
+                            <img src={logo} alt="Neural Chat" style={{ width: '80px', height: '80px' }} />
+                        </div>
+
+                        <div style={{ textAlign: 'center', color: '#8696a0', maxWidth: '400px', padding: '0 20px' }}>
+                            <div style={{ color: '#0EA5BE', fontSize: '19px', fontWeight: '600', marginBottom: '12px', lineHeight: '1.4' }}>
+                                You are diverted out of focus from the screen.
+                            </div>
+                            <div style={{ fontSize: '16px', color: '#8696a0' }}>
+                                Please return to the screen to start the conversation
+                            </div>
+                        </div>
+
+                        {/* Visual indicator of "sleep" */}
+                        <div style={{ position: 'absolute', bottom: '40px', color: '#3b4a54', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '2px' }}>
+                            Encrypted Session Asleep
+                        </div>
+                    </div>
+                )}
                 {renderLeftSidebar()}
                 {isSettingsOpen ? (
                     renderSettingsPanel()
@@ -19372,9 +19535,11 @@ export default function Chat() {
                 <div className="wa-mute-modal-overlay" onClick={() => setIsEventEditOpen(false)} style={{ zIndex: 30000 }}>
                     <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px', width: '94%', borderRadius: '16px', padding: 0, background: '#ffffff', boxShadow: '0 17px 50px rgba(0,0,0,0.19)', overflow: 'hidden' }}>
                         <div style={{ padding: '18px 20px' }}>
-                            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: 12, position: 'relative' }}>
-                                <h3 style={{ margin: 0, whiteSpace: 'nowrap' }}>{eventEditTarget.event?.name ? 'Edit event' : 'Edit event'}</h3>
-                                <button onClick={() => setIsEventEditOpen(false)} style={{ position: 'absolute', right: 0, background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={20} color="#54656f" /></button>
+                            <div style={{ padding: '0 0 15px 0', display: 'flex', alignItems: 'center', position: 'relative' }}>
+                                <div style={{ flex: 1, textAlign: 'center' }}>
+                                    <h3 style={{ margin: 0, fontSize: '19px', fontWeight: '500', color: '#111b21', whiteSpace: 'nowrap' }}>Edit event</h3>
+                                </div>
+                                <button onClick={() => setIsEventEditOpen(false)} style={{ position: 'absolute', right: 0, background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={24} /></button>
                             </div>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
