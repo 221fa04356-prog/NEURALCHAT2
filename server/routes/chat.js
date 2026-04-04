@@ -2212,8 +2212,8 @@ router.post('/requests/reject', authenticateToken, async (req, res) => {
 
         sender.rejectionCount = (sender.rejectionCount || 0) + 1;
 
-        if (sender.rejectionCount >= 3) {
-            // Three strikes — lock account
+        if (sender.rejectionCount >= 6) {
+            // Six strikes (including 6th) — lock account
             sender.adminLock = true;
             await sender.save();
 

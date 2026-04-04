@@ -938,6 +938,22 @@ export default function AdminDashboard() {
     };
 
     useEffect(() => {
+        const handleEsc = (e) => {
+            if (e.key === 'Escape') {
+                if (showNotifications) setShowNotifications(false);
+                if (viewChat) setViewChat(null);
+                if (viewingMedia) setViewingMedia(null);
+                if (unethicalModalUser) setUnethicalModalUser(null);
+                if (showUnethicalModal) setShowUnethicalModal(false);
+                if (confirmConfig) closeConfirm();
+                if (msgDropdown) setMsgDropdown(null);
+            }
+        };
+        window.addEventListener('keydown', handleEsc);
+        return () => window.removeEventListener('keydown', handleEsc);
+    }, [showNotifications, viewChat, viewingMedia, unethicalModalUser, showUnethicalModal, confirmConfig, msgDropdown]);
+
+    useEffect(() => {
         const handleClick = () => {
             if (contextMenu.visible) setContextMenu({ ...contextMenu, visible: false });
             if (msgDropdown) setMsgDropdown(null);
@@ -2608,7 +2624,7 @@ export default function AdminDashboard() {
                                 </td>
                                 <td style={{ padding: '1rem', textAlign: 'center' }}>
                                     <div style={{
-                                        background: '#f8f9fe',
+                                        background: '#ffffff',
                                         padding: '10px 15px',
                                         borderRadius: '8px',
                                         fontSize: '0.85rem',
@@ -2630,7 +2646,7 @@ export default function AdminDashboard() {
                                         fontSize: '0.75rem',
                                         fontWeight: '700'
                                     }}>
-                                        {u.strikes || 0} / 5 Strikes
+                                        {u.unethicalCount || 0} / 5 Strikes
                                     </span>
                                 </td>
                                 <td style={{ padding: '1rem', textAlign: 'center' }}>
@@ -2638,26 +2654,48 @@ export default function AdminDashboard() {
                                         <button
                                             onClick={() => handleApproveUnblock(u.id)}
                                             style={{
-                                                background: '#2dce89', color: 'white', border: 'none',
+                                                background: '#fff', color: '#0A7C8F', border: 'none',
                                                 padding: '8px 16px', borderRadius: '8px', cursor: 'pointer',
                                                 fontSize: '0.85rem', fontWeight: '700', display: 'flex',
-                                                alignItems: 'center', gap: '6px', transition: 'all 0.2s'
+                                                alignItems: 'center', gap: '6px', transition: 'all 0.2s',
+                                                boxShadow: '0 4px 6px -1px rgba(10, 124, 143, 0.1)',
+                                                width: '110px', justifyContent: 'center', outline: 'none'
                                             }}
-                                            onMouseOver={e => e.currentTarget.style.transform = 'translateY(-1px)'}
-                                            onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}
+                                            className="hover-card"
+                                            onMouseOver={e => {
+                                                e.currentTarget.style.background = 'linear-gradient(135deg, #0A7C8F 0%, #0FB5D0 100%)';
+                                                e.currentTarget.style.color = 'white';
+                                                e.currentTarget.style.transform = 'translateY(-1px)';
+                                            }}
+                                            onMouseOut={e => {
+                                                e.currentTarget.style.background = '#fff';
+                                                e.currentTarget.style.color = '#0A7C8F';
+                                                e.currentTarget.style.transform = 'translateY(0)';
+                                            }}
                                         >
                                             <Check size={16} /> Restore
                                         </button>
                                         <button
                                             onClick={() => handleRejectUnblock(u.id)}
                                             style={{
-                                                background: '#f5365c', color: 'white', border: 'none',
+                                                background: '#fff', color: '#f5365c', border: 'none',
                                                 padding: '8px 16px', borderRadius: '8px', cursor: 'pointer',
                                                 fontSize: '0.85rem', fontWeight: '700', display: 'flex',
-                                                alignItems: 'center', gap: '6px', transition: 'all 0.2s'
+                                                alignItems: 'center', gap: '6px', transition: 'all 0.2s',
+                                                boxShadow: '0 4px 6px -1px rgba(245, 54, 92, 0.1)',
+                                                width: '110px', justifyContent: 'center', outline: 'none'
                                             }}
-                                            onMouseOver={e => e.currentTarget.style.transform = 'translateY(-1px)'}
-                                            onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}
+                                            className="hover-card"
+                                            onMouseOver={e => {
+                                                e.currentTarget.style.background = '#f5365c';
+                                                e.currentTarget.style.color = 'white';
+                                                e.currentTarget.style.transform = 'translateY(-1px)';
+                                            }}
+                                            onMouseOut={e => {
+                                                e.currentTarget.style.background = '#fff';
+                                                e.currentTarget.style.color = '#f5365c';
+                                                e.currentTarget.style.transform = 'translateY(0)';
+                                            }}
                                         >
                                             <X size={16} /> Reject
                                         </button>

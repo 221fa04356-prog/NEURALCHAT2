@@ -813,6 +813,7 @@ export default function Chat() {
         document.head.appendChild(style);
         return () => document.head.removeChild(style);
     }, []);
+
     const user = JSON.parse(localStorage.getItem('user') || '{}');
     const navigate = useNavigate();
     const bottomRef = useRef(null);
@@ -1304,58 +1305,9 @@ export default function Chat() {
     }, [selectedFontSize, browserScale]);
 
     useEffect(() => {
-        const handleKeyDown = (e) => {
-            if (e.key === 'Escape') {
-                setSelectedUser(null);
-                setSelectedGroup(null);
-                if (selectedUserRef) selectedUserRef.current = null;
-                if (selectedGroupRef) selectedGroupRef.current = null;
-                setIsForwardingMode(false);
-                setIsChatSelectionMode(false);
-                setForwardSelectedMsgs([]);
-                setOpenDropdown(null);
-                setChatContextMenu(null);
-                setIsProfileOpen(false);
-                setIsNewChatOpen(false);
-                setIsNewGroupOpen(false);
-                setIsArchivedChatsOpen(false);
-                setIsGlobalStarredOpen(false);
-                setIsContactInfoOpen(false);
-                setIsGroupInfoOpen(false);
-                setIsCommunityInfoOpen(false);
-                setIsMessageSearchOpen(false);
-                setIsStarredMessagesOpen(false);
-                setIsSharedMediaOpen(false);
-                setIsEditContactOpen(false);
-                setIsNotificationSettingsOpen(false);
-                setIsCommunitySettingsOpen(false);
-                setIsWhoCanAddGroupsModalOpen(false);
-                setShowNotificationDetails(false);
-                setFile(null);
-                setReplyingTo(null);
-                setIsAttachmentMenuOpen(false);
-            }
-        };
-        window.addEventListener('keydown', handleKeyDown);
-
-        const handleClickOutside = (e) => {
-            if (attachmentMenuRef.current && !attachmentMenuRef.current.contains(e.target)) {
-                const triggerBtn = e.target.closest('.wa-nav-icon-btn');
-                if (!triggerBtn || (!triggerBtn.innerHTML.includes('Paperclip') && !triggerBtn.innerHTML.includes('Plus'))) {
-                    setIsAttachmentMenuOpen(false);
-                }
-            }
-            // Close notification details if clicking outside the bell or dropdown
-            if (!e.target.closest('.wa-notification-dropdown') && !e.target.closest('.wa-nav-icon-btn[title="Notifications"]')) {
-                setShowNotificationDetails(false);
-            }
-        };
-        window.addEventListener('mousedown', handleClickOutside);
-
-        return () => {
-            window.removeEventListener('keydown', handleKeyDown);
-            window.removeEventListener('mousedown', handleClickOutside);
-        };
+        const handleResize = () => setBrowserScale(window.devicePixelRatio || 1);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
     }, []);
 
     const handleFontSizeChange = (size) => {
@@ -3900,32 +3852,84 @@ export default function Chat() {
     // Consolidated outside listeners for dropdowns, menus and Escape key
     useEffect(() => {
         const handleClickOutside = (e) => {
+            if (showUnblockModal && e.target.classList.contains('wa-mute-modal-overlay')) {
+                setShowUnblockModal(false);
+                return;
+            }
             if (openDropdown) setOpenDropdown(null);
             if (chatContextMenu) setChatContextMenu(null);
             if (showMenu) setShowMenu(false);
-            // NOTE: isStarredMenuOpen is handled by its own dedicated mousedown listener
-            // to avoid closing on the same click that opens it.
             if (isCountryDropdownOpen) setIsCountryDropdownOpen(false);
+            if (showInputEmojiPicker && !e.target.closest('.wa-emoji-picker-container') && !e.target.closest('.wa-nav-icon-btn')) {
+                setShowInputEmojiPicker(false);
+            }
+            if (attachmentMenuRef.current && !attachmentMenuRef.current.contains(e.target)) {
+                const triggerBtn = e.target.closest('.wa-nav-icon-btn');
+                if (!triggerBtn || (!triggerBtn.innerHTML.includes('Paperclip') && !triggerBtn.innerHTML.includes('Plus'))) {
+                    setIsAttachmentMenuOpen(false);
+                }
+            }
+            if (!e.target.closest('.wa-notification-dropdown') && !e.target.closest('.wa-nav-icon-btn[title="Notifications"]')) {
+                setShowNotificationDetails(false);
+            }
         };
 
         const handleGlobalKeyDown = (e) => {
             if (e.key === 'Escape') {
+                if (showUnblockModal) {
+                    setShowUnblockModal(false);
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                    return;
+                }
+                
                 if (chatContextMenu) {
                     setChatContextMenu(null);
-                } else if (openDropdown) {
+                    return;
+                }
+                
+                if (openDropdown) {
                     setOpenDropdown(null);
-                } else if (showMenu) {
+                    return;
+                }
+                
+                if (showMenu) {
                     setShowMenu(false);
-                } else if (isNewGroupOpen) {
+                    return;
+                }
+                
+                if (isNewGroupOpen) {
                     setIsNewGroupOpen(false);
-                } else if (isNewChatOpen) {
+                    return;
+                }
+                
+                if (isNewChatOpen) {
                     setIsNewChatOpen(false);
-                } else if (selectedUser) {
-                    setSelectedUser(null);
-                    // Also cleanup selection modes
-                    setIsForwardingMode(false);
-                    setIsChatSelectionMode(false);
-                    setForwardSelectedMsgs([]);
+                    return;
+                }
+                
+                if (selectedUser || selectedGroup) {
+                    if (showUnblockModal) {
+                         setShowUnblockModal(false);
+                         return;
+                    }
+                    
+                    // Reset all panels and selection modes
+                    handleBackToChatList();
+                    setSelectedGroup(null);
+                    if (selectedUserRef) selectedUserRef.current = null;
+                    if (selectedGroupRef) selectedGroupRef.current = null;
+                    setIsProfileOpen(false);
+                    setIsArchivedChatsOpen(false);
+                    setIsGlobalStarredOpen(false);
+                    setIsGroupInfoOpen(false);
+                    setIsCommunityInfoOpen(false);
+                    setIsNotificationSettingsOpen(false);
+                    setIsCommunitySettingsOpen(false);
+                    setIsWhoCanAddGroupsModalOpen(false);
+                    setShowNotificationDetails(false);
+                    setIsAttachmentMenuOpen(false);
+                    return;
                 }
             }
 
@@ -3964,7 +3968,7 @@ export default function Chat() {
             window.removeEventListener('click', handleClickOutside);
             window.removeEventListener('keydown', handleGlobalKeyDown);
         };
-    }, [openDropdown, chatContextMenu, showMenu, isCountryDropdownOpen, selectedUser, isNewChatOpen]);
+    }, [openDropdown, chatContextMenu, showMenu, isCountryDropdownOpen, selectedUser, isNewChatOpen, showUnblockModal]);
 
     useEffect(() => {
         const handleClickOutside = (e) => {
@@ -13336,6 +13340,7 @@ export default function Chat() {
     };
 
     const handleBackToChatList = () => {
+        if (showUnblockModal) return; // Prevent navigation while modal is active
         setSelectedUser(null);
         setSelectedGroup(null);
         setSelectedCommunity(null);
@@ -16685,8 +16690,16 @@ export default function Chat() {
     const renderUnblockModal = () => {
         if (!showUnblockModal) return null;
         return (
-            <div className="wa-mute-modal-overlay" style={{ zIndex: 5000, background: 'rgba(11, 20, 26, 0.85)', backdropFilter: 'blur(4px)' }}>
-                <div className="wa-mute-modal" style={{ maxWidth: '450px', background: '#ffffff', borderRadius: '24px', padding: '32px', textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
+            <div 
+                className="wa-mute-modal-overlay" 
+                onClick={() => setShowUnblockModal(false)}
+                style={{ zIndex: 5000, background: 'rgba(11, 20, 26, 0.85)', backdropFilter: 'blur(4px)' }}
+            >
+                <div 
+                    className="wa-mute-modal" 
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ maxWidth: '450px', background: '#ffffff', borderRadius: '24px', padding: '32px', textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}
+                >
                     <div style={{ background: '#fff5f6', width: '80px', height: '80px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', border: '1px solid #fee2e2' }}>
                         <ShieldAlert size={40} color="#dc2626" />
                     </div>
@@ -16716,7 +16729,25 @@ export default function Chat() {
                             )}
 
                             <div style={{ display: 'flex', gap: '12px', marginTop: unblockReason.trim() ? '24px' : '0' }}>
-                                <button onClick={() => setShowUnblockModal(false)} style={{ flex: 1, padding: '12px', borderRadius: '24px', border: '1.5px solid #e9edef', background: 'white', color: '#54656f', fontWeight: '600', cursor: 'pointer' }}>Cancel</button>
+                                <button
+                                    onClick={() => setShowUnblockModal(false)}
+                                    style={{
+                                        flex: 1,
+                                        padding: '12px',
+                                        borderRadius: '24px',
+                                        border: 'none',
+                                        background: 'white',
+                                        color: '#54656f',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                                        transition: 'all 0.2s'
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = '#f8f9fa'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'white'}
+                                >
+                                    Cancel
+                                </button>
                                 <div style={{ flex: 1, position: 'relative' }}>
                                     <button
                                         onClick={handleRequestUnblock}
