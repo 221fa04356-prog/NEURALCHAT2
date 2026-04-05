@@ -190,7 +190,6 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
     const [audioBlob, setAudioBlob] = useState(null);
     const [audioUrl, setAudioUrl] = useState(null);
     const [isReviewing, setIsReviewing] = useState(false);
-    const [waveformPoints, setWaveformPoints] = useState([]);
     const [isViewOnceVoice, setIsViewOnceVoice] = useState(false);
     const [previewProgress, setPreviewProgress] = useState(0);
     const [previewSeconds, setPreviewSeconds] = useState(0);
@@ -206,12 +205,14 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
     const analyserRef = useRef(null);
     const dataArrayRef = useRef(null);
     const audioContextRef = useRef(null);
+    const waveAnimationIdRef = useRef(null);
     const waveformTimerHandler = useRef(null);
     const previewAudioRef = useRef(null);
     const mimeTypeRef = useRef('audio/webm');
     const allWaveformPointsRef = useRef([]);
     const waveformRef = useRef(null);
     const isViewOnceRef = useRef(false);
+    const isPausedRef = useRef(false);
 
     useEffect(() => {
         isViewOnceRef.current = isViewOnceVoice;
@@ -235,6 +236,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
             previewAudioRef.current.pause();
             previewAudioRef.current = null;
         }
+        if (waveAnimationIdRef.current) cancelAnimationFrame(waveAnimationIdRef.current);
         setIsPlayingPreview(false);
         setIsPaused(false);
         setIsReviewing(false);
@@ -261,15 +263,15 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
 
     const startRecording = async () => {
         setIsPaused(false);
+        isPausedRef.current = false;
         setRecordingTime(0);
         setIsReviewing(false);
         setAudioUrl(null);
         setAudioBlob(null);
         setIsViewOnceVoice(false);
-        setWaveformPoints(new Array(30).fill(3)); // Pre-fill silent baseline
+        allWaveformPointsRef.current = []; // Reset canvas waveform buffer
         setPreviewProgress(0);
         setPreviewSeconds(0);
-        allWaveformPointsRef.current = [];
 
         // Ensure AudioContext is available and resumed
         if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
@@ -321,29 +323,29 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
 
             // --- "Silent Zero-Air" High-Clarity Engine (Total Hiss Neutralization) ---
 
-            // 1. Triple-Stage Brick-Wall High-pass (3x 180Hz): Deletes mechanical floor rumble
-            const hp1 = audioContext.createBiquadFilter(); hp1.type = 'highpass'; hp1.frequency.value = 180;
-            const hp2 = audioContext.createBiquadFilter(); hp2.type = 'highpass'; hp2.frequency.value = 180;
-            const hp3 = audioContext.createBiquadFilter(); hp3.type = 'highpass'; hp3.frequency.value = 180;
-
-            // 2. Presence & Crispness Focus EQ (Focussing on human speech range only)
+            // 1. Triple-Stage High-pass (3x 140Hz): Deletes rumble while keeping voice warmth
+            const hp1 = audioContext.createBiquadFilter(); hp1.type = 'highpass'; hp1.frequency.value = 140;
+            const hp2 = audioContext.createBiquadFilter(); hp2.type = 'highpass'; hp2.frequency.value = 140;
+            const hp3 = audioContext.createBiquadFilter(); hp3.type = 'highpass'; hp3.frequency.value = 140;
+ 
+            // 2. Presence & Studio Crispness (Capturing the natural human speech clarity)
             const presenceBoost = audioContext.createBiquadFilter();
             presenceBoost.type = 'peaking';
             presenceBoost.frequency.value = 3500;
-            presenceBoost.gain.value = 10;
-            presenceBoost.Q.value = 1.2;
-
-            const clarityBoost = audioContext.createBiquadFilter();
-            clarityBoost.type = 'peaking';
-            clarityBoost.frequency.value = 1500;
-            clarityBoost.gain.value = 6;
-            clarityBoost.Q.value = 1.0;
-
-            // 3. Quad-Stage Extreme Low-pass (4x 6000Hz): Aggressive 48dB/Octave Wall against Air Hiss
-            const lp1 = audioContext.createBiquadFilter(); lp1.type = 'lowpass'; lp1.frequency.value = 6000;
-            const lp2 = audioContext.createBiquadFilter(); lp2.type = 'lowpass'; lp2.frequency.value = 6000;
-            const lp3 = audioContext.createBiquadFilter(); lp3.type = 'lowpass'; lp3.frequency.value = 6000;
-            const lp4 = audioContext.createBiquadFilter(); lp4.type = 'lowpass'; lp4.frequency.value = 6000;
+            presenceBoost.gain.value = 8; // Gently boost clarity
+            presenceBoost.Q.value = 1.0;
+ 
+            const sibilanceFocus = audioContext.createBiquadFilter();
+            sibilanceFocus.type = 'peaking';
+            sibilanceFocus.frequency.value = 5200;
+            sibilanceFocus.gain.value = 4;
+            sibilanceFocus.Q.value = 1.2;
+ 
+            // 3. Quad-Stage "Air Guard" Low-pass (4x 8500Hz): Natural high-end cutoff
+            const lp1 = audioContext.createBiquadFilter(); lp1.type = 'lowpass'; lp1.frequency.value = 8500;
+            const lp2 = audioContext.createBiquadFilter(); lp2.type = 'lowpass'; lp2.frequency.value = 8500;
+            const lp3 = audioContext.createBiquadFilter(); lp3.type = 'lowpass'; lp3.frequency.value = 8500;
+            const lp4 = audioContext.createBiquadFilter(); lp4.type = 'lowpass'; lp4.frequency.value = 8500;
 
             // 4. Professional Studio Leveler (Gentle 4:1 Ratio to avoid lifting noise floor)
             const compressor = audioContext.createDynamicsCompressor();
@@ -365,8 +367,8 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
             hp1.connect(hp2);
             hp2.connect(hp3);
             hp3.connect(presenceBoost);
-            presenceBoost.connect(clarityBoost);
-            clarityBoost.connect(lp1);
+            presenceBoost.connect(sibilanceFocus);
+            sibilanceFocus.connect(lp1);
             lp1.connect(lp2);
             lp2.connect(lp3);
             lp3.connect(lp4);
@@ -386,42 +388,59 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
             dataArrayRef.current = dataArray;
 
             const startWaveformTimer = () => {
-                if (waveTimerRef.current) clearInterval(waveTimerRef.current);
-                waveTimerRef.current = setInterval(() => {
+                const draw = () => {
+                    waveAnimationIdRef.current = requestAnimationFrame(draw);
                     const analyser = analyserRef.current;
                     const dataArray = dataArrayRef.current;
-                    if (audioContextRef.current && analyser && dataArray) {
+                    if (audioContextRef.current && analyser && dataArray && !isPausedRef.current) {
                         analyser.getByteFrequencyData(dataArray);
 
                         let sum = 0;
-                        const startBin = 6; // Filter out low-end hum and rumble
+                        const startBin = 6;
                         const endBin = 60;
                         for (let i = startBin; i < endBin; i++) sum += dataArray[i];
                         const avg = sum / (endBin - startBin);
 
-                        const time = Date.now() / 400;
-                        let finalHeight = 3; // Baseline flat dot when silence
-
-                        // Noise Floor & Detection
-                        const noiseFloor = 40; // Increased heavily so it ONLY triggers on actual voice
+                        let finalHeight = 3;
+                        const noiseFloor = 32;
                         if (avg > noiseFloor) {
-                            // Scale peaks gently so waves are smaller/more elegant
-                            const peak = ((avg - noiseFloor) / 120) * 22;
+                            const peak = ((avg - noiseFloor) / 100) * 18;
                             finalHeight += peak;
                         }
-
-                        // Add tiny organic variation ONLY when talking
                         if (avg > noiseFloor + 10) finalHeight += (Math.random() - 0.5) * 3;
                         finalHeight = Math.min(24, Math.max(3, finalHeight));
 
-                        allWaveformPointsRef.current.push(finalHeight);
-                        setWaveformPoints(prev => {
-                            const next = [...prev, finalHeight];
-                            if (next.length > 30) return next.slice(1);
-                            return next;
-                        });
+                        const canvas = waveformRef.current;
+                        if (canvas) {
+                            const ctx = canvas.getContext('2d');
+                            const w = canvas.width;
+                            const h = canvas.height;
+
+                            allWaveformPointsRef.current.push(finalHeight);
+                            if (allWaveformPointsRef.current.length > 40) {
+                                allWaveformPointsRef.current.shift();
+                            }
+
+                            ctx.clearRect(0, 0, w, h);
+                            const points = allWaveformPointsRef.current;
+                            const barWidth = 3;
+                            const gap = 2.5;
+                            const totalBarWidth = barWidth + gap;
+                            const startX = Math.max(0, (w - (points.length * totalBarWidth)) / 2);
+
+                            points.forEach((pointHeight, idx) => {
+                                ctx.fillStyle = '#8696a0';
+                                const x = startX + idx * totalBarWidth;
+                                const y = (h - pointHeight) / 2;
+
+                                ctx.beginPath();
+                                ctx.roundRect(x, y, barWidth, pointHeight, 3);
+                                ctx.fill();
+                            });
+                        }
                     }
-                }, 100); // 100ms interval for a relaxed, normal speed
+                };
+                draw();
             };
 
             waveformTimerHandler.current = startWaveformTimer;
@@ -429,8 +448,6 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
             mediaRecorder.ondataavailable = (e) => {
                 if (e.data && e.data.size > 0) {
                     audioChunksRef.current.push(e.data);
-                    // Whenever data is received (e.g., via requestData() on pause or at the end of recording),
-                    // update the preview blob and URL to ensure the user can play back the recording.
                     const blob = new Blob(audioChunksRef.current, { type: mimeTypeRef.current });
                     const url = URL.createObjectURL(blob);
                     setAudioBlob(blob);
@@ -455,27 +472,15 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                     audioContextRef.current.close().catch(() => { });
                     audioContextRef.current = null;
                 }
-                if (waveTimerRef.current) clearInterval(waveTimerRef.current);
+                if (waveAnimationIdRef.current) cancelAnimationFrame(waveAnimationIdRef.current);
 
                 if (window.directSendRequested) {
                     onSend(blob, finalDuration, isViewOnceRef.current);
                 } else {
-                    // Downsample full waveform for review
-                    const total = allWaveformPointsRef.current.length;
-                    const target = 30;
-                    if (total > 0) {
-                        const step = total / target;
-                        const downsampled = [];
-                        for (let i = 0; i < target; i++) {
-                            downsampled.push(allWaveformPointsRef.current[Math.floor(i * step)] || 3);
-                        }
-                        setWaveformPoints(downsampled);
-                    }
                     setIsReviewing(true);
                 }
             };
 
-            // Start recording without timeslice to prevent chunk collision repetition
             mediaRecorder.start();
             if (waveformTimerHandler.current) waveformTimerHandler.current();
 
@@ -497,29 +502,16 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
         if (e) e.stopPropagation();
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
             try {
-                // Manually request data only on pause to allow preview.
-                // This triggers ondataavailable which now safely handles the blob/url update.
                 mediaRecorderRef.current.requestData();
                 mediaRecorderRef.current.pause();
                 if (waveTimerRef.current) clearInterval(waveTimerRef.current);
 
+                isPausedRef.current = true;
                 setIsPaused(true);
                 if (timerRef.current) clearInterval(timerRef.current);
                 if (startTimeRef.current) {
                     accumulatedDurationRef.current += (Date.now() - startTimeRef.current);
                     startTimeRef.current = null;
-                }
-
-                // Downsample for static preview
-                const total = allWaveformPointsRef.current.length;
-                const target = 30;
-                if (total > 0) {
-                    const step = total / target;
-                    const downsampled = [];
-                    for (let i = 0; i < target; i++) {
-                        downsampled.push(allWaveformPointsRef.current[Math.floor(i * step)] || 3);
-                    }
-                    setWaveformPoints(downsampled);
                 }
             } catch (err) { }
         }
@@ -537,6 +529,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                     setIsPlayingPreview(false);
                 }
                 mediaRecorderRef.current.resume();
+                isPausedRef.current = false;
                 setIsPaused(false);
                 setPreviewProgress(0);
                 setPreviewSeconds(recordingTime);
@@ -591,11 +584,10 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
     useEffect(() => {
         startRecording();
         return () => {
-            if (waveTimerRef.current) clearInterval(waveTimerRef.current);
+            if (waveAnimationIdRef.current) cancelAnimationFrame(waveAnimationIdRef.current);
             if (timerRef.current) clearInterval(timerRef.current);
             if (previewAudioRef.current) previewAudioRef.current.pause();
 
-            // Critical: stop recorder and tracks when component unmounts
             if (mediaRecorderRef.current) {
                 try {
                     mediaRecorderRef.current.onstop = null;
@@ -619,8 +611,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
         };
     }, [audioUrl]);
 
-    if (!isReviewing && !recordingTime && waveformPoints.length === 0 && !isPaused) {
-        // Optimization: don't render until first data point
+    if (!isReviewing && !recordingTime && !isPaused) {
     }
 
     const btnSize = isMobile ? '32px' : '40px';
@@ -665,84 +656,80 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                         </div>
                     </div>
                     <div
-                        ref={waveformRef}
-                        onMouseDown={(e) => {
-                            if (!isPaused && !isReviewing) return;
-                            const rect = waveformRef.current.getBoundingClientRect();
-
-                            const updateSeekFromEvent = (moveEvent) => {
-                                const x = moveEvent.clientX - rect.left;
-                                const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
-                                setPreviewProgress(percent);
-
-                                if (previewAudioRef.current) {
-                                    const audio = previewAudioRef.current;
-                                    const duration = (recordingTime > 0) ? recordingTime : ((audio.duration && isFinite(audio.duration)) ? audio.duration : 0);
-                                    audio.currentTime = (percent / 100) * (duration || 0);
-                                } else {
-                                    setPreviewSeconds(Math.floor((percent / 100) * recordingTime));
-                                }
-                            };
-
-                            const onMouseMove = (moveEvent) => {
-                                setIsDragging(true);
-                                updateSeekFromEvent(moveEvent);
-                            };
-
-                            const onMouseUp = () => {
-                                setIsDragging(false);
-                                window.removeEventListener('mousemove', onMouseMove);
-                                window.removeEventListener('mouseup', onMouseUp);
-                            };
-
-                            window.addEventListener('mousemove', onMouseMove);
-                            window.addEventListener('mouseup', onMouseUp);
-
-                            updateSeekFromEvent(e); // Seek immediately on click/down
-                        }}
                         className="wa-recording-waveform"
                         style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '2.5px',
                             height: '36px',
                             flex: 1,
                             maxWidth: isMobile
                                 ? ((isPaused || isReviewing)
                                     ? (window.innerWidth > 500 ? '130px' : '90px')
                                     : (window.innerWidth > 500 ? '220px' : '150px'))
-                                : '180px',
+                                : '220px',
                             minWidth: 0,
-                            overflow: 'hidden',
-                            justifyContent: 'center',
                             position: 'relative',
                             cursor: (isPaused || isReviewing) ? 'grab' : 'default',
                             flexShrink: 5
                         }}
                     >
-                        {waveformPoints.map((h, i) => (
-                            <div key={i} style={{
-                                height: `${h}px`,
-                                backgroundColor: (isPaused || isReviewing)
-                                    ? (i / waveformPoints.length < previewProgress / 100 ? '#0EA5BE' : '#8696a0')
-                                    : '#8696a0',
-                                width: '3px',
-                                borderRadius: '3px',
-                                transition: 'height 0.1s ease',
-                                transform: 'scaleY(1)' // Centralized growth due to flex align-center
-                            }} />
-                        ))}
+                        <canvas
+                            ref={waveformRef}
+                            width={220}
+                            height={36}
+                            style={{ 
+                                width: '100%', 
+                                height: '100%',
+                                opacity: (isPaused || isReviewing) ? 0.8 : 1
+                            }}
+                            onMouseDown={(e) => {
+                                if (!isPaused && !isReviewing) return;
+                                const rect = waveformRef.current.getBoundingClientRect();
+
+                                const updateSeekFromEvent = (moveEvent) => {
+                                    const x = moveEvent.clientX - rect.left;
+                                    const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
+                                    setPreviewProgress(percent);
+
+                                    if (previewAudioRef.current) {
+                                        const audio = previewAudioRef.current;
+                                        const duration = (recordingTime > 0) ? recordingTime : ((audio.duration && isFinite(audio.duration)) ? audio.duration : 0);
+                                        audio.currentTime = (percent / 100) * (duration || 0);
+                                    } else {
+                                        setPreviewSeconds(Math.floor((percent / 100) * recordingTime));
+                                    }
+                                };
+
+                                const onMouseMove = (moveEvent) => {
+                                    setIsDragging(true);
+                                    updateSeekFromEvent(moveEvent);
+                                };
+
+                                const onMouseUp = () => {
+                                    setIsDragging(false);
+                                    window.removeEventListener('mousemove', onMouseMove);
+                                    window.removeEventListener('mouseup', onMouseUp);
+                                };
+
+                                window.addEventListener('mousemove', onMouseMove);
+                                window.addEventListener('mouseup', onMouseUp);
+
+                                updateSeekFromEvent(e); 
+                            }}
+                        />
                         {(isPaused || isReviewing) && (
                             <div style={{
                                 position: 'absolute',
                                 left: `${previewProgress}%`,
                                 width: '10px',
                                 height: '10px',
-                                backgroundColor: '#0EA5BE', // Theme Blue shade
+                                backgroundColor: '#0EA5BE', 
                                 borderRadius: '50%',
                                 pointerEvents: 'none',
                                 transform: 'translateX(-50%)',
                                 zIndex: 10,
+                                top: '50%',
+                                marginTop: '-5px',
                                 transition: isDragging ? 'none' : 'left 0.1s linear'
                             }} />
                         )}
@@ -4767,6 +4754,12 @@ export default function Chat() {
             setIsSharedMediaOpen(false);
             setIsEditContactOpen(false);
             setShowScrollBtn(false);
+            setSelectedGroup(null);
+            setSelectedCommunity(null);
+            setIsCommunityInfoOpen(false);
+            setIsCommunityGroupsListOpen(false);
+            setIsNotificationSettingsOpen(false);
+            setIsEventDetailsOpen(false);
         }
         setSelectedUser(u);
         fetchP2PRequest(u._id);
@@ -16860,7 +16853,7 @@ export default function Chat() {
                         )}
                     </>
                 ) : (
-                    <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#41525d' }}>
+                    <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#41525d', position: 'relative', zIndex: 5 }}>
                         <h2>Neural Chat</h2>
                         <p style={{ fontSize: 14, marginTop: 10 }}>Send and receive messages without keeping your phone online.</p>
                     </div>
