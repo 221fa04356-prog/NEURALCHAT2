@@ -399,6 +399,23 @@ export default function AdminDashboard() {
     }, [viewChat?.messages, chatStep, highlightMessageId]);
 
     const handleViewAlert = async (alert) => {
+        // Tab switching logic for non-chat alerts
+        if (alert.type === 'unblock_request') {
+            setActiveTab('unblock');
+            setShowNotifications(false);
+            return;
+        }
+        if (alert.type === 'registration') {
+            setActiveTab('pending');
+            setShowNotifications(false);
+            return;
+        }
+        if (alert.type === 'reset') {
+            setActiveTab('resets');
+            setShowNotifications(false);
+            return;
+        }
+
         // 1. Find User (Sender/Actor)
         const actorId = alert.userId || alert.sender_id;
         const user = users.find(u => u.id === actorId || u._id === actorId) || { id: actorId, name: alert.userName || alert.deletedBy || 'User', email: 'N/A' };
@@ -558,11 +575,22 @@ export default function AdminDashboard() {
         socket.on('new_registration', (newUser) => {
             console.log('Client: new_registration received:', newUser);
             setUsers(prev => {
-                // Ensure unique by ID
                 if (prev.find(u => u.id === newUser.id)) return prev;
                 return [...prev, newUser];
             });
             showSnackbar(`New Registration (Pending Approval): ${newUser.name}`, 'info');
+            
+            // Add to Review Box
+            const newNotif = {
+                id: `reg-${newUser.id}-${Date.now()}`,
+                type: 'registration',
+                userId: newUser.id,
+                name: newUser.name,
+                email: newUser.email,
+                login_id: newUser.login_id,
+                timestamp: new Date()
+            };
+            setAdminNotifications(prev => [newNotif, ...prev]);
             fetchStats();
         });
 
@@ -574,6 +602,18 @@ export default function AdminDashboard() {
             });
             const identifier = `${newReset.name} (${newReset.login_id || newReset.email})`;
             showSnackbar(`New Password Reset Request: ${identifier}`, 'info');
+            
+            // Add to Review Box
+            const newNotif = {
+                id: `reset-${newReset.id}-${Date.now()}`,
+                type: 'reset',
+                userId: newReset.user_id,
+                name: newReset.name,
+                email: newReset.email,
+                login_id: newReset.login_id,
+                timestamp: new Date()
+            };
+            setAdminNotifications(prev => [newNotif, ...prev]);
             fetchStats();
         });
 
@@ -813,6 +853,10 @@ export default function AdminDashboard() {
             await axios.post('/api/admin/approve', { userId, loginId, password });
             const user = users.find(u => u.id === userId || u._id === userId);
             showSnackbar(`Pending Approval approved for: ${user?.name || ''} (${loginId})`, 'success');
+            
+            // Remove notification from Review Box
+            setAdminNotifications(prev => prev.filter(n => !(n.type === 'registration' && n.userId === userId)));
+            
             fetchData();
             fetchStats();
             setConfirmPass({ ...confirmPass, [userId]: '' });
@@ -838,6 +882,10 @@ export default function AdminDashboard() {
             // Find the user associated with the reset request to display their name/login_id
             const user = users.find(u => u.id === userId);
             showSnackbar(`Temporary password set for: ${user?.name || userId} (${user?.login_id || ''})`, 'success');
+            
+            // Remove notification from Review Box
+            setAdminNotifications(prev => prev.filter(n => !(n.type === 'reset' && n.userId === userId)));
+            
             fetchData(); // Re-fetch data to update resets list if needed
             fetchStats();
         } catch (err) {
@@ -850,6 +898,10 @@ export default function AdminDashboard() {
             await axios.post('/api/admin/approve-unblock', { userId });
             const user = users.find(u => u.id === userId || u._id === userId);
             showSnackbar(`Messaging restored for: ${user?.name || ''}`, 'success');
+            
+            // Remove notification from Review Box
+            setAdminNotifications(prev => prev.filter(n => !(n.type === 'unblock_request' && n.userId === userId)));
+            
             fetchData();
             fetchStats();
         } catch (err) {
@@ -863,6 +915,10 @@ export default function AdminDashboard() {
             try {
                 await axios.post('/api/admin/reject-unblock', { userId });
                 showSnackbar(`Unblock request rejected for: ${user?.name || ''}`, 'info');
+                
+                // Remove notification from Review Box
+                setAdminNotifications(prev => prev.filter(n => !(n.type === 'unblock_request' && n.userId === userId)));
+                
                 fetchData();
                 fetchStats();
                 closeConfirm();
@@ -1555,12 +1611,21 @@ export default function AdminDashboard() {
                             >
                                 <div style={{
                                     width: '36px', height: '36px', borderRadius: '50%',
-                                    background: alert.type === 'unethical' ? '#feebee' : '#e0f7fa',
+                                    background: alert.type === 'unethical' ? '#feebee' : 
+                                               alert.type === 'unblock_request' ? '#fff4e5' : 
+                                               alert.type === 'registration' ? '#e8f5e9' : 
+                                               alert.type === 'reset' ? '#f3e5f5' : '#e0f7fa',
                                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                                     flexShrink: 0
                                 }}>
                                     {alert.type === 'unethical' ? (
                                         <AlertTriangle size={18} color="#f5365c" />
+                                    ) : alert.type === 'unblock_request' ? (
+                                        <ShieldCheck size={18} color="#fb6340" />
+                                    ) : alert.type === 'registration' ? (
+                                        <UserCheck size={18} color="#2dce89" />
+                                    ) : alert.type === 'reset' ? (
+                                        <Key size={18} color="#8965e0" />
                                     ) : (
                                         <Trash2 size={18} color="#0A7C8F" />
                                     )}
@@ -1568,30 +1633,48 @@ export default function AdminDashboard() {
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
                                         <span style={{ fontWeight: '700', fontSize: '0.825rem', color: '#32325d' }}>
-                                            {alert.type === 'unethical' ? 'Unethical Content' : 'Message Deleted'}
+                                            {alert.type === 'unethical' ? 'Unethical Content' : 
+                                             alert.type === 'unblock_request' ? 'Unblock Request' : 
+                                             alert.type === 'registration' ? 'New Registration' : 
+                                             alert.type === 'reset' ? 'Password Reset' : 'Message Deleted'}
                                         </span>
                                         <span style={{ fontSize: '0.65rem', color: '#adb5bd' }}>
                                             {new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                         </span>
                                     </div>
                                     <div style={{ fontSize: '0.75rem', color: '#525f7f', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
-                                        {alert.isGroup ? <Users size={12} /> : <UserIcon size={12} />}
-                                        <span style={{ fontWeight: '600' }}>{alert.deletedBy || alert.userName}</span>
-                                        <span style={{ color: '#adb5bd' }}>in</span>
-                                        <span style={{ fontWeight: '600', color: '#0A7C8F' }}>{alert.partnerName}</span>
+                                        {alert.type === 'registration' ? <UserIcon size={12} /> : 
+                                         alert.type === 'reset' ? <Key size={12} /> : 
+                                         alert.type === 'unblock_request' ? <ShieldCheck size={12} /> : 
+                                         alert.isGroup ? <Users size={12} /> : <UserIcon size={12} />}
+                                        <span style={{ fontWeight: '600' }}>{alert.deletedBy || alert.userName || alert.name}</span>
+                                        {(alert.type === 'unethical' || alert.type === 'deletion') && (
+                                            <>
+                                                <span style={{ color: '#adb5bd' }}>in</span>
+                                                <span style={{ fontWeight: '600', color: '#0A7C8F' }}>{alert.partnerName || 'Unknown Chat'}</span>
+                                            </>
+                                        )}
                                     </div>
                                     <div style={{
                                         fontSize: '0.75rem', color: '#8898aa',
                                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                                         fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '4px'
                                     }}>
-                                        {alert.type === 'audio' ? (
-                                            <>
-                                                <Mic size={12} /> Voice Message ({formatVoiceTime(alert.duration)})
-                                            </>
-                                        ) : (
-                                            `"${alert.contentSnippet || alert.content}"`
-                                        )}
+                                        {alert.type === 'unethical' || alert.type === 'deletion' ? (
+                                            alert.type === 'audio' ? (
+                                                <>
+                                                    <Mic size={12} /> Voice Message ({formatVoiceTime(alert.duration)})
+                                                </>
+                                            ) : (
+                                                `"${alert.contentSnippet || alert.content || 'No content'}"`
+                                            )
+                                        ) : alert.type === 'unblock_request' ? (
+                                            `Reason: "${alert.reason || 'No reason provided'}"`
+                                        ) : alert.type === 'registration' ? (
+                                            `New user: ${alert.email || alert.login_id || alert.userId}`
+                                        ) : alert.type === 'reset' ? (
+                                            `For: ${alert.login_id || alert.email || alert.name}`
+                                        ) : null}
                                     </div>
                                 </div>
                             </div>
