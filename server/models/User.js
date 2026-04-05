@@ -23,7 +23,7 @@ const userSchema = new mongoose.Schema({
     rejectionCount: { type: Number, default: 0 },     // Strike counter (banned after each rejection, locked after 5)
     adminLock: { type: Boolean, default: false },       // Locked by admin after 5 strikes
     customLists: [{
-        _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
+        _id: { type: String }, // Flexible to support timestamp or UUID strings
         name: { type: String, required: true },
         members: [{ type: String }] // Storing IDs as strings to match frontend implementation (could be User, Group, or Community IDs)
     }],

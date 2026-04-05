@@ -2574,8 +2574,9 @@ export default function Chat() {
         }
 
         // --- Grammar check ONLY for text messages (no files or link previews) ---
+        const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(input);
         const containsUrl = /https?:\/\/[^\s]+/.test(input);
-        if (file || !input.trim() || typingLinkPreview || containsUrl) {
+        if (file || !input.trim() || typingLinkPreview || containsUrl || isEmojiPresent) {
             setGrammarSuggestions(null);
             setShowGrammarBar(false);
             setSuggestionApplied(true); // Bypass AI check requirement
@@ -2589,14 +2590,15 @@ export default function Chat() {
             const trimmedInput = input.trim();
             const hasVowels = /[aeiouy]/i.test(trimmedInput);
             const hasNumbers = /[0-9]/.test(trimmedInput);
-            const isMeaningful = trimmedInput.length >= 2 && /[a-zA-Z0-9]/.test(trimmedInput);
+            const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(trimmedInput);
+            const isMeaningful = trimmedInput.length >= 1 && (/[a-zA-Z0-9]/.test(trimmedInput) || isEmojiPresent);
 
             // Catch repeats like "fff", "jgjg" and vowel-less strings
-            const isProbablyGarbage = (trimmedInput.length >= 3 && !hasVowels && !hasNumbers) ||
+            const isProbablyGarbage = (trimmedInput.length >= 3 && !hasVowels && !hasNumbers && !isEmojiPresent) ||
                 /([^aeiouy0-9\s])\1{2,}/i.test(trimmedInput) ||
-                (trimmedInput.length >= 4 && !hasVowels && !hasNumbers);
+                (trimmedInput.length >= 4 && !hasVowels && !hasNumbers && !isEmojiPresent);
 
-            if (isProbablyGarbage || !isMeaningful) {
+            if (isProbablyGarbage || (!isMeaningful && !isEmojiPresent)) {
                 setIsGarbageMessage(true);
                 setShowGrammarBar(true);
                 if ((isProbablyGarbage || !isMeaningful) && trimmedInput.length >= 3) {
@@ -2654,7 +2656,8 @@ export default function Chat() {
 
     const applyGrammarSuggestion = (text) => {
         const trimmedInput = input.trim();
-        if (trimmedInput.length < 2 || !/[a-zA-Z0-9]/.test(trimmedInput)) {
+        const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(trimmedInput);
+        if (!isEmojiPresent && (trimmedInput.length < 2 || !/[a-zA-Z0-9]/.test(trimmedInput))) {
             setSnackbar({ message: "write a meaningful word or sentence to start the chat", type: 'info' });
             return;
         }
@@ -6830,6 +6833,7 @@ export default function Chat() {
             return userInList ? userInList.isOnline : m.isOnline;
         }).length;
 
+        const otherMembers = (group.members || []).filter(m => String(m._id || m) !== String(myId));
         if (onlineCount > 0) {
             // Show count of other members who are online
             return `${onlineCount} online`;
@@ -6838,8 +6842,6 @@ export default function Chat() {
         // If no other members are online, show the names of all members (excluding self)
         return otherMembers.map(m => m.name || (m.user_id?.name)).filter(Boolean).join(', ');
     };
-
-    // --- Sub Render Functions ---
 
     // --- Sub Render Functions ---
 

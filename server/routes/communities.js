@@ -48,7 +48,7 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
                 select: 'name icon _id members admin admins removedMembers isAnnouncementGroup userHistory',
                 populate: {
                     path: 'members',
-                    select: 'name about mobile image __enc_name __enc_about __enc_mobile'
+                    select: 'name about mobile image __enc_name __enc_about __enc_mobile _id'
                 }
             })
             .populate({
@@ -56,7 +56,7 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
                 select: 'name icon _id members admin admins removedMembers community_id userHistory',
                 populate: {
                     path: 'members',
-                    select: 'name about mobile image __enc_name __enc_about __enc_mobile'
+                    select: 'name about mobile image __enc_name __enc_about __enc_mobile _id'
                 }
             })
             .sort({ created_at: -1 })
@@ -65,7 +65,14 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
         const enriched = await Promise.all((communities || []).map(async (c) => {
             let lastMsg = null;
             let unreadCount = 0;
-            if (c.announcements?._id) {
+
+            // Check if the current user is a member/admin/creator of this community
+            const isCommMember = (c.members || []).some(m => String(m._id || m) === String(userId));
+            const isCommAdmin = (c.admins || []).some(a => String(a?._id || a) === String(userId));
+            const isCommCreator = String(c.creator?._id || c.creator) === String(userId);
+            const isStillInComm = isCommMember || isCommAdmin || isCommCreator;
+
+            if (c.announcements?._id && isStillInComm) {
                 lastMsg = await GroupMessage.findOne({ group_id: c.announcements._id })
                     .sort({ created_at: -1 })
                     .populate('sender_id', 'name _id __enc_name')
@@ -87,6 +94,24 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
 
             // Enrich individual groups
             const enrichedGroups = await Promise.all((c.groups || []).map(async (g) => {
+                // Check if the current user is a member/admin/creator of this group
+                const isMember = (g.members || []).some(m => String(m._id || m) === String(userId));
+                const isAdmin = (g.admins || []).some(a => String(a?._id || a) === String(userId));
+                const isCreatorMatch = String(g.admin?._id || g.admin) === String(userId);
+                
+                // A user is only active if they are in the members array.
+                // Admins/Creators who left the group should not see unread counts.
+                const isJoined = isMember || isAdmin || (isCreatorMatch && isMember);
+
+                // If not a joined member, don't show unread counts or last messages
+                if (!isJoined) {
+                    return {
+                        ...g,
+                        lastMessage: null,
+                        unreadCount: 0
+                    };
+                }
+
                 const history = (g.userHistory || []).find(h => String(h.user) === String(userId));
                 const visibleFrom = history?.visibleFrom || new Date(0);
                 

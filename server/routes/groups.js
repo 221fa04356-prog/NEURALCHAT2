@@ -241,17 +241,28 @@ router.get('/my-groups', authenticateToken, async (req, res) => {
 
             const userIdObj = new mongoose.Types.ObjectId(userId);
             
-            // Find user's visibleFrom for this group
-            const history = (g.userHistory || g.toObject?.().userHistory || []).find(h => String(h.user) === String(userId));
-            const visibleFrom = history?.visibleFrom || new Date(0);
+            // Check if the current user is a joined member (member, admin, or creator)
+            const isMem = (g.members || []).some(m => String(m._id || m) === String(userId));
+            const isGrpAdmin = (g.admins || []).some(a => String(a?._id || a) === String(userId));
+            const isCreatorMatch = String(g.admin?._id || g.admin) === String(userId);
+            
+            // A user is only active if they are in the members array.
+            const isJoined = isMem || isGrpAdmin || (isCreatorMatch && isMem);
 
-            const unreadCount = await GroupMessage.countDocuments({
-                group_id: g._id,
-                sender_id: { $ne: userIdObj },
-                read_by: { $ne: userIdObj },
-                is_system: { $ne: true },
-                created_at: { $gte: visibleFrom }
-            });
+            let unreadCount = 0;
+            if (isJoined) {
+                // Find user's visibleFrom for this group
+                const history = (g.userHistory || g.toObject?.().userHistory || []).find(h => String(h.user) === String(userId));
+                const visibleFrom = history?.visibleFrom || new Date(0);
+
+                unreadCount = await GroupMessage.countDocuments({
+                    group_id: g._id,
+                    sender_id: { $ne: userIdObj },
+                    read_by: { $ne: userIdObj },
+                    is_system: { $ne: true },
+                    created_at: { $gte: visibleFrom }
+                });
+            }
 
             return {
                 ...g.toObject(),
