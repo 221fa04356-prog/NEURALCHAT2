@@ -102,7 +102,17 @@ const formatEventTimeString = (startDate, startTime, endDate, endTime) => {
         if (isToday(d)) dateStr = 'Today';
         else if (isTomorrow(d)) dateStr = 'Tomorrow';
         else dateStr = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-        return ts ? `${dateStr}, ${ts}` : dateStr;
+
+        let timeStr = ts || '';
+        if (ts && ts.includes(':')) {
+            const [h, m] = ts.split(':');
+            const hh = parseInt(h);
+            const ampm = hh >= 12 ? 'PM' : 'AM';
+            const h12 = hh % 12 || 12;
+            timeStr = `${h12}:${m} ${ampm}`;
+        }
+
+        return ts ? `${dateStr}, ${timeStr}` : dateStr;
     };
 
     const startStr = formatPart(startDate, startTime);
@@ -1043,6 +1053,7 @@ export default function Chat() {
     const [eventLocation, setEventLocation] = useState('');
     const [eventCallOn, setEventCallOn] = useState(false);
     const [eventCallType, setEventCallType] = useState('Video'); // Video / Voice
+    const [eventReminderTiming, setEventReminderTiming] = useState('default');
     const [showStartTimePicker, setShowStartTimePicker] = useState(false);
     const [showEndTimePicker, setShowEndTimePicker] = useState(false);
     const [showEventCallTypeDropdown, setShowEventCallTypeDropdown] = useState(false);
@@ -1051,8 +1062,11 @@ export default function Chat() {
     const [isEventDetailsOpen, setIsEventDetailsOpen] = useState(false);
     const [eventDetailsMsg, setEventDetailsMsg] = useState(null);
     const [isEventEditOpen, setIsEventEditOpen] = useState(false);
+    const [isRemindersModalOpen, setIsRemindersModalOpen] = useState(false);
+    const [remindersList, setRemindersList] = useState([]);
     const [eventEditTarget, setEventEditTarget] = useState(null);
     const [isCancelEventConfirmOpen, setIsCancelEventConfirmOpen] = useState(false);
+    const [eventTick, setEventTick] = useState(0); // For global re-render of expired states
 
     // --- Sleep Mode States ---
     const [isAppAsleep, setIsAppAsleep] = useState(false);
@@ -1100,7 +1114,10 @@ export default function Chat() {
         };
 
         // Register listeners
-        window.addEventListener('mousemove', resetSleepTimer);
+        window.addEventListener('mousemove', () => {
+            resetSleepTimer();
+            if (isAppAsleep) setIsAppAsleep(false);
+        });
         window.addEventListener('keydown', resetSleepTimer);
         window.addEventListener('mousedown', resetSleepTimer);
         window.addEventListener('touchstart', resetSleepTimer);
@@ -1122,6 +1139,74 @@ export default function Chat() {
         };
     }, [selectedUser, selectedGroup, isAppAsleep]); // Re-run when chat changes or when we enter/exit sleep
 
+    const fetchReminders = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) return;
+            const res = await axios.get('/api/chat/events/reminders', { headers: { Authorization: `Bearer ${token}` } });
+            setRemindersList(res.data.events || []);
+        } catch (e) {
+            console.error('Failed to fetch reminders', e);
+        }
+    };
+
+    useEffect(() => {
+        if (!user || isAppAsleep) return;
+        fetchReminders();
+        const interval = setInterval(() => {
+            if (remindersList.length > 0) {
+                const now = new Date();
+                remindersList.forEach(m => {
+                    const ev = m.event;
+                    if (!ev || ev.cancelled) return;
+
+                    let isAttending = false;
+                    if (m.isGroup) {
+                         isAttending = ev.responses && ev.responses.some(r => String(r.user_id._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
+                         if (String(m.sender_id?._id || m.sender_id) === String(user.id)) isAttending = true;
+                    } else {
+                         isAttending = ev.responses && ev.responses.some(r => String(r.user_id._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
+                         if (String(m.user_id?._id || m.user_id) === String(user.id)) isAttending = true;
+                    }
+                    if (!isAttending) return;
+
+                    const startStr = `${ev.startDate.split('T')[0]}T${ev.startTime || '00:00'}`;
+                    const startObj = new Date(startStr);
+                    const diffMs = startObj.getTime() - now.getTime();
+                    
+                    const rt = ev.reminderTiming || 'default';
+                    let targetMs = 24 * 60 * 60 * 1000;
+                    if (rt === '15m') targetMs = 15 * 60 * 1000;
+                    if (rt === '1h') targetMs = 60 * 60 * 1000;
+                    if (rt === '1d') targetMs = 24 * 60 * 60 * 1000;
+                    if (rt === '1m') targetMs = 60 * 1000;
+                    if (rt === 'default') {
+                        if (startObj.toDateString() === now.toDateString()) {
+                            targetMs = 12 * 60 * 60 * 1000;
+                        }
+                    }
+
+                    // trigger if we are exactly at or just passed the threshold
+                    if (diffMs <= targetMs && diffMs > targetMs - 61000) {
+                        const storageKey = `reminder_sent_${m._id || m.id}`;
+                        if (!localStorage.getItem(storageKey)) {
+                            setSnackbar({
+                                message: `Reminder: ${ev.name} starts in ${rt === 'default' ? 'some time' : rt.replace('m', ' min').replace('h', ' hr').replace('d', ' day')}`,
+                                type: 'info',
+                                variant: 'system',
+                                forceShow: true
+                            });
+                            localStorage.setItem(storageKey, 'true');
+                        }
+                    }
+                });
+                
+                // Keep UI updated if events expire
+                setEventTick(prev => prev + 1);
+            }
+        }, 60000);
+        return () => clearInterval(interval);
+    }, [user, isAppAsleep, remindersList, eventTick]);
 
     const isAccountBanned = () => {
         if (!accountBanned) return false;
@@ -2917,8 +3002,8 @@ export default function Chat() {
                 const mutedMap = JSON.parse(localStorage.getItem(mutedKey)) || {};
 
                 if (!mutedMap[senderId]) {
-                    const sender = usersRef.current.find(u => u._id === senderId);
-                    const senderName = sender ? (sender.name || sender.firstName || 'Someone') : 'New Message';
+                    const sender = (usersRef.current || []).find(u => String(u._id || u.id) === String(senderId));
+                    const senderName = sender ? (sender.name || sender.firstName || sender.username || 'Someone') : 'Someone';
                     const senderAvatar = sender ? sender.avatar : null;
 
                     let previewText = 'Sent a message';
@@ -3864,8 +3949,8 @@ export default function Chat() {
                 setShowInputEmojiPicker(false);
             }
             if (attachmentMenuRef.current && !attachmentMenuRef.current.contains(e.target)) {
-                const triggerBtn = e.target.closest('.wa-nav-icon-btn');
-                if (!triggerBtn || (!triggerBtn.innerHTML.includes('Paperclip') && !triggerBtn.innerHTML.includes('Plus'))) {
+                const triggerBtn = e.target.closest('.wa-attachment-trigger-btn');
+                if (!triggerBtn) {
                     setIsAttachmentMenuOpen(false);
                 }
             }
@@ -5660,7 +5745,8 @@ export default function Chat() {
             endTime: eventEndTime,
             location: eventLocation.trim(),
             callOn: eventCallOn,
-            callType: eventCallOn ? eventCallType : null
+            callType: eventCallOn ? eventCallType : null,
+            reminderTiming: eventReminderTiming
         };
 
         const target = selectedUser || selectedGroup;
@@ -5675,6 +5761,15 @@ export default function Chat() {
         if (eventEndDate && endObj < startObj) {
             setSnackbar({
                 message: 'Event cannot end before it starts. Please check your dates and times.',
+                type: 'error',
+                variant: 'system'
+            });
+            return;
+        }
+
+        if (startObj < new Date()) {
+            setSnackbar({
+                message: 'Event start time cannot be in the past.',
                 type: 'error',
                 variant: 'system'
             });
@@ -5736,6 +5831,7 @@ export default function Chat() {
             setEventName('');
             setEventDescription('');
             setEventLocation('');
+            setEventReminderTiming('default');
             setSnackbar({ message: 'Event created!', type: 'success', variant: 'system' });
         } catch (err) {
             console.error('Event send failed:', err);
@@ -5799,6 +5895,7 @@ export default function Chat() {
         setEventName(ev.name || '');
         setEventDescription(ev.description || '');
         setEventLocation(ev.location || '');
+        setEventReminderTiming(ev.reminderTiming || 'default');
         setEventStartDate(ev.startDate || new Date().toISOString().split('T')[0]);
         setEventStartTime(ev.startTime || '11:00');
         setEventEndDate(ev.endDate || '');
@@ -5821,7 +5918,8 @@ export default function Chat() {
                 startDate: eventStartDate,
                 startTime: eventStartTime,
                 endDate: eventEndDate,
-                endTime: eventEndTime
+                endTime: eventEndTime,
+                reminderTiming: eventReminderTiming
             };
 
             // Chronological Validation
@@ -5833,6 +5931,15 @@ export default function Chat() {
             if (eventEndDate && endObj < startObj) {
                 setSnackbar({
                     message: 'Event cannot end before it starts. Please check your dates and times.',
+                    type: 'error',
+                    variant: 'system'
+                });
+                return;
+            }
+
+            if (startObj < new Date()) {
+                setSnackbar({
+                    message: 'Event start time cannot be in the past.',
                     type: 'error',
                     variant: 'system'
                 });
@@ -12674,12 +12781,126 @@ export default function Chat() {
             {isCommunityHomeOpen && renderCommunityHomeDrawer()}
             {isArchivedChatsOpen && renderArchivedChatsDrawer()}
             {isGlobalStarredOpen && renderGlobalStarredDrawer()}
+            {isRemindersModalOpen && (
+                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'white', zIndex: 100, display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', padding: '14px 23px', borderBottom: '1px solid #e9edef', background: '#f0f2f5' }}>
+                        <button style={{ background: 'none', border: 'none', cursor: 'pointer', marginRight: 20 }} onClick={() => setIsRemindersModalOpen(false)}>
+                            <ArrowLeft size={24} color="#54656f" />
+                        </button>
+                        <span style={{ fontSize: '16px', color: '#111b21', fontWeight: 500 }}>Event Reminders</span>
+                    </div>
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px' }}>
+                        {(() => {
+                            const approachingEvents = [];
+                            const allScheduledEvents = [];
+                            const now = new Date();
+
+                            remindersList.forEach((m) => {
+                                const ev = m.event;
+                                if (!ev) return;
+                                
+                                let isAttending = false;
+                                if (m.isGroup) {
+                                     isAttending = ev.responses && ev.responses.some(r => String(r.user_id._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
+                                     if (String(m.sender_id?._id || m.sender_id) === String(user.id)) isAttending = true;
+                                } else {
+                                     isAttending = ev.responses && ev.responses.some(r => String(r.user_id._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
+                                     if (String(m.user_id?._id || m.user_id) === String(user.id)) isAttending = true;
+                                }
+
+                                let isNear = false;
+                                if (isAttending && !ev.cancelled) {
+                                    const startStr = `${ev.startDate.split('T')[0]}T${ev.startTime || '00:00'}`;
+                                    const startObj = new Date(startStr);
+                                    const diffMs = startObj.getTime() - now.getTime();
+                                    
+                                    const rt = ev.reminderTiming || 'default';
+                                    let targetMs = 24 * 60 * 60 * 1000;
+                                    if (rt === '15m') targetMs = 15 * 60 * 1000;
+                                    if (rt === '1h') targetMs = 60 * 60 * 1000;
+                                    if (rt === '1d') targetMs = 24 * 60 * 60 * 1000;
+                                    if (rt === '1m') targetMs = 60 * 1000;
+                                    if (rt === 'default') {
+                                        if (startObj.toDateString() === now.toDateString()) {
+                                            targetMs = 12 * 60 * 60 * 1000;
+                                        }
+                                    }
+                                    if (diffMs > 0 && diffMs <= targetMs) {
+                                        isNear = true;
+                                    }
+                                }
+
+                                allScheduledEvents.push(m);
+                                if (isNear) approachingEvents.push(m);
+                            });
+
+                            const renderEventCard = (m, keyStr, isImportant) => {
+                                const ev = m.event;
+                                const isCancelled = ev.cancelled;
+                                return (
+                                    <div key={keyStr} style={{ padding: '15px', background: isImportant ? '#e6f7ff' : '#f0f2f5', borderRadius: '8px', marginBottom: '10px', border: isImportant ? '1px solid #1890ff' : 'none' }}>
+                                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#111b21', marginBottom: 4 }}>{ev.name}</div>
+                                        {isCancelled ? (
+                                            <div style={{ color: '#ef4444', fontSize: '14px', fontWeight: 'bold' }}>Event Cancelled</div>
+                                        ) : (
+                                            <>
+                                                <div style={{ fontSize: '14px', color: '#54656f', marginBottom: 8 }}>{ev.description}</div>
+                                                <div style={{ fontSize: '13px', color: '#8696a0', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: 2 }}>
+                                                    <Calendar size={14} /> {formatEventTimeString(ev.startDate, ev.startTime, ev.endDate, ev.endTime)}
+                                                </div>
+                                                {ev.location && (
+                                                    <div style={{ fontSize: '13px', color: '#8696a0', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                        <MapPin size={14} /> {ev.location}
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+                                );
+                            };
+
+                            return (
+                                <>
+                                    {approachingEvents.length > 0 && (
+                                        <div style={{ marginBottom: 20 }}>
+                                            <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#0EA5BE', marginBottom: 10, paddingLeft: 4 }}>Upcoming Reminders</div>
+                                            {approachingEvents.map((m, i) => renderEventCard(m, `near-${i}`, true))}
+                                        </div>
+                                    )}
+                                    
+                                    <div>
+                                        <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#54656f', marginBottom: 10, paddingLeft: 4 }}>All Scheduled Events</div>
+                                        {allScheduledEvents.length === 0 ? (
+                                            <div style={{ textAlign: 'center', color: '#8696a0', marginTop: 40 }}>No events scheduled.</div>
+                                        ) : (
+                                            allScheduledEvents.map((m, i) => renderEventCard(m, `all-${i}`, false))
+                                        )}
+                                    </div>
+                                </>
+                            );
+                        })()}
+                    </div>
+                </div>
+            )}
 
 
             {/* Chat List Header */}
             <div className="wa-header" style={{ background: 'white' }}>
                 <span className="wa-header-title">{t('chat_list.title')}</span>
                 <div className="wa-header-icons">
+                    <div style={{ position: 'relative' }}>
+                        <button
+                            className={`wa-nav-icon-btn ${isRemindersModalOpen ? 'active' : ''}`}
+                            title="Reminders"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                fetchReminders();
+                                setIsRemindersModalOpen(true);
+                            }}
+                        >
+                            <Calendar size={20} />
+                        </button>
+                    </div>
                     <div style={{ position: 'relative' }}>
                         <button
                             className={`wa-nav-icon-btn ${showNotificationDetails ? 'active' : ''}`}
@@ -14692,27 +14913,34 @@ export default function Chat() {
                                                                                 <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', position: 'relative', gap: '8px' }}>
                                                                                     {msg.event.cancelled ? (
                                                                                         <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
-                                                                                    ) : (
-                                                                                        <>
-                                                                                            {isMe && (
-                                                                                                <div 
-                                                                                                    onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} 
-                                                                                                    style={{ width: '100%', textAlign: 'center', color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer', paddingBottom: '8px', borderBottom: '1px solid #f0f2f5', marginBottom: '4px' }}
-                                                                                                >
-                                                                                                    Edit event
+                                                                                    ) : (() => {
+                                                                                        const dStr = (msg.event.endDate || msg.event.startDate).split('T')[0];
+                                                                                        const endStr = `${dStr}T${msg.event.endTime || '23:59'}:00`;
+                                                                                        const isEnded = new Date(endStr) <= new Date();
+                                                                                        if (isEnded) return <span key={`ended-p2p-${eventTick}`} style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event ended</span>;
+                                                                                        
+                                                                                        return (
+                                                                                            <>
+                                                                                                {isMe && (
+                                                                                                    <div 
+                                                                                                        onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} 
+                                                                                                        style={{ width: '100%', textAlign: 'center', color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer', paddingBottom: '8px', borderBottom: '1px solid #f0f2f5', marginBottom: '4px' }}
+                                                                                                    >
+                                                                                                        Edit event
+                                                                                                    </div>
+                                                                                                )}
+                                                                                                <div style={{ width: '100%', textAlign: 'center' }}>
+                                                                                                    <div
+                                                                                                        onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
+                                                                                                        style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
+                                                                                                    >
+                                                                                                        {myResponse ? myResponse.status : 'Respond'}
+                                                                                                        <ChevronDown size={18} />
+                                                                                                    </div>
                                                                                                 </div>
-                                                                                            )}
-                                                                                            <div style={{ width: '100%', textAlign: 'center' }}>
-                                                                                                <div
-                                                                                                    onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
-                                                                                                    style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
-                                                                                                >
-                                                                                                    {myResponse ? myResponse.status : 'Respond'}
-                                                                                                    <ChevronDown size={18} />
-                                                                                                </div>
-                                                                                            </div>
-                                                                                        </>
-                                                                                    )}
+                                                                                            </>
+                                                                                        );
+                                                                                    })()}
 
                                                                                     {openEventRespondId === msg._id && !msg.event.cancelled && (
                                                                                         <div style={{
@@ -15032,7 +15260,7 @@ export default function Chat() {
                                                     <div style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '0 4px 0 12px', minHeight: '54px' }}>
                                                         <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
                                                             {renderAttachmentMenu()}
-                                                            <button className="wa-nav-icon-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} data-tooltip="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
+                                                            <button className="wa-nav-icon-btn wa-attachment-trigger-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} data-tooltip="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
                                                                 <Paperclip size={22} color="#54656f" />
                                                             </button>
                                                             <input
@@ -16096,53 +16324,60 @@ export default function Chat() {
                                                                                 <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', position: 'relative', gap: '8px' }}>
                                                                                     {msg.event.cancelled ? (
                                                                                         <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
-                                                                                    ) : (
-                                                                                        <>
-                                                                                            {isMe && (
-                                                                                                <div 
-                                                                                                    onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} 
-                                                                                                    style={{ width: '100%', textAlign: 'center', color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer', paddingBottom: '8px', borderBottom: '1px solid #f0f2f5', marginBottom: '4px' }}
-                                                                                                >
-                                                                                                    Edit event
-                                                                                                </div>
-                                                                                            )}
-                                                                                            <div style={{ width: '100%', textAlign: 'center' }}>
-                                                                                                <div
-                                                                                                    onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
-                                                                                                    style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
-                                                                                                >
-                                                                                                    {myResponse ? myResponse.status : 'Respond'}
-                                                                                                    <ChevronDown size={18} />
-                                                                                                </div>
-                                                                                                {openEventRespondId === msg._id && (
-                                                                                                    <div style={{
-                                                                                                        position: 'absolute',
-                                                                                                        bottom: '100%',
-                                                                                                        left: '50%',
-                                                                                                        transform: 'translateX(-50%)',
-                                                                                                        background: 'white',
-                                                                                                        borderRadius: '8px',
-                                                                                                        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                                                                                                        zIndex: 10,
-                                                                                                        minWidth: '120px',
-                                                                                                        marginBottom: '4px',
-                                                                                                        overflow: 'hidden',
-                                                                                                        border: '1px solid #e9edef'
-                                                                                                    }}>
-                                                                                                        {['Going', 'Maybe', 'Not going'].map(status => (
-                                                                                                            <div
-                                                                                                                key={status}
-                                                                                                                onClick={(e) => { e.stopPropagation(); handleEventRespond(msg, status); setOpenEventRespondId(null); }}
-                                                                                                                style={{ padding: '10px 16px', fontSize: '14px', color: '#111b21', textAlign: 'left', borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none', background: myResponse?.status === status ? '#f0f2f5' : 'white' }}
-                                                                                                            >
-                                                                                                                {status}
-                                                                                                            </div>
-                                                                                                        ))}
+                                                                                    ) : (() => {
+                                                                                        const dStr = (msg.event.endDate || msg.event.startDate).split('T')[0];
+                                                                                        const endStr = `${dStr}T${msg.event.endTime || '23:59'}:00`;
+                                                                                        const isEnded = new Date(endStr) <= new Date();
+                                                                                        if (isEnded) return <span key={`ended-grp-${eventTick}`} style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event ended</span>;
+
+                                                                                        return (
+                                                                                            <>
+                                                                                                {isMe && (
+                                                                                                    <div 
+                                                                                                        onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} 
+                                                                                                        style={{ width: '100%', textAlign: 'center', color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer', paddingBottom: '8px', borderBottom: '1px solid #f0f2f5', marginBottom: '4px' }}
+                                                                                                    >
+                                                                                                        Edit event
                                                                                                     </div>
                                                                                                 )}
-                                                                                            </div>
-                                                                                        </>
-                                                                                    )}
+                                                                                                <div style={{ width: '100%', textAlign: 'center' }}>
+                                                                                                    <div
+                                                                                                        onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
+                                                                                                        style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
+                                                                                                    >
+                                                                                                        {myResponse ? myResponse.status : 'Respond'}
+                                                                                                        <ChevronDown size={18} />
+                                                                                                    </div>
+                                                                                                    {openEventRespondId === msg._id && (
+                                                                                                        <div style={{
+                                                                                                            position: 'absolute',
+                                                                                                            bottom: '100%',
+                                                                                                            left: '50%',
+                                                                                                            transform: 'translateX(-50%)',
+                                                                                                            background: 'white',
+                                                                                                            borderRadius: '8px',
+                                                                                                            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                                                                                            zIndex: 10,
+                                                                                                            minWidth: '120px',
+                                                                                                            marginBottom: '4px',
+                                                                                                            overflow: 'hidden',
+                                                                                                            border: '1px solid #e9edef'
+                                                                                                        }}>
+                                                                                                            {['Going', 'Maybe', 'Not going'].map(status => (
+                                                                                                                <div
+                                                                                                                    key={status}
+                                                                                                                    onClick={(e) => { e.stopPropagation(); handleEventRespond(msg, status); setOpenEventRespondId(null); }}
+                                                                                                                    style={{ padding: '10px 16px', fontSize: '14px', color: '#111b21', textAlign: 'left', borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none', background: myResponse?.status === status ? '#f0f2f5' : 'white' }}
+                                                                                                                >
+                                                                                                                    {status}
+                                                                                                                </div>
+                                                                                                            ))}
+                                                                                                        </div>
+                                                                                                    )}
+                                                                                                </div>
+                                                                                            </>
+                                                                                        );
+                                                                                    })()}
                                                                                 </div>
                                                                             </div>
                                                                         );
@@ -16545,7 +16780,7 @@ export default function Chat() {
                                                     <div style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '0 4px 0 12px', minHeight: '54px' }}>
                                                         <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
                                                             {renderAttachmentMenu()}
-                                                            <button className={`wa-nav-icon-btn ${isAttachmentMenuOpen ? 'active' : ''}`} onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)">
+                                                            <button className={`wa-nav-icon-btn wa-attachment-trigger-btn ${isAttachmentMenuOpen ? 'active' : ''}`} onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)">
                                                                 <Paperclip size={22} color={isAttachmentMenuOpen ? "#0EA5BE" : "#54656f"} />
                                                             </button>
                                                             <input
@@ -17311,6 +17546,24 @@ export default function Chat() {
                                 style={{ width: '100%', border: 'none', borderBottom: '1px solid #dfe5e7', padding: '8px 40px 8px 0', fontSize: '16px', outline: 'none', background: 'transparent', color: '#111b21' }}
                             />
                             <MapPin size={22} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px' }} />
+                        </div>
+                        
+                        {/* Reminder Timing Dropdown */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+                            <div style={{ color: '#111b21', fontSize: '16px' }}>Reminder</div>
+                            <div style={{ position: 'relative' }}>
+                                <select 
+                                    value={eventReminderTiming} 
+                                    onChange={(e) => setEventReminderTiming(e.target.value)} 
+                                    style={{ background: '#f0f2f5', border: 'none', borderRadius: '18px', padding: '6px 16px', color: '#0EA5BE', cursor: 'pointer', outline: 'none' }}
+                                >
+                                    <option value="default">Default auto</option>
+                                    <option value="1m">1 min before (Test)</option>
+                                    <option value="15m">15 mins before</option>
+                                    <option value="1h">1 hour before</option>
+                                    <option value="1d">1 day before</option>
+                                </select>
+                            </div>
                         </div>
 
                         {/* Call Toggle */}
@@ -18714,71 +18967,7 @@ export default function Chat() {
             `}</style>
 
             <div className={`wa-app-container ${(selectedUser || selectedGroup) ? 'chat-active' : 'list-active'}`} style={{ position: 'relative' }}>
-                {/* Sleep Mode Overlay - Now at top level to cover everything including panels */}
-                {isAppAsleep && (
-                    <div 
-                        className="wa-sleep-overlay"
-                        onClick={() => setIsAppAsleep(false)}
-                        style={{
-                            position: 'fixed',
-                            inset: 0,
-                            background: 'rgba(11, 20, 26, 0.96)',
-                            backdropFilter: 'blur(12px)',
-                            zIndex: 60000, // Above everything including panels and snackbars/dropdowns
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            animation: 'wa-fade-in 0.3s ease-out',
-                            cursor: 'pointer'
-                        }}
-                    >
-                        {/* Avatar / Icon */}
-                        {(selectedUser || selectedGroup) && (
-                            <div style={{ marginBottom: '24px', textAlign: 'center' }}>
-                                {selectedUser ? (
-                                    <img 
-                                        src={selectedUser.avatar || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png'} 
-                                        alt="User"
-                                        style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid #3b4a54', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}
-                                    />
-                                ) : (
-                                    <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#0EA5BE', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #3b4a54', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
-                                        <Users size={50} color="white" />
-                                    </div>
-                                )}
-                                <h2 style={{ color: 'white', marginTop: '16px', fontSize: '22px', fontWeight: '600' }}>
-                                    {selectedUser ? selectedUser.name : (() => {
-                                        if (selectedGroup?.name === 'Announcements' && selectedGroup?.community_id) {
-                                            const comm = communities.find(c => String(c._id || c.id) === String(selectedGroup.community_id));
-                                            if (comm) return `${comm.name} Announcements`;
-                                        }
-                                        return selectedGroup?.name || '';
-                                    })()}
-                                </h2>
-                            </div>
-                        )}
 
-                        {/* Neural Chat logo Branding */}
-                        <div style={{ marginBottom: '28px', animation: 'wa-popover-in 0.4s ease-out' }}>
-                            <img src={logo} alt="Neural Chat" style={{ width: '80px', height: '80px' }} />
-                        </div>
-
-                        <div style={{ textAlign: 'center', color: '#8696a0', maxWidth: '400px', padding: '0 20px' }}>
-                            <div style={{ color: '#0EA5BE', fontSize: '19px', fontWeight: '600', marginBottom: '12px', lineHeight: '1.4' }}>
-                                You are diverted out of focus from the screen.
-                            </div>
-                            <div style={{ fontSize: '16px', color: '#8696a0' }}>
-                                Please return to the screen to start the conversation
-                            </div>
-                        </div>
-
-                        {/* Visual indicator of "sleep" */}
-                        <div style={{ position: 'absolute', bottom: '40px', color: '#3b4a54', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '2px' }}>
-                            Encrypted Session Asleep
-                        </div>
-                    </div>
-                )}
                 {renderLeftSidebar()}
                 {isSettingsOpen ? (
                     renderSettingsPanel()
@@ -18789,6 +18978,72 @@ export default function Chat() {
                         <div style={{ flex: 1, display: 'flex', position: 'relative', overflow: 'hidden', height: '100%' }}>
                             {/* Main Chat always mounted to preserve scroll */}
                             {renderMainChat()}
+
+                            {/* Sleep Mode Overlay - Restricted strictly to the Chat Area */}
+                            {isAppAsleep && (selectedUser || selectedGroup) && (
+                                <div 
+                                    className="wa-sleep-overlay"
+                                    onClick={() => setIsAppAsleep(false)}
+                                    style={{
+                                        position: 'absolute',
+                                        inset: 0,
+                                        background: 'rgba(11, 20, 26, 0.96)',
+                                        backdropFilter: 'blur(12px)',
+                                        zIndex: 60000,
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        animation: 'wa-fade-in 0.3s ease-out',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    {/* Avatar / Icon */}
+                                    {(selectedUser || selectedGroup) && (
+                                        <div style={{ marginBottom: '24px', textAlign: 'center' }}>
+                                            {selectedUser ? (
+                                                <img 
+                                                    src={selectedUser.avatar || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png'} 
+                                                    alt="User"
+                                                    style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid #3b4a54', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}
+                                                />
+                                            ) : (
+                                                <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#0EA5BE', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #3b4a54', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
+                                                    <Users size={50} color="white" />
+                                                </div>
+                                            )}
+                                            <h2 style={{ color: 'white', marginTop: '16px', fontSize: '22px', fontWeight: '600' }}>
+                                                {selectedUser ? selectedUser.name : (() => {
+                                                    if (selectedGroup?.name === 'Announcements' && selectedGroup?.community_id) {
+                                                        const comm = communities.find(c => String(c._id || c.id) === String(selectedGroup.community_id));
+                                                        if (comm) return `${comm.name} Announcements`;
+                                                    }
+                                                    return selectedGroup?.name || '';
+                                                })()}
+                                            </h2>
+                                        </div>
+                                    )}
+
+                                    {/* Neural Chat logo Branding */}
+                                    <div style={{ marginBottom: '28px', animation: 'wa-popover-in 0.4s ease-out' }}>
+                                        <img src={logo} alt="Neural Chat" style={{ width: '80px', height: '80px' }} />
+                                    </div>
+
+                                    <div style={{ textAlign: 'center', color: '#8696a0', maxWidth: '400px', padding: '0 20px' }}>
+                                        <div style={{ color: '#0EA5BE', fontSize: '19px', fontWeight: '600', marginBottom: '12px', lineHeight: '1.4' }}>
+                                            You are diverted out of focus from the screen.
+                                        </div>
+                                        <div style={{ fontSize: '16px', color: '#8696a0' }}>
+                                            Please return to the screen to start the conversation
+                                        </div>
+                                    </div>
+
+                                    {/* Visual indicator of "sleep" */}
+                                    <div style={{ position: 'absolute', bottom: '40px', color: '#3b4a54', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '2px' }}>
+                                        Encrypted Session Asleep
+                                    </div>
+                                </div>
+                            )}
 
                             {/* File Preview Overlay (Restricted to Chat Area) */}
                             {file && (
@@ -19585,6 +19840,17 @@ export default function Chat() {
                                     <input type="date" value={eventEndDate} onChange={(e) => setEventEndDate(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', flex: 1 }} />
                                     <input type="time" value={eventEndTime} onChange={(e) => setEventEndTime(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', width: 140 }} />
                                 </div>
+                                <select 
+                                    value={eventReminderTiming} 
+                                    onChange={(e) => setEventReminderTiming(e.target.value)} 
+                                    style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', width: '100%' }}
+                                >
+                                    <option value="default">Default auto reminder</option>
+                                    <option value="1m">1 min before (Test)</option>
+                                    <option value="15m">15 mins before</option>
+                                    <option value="1h">1 hour before</option>
+                                    <option value="1d">1 day before</option>
+                                </select>
                             </div>
 
                             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
