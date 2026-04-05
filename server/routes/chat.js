@@ -648,6 +648,38 @@ router.get('/messages/starred/all', authenticateToken, async (req, res) => {
     }
 });
 
+// Fetch user event reminders
+router.get('/events/reminders', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // All P2P events for the user
+        const p2pEvents = await Message.find({
+            type: 'event',
+            $or: [{ user_id: userId }, { receiver_id: userId }]
+        }).populate('user_id', 'name image').populate('receiver_id', 'name image');
+
+        // All Group events where user is a member
+        const Group = require('../models/Group');
+        const userGroups = await Group.find({ members: userId }).select('_id');
+        const userGroupIds = userGroups.map(g => g._id);
+
+        const groupEvents = await GroupMessage.find({
+            type: 'event',
+            group_id: { $in: userGroupIds }
+        }).populate('sender_id', 'name image').populate('group_id', 'name icon');
+
+        const combined = [
+            ...p2pEvents.map(m => ({ ...m.toObject(), isGroup: false })),
+            ...groupEvents.map(m => ({ ...m.toObject(), isGroup: true }))
+        ].sort((a, b) => new Date(a.event.startDate) - new Date(b.event.startDate));
+
+        res.json({ status: 'success', events: combined });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // POST /api/chat/request-unblock - Request unblock from admin
 router.post('/request-unblock', authenticateToken, async (req, res) => {
     try {

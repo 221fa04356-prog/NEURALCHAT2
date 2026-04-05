@@ -81,7 +81,8 @@ const messageSchema = new mongoose.Schema({
             user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
             status: { type: String, enum: ['Going', 'Maybe', 'Not going'] },
             timestamp: { type: Date, default: Date.now }
-        }]
+        }],
+        reminderTiming: { type: String, default: 'default' }
     },
     edited_at: { type: Date, default: null },
     reactions: [{
