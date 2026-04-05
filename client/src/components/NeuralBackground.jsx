@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 
-const NeuralBackground = () => {
+const NeuralBackground = React.memo(({ isRecording }) => {
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
 
@@ -13,22 +13,23 @@ const NeuralBackground = () => {
         let mouse = { x: null, y: null };
         let animationFrameId;
 
-        // Configuration
+        // Configuration matching LandingBackground exactly
         const config = {
-            baseColor: { r: 14, g: 165, b: 190 }, // #0EA5BE
+            baseColor: { r: 13, g: 159, b: 183 }, // #0D9FB7
             baseConnectionDistance: 110,
             mouseDistance: 200,
             baseSpeed: 0.5
         };
 
         const resize = () => {
-            width = window.innerWidth;
-            height = window.innerHeight;
+            if (!containerRef.current) return;
+            width = containerRef.current.clientWidth || window.innerWidth;
+            height = containerRef.current.clientHeight || window.innerHeight;
             canvas.width = width;
             canvas.height = height;
 
             const area = width * height;
-            const density = 10000;
+            const density = 14000; // Significantly reduced particle count
             const targetCount = Math.floor(area / density);
 
             initParticles(targetCount);
@@ -98,31 +99,45 @@ const NeuralBackground = () => {
             // "Breathing" Web: Connection distance gently expands and contracts over time
             const dynamicConnectionDistance = config.baseConnectionDistance + Math.sin(Date.now() * 0.001) * 25;
 
-            for (let i = 0; i < particles.length; i++) {
+            const n = particles.length;
+
+            // Pre-create buckets for Path2D batching (10 alpha levels x 2 line widths)
+            // This drops `stroke()` calls from ~1500 per frame to exactly 20.
+            const normalBuckets = Array.from({ length: 10 }, () => new Path2D());
+            const hubBuckets = Array.from({ length: 10 }, () => new Path2D());
+
+            for (let i = 0; i < n; i++) {
                 particles[i].update();
                 particles[i].draw();
 
-                for (let j = i + 1; j < particles.length; j++) {
+                for (let j = i + 1; j < n; j++) {
                     const dx = particles[i].x - particles[j].x;
                     const dy = particles[i].y - particles[j].y;
-                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    const dist2 = dx * dx + dy * dy;
 
                     let maxDist = dynamicConnectionDistance;
-                    if (particles[i].isHub || particles[j].isHub) {
+                    const isHubPair = particles[i].isHub || particles[j].isHub;
+                    if (isHubPair) {
                         maxDist *= 1.4; // Hubs connect across larger gaps
                     }
+                    const maxDist2 = maxDist * maxDist;
 
-                    if (distance < maxDist) {
-                        ctx.beginPath();
+                    if (dist2 < maxDist2) {
+                        const distance = Math.sqrt(dist2);
                         const opacity = 1 - (distance / maxDist);
+                        
+                        // Map opacity to bucket index (0 to 9)
+                        let bucketIdx = Math.floor(opacity * 10);
+                        if (bucketIdx > 9) bucketIdx = 9;
+                        if (bucketIdx < 0) bucketIdx = 0;
 
-                        const lineWidth = (particles[i].isHub || particles[j].isHub) ? 1.2 : 0.5;
-
-                        ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${opacity * 0.6})`;
-                        ctx.lineWidth = lineWidth;
-                        ctx.moveTo(particles[i].x, particles[i].y);
-                        ctx.lineTo(particles[j].x, particles[j].y);
-                        ctx.stroke();
+                        if (isHubPair) {
+                            hubBuckets[bucketIdx].moveTo(particles[i].x, particles[i].y);
+                            hubBuckets[bucketIdx].lineTo(particles[j].x, particles[j].y);
+                        } else {
+                            normalBuckets[bucketIdx].moveTo(particles[i].x, particles[i].y);
+                            normalBuckets[bucketIdx].lineTo(particles[j].x, particles[j].y);
+                        }
                     }
                 }
 
@@ -130,9 +145,11 @@ const NeuralBackground = () => {
                 if (mouse.x != null) {
                     const dx = particles[i].x - mouse.x;
                     const dy = particles[i].y - mouse.y;
-                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    const dist2 = dx * dx + dy * dy;
+                    const configMouse2 = config.mouseDistance * config.mouseDistance;
 
-                    if (distance < config.mouseDistance) {
+                    if (dist2 < configMouse2) {
+                        const distance = Math.sqrt(dist2);
                         ctx.beginPath();
                         const opacity = 1 - (distance / config.mouseDistance);
                         ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${opacity * 0.8})`;
@@ -142,18 +159,46 @@ const NeuralBackground = () => {
                         ctx.stroke();
 
                         // Subtle mouse repel effect
-                        if (distance < 50) {
+                        if (dist2 < 2500) { // 50 * 50
                             particles[i].x += dx * 0.02;
                             particles[i].y += dy * 0.02;
                         }
                     }
                 }
             }
+
+            // Draw all normal connections
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i < 10; i++) {
+                const alpha = (i / 10) * 0.6;
+                ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${alpha})`;
+                ctx.stroke(normalBuckets[i]);
+            }
+
+            // Draw all hub connections
+            ctx.lineWidth = 1.2;
+            for (let i = 0; i < 10; i++) {
+                const alpha = (i / 10) * 0.6;
+                ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${alpha})`;
+                ctx.stroke(hubBuckets[i]);
+            }
         }
 
         const handleMouseMove = (e) => {
-            mouse.x = e.clientX;
-            mouse.y = e.clientY;
+            if (!containerRef.current) return;
+            const rect = containerRef.current.getBoundingClientRect();
+            
+            // Handle Chat UI zoom factor if it exists
+            let zoom = 1;
+            const appContainer = document.querySelector('.wa-app-container');
+            if (appContainer && appContainer.style.zoom) {
+                zoom = parseFloat(appContainer.style.zoom);
+            }
+            if (isNaN(zoom) || zoom === 0) zoom = 1;
+
+            // Normalize device screen pixels to unzoomed canvas CSS pixels
+            mouse.x = (e.clientX - rect.left) / zoom;
+            mouse.y = (e.clientY - rect.top) / zoom;
         };
 
         const handleMouseOut = () => {
@@ -181,22 +226,22 @@ const NeuralBackground = () => {
         <div
             ref={containerRef}
             style={{
-                position: 'fixed',
+                position: 'absolute',
                 top: 0,
                 left: 0,
                 width: '100%',
                 height: '100%',
-                zIndex: -1,
+                zIndex: 0,
                 overflow: 'hidden',
-                backgroundColor: '#f5f5f5' // Light Theme Background as per snippet
+                backgroundColor: '#f5f5f5',
+                pointerEvents: 'none',
+                transform: 'translateZ(0)',
+                willChange: 'transform'
             }}
         >
-            <canvas
-                ref={canvasRef}
-                style={{ display: 'block' }}
-            />
+            <canvas ref={canvasRef} style={{ display: 'block' }} />
         </div>
     );
-};
+});
 
 export default NeuralBackground;
