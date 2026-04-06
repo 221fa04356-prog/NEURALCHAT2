@@ -1,0 +1,58 @@
+﻿diff --git a/client/src/pages/Chat.jsx b/client/src/pages/Chat.jsx
+index 2f0481b..e635aed 100644
+--- a/client/src/pages/Chat.jsx
++++ b/client/src/pages/Chat.jsx
+@@ -14051,7 +14051,6 @@ export default function Chat() {
+                     borderRight: (isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? '1px solid #d1d7db' : 'none'
+                 }}
+             >
+-                <NeuralBackground isRecording={isRecording} />
+ 
+                 {selectedUser ? (
+                     <>
+@@ -14112,9 +14111,10 @@ export default function Chat() {
+                         {/* Improved Restriction Banner (Under Header) */}
+                         {selectedUser.requestStatus === 'rejected' && selectedUser.requestUpdatedAt && (new Date() - new Date(selectedUser.requestUpdatedAt)) < 24 * 60 * 60 * 1000 && (
+                             <div style={{
+-                                background: '#fff5f6',
++                                background: 'rgba(255, 245, 246, 0.85)',
++                                backdropFilter: 'blur(8px)',
+                                 padding: '12px 20px',
+-                                borderBottom: '1px solid #fee2e2',
++                                borderBottom: '1px solid rgba(254, 226, 226, 0.5)',
+                                 display: 'flex',
+                                 alignItems: 'center',
+                                 gap: 12,
+@@ -14263,7 +14263,7 @@ export default function Chat() {
+                             );
+                             if (!pendingRequest) return null;
+                             return (
+-                                <div style={{ background: '#f8fafc', padding: '20px', borderBottom: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, boxShadow: 'inset 0 -2px 4px rgba(0,0,0,0.02)' }}>
++                                <div style={{ background: 'rgba(248, 250, 252, 0.85)', backdropFilter: 'blur(8px)', padding: '20px', borderBottom: '1px solid rgba(226, 232, 240, 0.5)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, boxShadow: 'inset 0 -2px 4px rgba(0,0,0,0.02)' }}>
+                                     <div style={{ fontSize: '0.95rem', color: '#334155', textAlign: 'center', fontWeight: '500' }}>
+                                         <span style={{ color: '#0EA5BE', fontWeight: 'bold' }}>{selectedUser.name}</span> wants to message you.
+                                     </div>
+@@ -16853,7 +16853,7 @@ export default function Chat() {
+                         )}
+                     </>
+                 ) : (
+-                    <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#41525d', position: 'relative', zIndex: 5 }}>
++                    <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#41525d', position: 'relative', zIndex: 1, background: 'transparent' }}>
+                         <h2>Neural Chat</h2>
+                         <p style={{ fontSize: 14, marginTop: 10 }}>Send and receive messages without keeping your phone online.</p>
+                     </div>
+@@ -18959,9 +18959,14 @@ export default function Chat() {
+                     to { transform: translateX(-50%) translateY(0); opacity: 1; }
+                 }
+                 .wa-opening-file-status { transition: all 0.3s ease; }
++                .wa-chat-messages-area, .wa-chat-footer { background: transparent !important; }
++                .wa-chat-messages-area.no-bg { background: transparent !important; }
++                .wa-main-chat { background: transparent !important; }
++                .wa-left-panel, .wa-left-sidebar { background: white; z-index: 2; position: relative; }
+             `}</style>
+ 
+             <div className={`wa-app-container ${(selectedUser || selectedGroup) ? 'chat-active' : 'list-active'}`} style={{ position: 'relative' }}>
++                <NeuralBackground isRecording={isRecording} />
+ 
+                 {renderLeftSidebar()}
+                 {isSettingsOpen ? (

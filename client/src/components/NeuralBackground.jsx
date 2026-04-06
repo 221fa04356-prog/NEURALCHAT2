@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 
-const NeuralBackground = React.memo(({ isRecording }) => {
+const NeuralBackground = React.memo(() => {
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
 
@@ -13,12 +13,11 @@ const NeuralBackground = React.memo(({ isRecording }) => {
         let mouse = { x: null, y: null };
         let animationFrameId;
 
-        // Configuration matching LandingBackground exactly
         const config = {
             baseColor: { r: 13, g: 159, b: 183 }, // #0D9FB7
             baseConnectionDistance: 110,
             mouseDistance: 200,
-            baseSpeed: 0.5
+            baseSpeed: 1.0
         };
 
         const resize = () => {
@@ -29,8 +28,8 @@ const NeuralBackground = React.memo(({ isRecording }) => {
             canvas.height = height;
 
             const area = width * height;
-            const density = 14000; // Significantly reduced particle count
-            const targetCount = Math.floor(area / density);
+            const density = 14000;
+            const targetCount = Math.min(Math.floor(area / density), 100);
 
             initParticles(targetCount);
         }
@@ -43,22 +42,16 @@ const NeuralBackground = React.memo(({ isRecording }) => {
                 this.baseSpeed = (Math.random() * 0.6 + 0.2) * config.baseSpeed;
                 this.speed = this.baseSpeed;
                 this.turnSpeed = (Math.random() - 0.5) * 0.015;
-
-                // 12% chance to be a larger central node (Hub)
                 this.isHub = Math.random() > 0.88;
                 this.baseSize = this.isHub ? Math.random() * 2 + 2.5 : Math.random() * 1.2 + 0.8;
                 this.size = this.baseSize;
             }
 
             update() {
-                // Organic wandering behavior (curved paths)
                 this.angle += this.turnSpeed;
-
-                // Move
                 this.x += Math.cos(this.angle) * this.speed;
                 this.y += Math.sin(this.angle) * this.speed;
 
-                // Seamless Infinite Wrap
                 if (this.x < -100) this.x = width + 100;
                 if (this.x > width + 100) this.x = -100;
                 if (this.y < -100) this.y = height + 100;
@@ -66,17 +59,14 @@ const NeuralBackground = React.memo(({ isRecording }) => {
             }
 
             draw() {
-                // Hub Aura Effect
                 if (this.isHub) {
                     ctx.beginPath();
-                    // Subtle breathing pulse for hub auras
                     const pulse = Math.sin(Date.now() * 0.002 + this.x) * 0.5;
                     ctx.arc(this.x, this.y, (this.size * 3) + pulse, 0, Math.PI * 2);
                     ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, 0.1)`;
                     ctx.fill();
                 }
 
-                // Core Node
                 ctx.beginPath();
                 ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
                 const alpha = this.isHub ? 0.9 : 0.5;
@@ -96,13 +86,9 @@ const NeuralBackground = React.memo(({ isRecording }) => {
             animationFrameId = requestAnimationFrame(animate);
             ctx.clearRect(0, 0, width, height);
 
-            // "Breathing" Web: Connection distance gently expands and contracts over time
             const dynamicConnectionDistance = config.baseConnectionDistance + Math.sin(Date.now() * 0.001) * 25;
-
             const n = particles.length;
 
-            // Pre-create buckets for Path2D batching (10 alpha levels x 2 line widths)
-            // This drops `stroke()` calls from ~1500 per frame to exactly 20.
             const normalBuckets = Array.from({ length: 10 }, () => new Path2D());
             const hubBuckets = Array.from({ length: 10 }, () => new Path2D());
 
@@ -118,15 +104,14 @@ const NeuralBackground = React.memo(({ isRecording }) => {
                     let maxDist = dynamicConnectionDistance;
                     const isHubPair = particles[i].isHub || particles[j].isHub;
                     if (isHubPair) {
-                        maxDist *= 1.4; // Hubs connect across larger gaps
+                        maxDist *= 1.4;
                     }
                     const maxDist2 = maxDist * maxDist;
 
                     if (dist2 < maxDist2) {
                         const distance = Math.sqrt(dist2);
                         const opacity = 1 - (distance / maxDist);
-                        
-                        // Map opacity to bucket index (0 to 9)
+
                         let bucketIdx = Math.floor(opacity * 10);
                         if (bucketIdx > 9) bucketIdx = 9;
                         if (bucketIdx < 0) bucketIdx = 0;
@@ -141,7 +126,6 @@ const NeuralBackground = React.memo(({ isRecording }) => {
                     }
                 }
 
-                // Mouse Repel / Connect
                 if (mouse.x != null) {
                     const dx = particles[i].x - mouse.x;
                     const dy = particles[i].y - mouse.y;
@@ -158,8 +142,7 @@ const NeuralBackground = React.memo(({ isRecording }) => {
                         ctx.lineTo(mouse.x, mouse.y);
                         ctx.stroke();
 
-                        // Subtle mouse repel effect
-                        if (dist2 < 2500) { // 50 * 50
+                        if (dist2 < 2500) {
                             particles[i].x += dx * 0.02;
                             particles[i].y += dy * 0.02;
                         }
@@ -167,7 +150,6 @@ const NeuralBackground = React.memo(({ isRecording }) => {
                 }
             }
 
-            // Draw all normal connections
             ctx.lineWidth = 0.5;
             for (let i = 0; i < 10; i++) {
                 const alpha = (i / 10) * 0.6;
@@ -175,7 +157,6 @@ const NeuralBackground = React.memo(({ isRecording }) => {
                 ctx.stroke(normalBuckets[i]);
             }
 
-            // Draw all hub connections
             ctx.lineWidth = 1.2;
             for (let i = 0; i < 10; i++) {
                 const alpha = (i / 10) * 0.6;
@@ -187,18 +168,10 @@ const NeuralBackground = React.memo(({ isRecording }) => {
         const handleMouseMove = (e) => {
             if (!containerRef.current) return;
             const rect = containerRef.current.getBoundingClientRect();
-            
-            // Handle Chat UI zoom factor if it exists
-            let zoom = 1;
-            const appContainer = document.querySelector('.wa-app-container');
-            if (appContainer && appContainer.style.zoom) {
-                zoom = parseFloat(appContainer.style.zoom);
-            }
-            if (isNaN(zoom) || zoom === 0) zoom = 1;
 
-            // Normalize device screen pixels to unzoomed canvas CSS pixels
-            mouse.x = (e.clientX - rect.left) / zoom;
-            mouse.y = (e.clientY - rect.top) / zoom;
+            // Normalize exactly as LandingBackground
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
         };
 
         const handleMouseOut = () => {
@@ -210,7 +183,6 @@ const NeuralBackground = React.memo(({ isRecording }) => {
         window.addEventListener('mousemove', handleMouseMove);
         window.addEventListener('mouseout', handleMouseOut);
 
-        // Start Application
         resize();
         animate();
 

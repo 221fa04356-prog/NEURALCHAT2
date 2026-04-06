@@ -642,7 +642,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                                     {(userData?.name || 'M')[0].toUpperCase()}
                                 </div>
                             )}
-                            <div className="wa-voice-mic-badge" style={{ position: 'absolute', bottom: '-2px', right: '-2px', width: '14px', height: '14px', background: 'white', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>
+                            <div className="wa-voice-mic-badge" style={{ position: 'absolute', bottom: '-2px', right: '-2px', width: '14px', height: '14px', background: 'transparent', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>
                                 <Mic size={10} color="#8696a0" />
                             </div>
                         </div>
@@ -6995,7 +6995,7 @@ export default function Chat() {
 
     const renderProfileDrawer = () => (
         <div className={`wa-profile-drawer ${isProfileOpen ? 'active' : ''}`}>
-            <div className="wa-drawer-header" style={{ position: 'relative', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px', background: 'white', borderBottom: 'none' }}>
+            <div className="wa-drawer-header" style={{ position: 'relative', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px', background: 'transparent', borderBottom: 'none' }}>
 
                 <span style={{
                     position: 'absolute',
@@ -7010,10 +7010,10 @@ export default function Chat() {
                 </span>
             </div>
             {/* Continuous White Content Area */}
-            <div className="wa-drawer-content" style={{ background: 'white', overflowY: 'auto' }}>
+            <div className="wa-drawer-content" style={{ background: 'transparent', overflowY: 'auto' }}>
 
                 {/* Profile Pic - Centered */}
-                <div className="wa-profile-pic-section" style={{ background: 'white', padding: '40px 0 30px', display: 'flex', justifyContent: 'center' }}>
+                <div className="wa-profile-pic-section" style={{ background: 'transparent', padding: '40px 0 30px', display: 'flex', justifyContent: 'center' }}>
                     <div style={{ position: 'relative', width: 160, height: 160 }}>
                         {userData.image ? (
                             <img src={userData.image} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
@@ -7122,7 +7122,7 @@ export default function Chat() {
 
         return (
             <div className={`wa-profile-drawer wa-new-chat-drawer ${isNewChatOpen ? 'active' : ''}`}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef', boxSizing: 'border-box', width: '100%' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid #e9edef', boxSizing: 'border-box', width: '100%' }}>
                     <button
                         onClick={() => setIsNewChatOpen(false)}
                         style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 10, display: 'flex', alignItems: 'center', width: 32, padding: 0, flexShrink: 0 }}
@@ -7139,7 +7139,7 @@ export default function Chat() {
                     </button>
                 </div>
 
-                <div className="wa-drawer-content" style={{ background: 'white', overflowY: 'auto', flex: 1 }}>
+                <div className="wa-drawer-content" style={{ background: 'transparent', overflowY: 'auto', flex: 1 }}>
                     {/* Search Bar */}
                     <div style={{ padding: '10px 16px' }}>
                         <div className="wa-search-bar" style={{ background: '#f0f2f5', borderRadius: 24, padding: '6px 12px', display: 'flex', alignItems: 'center', position: 'relative' }}>
@@ -7258,7 +7258,7 @@ export default function Chat() {
         return (
             <div className={`wa-profile-drawer wa-new-chat-drawer ${isPhoneNumberPanelOpen ? 'active' : ''}`}>
                 {/* 1st Pic: Header with Back Arrow and "Phone number" */}
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef', boxSizing: 'border-box', width: '100%' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid #e9edef', boxSizing: 'border-box', width: '100%' }}>
                     <button
                         onClick={() => { setIsPhoneNumberPanelOpen(false); setPhoneNumberInput(''); }}
                         style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 10, display: 'flex', alignItems: 'center', width: 32, padding: 0, flexShrink: 0 }}
@@ -7268,7 +7268,7 @@ export default function Chat() {
                     <span style={{ fontSize: 19, fontWeight: 500, color: '#3b4a54', whiteSpace: 'nowrap', flexShrink: 0 }}>Phone number</span>
                 </div>
 
-                <div className="wa-drawer-content" style={{ background: 'white', display: 'flex', flexDirection: 'column', height: '100%' }}>
+                <div className="wa-drawer-content" style={{ background: 'transparent', display: 'flex', flexDirection: 'column', height: '100%' }}>
                     {/* Input area with Green Bottom Border - Always visible */}
                     <div style={{ padding: '20px 30px' }}>
                         <div style={{ borderBottom: '2px solid #0EA5BE', paddingBottom: '10px' }}>
@@ -7419,7 +7419,7 @@ export default function Chat() {
 
         return (
             <div className={`wa-profile-drawer wa-new-chat-drawer ${isArchivedChatsOpen ? 'active' : ''}`}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef', boxSizing: 'border-box', width: '100%' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid #e9edef', boxSizing: 'border-box', width: '100%' }}>
                     <button
                         onClick={() => { setIsArchivedChatsOpen(false); }}
                         style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', width: 32, padding: 0, flexShrink: 0 }}
@@ -7429,7 +7429,7 @@ export default function Chat() {
                     <span style={{ fontSize: 19, fontWeight: 500, color: '#3b4a54', whiteSpace: 'nowrap', flexShrink: 0 }}>{t('chat_list.archived')}</span>
                 </div>
 
-                <div className="wa-drawer-content wa-user-list" onScroll={() => setOpenDropdown(null)} style={{ background: 'white', display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
+                <div className="wa-drawer-content wa-user-list" onScroll={() => setOpenDropdown(null)} style={{ background: 'transparent', display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
                     {allArchived.length === 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#8696a0', padding: 40, textAlign: 'center' }}>
                             <Archive size={48} style={{ marginBottom: 20, opacity: 0.5 }} />
@@ -7531,7 +7531,7 @@ export default function Chat() {
     const renderGlobalStarredDrawer = () => {
         return (
             <div className={`wa-profile-drawer wa-new-chat-drawer ${isGlobalStarredOpen ? 'active' : ''}`}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef', boxSizing: 'border-box', width: '100%' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid #e9edef', boxSizing: 'border-box', width: '100%' }}>
                     <button
                         onClick={() => { setIsGlobalStarredOpen(false); }}
                         style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', width: 32, padding: 0, flexShrink: 0 }}
@@ -7596,7 +7596,7 @@ export default function Chat() {
                             const communityName = communityOfGroup?.name;
 
                             return (
-                                <div key={idx} className="wa-starred-item" onClick={() => navigateToMessage(msg)} style={{ margin: '8px 12px', background: 'white', borderRadius: '8px', boxShadow: '0 1px 1px 0 rgba(11,20,26,.06)', cursor: 'pointer' }}>
+                                <div key={idx} className="wa-starred-item" onClick={() => navigateToMessage(msg)} style={{ margin: '8px 12px', background: 'transparent', borderRadius: '8px', boxShadow: '0 1px 1px 0 rgba(11,20,26,.06)', cursor: 'pointer' }}>
                                     <div className="wa-starred-item-header" style={{ padding: '12px 12px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                                         <div className="wa-starred-names" style={{ fontSize: '13px', color: '#54656f', display: 'flex', alignItems: 'center', gap: '4px', flex: 1, overflow: 'hidden' }}>
                                             <span style={{ fontWeight: '500', whiteSpace: 'nowrap' }}>{senderName}</span>
@@ -7742,7 +7742,7 @@ export default function Chat() {
         if (newGroupStep === 2) {
             return (
                 <div className={`${rootClass} wa-new-group-drawer ${isOpen ? 'active' : ''}`} style={extraStyle}>
-                    <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'white', borderBottom: 'none' }}>
+                    <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'transparent', borderBottom: 'none' }}>
                         <button onClick={() => { setNewGroupStep(1); setGroupIcon(null); }} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0, width: 40 }}>
                             <ArrowLeft size={24} />
                         </button>
@@ -7752,7 +7752,7 @@ export default function Chat() {
                         <div style={{ width: 40 }}></div>
                     </div>
 
-                    <div className="wa-drawer-content" style={{ background: 'white', overflowY: 'auto', flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+                    <div className="wa-drawer-content" style={{ background: 'transparent', overflowY: 'auto', flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>
                         <div className="wa-group-details-body" style={{ padding: '20px 0' }}>
                             <div className="wa-group-icon-picker-container" style={{ position: 'relative', marginBottom: 25 }}>
                                 <div className={`wa-group-icon-picker ${groupIcon ? 'has-icon' : ''}`} onClick={(e) => { e.stopPropagation(); setIsGroupIconMenuOpen(!isGroupIconMenuOpen); }}>
@@ -7871,7 +7871,7 @@ export default function Chat() {
 
             return (
                 <div className={`${rootClass} wa-new-group-drawer ${isOpen ? 'active' : ''}`} style={extraStyle}>
-                    <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'white', borderBottom: 'none' }}>
+                    <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'transparent', borderBottom: 'none' }}>
                         <button onClick={() => setNewGroupStep(2)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0, width: 40 }}>
                             <ArrowLeft size={24} />
                         </button>
@@ -7881,7 +7881,7 @@ export default function Chat() {
                         <div style={{ width: 40 }}></div>
                     </div>
 
-                    <div className="wa-drawer-content" style={{ background: 'white', overflowY: 'auto', flex: 1, position: 'relative' }}>
+                    <div className="wa-drawer-content" style={{ background: 'transparent', overflowY: 'auto', flex: 1, position: 'relative' }}>
                         <div className="wa-perms-container">
                             <div className="wa-perms-section-label">{t('new_chat.members_can')}</div>
                             <PermissionItem
@@ -7955,7 +7955,7 @@ export default function Chat() {
 
         return (
             <div className={`${rootClass} wa-new-group-drawer ${isOpen ? 'active' : ''}`} style={extraStyle}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'white', borderBottom: 'none', gap: 0 }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'transparent', borderBottom: 'none', gap: 0 }}>
                     <button onClick={() => { if (isRightSide) setIsCommunityNewGroupOpen(false); else setIsNewGroupOpen(false); setSelectedGroupMembers([]); setNewGroupStep(1); setGroupSubject(''); }} style={{ background: 'none', border: 'none', color: '#0EA5BE', cursor: 'pointer', display: 'flex', alignItems: 'center', fontSize: 16, fontWeight: 500, padding: 0 }}>
                         Close
                     </button>
@@ -7965,7 +7965,7 @@ export default function Chat() {
                     <div style={{ width: 45 }}></div>
                 </div>
 
-                <div className="wa-drawer-content" style={{ background: 'white', overflowY: 'auto', flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+                <div className="wa-drawer-content" style={{ background: 'transparent', overflowY: 'auto', flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>
                     {/* Selected Members PILE */}
                     <div style={{ padding: '10px 16px', borderBottom: '1px solid #e9edef', minHeight: 60 }}>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
@@ -8227,7 +8227,7 @@ export default function Chat() {
                 <div style={{ justifySelf: 'end' }} />
             </div>
 
-            <div style={{ padding: '20px 15px', background: 'white', flex: 1, overflowY: 'auto' }}>
+            <div style={{ padding: '20px 15px', background: 'transparent', flex: 1, overflowY: 'auto' }}>
 
                 <div style={{ background: '#f0f2f5', borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center' }}>
                     <Search size={20} color="#54656f" style={{ marginRight: 12 }} />
@@ -8289,7 +8289,7 @@ export default function Chat() {
         if (communityStep === 0) {
             return (
                 <div className={`wa-profile-drawer wa-new-community-drawer ${isNewCommunityOpen ? 'active' : ''}`}>
-                    <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef', position: 'relative' }}>
+                    <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid #e9edef', position: 'relative' }}>
                         <button onClick={() => setIsNewCommunityOpen(false)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', position: 'absolute', left: 12, display: 'flex', alignItems: 'center', padding: 0, zIndex: 1 }}>
                             <ArrowLeft size={24} />
                         </button>
@@ -8298,10 +8298,10 @@ export default function Chat() {
                         </div>
                     </div>
 
-                    <div className="wa-drawer-content" style={{ background: 'white', padding: '40px 30px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', flex: 1 }}>
+                    <div className="wa-drawer-content" style={{ background: 'transparent', padding: '40px 30px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', flex: 1 }}>
                         <div style={{ marginBottom: 40, width: 220, height: 220, background: '#f8f9fa', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
                             {/* Illustration Wrapper matching Picture 1 */}
-                            <div style={{ width: 140, height: 160, background: 'white', borderRadius: '16px', border: '1px solid #e9edef', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
+                            <div style={{ width: 140, height: 160, background: 'transparent', borderRadius: '16px', border: '1px solid #e9edef', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
                                 <div style={{ height: 40, width: '100%', background: '#fdf7e7', display: 'flex', alignItems: 'center', padding: '0 10px' }}>
                                     <div style={{ width: 10, height: 10, background: '#e9edef', borderRadius: '50%' }}></div>
                                 </div>
@@ -8350,7 +8350,7 @@ export default function Chat() {
         // Step 1: Input details (Picture 3 & 4)
         return (
             <div className={`wa-profile-drawer wa-new-community-drawer ${isNewCommunityOpen ? 'active' : ''}`}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef', position: 'relative' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid #e9edef', position: 'relative' }}>
                     <button onClick={() => setCommunityStep(0)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', position: 'absolute', left: 12, display: 'flex', alignItems: 'center', padding: 0, zIndex: 1 }}>
                         <ArrowLeft size={24} />
                     </button>
@@ -8359,7 +8359,7 @@ export default function Chat() {
                     </div>
                 </div>
 
-                <div className="wa-drawer-content" style={{ background: 'white', flex: 1, padding: 0, display: 'flex', flexDirection: 'column' }}>
+                <div className="wa-drawer-content" style={{ background: 'transparent', flex: 1, padding: 0, display: 'flex', flexDirection: 'column' }}>
 
                     <div style={{ padding: '40px 30px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                         {/* Icon Picker - Rounded Square as per Picture 3 */}
@@ -8526,7 +8526,7 @@ export default function Chat() {
 
         return (
             <div className={`wa-profile-drawer wa-community-home-drawer ${isCommunityHomeOpen ? 'active' : ''}`}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid #e9edef' }}>
                     <button onClick={() => setIsCommunityHomeOpen(false)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
                         <ArrowLeft size={24} />
                     </button>
@@ -8558,7 +8558,7 @@ export default function Chat() {
                     </button>
                 </div>
 
-                <div className="wa-drawer-content" style={{ background: 'white', flex: 1, padding: 0, display: 'flex', flexDirection: 'column' }}>
+                <div className="wa-drawer-content" style={{ background: 'transparent', flex: 1, padding: 0, display: 'flex', flexDirection: 'column' }}>
                     {isRemovedFromCommunity(selectedCommunity) && (
                         <div style={{ background: '#F8F9FA', padding: '16px 20px', borderBottom: '1px solid #E9EDEF', textAlign: 'center' }}>
                             <p style={{ margin: 0, color: '#667781', fontSize: '14px', fontWeight: 500 }}>
@@ -8946,7 +8946,7 @@ export default function Chat() {
 
         return (
             <div className={`wa-contact-info-panel ${isContactInfoOpen ? 'active' : ''}`}>
-                <div className="wa-contact-info-header" style={{ position: 'relative', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px', borderBottom: '1px solid #e9edef', background: 'white' }}>
+                <div className="wa-contact-info-header" style={{ position: 'relative', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px', borderBottom: '1px solid #e9edef', background: 'transparent' }}>
 
                     <button className="wa-contact-info-close-btn" onClick={() => setIsContactInfoOpen(false)} style={{ position: 'absolute', left: 16, zIndex: 10, background: 'none', border: 'none', cursor: 'pointer' }}>
                         <span style={{ fontSize: 16, color: '#0EA5BE', fontWeight: 500 }}>{t('lang_confirm.cancel')}</span>
@@ -9587,7 +9587,7 @@ export default function Chat() {
                                     <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'default', opacity: infoMessage.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
                                         <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
                                             <div style={{ display: 'flex', gap: '14px' }}>
-                                                <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                <div style={{ background: 'transparent', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                                     <Calendar size={24} color="#0EA5BE" />
                                                 </div>
                                                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -10044,7 +10044,7 @@ export default function Chat() {
                     return (
                         <iframe
                             src={`${viewingImage.file_path}#toolbar=0`}
-                            style={{ width: '80%', height: '80%', background: 'white', border: 'none', borderRadius: 8 }}
+                            style={{ width: '80%', height: '80%', background: 'transparent', border: 'none', borderRadius: 8 }}
                             title="PDF Preview"
                         />
                     );
@@ -10453,7 +10453,7 @@ export default function Chat() {
                 right: (type.includes('header') || type === 'sidebar_menu' || type === 'snackbar_menu') ? (vWidth - mouseX - 10) : 'auto',
                 zIndex: 10002,
                 minWidth: 240,
-                background: 'white',
+                background: 'transparent',
                 borderRadius: '12px',
                 boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
                 padding: '8px 0',
@@ -10643,7 +10643,7 @@ export default function Chat() {
 
         return (
             <div className={`wa-contact-info-panel wa-manage-groups-drawer ${isCommunityGroupsListOpen ? 'active' : ''}`} style={{ background: '#f0f2f5', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', background: 'white', borderBottom: '1px solid #e9edef' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', background: 'transparent', borderBottom: '1px solid #e9edef' }}>
                     <button onClick={() => setIsCommunityGroupsListOpen(false)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0, width: 24 }}>
                         <X size={24} />
                     </button>
@@ -10652,7 +10652,7 @@ export default function Chat() {
                 </div>
 
                 <div className="wa-drawer-content" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ background: 'white', marginBottom: 12 }}>
+                    <div style={{ background: 'transparent', marginBottom: 12 }}>
                         {checkAddGroupPermission(community, false) && (
                             <div
                                 className="wa-manage-groups-item"
@@ -10703,7 +10703,7 @@ export default function Chat() {
                             return (
                                 <div key={String(gId)}
                                     className="wa-manage-groups-item"
-                                    style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid #f0f2f5', background: 'white' }}
+                                    style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid #f0f2f5', background: 'transparent' }}
                                     onClick={() => {
                                         setIsCommunityGroupsListOpen(false);
                                         setSelectedGroup(g);
@@ -10723,7 +10723,7 @@ export default function Chat() {
                         })}
                     </div>
 
-                    <div style={{ padding: '0', background: 'white', flex: 1 }}>
+                    <div style={{ padding: '0', background: 'transparent', flex: 1 }}>
                         <div
                             className="wa-manage-groups-item"
                             style={{ padding: '15px 20px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid #f0f2f5' }}
@@ -10750,7 +10750,7 @@ export default function Chat() {
 
         return (
             <div className={`wa-contact-info-panel wa-manage-groups-drawer ${isManageGroupsOpen ? 'active' : ''}`} style={{ background: '#f0f2f5', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid #e9edef' }}>
                     <button onClick={() => { setIsManageGroupsOpen(false); if (!selectedCommunity && community) setSelectedCommunity(community); }} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
                         <ArrowLeft size={24} />
                     </button>
@@ -10760,7 +10760,7 @@ export default function Chat() {
                 </div>
 
                 <div className="wa-drawer-content" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ background: 'white', marginBottom: 12 }}>
+                    <div style={{ background: 'transparent', marginBottom: 12 }}>
                         <div
                             className="wa-manage-groups-item"
                             style={{ padding: '15px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid #f0f2f5' }}
@@ -10814,7 +10814,7 @@ export default function Chat() {
                                 const g = fullGroup || (typeof gItem === 'object' ? gItem : null);
                                 if (!g) return null;
                                 return (
-                                    <div key={String(gId)} style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid #f0f2f5', background: 'white' }}>
+                                    <div key={String(gId)} style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid #f0f2f5', background: 'transparent' }}>
                                         <div style={{ width: 44, height: 44, borderRadius: '12px', background: '#f0f2f5', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                             {g.icon ? <img src={g.icon} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Users size={22} color="#8696a0" />}
                                         </div>
@@ -10846,7 +10846,7 @@ export default function Chat() {
                     ) : (
                         <div style={{ padding: '40px 30px', textAlign: 'center', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                             <div style={{ marginBottom: 30, display: 'flex', justifyContent: 'center' }}>
-                                <div style={{ width: 140, height: 160, background: 'white', borderRadius: '16px', border: '1px solid #e9edef', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
+                                <div style={{ width: 140, height: 160, background: 'transparent', borderRadius: '16px', border: '1px solid #e9edef', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
                                     <div style={{ height: 40, width: '100%', background: '#fdf7e7', display: 'flex', alignItems: 'center', padding: '0 10px' }}>
                                         <div style={{ width: 10, height: 10, background: '#e9edef', borderRadius: '50%' }}></div>
                                     </div>
@@ -10882,8 +10882,8 @@ export default function Chat() {
         );
 
         return (
-            <div className={`wa-contact-info-panel wa-add-existing-groups-drawer ${isAddExistingGroupsOpen ? 'active' : ''}`} style={{ background: 'white', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef' }}>
+            <div className={`wa-contact-info-panel wa-add-existing-groups-drawer ${isAddExistingGroupsOpen ? 'active' : ''}`} style={{ background: 'transparent', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid #e9edef' }}>
                     <button onClick={() => { if (showAddGroupsSearch) { setShowAddGroupsSearch(false); setAddGroupsSearchQuery(''); } else { setIsAddExistingGroupsOpen(false); setShowAddGroupsSearch(false); } }} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
                         <ArrowLeft size={24} />
                     </button>
@@ -10979,8 +10979,8 @@ export default function Chat() {
         const subTextColor = '#667781';
 
         return (
-            <div className={`wa-contact-info-panel wa-confirm-add-groups-drawer ${isConfirmAddGroupsOpen ? 'active' : ''}`} style={{ background: 'white', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef' }}>
+            <div className={`wa-contact-info-panel wa-confirm-add-groups-drawer ${isConfirmAddGroupsOpen ? 'active' : ''}`} style={{ background: 'transparent', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid #e9edef' }}>
                     <button onClick={() => setIsConfirmAddGroupsOpen(false)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
                         <ArrowLeft size={24} />
                     </button>
@@ -11420,7 +11420,7 @@ export default function Chat() {
                     overflow: 'hidden'
                 }}
             >
-                <div className="wa-contact-info-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'white', borderBottom: thinDivider, color: textColor, flexShrink: 0 }}>
+                <div className="wa-contact-info-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'transparent', borderBottom: thinDivider, color: textColor, flexShrink: 0 }}>
                     <button
                         onClick={() => {
                             setIsCommunityInfoOpen(false);
@@ -11674,7 +11674,7 @@ export default function Chat() {
                                             <div style={{
                                                 display: 'flex',
                                                 alignItems: 'center',
-                                                background: 'white',
+                                                background: 'transparent',
                                                 borderRadius: 8,
                                                 padding: '0 2px 0 10px',
                                                 flex: 1,
@@ -11957,7 +11957,7 @@ export default function Chat() {
                     <div style={{ width: 60 }} /> {/* Spacer to balance the Close button */}
                 </div>
 
-                <div className="wa-contact-info-content" style={{ background: 'white', overflowX: 'visible' }}>
+                <div className="wa-contact-info-content" style={{ background: 'transparent', overflowX: 'visible' }}>
                     <div style={{ padding: '28px 20px', boxSizing: 'border-box' }}>
 
                         {/* Name Fields */}
@@ -12016,7 +12016,7 @@ export default function Chat() {
                                         </button>
 
                                         {isCountryDropdownOpen && (
-                                            <div className="wa-country-dropdown" style={{ position: 'absolute', top: '100%', left: 0, width: '250px', maxHeight: '300px', overflowY: 'auto', background: 'white', border: '1px solid #e9edef', boxShadow: '0 2px 5px rgba(0,0,0,0.1)', zIndex: 100 }}>
+                                            <div className="wa-country-dropdown" style={{ position: 'absolute', top: '100%', left: 0, width: '250px', maxHeight: '300px', overflowY: 'auto', background: 'transparent', border: '1px solid #e9edef', boxShadow: '0 2px 5px rgba(0,0,0,0.1)', zIndex: 100 }}>
                                                 {countryCodes.sort((a, b) => a.name.localeCompare(b.name)).map(c => (
                                                     <div
                                                         key={`${c.isoCode}-${c.dialCode}`}
@@ -12087,7 +12087,7 @@ export default function Chat() {
                                         }}
                                     >
                                         <div style={{
-                                            width: 14, height: 14, borderRadius: '50%', background: 'white',
+                                            width: 14, height: 14, borderRadius: '50%', background: 'transparent',
                                             position: 'absolute', top: 3, left: isSyncEnabled ? 23 : 3, transition: '0.3s'
                                         }} />
                                     </div>
@@ -12584,7 +12584,7 @@ export default function Chat() {
     };
 
     const renderAddToListModal = () => (
-        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'white', zIndex: 110, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'transparent', zIndex: 110, display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', padding: '14px 23px', borderBottom: '1px solid #e9edef', background: '#f0f2f5' }}>
                 <button style={{ background: 'none', border: 'none', cursor: 'pointer', marginRight: 20 }} onClick={() => setIsAddToListModalOpen(false)}>
                     <X size={24} color="#54656f" />
@@ -12659,7 +12659,7 @@ export default function Chat() {
 
     const renderCreateListDrawer = () => (
         <div className={`wa-drawer ${isCreateListOpen ? 'open' : ''}`} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 100, display: 'flex', flexDirection: 'column', background: '#f0f2f5' }}>
-            <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'white', borderBottom: '1px solid #e9edef', position: 'relative', padding: '0 20px' }}>
+            <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', borderBottom: '1px solid #e9edef', position: 'relative', padding: '0 20px' }}>
                 <button className="wa-back-btn" style={{ position: 'absolute', left: 20, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center' }} onClick={() => setIsCreateListOpen(false)}>
                     <ArrowLeft size={24} color="#54656f" />
                 </button>
@@ -12777,7 +12777,7 @@ export default function Chat() {
             {isArchivedChatsOpen && renderArchivedChatsDrawer()}
             {isGlobalStarredOpen && renderGlobalStarredDrawer()}
             {isRemindersModalOpen && (
-                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'white', zIndex: 100, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'transparent', zIndex: 100, display: 'flex', flexDirection: 'column' }}>
                     <div style={{ display: 'flex', alignItems: 'center', padding: '14px 23px', borderBottom: '1px solid #e9edef', background: '#f0f2f5' }}>
                         <button style={{ background: 'none', border: 'none', cursor: 'pointer', marginRight: 20 }} onClick={() => setIsRemindersModalOpen(false)}>
                             <ArrowLeft size={24} color="#54656f" />
@@ -12880,7 +12880,7 @@ export default function Chat() {
 
 
             {/* Chat List Header */}
-            <div className="wa-header" style={{ background: 'white' }}>
+            <div className="wa-header" style={{ background: 'transparent' }}>
                 <span className="wa-header-title">{t('chat_list.title')}</span>
                 <div className="wa-header-icons">
                     <div style={{ position: 'relative' }}>
@@ -14051,11 +14051,12 @@ export default function Chat() {
                     borderRight: (isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? '1px solid #d1d7db' : 'none'
                 }}
             >
+                <NeuralBackground isRecording={isRecording} />
 
                 {selectedUser ? (
                     <>
                         {/* Header */}
-                        <div className="wa-chat-header" style={{ background: 'white' }}>
+                        <div className="wa-chat-header" style={{ background: 'transparent' }}>
                             <div className="wa-chat-header-user">
                                 {/* Mobile Back Button */}
                                 <button
@@ -14111,10 +14112,9 @@ export default function Chat() {
                         {/* Improved Restriction Banner (Under Header) */}
                         {selectedUser.requestStatus === 'rejected' && selectedUser.requestUpdatedAt && (new Date() - new Date(selectedUser.requestUpdatedAt)) < 24 * 60 * 60 * 1000 && (
                             <div style={{
-                                background: 'rgba(255, 245, 246, 0.85)',
-                                backdropFilter: 'blur(8px)',
+                                background: '#fff5f6',
                                 padding: '12px 20px',
-                                borderBottom: '1px solid rgba(254, 226, 226, 0.5)',
+                                borderBottom: '1px solid #fee2e2',
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: 12,
@@ -14192,7 +14192,7 @@ export default function Chat() {
                             }
 
                             return (
-                                <div className="wa-pinned-messages-banner" style={{ background: 'white', padding: '8px 16px', borderBottom: '1px solid #d1d7db', display: 'flex', alignItems: 'center', zIndex: 10, position: 'relative', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+                                <div className="wa-pinned-messages-banner" style={{ background: 'transparent', padding: '8px 16px', borderBottom: '1px solid #d1d7db', display: 'flex', alignItems: 'center', zIndex: 10, position: 'relative', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
                                     onClick={() => {
                                         navigateToMessage(msg);
                                         setCurrentPinnedIndex((safeIndex + 1) % pinnedMessages.length);
@@ -14263,7 +14263,7 @@ export default function Chat() {
                             );
                             if (!pendingRequest) return null;
                             return (
-                                <div style={{ background: 'rgba(248, 250, 252, 0.85)', backdropFilter: 'blur(8px)', padding: '20px', borderBottom: '1px solid rgba(226, 232, 240, 0.5)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, boxShadow: 'inset 0 -2px 4px rgba(0,0,0,0.02)' }}>
+                                <div style={{ background: '#f8fafc', padding: '20px', borderBottom: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, boxShadow: 'inset 0 -2px 4px rgba(0,0,0,0.02)' }}>
                                     <div style={{ fontSize: '0.95rem', color: '#334155', textAlign: 'center', fontWeight: '500' }}>
                                         <span style={{ color: '#0EA5BE', fontWeight: 'bold' }}>{selectedUser.name}</span> wants to message you.
                                     </div>
@@ -14278,7 +14278,7 @@ export default function Chat() {
                                         </button>
                                         <button
                                             onClick={() => handleRejectRequest(pendingRequest._id)}
-                                            style={{ background: 'white', color: '#f15c6d', border: '1px solid #f15c6d', padding: '10px 28px', borderRadius: '12px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s' }}
+                                            style={{ background: 'transparent', color: '#f15c6d', border: '1px solid #f15c6d', padding: '10px 28px', borderRadius: '12px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s' }}
                                             onMouseOver={(e) => e.target.style.background = '#fff5f6'}
                                             onMouseOut={(e) => e.target.style.background = 'white'}
                                         >
@@ -14311,7 +14311,7 @@ export default function Chat() {
                         {/* Messages */}
                         <div
                             ref={chatMessagesRef}
-                            className="wa-chat-messages-area"
+                            className="wa-chat-messages-area no-bg"
                             onScroll={() => {
                                 const el = chatMessagesRef.current;
                                 if (!el) return;
@@ -14879,7 +14879,7 @@ export default function Chat() {
                                                                             <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
                                                                                 <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
                                                                                     <div style={{ display: 'flex', gap: '14px' }}>
-                                                                                        <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                                        <div style={{ background: 'transparent', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                                                                             <Calendar size={24} color="#0EA5BE" />
                                                                                         </div>
                                                                                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -15045,7 +15045,7 @@ export default function Chat() {
                                                 padding: '12px 16px',
                                                 borderRadius: '0 12px 12px 12px',
                                                 width: 'fit-content',
-                                                background: 'white',
+                                                background: 'transparent',
                                                 display: 'flex',
                                                 alignItems: 'center',
                                                 gap: '5px',
@@ -15211,7 +15211,7 @@ export default function Chat() {
                                                     isMeMsg={isMeMsg}
                                                 />
                                             ) : (
-                                                <div className="wa-input-pill" style={{ background: 'white', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: (replyingTo || showGrammarBar) ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                                                <div className="wa-input-pill" style={{ background: 'transparent', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: (replyingTo || showGrammarBar) ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                                                     {renderGrammarBar()}
                                                     {replyingTo && (
                                                         <div className="wa-reply-preview-container">
@@ -15334,7 +15334,7 @@ export default function Chat() {
                     </>
                 ) : selectedGroup ? (
                     <>
-                        <div className="wa-chat-header" style={{ background: 'white' }}>
+                        <div className="wa-chat-header" style={{ background: 'transparent' }}>
                             <div className="wa-chat-header-user">
                                 {/* Mobile Back Button */}
                                 <button
@@ -15465,7 +15465,7 @@ export default function Chat() {
                             }
 
                             return (
-                                <div className="wa-pinned-messages-banner" style={{ background: 'white', padding: '8px 16px', borderBottom: '1px solid #d1d7db', display: 'flex', alignItems: 'center', zIndex: 10, position: 'relative', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+                                <div className="wa-pinned-messages-banner" style={{ background: 'transparent', padding: '8px 16px', borderBottom: '1px solid #d1d7db', display: 'flex', alignItems: 'center', zIndex: 10, position: 'relative', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
                                     onClick={() => {
                                         navigateToMessage(msg);
                                         setCurrentPinnedIndex((safeIndex + 1) % pinnedMessages.length);
@@ -15520,7 +15520,7 @@ export default function Chat() {
 
                         <div
                             ref={chatMessagesRef}
-                            className="wa-chat-messages-area"
+                            className="wa-chat-messages-area no-bg"
                             onScroll={() => {
                                 setOpenDropdown(null);
                                 const el = chatMessagesRef.current;
@@ -15538,7 +15538,7 @@ export default function Chat() {
                             {/* Welcome Card */}
                             {selectedGroup.isCommunityAnnouncements ? (
                                 <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-                                    <div style={{ background: 'white', borderRadius: '12px', padding: '24px', maxWidth: '300px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                                    <div style={{ background: 'transparent', borderRadius: '12px', padding: '24px', maxWidth: '300px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
                                         <div style={{ width: 48, height: 48, background: '#f0f2f5', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
                                             <Users size={24} color="#54656f" />
                                         </div>
@@ -16288,7 +16288,7 @@ export default function Chat() {
                                                                             <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
                                                                                 <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
                                                                                     <div style={{ display: 'flex', gap: '14px' }}>
-                                                                                        <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                                        <div style={{ background: 'transparent', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                                                                             <Calendar size={24} color="#0EA5BE" />
                                                                                         </div>
                                                                                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -16349,7 +16349,7 @@ export default function Chat() {
                                                                                                             bottom: '100%',
                                                                                                             left: '50%',
                                                                                                             transform: 'translateX(-50%)',
-                                                                                                            background: 'white',
+                                                                                                            background: 'transparent',
                                                                                                             borderRadius: '8px',
                                                                                                             boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
                                                                                                             zIndex: 10,
@@ -16683,7 +16683,7 @@ export default function Chat() {
                                                     isMeMsg={isMeMsg}
                                                 />
                                             ) : (
-                                                <div className="wa-input-pill" style={{ background: 'white', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: replyingTo ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                                                <div className="wa-input-pill" style={{ background: 'transparent', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: replyingTo ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                                                     {replyingTo && (
                                                         <div className="wa-reply-preview-container">
                                                             <div style={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
@@ -16966,7 +16966,7 @@ export default function Chat() {
                                         padding: '12px',
                                         borderRadius: '24px',
                                         border: 'none',
-                                        background: 'white',
+                                        background: 'transparent',
                                         color: '#54656f',
                                         fontWeight: '600',
                                         cursor: 'pointer',
@@ -17367,7 +17367,7 @@ export default function Chat() {
                                     bottom: '100%',
                                     left: 0,
                                     right: 0,
-                                    background: 'white',
+                                    background: 'transparent',
                                     borderRadius: '12px',
                                     boxShadow: '0 -4px 20px rgba(0,0,0,0.15)',
                                     marginBottom: '10px',
@@ -17648,7 +17648,7 @@ export default function Chat() {
 
         return (
             <div className={`wa-contact-info-panel wa-community-settings-drawer ${isCommunitySettingsOpen ? 'active' : ''}`} style={{ background: '#f0f2f5', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid #e9edef' }}>
                     <button onClick={() => setIsCommunitySettingsOpen(false)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
                         <ArrowLeft size={24} />
                     </button>
@@ -17658,10 +17658,10 @@ export default function Chat() {
                 </div>
 
                 <div className="wa-drawer-content" style={{ padding: 0, display: 'flex', flexDirection: 'column', background: '#f0f2f5' }}>
-                    <div style={{ padding: '30px 20px 10px', color: '#0EA5BE', fontSize: '14px', fontWeight: '500', background: 'white' }}>Community permissions</div>
+                    <div style={{ padding: '30px 20px 10px', color: '#0EA5BE', fontSize: '14px', fontWeight: '500', background: 'transparent' }}>Community permissions</div>
 
                     <div
-                        style={{ background: 'white', padding: '15px 20px', cursor: 'pointer', borderBottom: thickDivider }}
+                        style={{ background: 'transparent', padding: '15px 20px', cursor: 'pointer', borderBottom: thickDivider }}
                         onClick={() => {
                             setPendingWhoCanAddGroups(community.whoCanAddGroups || 'everyone');
                             setIsWhoCanAddGroupsModalOpen(true);
@@ -17825,7 +17825,7 @@ export default function Chat() {
                         You can only assign community admins as new owners.
                     </div>
 
-                    <div style={{ background: 'white', minHeight: '100%' }}>
+                    <div style={{ background: 'transparent', minHeight: '100%' }}>
                         {sortedInitials.length === 0 ? (
                             <div style={{ padding: 40, textAlign: 'center', color: '#667781' }}>No members found</div>
                         ) : (
@@ -17945,7 +17945,7 @@ export default function Chat() {
                             rows={1}
                             style={{
                                 flex: 1,
-                                background: 'white',
+                                background: 'transparent',
                                 border: '1px solid #e2e8f0',
                                 borderRadius: '18px',
                                 padding: '10px 16px',
@@ -18937,7 +18937,7 @@ export default function Chat() {
                     <div style={{
                         width: '32px',
                         height: '32px',
-                        background: 'white',
+                        background: 'transparent',
                         borderRadius: '50%',
                         display: 'flex',
                         alignItems: 'center',
@@ -18959,16 +18959,9 @@ export default function Chat() {
                     to { transform: translateX(-50%) translateY(0); opacity: 1; }
                 }
                 .wa-opening-file-status { transition: all 0.3s ease; }
-                .wa-chat-messages-area, .wa-chat-footer { background: transparent !important; }
-                .wa-chat-messages-area.no-bg { background: transparent !important; }
-                .wa-main-chat { background: transparent !important; }
-                .wa-left-panel, .wa-left-sidebar { background: white; z-index: 2; position: relative; }
-                .wa-chat-header { background: transparent !important; }
-                .wa-pinned-messages-banner { background: rgba(255, 255, 255, 0.85) !important; backdrop-filter: blur(8px) !important; }
             `}</style>
 
             <div className={`wa-app-container ${(selectedUser || selectedGroup) ? 'chat-active' : 'list-active'}`} style={{ position: 'relative' }}>
-                <NeuralBackground isRecording={isRecording} />
 
                 {renderLeftSidebar()}
                 {isSettingsOpen ? (
@@ -19521,7 +19514,7 @@ export default function Chat() {
 
             {isOwnerExitCommunityModalOpen && exitCommunityTarget && (
                 <div className="wa-mute-modal-overlay" onClick={() => setIsOwnerExitCommunityModalOpen(false)} style={{ zIndex: 11000 }}>
-                    <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px', width: '90%', borderRadius: '16px', background: 'white', padding: '24px 32px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                    <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px', width: '90%', borderRadius: '16px', background: 'transparent', padding: '24px 32px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
                         <p style={{ color: '#111b21', fontSize: '18px', margin: '0 0 32px 0', lineHeight: 1.4, fontWeight: 500 }}>
                             As the owner, you'll need to assign a new owner to exit the community.
                         </p>
@@ -19739,7 +19732,7 @@ export default function Chat() {
                         background: '#f0f2f5'
                     }}
                 >
-                    <div style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'white', borderBottom: '1px solid #e9edef', position: 'relative', flexShrink: 0 }}>
+                    <div style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'transparent', borderBottom: '1px solid #e9edef', position: 'relative', flexShrink: 0 }}>
                         <button onClick={() => setIsAssignNewOwnerOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', position: 'absolute', left: 16 }}>
                             <ArrowLeft size={24} color="#54656f" />
                         </button>
@@ -19788,7 +19781,7 @@ export default function Chat() {
                                                     display: 'flex',
                                                     alignItems: 'center',
                                                     padding: '14px 20px',
-                                                    background: 'white',
+                                                    background: 'transparent',
                                                     borderBottom: '1px solid #f0f2f5',
                                                     cursor: 'pointer',
                                                     transition: 'background 0.15s',

@@ -18,7 +18,7 @@ const LandingBackground = React.memo(() => {
             baseColor: { r: 13, g: 159, b: 183 }, // #0D9FB7
             baseConnectionDistance: 110,
             mouseDistance: 200,
-            baseSpeed: 0.5
+            baseSpeed: 1.0
         };
 
         const resize = () => {
@@ -30,7 +30,7 @@ const LandingBackground = React.memo(() => {
 
             const area = width * height;
             const density = 14000; // Significantly reduced particle count
-            const targetCount = Math.floor(area / density);
+            const targetCount = Math.min(Math.floor(area / density), 100);
 
             initParticles(targetCount);
         }
