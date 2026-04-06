@@ -14311,7 +14311,7 @@ export default function Chat() {
                         {/* Messages */}
                         <div
                             ref={chatMessagesRef}
-                            className="wa-chat-messages-area"
+                            className="wa-chat-messages-area no-bg"
                             onScroll={() => {
                                 const el = chatMessagesRef.current;
                                 if (!el) return;
@@ -15520,7 +15520,7 @@ export default function Chat() {
 
                         <div
                             ref={chatMessagesRef}
-                            className="wa-chat-messages-area"
+                            className="wa-chat-messages-area no-bg"
                             onScroll={() => {
                                 setOpenDropdown(null);
                                 const el = chatMessagesRef.current;
@@ -16853,7 +16853,7 @@ export default function Chat() {
                         )}
                     </>
                 ) : (
-                    <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#41525d', position: 'relative', zIndex: 5 }}>
+                    <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#41525d', position: 'relative', zIndex: 1, background: 'transparent' }}>
                         <h2>Neural Chat</h2>
                         <p style={{ fontSize: 14, marginTop: 10 }}>Send and receive messages without keeping your phone online.</p>
                     </div>
@@ -18963,8 +18963,6 @@ export default function Chat() {
                 .wa-chat-messages-area.no-bg { background: transparent !important; }
                 .wa-main-chat { background: transparent !important; }
                 .wa-left-panel, .wa-left-sidebar { background: white; z-index: 2; position: relative; }
-                .wa-chat-header { background: transparent !important; }
-                .wa-pinned-messages-banner { background: rgba(255, 255, 255, 0.85) !important; backdrop-filter: blur(8px) !important; }
             `}</style>
 
             <div className={`wa-app-container ${(selectedUser || selectedGroup) ? 'chat-active' : 'list-active'}`} style={{ position: 'relative' }}>
@@ -20258,3 +20256,4 @@ export default function Chat() {
         </>
     );
 }
+
