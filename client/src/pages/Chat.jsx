@@ -213,6 +213,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
     const waveformRef = useRef(null);
     const isViewOnceRef = useRef(false);
     const isPausedRef = useRef(false);
+    const sessionRef = useRef(null);
 
     useEffect(() => {
         isViewOnceRef.current = isViewOnceVoice;
@@ -262,6 +263,8 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
     };
 
     const startRecording = async () => {
+        const session = Symbol();
+        sessionRef.current = session;
         setIsPaused(false);
         isPausedRef.current = false;
         setRecordingTime(0);
@@ -279,12 +282,6 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
         }
 
         if (timerRef.current) clearInterval(timerRef.current);
-        accumulatedDurationRef.current = 0;
-        startTimeRef.current = Date.now();
-        timerRef.current = setInterval(() => {
-            const elapsed = (accumulatedDurationRef.current + (Date.now() - startTimeRef.current)) / 1000;
-            setRecordingTime(elapsed);
-        }, 100);
 
         try {
             // Simplified constraints for maximum compatibility and reduced hardware jitter
@@ -302,6 +299,10 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                 }
             };
             const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            if (sessionRef.current !== session) {
+                stream.getTracks().forEach(track => track.stop());
+                return;
+            }
 
             let mimeType = 'audio/webm';
             if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) mimeType = 'audio/webm;codecs=opus';
@@ -484,6 +485,18 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
             mediaRecorder.start();
             if (waveformTimerHandler.current) waveformTimerHandler.current();
 
+            accumulatedDurationRef.current = 0;
+            startTimeRef.current = Date.now();
+            let lastSecond = 0;
+            timerRef.current = setInterval(() => {
+                const elapsed = (accumulatedDurationRef.current + (Date.now() - startTimeRef.current)) / 1000;
+                const currentSecond = Math.floor(elapsed);
+                if (currentSecond !== lastSecond) {
+                    lastSecond = currentSecond;
+                    setRecordingTime(elapsed);
+                }
+            }, 100);
+
         } catch (err) {
             console.error("Mic error:", err);
             onCancel();
@@ -535,9 +548,14 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                 setPreviewSeconds(recordingTime);
                 if (timerRef.current) clearInterval(timerRef.current);
                 startTimeRef.current = Date.now();
+                let lastSecond = -1;
                 timerRef.current = setInterval(() => {
                     const elapsed = (accumulatedDurationRef.current + (Date.now() - startTimeRef.current)) / 1000;
-                    setRecordingTime(elapsed);
+                    const currentSecond = Math.floor(elapsed);
+                    if (currentSecond !== lastSecond) {
+                        lastSecond = currentSecond;
+                        setRecordingTime(elapsed);
+                    }
                 }, 100);
                 if (waveformTimerHandler.current) waveformTimerHandler.current();
             } catch (err) { }
@@ -584,6 +602,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
     useEffect(() => {
         startRecording();
         return () => {
+            sessionRef.current = null;
             if (waveAnimationIdRef.current) cancelAnimationFrame(waveAnimationIdRef.current);
             if (timerRef.current) clearInterval(timerRef.current);
             if (previewAudioRef.current) previewAudioRef.current.pause();
@@ -14912,7 +14931,29 @@ export default function Chat() {
                                                                                         const dStr = (msg.event.endDate || msg.event.startDate).split('T')[0];
                                                                                         const endStr = `${dStr}T${msg.event.endTime || '23:59'}:00`;
                                                                                         const isEnded = new Date(endStr) <= new Date();
-                                                                                        if (isEnded) return <span key={`ended-p2p-${eventTick}`} style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event ended</span>;
+                                                                                        const startDStr = (msg.event.startDate || '').split('T')[0];
+                                                                                        const startStr = `${startDStr}T${msg.event.startTime || '00:00'}:00`;
+                                                                                        const isStarted = new Date(startStr) <= new Date();
+
+                                                                                        if (isStarted || isEnded) {
+                                                                                            return (
+                                                                                                <>
+                                                                                                    {isMe && !isEnded && (
+                                                                                                        <div 
+                                                                                                            onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} 
+                                                                                                            style={{ width: '100%', textAlign: 'center', color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer', paddingBottom: '8px', borderBottom: '1px solid #f0f2f5', marginBottom: '4px' }}
+                                                                                                        >
+                                                                                                            Edit event
+                                                                                                        </div>
+                                                                                                    )}
+                                                                                                    <div style={{ width: '100%', textAlign: 'center' }}>
+                                                                                                        <span key={`started-p2p-${eventTick}`} style={{ color: isEnded ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
+                                                                                                            {isEnded ? 'Event ended' : 'Event started'}
+                                                                                                        </span>
+                                                                                                    </div>
+                                                                                                </>
+                                                                                            );
+                                                                                        }
                                                                                         
                                                                                         return (
                                                                                             <>
@@ -16323,7 +16364,29 @@ export default function Chat() {
                                                                                         const dStr = (msg.event.endDate || msg.event.startDate).split('T')[0];
                                                                                         const endStr = `${dStr}T${msg.event.endTime || '23:59'}:00`;
                                                                                         const isEnded = new Date(endStr) <= new Date();
-                                                                                        if (isEnded) return <span key={`ended-grp-${eventTick}`} style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event ended</span>;
+                                                                                        const startDStr = (msg.event.startDate || '').split('T')[0];
+                                                                                        const startStr = `${startDStr}T${msg.event.startTime || '00:00'}:00`;
+                                                                                        const isStarted = new Date(startStr) <= new Date();
+
+                                                                                        if (isStarted || isEnded) {
+                                                                                            return (
+                                                                                                <>
+                                                                                                    {isMe && !isEnded && (
+                                                                                                        <div 
+                                                                                                            onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} 
+                                                                                                            style={{ width: '100%', textAlign: 'center', color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer', paddingBottom: '8px', borderBottom: '1px solid #f0f2f5', marginBottom: '4px' }}
+                                                                                                        >
+                                                                                                            Edit event
+                                                                                                        </div>
+                                                                                                    )}
+                                                                                                    <div style={{ width: '100%', textAlign: 'center' }}>
+                                                                                                        <span key={`started-grp-${eventTick}`} style={{ color: isEnded ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
+                                                                                                            {isEnded ? 'Event ended' : 'Event started'}
+                                                                                                        </span>
+                                                                                                    </div>
+                                                                                                </>
+                                                                                            );
+                                                                                        }
 
                                                                                         return (
                                                                                             <>
@@ -17340,87 +17403,82 @@ export default function Chat() {
 
                 {/* Sticky Bottom Actions */}
                 <div style={{ padding: '20px', background: '#ffffff', borderTop: '1px solid #f0f2f5', flexShrink: 0 }}>
-                    {eventDetailsMsg && !eventDetailsMsg.event?.cancelled && String(eventDetailsMsg.user_id || eventDetailsMsg.sender_id?._id || eventDetailsMsg.sender_id) === String(myId) ? (
-                        <>
-                            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-                                <span onClick={(e) => { e.stopPropagation(); openEditEvent(eventDetailsMsg); }} style={{ color: '#0EA5BE', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>
-                                    Edit event
-                                </span>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'center' }}>
-                                <span onClick={(e) => { e.stopPropagation(); confirmCancelEvent(eventDetailsMsg); }} style={{ color: '#ea0038', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>
-                                    Cancel event
-                                </span>
-                            </div>
-                        </>
-                    ) : eventDetailsMsg?.event?.cancelled ? (
-                        <div style={{ display: 'flex', justifyContent: 'center' }}>
-                            <span style={{ color: '#667781', fontSize: 16, fontWeight: 600 }}>
-                                Event cancelled
-                            </span>
-                        </div>
-                    ) : (
-                        <div style={{ position: 'relative' }}>
-                            {openEventRespondId === eventDetailsMsg._id ? (
-                                <div style={{
-                                    position: 'absolute',
-                                    bottom: '100%',
-                                    left: 0,
-                                    right: 0,
-                                    background: 'white',
-                                    borderRadius: '12px',
-                                    boxShadow: '0 -4px 20px rgba(0,0,0,0.15)',
-                                    marginBottom: '10px',
-                                    zIndex: 100,
-                                    overflow: 'hidden'
-                                }}>
-                                    {['Going', 'Maybe', 'Not going'].map(status => (
-                                        <button
-                                            key={status}
-                                            onClick={(e) => { e.stopPropagation(); handleEventRespond(eventDetailsMsg, status); setOpenEventRespondId(null); }}
-                                            style={{
-                                                width: '100%',
-                                                padding: '12px',
-                                                border: 'none',
-                                                background: myResponse?.status === status ? '#f0f2f5' : 'white',
-                                                textAlign: 'left',
-                                                cursor: 'pointer',
-                                                fontSize: '15px',
-                                                color: '#111b21',
-                                                display: 'flex',
-                                                justifyContent: 'space-between',
-                                                alignItems: 'center'
-                                            }}
-                                        >
-                                            {status}
-                                            {myResponse?.status === status && <Check size={18} color="#0EA5BE" />}
-                                        </button>
-                                    ))}
+                    {(() => {
+                        if (!eventDetailsMsg?.event) return null;
+                        const ev = eventDetailsMsg.event;
+                        const isSender = String(eventDetailsMsg.user_id || eventDetailsMsg.sender_id?._id || eventDetailsMsg.sender_id) === String(myId);
+                        
+                        const dStr = (ev.endDate || ev.startDate).split('T')[0];
+                        const endStr = `${dStr}T${ev.endTime || '23:59'}:00`;
+                        const isEnded = new Date(endStr) <= new Date();
+                        
+                        const startDStr = (ev.startDate || '').split('T')[0];
+                        const startStr = `${startDStr}T${ev.startTime || '00:00'}:00`;
+                        const isStarted = new Date(startStr) <= new Date();
+
+                        if (ev.cancelled) {
+                            return (
+                                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                    <span style={{ color: '#667781', fontSize: 16, fontWeight: 600 }}>Event cancelled</span>
                                 </div>
-                            ) : null}
-                            <button
-                                onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === eventDetailsMsg._id ? null : eventDetailsMsg._id); }}
-                                style={{
-                                    background: '#0EA5BE',
-                                    color: 'white',
-                                    border: 'none',
-                                    padding: '12px 24px',
-                                    borderRadius: '24px',
-                                    fontSize: 16,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                    width: '100%',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: '8px'
-                                }}
-                            >
-                                {myResponse ? myResponse.status : 'Respond'}
-                                <ChevronUp size={20} />
-                            </button>
-                        </div>
-                    )}
+                            );
+                        }
+
+                        if (isStarted || isEnded) {
+                            return (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                    {isSender && !isEnded && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0 20px' }}>
+                                            <span onClick={(e) => { e.stopPropagation(); openEditEvent(eventDetailsMsg); }} style={{ color: '#0EA5BE', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Edit event</span>
+                                            <span onClick={(e) => { e.stopPropagation(); confirmCancelEvent(eventDetailsMsg); }} style={{ color: '#ea0038', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Cancel event</span>
+                                        </div>
+                                    )}
+                                    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                                        {myResponse && (
+                                            <div style={{ background: '#f0f2f5', color: '#667781', padding: '12px 24px', borderRadius: '24px', fontSize: 16, fontWeight: 600, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                                {myResponse.status}
+                                                <Check size={20} color="#667781" />
+                                            </div>
+                                        )}
+                                        <div style={{ color: isEnded ? '#667781' : '#0EA5BE', fontSize: 16, fontWeight: 600 }}>
+                                            {isEnded ? 'Event ended' : 'Event started'}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        }
+
+                        return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                {isSender && (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0 20px', marginBottom: '4px' }}>
+                                        <span onClick={(e) => { e.stopPropagation(); openEditEvent(eventDetailsMsg); }} style={{ color: '#0EA5BE', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Edit event</span>
+                                        <span onClick={(e) => { e.stopPropagation(); confirmCancelEvent(eventDetailsMsg); }} style={{ color: '#ea0038', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Cancel event</span>
+                                    </div>
+                                )}
+                                <div style={{ position: 'relative' }}>
+                                    {openEventRespondId === eventDetailsMsg._id && (
+                                        <div style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, background: 'white', borderRadius: '12px', boxShadow: '0 -4px 20px rgba(0,0,0,0.15)', marginBottom: '10px', zIndex: 100, overflow: 'hidden' }}>
+                                            {['Going', 'Maybe', 'Not going'].map(status => (
+                                                <button
+                                                    key={status}
+                                                    onClick={(e) => { e.stopPropagation(); handleEventRespond(eventDetailsMsg, status); setOpenEventRespondId(null); }}
+                                                    style={{ width: '100%', padding: '12px', border: 'none', background: myResponse?.status === status ? '#f0f2f5' : 'white', textAlign: 'left', cursor: 'pointer', fontSize: '15px', color: '#111b21', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                                                >
+                                                    {status}
+                                                    {myResponse?.status === status && <Check size={18} color="#0EA5BE" />}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <button onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === eventDetailsMsg._id ? null : eventDetailsMsg._id); }} style={{ background: '#0EA5BE', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '24px', fontSize: 16, fontWeight: 600, cursor: 'pointer', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                        {myResponse ? myResponse.status : 'Respond'}
+                                        <ChevronUp size={20} />
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })()}
                 </div>
             </div>
         );
