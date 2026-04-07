@@ -92,41 +92,61 @@ const LandingBackground = React.memo(() => {
             }
         }
 
-        const animate = () => {
+        const animate = (currentTime) => {
             animationFrameId = requestAnimationFrame(animate);
+            
+            // Use currentTime for consistent animations
+            const now = currentTime || Date.now();
+            
             ctx.clearRect(0, 0, width, height);
 
-            // "Breathing" Web: Connection distance gently expands and contracts over time
-            const dynamicConnectionDistance = config.baseConnectionDistance + Math.sin(Date.now() * 0.001) * 25;
-
+            const dynamicConnectionDistance = config.baseConnectionDistance + Math.sin(now * 0.001) * 25;
             const n = particles.length;
 
-            // Pre-create buckets for Path2D batching (10 alpha levels x 2 line widths)
-            // This drops `stroke()` calls from ~1500 per frame to exactly 20.
             const normalBuckets = Array.from({ length: 10 }, () => new Path2D());
             const hubBuckets = Array.from({ length: 10 }, () => new Path2D());
+            
+            // Paths for batched particle drawing
+            const hubAuraPath = new Path2D();
+            const hubPath = new Path2D();
+            const normalPath = new Path2D();
 
             for (let i = 0; i < n; i++) {
                 particles[i].update();
-                particles[i].draw();
+                
+                // Batch particle paths
+                if (particles[i].isHub) {
+                    const pulse = Math.sin(now * 0.002 + particles[i].x) * 0.5;
+                    hubAuraPath.moveTo(particles[i].x + (particles[i].size * 3) + pulse, particles[i].y);
+                    hubAuraPath.arc(particles[i].x, particles[i].y, (particles[i].size * 3) + pulse, 0, Math.PI * 2);
+                    
+                    hubPath.moveTo(particles[i].x + particles[i].size, particles[i].y);
+                    hubPath.arc(particles[i].x, particles[i].y, particles[i].size, 0, Math.PI * 2);
+                } else {
+                    normalPath.moveTo(particles[i].x + particles[i].size, particles[i].y);
+                    normalPath.arc(particles[i].x, particles[i].y, particles[i].size, 0, Math.PI * 2);
+                }
 
                 for (let j = i + 1; j < n; j++) {
                     const dx = particles[i].x - particles[j].x;
                     const dy = particles[i].y - particles[j].y;
+                    
+                    // COARSE CHECK
+                    const maxDistVal = dynamicConnectionDistance * 1.4;
+                    if (Math.abs(dx) > maxDistVal || Math.abs(dy) > maxDistVal) continue;
+
                     const dist2 = dx * dx + dy * dy;
 
                     let maxDist = dynamicConnectionDistance;
                     const isHubPair = particles[i].isHub || particles[j].isHub;
-                    if (isHubPair) {
-                        maxDist *= 1.4; // Hubs connect across larger gaps
-                    }
+                    if (isHubPair) maxDist *= 1.4;
+                    
                     const maxDist2 = maxDist * maxDist;
 
                     if (dist2 < maxDist2) {
                         const distance = Math.sqrt(dist2);
                         const opacity = 1 - (distance / maxDist);
                         
-                        // Map opacity to bucket index (0 to 9)
                         let bucketIdx = Math.floor(opacity * 10);
                         if (bucketIdx > 9) bucketIdx = 9;
                         if (bucketIdx < 0) bucketIdx = 0;
@@ -141,7 +161,6 @@ const LandingBackground = React.memo(() => {
                     }
                 }
 
-                // Mouse Repel / Connect
                 if (mouse.x != null) {
                     const dx = particles[i].x - mouse.x;
                     const dy = particles[i].y - mouse.y;
@@ -158,8 +177,7 @@ const LandingBackground = React.memo(() => {
                         ctx.lineTo(mouse.x, mouse.y);
                         ctx.stroke();
 
-                        // Subtle mouse repel effect
-                        if (dist2 < 2500) { // 50 * 50
+                        if (dist2 < 2500) {
                             particles[i].x += dx * 0.02;
                             particles[i].y += dy * 0.02;
                         }
@@ -167,7 +185,17 @@ const LandingBackground = React.memo(() => {
                 }
             }
 
-            // Draw all normal connections
+            // Draw batched particles
+            ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, 0.1)`;
+            ctx.fill(hubAuraPath);
+
+            ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, 0.9)`;
+            ctx.fill(hubPath);
+
+            ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, 0.5)`;
+            ctx.fill(normalPath);
+
+            // Draw batched connections
             ctx.lineWidth = 0.5;
             for (let i = 0; i < 10; i++) {
                 const alpha = (i / 10) * 0.6;
@@ -175,7 +203,6 @@ const LandingBackground = React.memo(() => {
                 ctx.stroke(normalBuckets[i]);
             }
 
-            // Draw all hub connections
             ctx.lineWidth = 1.2;
             for (let i = 0; i < 10; i++) {
                 const alpha = (i / 10) * 0.6;

@@ -19025,8 +19025,7 @@ export default function Chat() {
                 .wa-pinned-messages-banner { background: rgba(255, 255, 255, 0.85) !important; backdrop-filter: blur(8px) !important; }
             `}</style>
 
-            <div className={`wa-app-container ${(selectedUser || selectedGroup) ? 'chat-active' : 'list-active'}`} style={{ position: 'relative' }}>
-                <NeuralBackground isRecording={isRecording} />
+            <div className={`wa-app-container ${(selectedUser || selectedGroup) ? 'chat-active' : 'list-active'}`} style={{ position: 'relative', background: 'transparent' }}>
 
                 {renderLeftSidebar()}
                 {isSettingsOpen ? (

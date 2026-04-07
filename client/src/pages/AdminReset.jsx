@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import { Lock, Mail, Key, Eye, EyeOff, ArrowLeft } from 'lucide-react';
-import LandingBackground from '../components/LandingBackground';
 import Snackbar from '../components/Snackbar';
 import HumanVerification from '../components/HumanVerification';
 import '../styles/Home.css';
@@ -50,7 +49,7 @@ export default function AdminReset() {
 
     return (
         <div className="home-container">
-            <LandingBackground />
+            
 
             {snackbar.open && (
                 <Snackbar

@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { Lock, Eye, EyeOff, ArrowLeft, ShieldAlert } from 'lucide-react';
-import LandingBackground from '../components/LandingBackground';
 import HumanVerification from '../components/HumanVerification';
 import Snackbar from '../components/Snackbar';
 import '../styles/Home.css';
@@ -117,7 +116,7 @@ export default function UserReset() {
     if (isExpired) {
         return (
             <div className="home-container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <LandingBackground />
+                
                 <style>
                     {`
                         @keyframes dropIn {
@@ -155,7 +154,7 @@ export default function UserReset() {
     if (verifying) {
         return (
             <div className="home-container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <LandingBackground />
+                
                 <div style={{ color: '#334155', fontSize: '1.5rem', fontWeight: '600', zIndex: 10, background: 'rgba(255,255,255,0.9)', padding: '2rem', borderRadius: '1rem', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
                     Verifying Link...
                 </div>
@@ -258,7 +257,7 @@ export default function UserReset() {
 
     return (
         <div className="home-container">
-            <LandingBackground />
+            
 
             {snackbar.open && snackbar.type !== 'success' && (
                 <Snackbar
