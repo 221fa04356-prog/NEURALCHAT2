@@ -38,7 +38,7 @@ html {
 /* --- Far Left Navigation Sidebar --- */
 .wa-nav-sidebar {
     width: 64px;
-    background-color: #f0f2f5;
+    background-color: rgba(240, 242, 245, 0.8);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -203,7 +203,7 @@ html {
     /* Fluid width for desktop */
     min-width: 320px;
     max-width: 450px;
-    background-color: white;
+    background-color: rgba(255, 255, 255, 0.85);
     display: flex;
     flex-direction: column;
     border-right: 1px solid var(--wa-border);
@@ -1445,7 +1445,9 @@ html {
 
 .wa-chat-header {
     height: 60px;
-    background-color: var(--wa-panel-header-bg);
+    background-color: rgba(240, 242, 245, 0.4);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     padding: 10px 16px;
     display: flex;
     align-items: center;
@@ -1476,6 +1478,8 @@ html {
     position: relative;
     /* Ensure it stacks above NeuralBackground */
     z-index: 1;
+    will-change: transform, scroll-position;
+    transform: translateZ(0); /* Promote to compositor layer */
 }
 
 /* View Once Fullscreen Player */

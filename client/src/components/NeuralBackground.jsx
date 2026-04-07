@@ -63,27 +63,11 @@ const NeuralBackground = React.memo(() => {
         };
 
         let lastMousePos = { x: null, y: null };
+        let lastMouseTimestamp = 0;
         let mouseFrameRequest = null;
 
         const handleMouseMove = (e) => {
-            if (!containerRef.current || !workerRef.current) return;
-            const rect = containerRef.current.getBoundingClientRect();
-            lastMousePos = {
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top
-            };
-
-            if (!mouseFrameRequest) {
-                mouseFrameRequest = requestAnimationFrame(() => {
-                    if (workerRef.current) {
-                        workerRef.current.postMessage({
-                            type: 'MOUSE',
-                            payload: lastMousePos
-                        });
-                    }
-                    mouseFrameRequest = null;
-                });
-            }
+            // Removed
         };
 
         const handleMouseOut = () => {
@@ -94,14 +78,10 @@ const NeuralBackground = React.memo(() => {
             });
         };
 
-        window.addEventListener('resize', resize);
-        window.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseout', handleMouseOut);
+        window.addEventListener('resize', resize, { passive: true });
 
         return () => {
             window.removeEventListener('resize', resize);
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseout', handleMouseOut);
 
             if (workerRef.current) {
                 workerRef.current.terminate();
@@ -121,7 +101,7 @@ const NeuralBackground = React.memo(() => {
                 height: '100vh',
                 zIndex: -1,
                 overflow: 'hidden',
-                backgroundColor: '#f6f6f6ff', // Professional dark background
+                backgroundColor: '#f5f5f5', // Light Theme Background
                 pointerEvents: 'none',
                 transform: 'translateZ(0)',
                 willChange: 'transform'
