@@ -12,8 +12,8 @@ const NeuralBackground = React.memo(() => {
         if (!canvasRef.current || !containerRef.current) return;
 
         const canvas = canvasRef.current;
-        const width = containerRef.current.clientWidth || window.innerWidth;
-        const height = containerRef.current.clientHeight || window.innerHeight;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
 
         // Use transferControlToOffscreen to move canvas to the worker
         let offscreen;
@@ -51,9 +51,10 @@ const NeuralBackground = React.memo(() => {
         }
 
         const resize = () => {
-            if (!containerRef.current || !workerRef.current) return;
-            const w = containerRef.current.clientWidth || window.innerWidth;
-            const h = containerRef.current.clientHeight || window.innerHeight;
+            if (!workerRef.current) return;
+            // Use window dimensions strictly to prevent stretching with page content
+            const w = window.innerWidth;
+            const h = window.innerHeight;
 
             workerRef.current.postMessage({
                 type: 'RESIZE',
@@ -61,16 +62,28 @@ const NeuralBackground = React.memo(() => {
             });
         };
 
+        let lastMousePos = { x: null, y: null };
+        let mouseFrameRequest = null;
+
         const handleMouseMove = (e) => {
             if (!containerRef.current || !workerRef.current) return;
             const rect = containerRef.current.getBoundingClientRect();
-            workerRef.current.postMessage({
-                type: 'MOUSE',
-                payload: {
-                    x: e.clientX - rect.left,
-                    y: e.clientY - rect.top
-                }
-            });
+            lastMousePos = {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
+
+            if (!mouseFrameRequest) {
+                mouseFrameRequest = requestAnimationFrame(() => {
+                    if (workerRef.current) {
+                        workerRef.current.postMessage({
+                            type: 'MOUSE',
+                            payload: lastMousePos
+                        });
+                    }
+                    mouseFrameRequest = null;
+                });
+            }
         };
 
         const handleMouseOut = () => {
@@ -108,7 +121,7 @@ const NeuralBackground = React.memo(() => {
                 height: '100vh',
                 zIndex: -1,
                 overflow: 'hidden',
-                backgroundColor: '#f3f3f3ff', // Professional dark background
+                backgroundColor: '#f6f6f6ff', // Professional dark background
                 pointerEvents: 'none',
                 transform: 'translateZ(0)',
                 willChange: 'transform'

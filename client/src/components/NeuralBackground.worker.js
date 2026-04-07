@@ -3,37 +3,60 @@
 let canvas, ctx, width, height;
 let particles = [];
 let mouse = { x: null, y: null };
+let targetMouse = { x: null, y: null };
 let animationFrameId;
 
 const config = {
-    baseColor: { r: 14, g: 165, b: 190 }, // #0EA5BE
-    baseConnectionDistance: 120,
-    mouseDistance: 250,
-    baseSpeed: 1.2
+    baseColor: { r: 13, g: 159, b: 183 }, // #0D9FB7
+    baseConnectionDistance: 100, 
+    mouseDistance: 240,
+    baseSpeed: 0.6, // Lowered for calmer movement
+    mouseEase: 0.08 
 };
 
+// PRE-ALLOCATED RESOURCES FOR ZERO-GC ANIMATION
+const grid = new Map();
+let collisionMatrix = new Uint8Array(0);
+
 class Particle {
-    constructor(w, h) {
+    constructor(w, h, id) {
+        this.id = id;
         this.x = Math.random() * w;
         this.y = Math.random() * h;
         this.angle = Math.random() * Math.PI * 2;
-        this.baseSpeed = (Math.random() * 0.6 + 0.2) * config.baseSpeed;
+        this.baseSpeed = (Math.random() * 0.7 + 0.3) * config.baseSpeed;
         this.speed = this.baseSpeed;
-        this.turnSpeed = (Math.random() - 0.5) * 0.015;
-        this.isHub = Math.random() > 0.88;
-        this.baseSize = this.isHub ? Math.random() * 2 + 2.5 : Math.random() * 1.2 + 0.8;
+        this.turnSpeed = (Math.random() - 0.5) * 0.012;
+        this.isHub = Math.random() > 0.75; // More hubs for more cluster anchors
+        this.baseSize = this.isHub ? Math.random() * 2.5 + 3.0 : Math.random() * 1.5 + 0.8;
         this.size = this.baseSize;
     }
 
     update(w, h) {
+        // Organic wandering behavior (curved paths) matches LandingBackground
         this.angle += this.turnSpeed;
+
         this.x += Math.cos(this.angle) * this.speed;
         this.y += Math.sin(this.angle) * this.speed;
 
-        if (this.x < -100) this.x = w + 100;
-        if (this.x > w + 100) this.x = -100;
-        if (this.y < -100) this.y = h + 100;
-        if (this.y > h + 100) this.y = -100;
+        // Mouse interaction (push away)
+        if (mouse.x !== null) {
+            const dx = this.x - mouse.x;
+            const dy = this.y - mouse.y;
+            const dist2 = dx * dx + dy * dy;
+            if (dist2 < 62500) { // 250^2
+                const force = (250 - Math.sqrt(dist2)) / 250;
+                this.x += (dx / Math.sqrt(dist2)) * force * 2;
+                this.y += (dy / Math.sqrt(dist2)) * force * 2;
+            }
+        }
+
+        // Seamless Infinite Wrap
+        const margin = 100;
+        if (this.x < -margin) this.x = width + margin;
+        if (this.x > width + margin) this.x = -margin;
+        if (this.y < -margin) this.y = height + margin;
+        if (this.y > height + margin) this.y = -margin;
     }
 
     draw(ctx) {
@@ -43,9 +66,9 @@ class Particle {
 
     drawAura(ctx, currentTime) {
         if (this.isHub) {
-            const pulse = Math.sin(currentTime * 0.002 + this.x) * 0.5;
-            ctx.moveTo(this.x + (this.size * 3) + pulse, this.y);
-            ctx.arc(this.x, this.y, (this.size * 3) + pulse, 0, Math.PI * 2);
+            const auraPulse = Math.sin(currentTime * 0.002 + this.pulse) * 0.8;
+            ctx.moveTo(this.x + (this.size * 3) + auraPulse, this.y);
+            ctx.arc(this.x, this.y, (this.size * 3) + auraPulse, 0, Math.PI * 2);
         }
     }
 }
@@ -53,9 +76,11 @@ class Particle {
 function initParticles(count, w, h) {
     const newParticles = [];
     for (let i = 0; i < count; i++) {
-        newParticles.push(new Particle(w, h));
+        newParticles.push(new Particle(w, h, i));
     }
     particles = newParticles;
+    // Pre-allocate matrix based on particle count
+    collisionMatrix = new Uint8Array(count * count);
 }
 
 const animate = (currentTime) => {
@@ -64,84 +89,159 @@ const animate = (currentTime) => {
     if (!ctx || !width || !height) return;
 
     const now = currentTime || Date.now();
+    
+    // Smooth mouse interpolation
+    if (targetMouse.x !== null && targetMouse.y !== null) {
+        if (mouse.x === null) {
+            mouse.x = targetMouse.x;
+            mouse.y = targetMouse.y;
+        } else {
+            mouse.x += (targetMouse.x - mouse.x) * config.mouseEase;
+            mouse.y += (targetMouse.y - mouse.y) * config.mouseEase;
+        }
+    } else {
+        mouse.x = null;
+        mouse.y = null;
+    }
+
     ctx.clearRect(0, 0, width, height);
 
-    const dynamicConnectionDistance = config.baseConnectionDistance + Math.sin(now * 0.001) * 25;
+    const dynamicConnectionDistance = config.baseConnectionDistance + Math.sin(now * 0.001) * 20;
+    const maxDist = dynamicConnectionDistance * 1.6; 
+    const cellSize = maxDist * 1.1;
     const n = particles.length;
+
+    // 1. REUSE GRID (Clear instead of re-creating)
+    grid.clear();
+    const getGridKey = (x, y) => {
+        const col = Math.floor(x / cellSize);
+        const row = Math.floor(y / cellSize);
+        return `${col},${row}`;
+    };
 
     const normalBuckets = Array.from({ length: 10 }, () => new Path2D());
     const hubBuckets = Array.from({ length: 10 }, () => new Path2D());
+    const backgroundPath = new Path2D();
     
     const hubAuraPath = new Path2D();
     const hubPath = new Path2D();
     const normalPath = new Path2D();
 
+    // 1. Update and populate grid
     for (let i = 0; i < n; i++) {
-        particles[i].update(width, height);
+        const p = particles[i];
+        p.update(width, height);
         
-        if (particles[i].isHub) {
-            particles[i].drawAura(hubAuraPath, now);
-            particles[i].draw(hubPath);
+        if (p.isHub) {
+            // Pulse logic for hubs
+            const auraPulse = Math.sin(now * 0.002 + p.x) * 0.8;
+            hubAuraPath.moveTo(p.x + (p.size * 3) + auraPulse, p.y);
+            hubAuraPath.arc(p.x, p.y, (p.size * 3) + auraPulse, 0, Math.PI * 2);
+            hubPath.moveTo(p.x + p.size, p.y);
+            hubPath.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         } else {
-            particles[i].draw(normalPath);
+            normalPath.moveTo(p.x + p.size, p.y);
+            normalPath.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         }
 
-        for (let j = i + 1; j < n; j++) {
-            const dx = particles[i].x - particles[j].x;
-            const dy = particles[i].y - particles[j].y;
-            
-            const maxDistVal = dynamicConnectionDistance * 1.4;
-            if (Math.abs(dx) > maxDistVal || Math.abs(dy) > maxDistVal) continue;
+        const key = getGridKey(p.x, p.y);
+        if (!grid.has(key)) grid.set(key, []);
+        grid.get(key).push(p);
 
-            const dist2 = dx * dx + dy * dy;
+        if (mouse.x !== null) {
+            const dx = p.x - mouse.x;
+            const dy = p.y - mouse.y;
+            const d2 = dx * dx + dy * dy;
+            if (d2 < config.mouseDistance * config.mouseDistance) {
+                const dist = Math.sqrt(d2);
+                ctx.beginPath();
+                // Increased opacity from 0.5 to 0.85
+                const op = (1 - (dist / config.mouseDistance)) * 0.85;
+                ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${op})`;
+                ctx.lineWidth = 1.3; // Slightly thicker
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(mouse.x, mouse.y);
+                ctx.stroke();
+            }
+        }
+    }
 
-            let maxDist = dynamicConnectionDistance;
-            const isHubPair = particles[i].isHub || particles[j].isHub;
-            if (isHubPair) maxDist *= 1.4;
-            
-            const maxDist2 = maxDist * maxDist;
+    // 2. REUSE MATRIX (Zero out instead of re-creating Set)
+    collisionMatrix.fill(0);
+    const mouseActive = mouse.x !== null;
 
-            if (dist2 < maxDist2) {
-                const distance = Math.sqrt(dist2);
-                const opacity = 1 - (distance / maxDist);
-                
-                let bucketIdx = Math.floor(opacity * 10);
-                if (bucketIdx > 9) bucketIdx = 9;
-                if (bucketIdx < 0) bucketIdx = 0;
+    for (let i = 0; i < n; i++) {
+        const p1 = particles[i];
+        const col = Math.floor(p1.x / cellSize);
+        const row = Math.floor(p1.y / cellSize);
 
-                if (isHubPair) {
-                    hubBuckets[bucketIdx].moveTo(particles[i].x, particles[i].y);
-                    hubBuckets[bucketIdx].lineTo(particles[j].x, particles[j].y);
-                } else {
-                    normalBuckets[bucketIdx].moveTo(particles[i].x, particles[i].y);
-                    normalBuckets[bucketIdx].lineTo(particles[j].x, particles[j].y);
-                }
+        // Radial Interaction Multiplier (Organic growth around mouse)
+        let localMultiplier = 1.0;
+        if (mouseActive) {
+            const mdx = p1.x - mouse.x;
+            const mdy = p1.y - mouse.y;
+            const mDist2 = mdx * mdx + mdy * mdy;
+            const checkRadius = 450;
+            if (mDist2 < checkRadius * checkRadius) {
+                const mDist = Math.sqrt(mDist2);
+                localMultiplier = 1.0 + (1.0 - mDist / checkRadius) * 0.6;
             }
         }
 
-        if (mouse.x != null) {
-            const dx = particles[i].x - mouse.x;
-            const dy = particles[i].y - mouse.y;
-            const dist2 = dx * dx + dy * dy;
-            const configMouse2 = config.mouseDistance * config.mouseDistance;
+        for (let x = col - 1; x <= col + 1; x++) {
+            for (let y = row - 1; y <= row + 1; y++) {
+                const neighbors = grid.get(`${x},${y}`);
+                if (!neighbors) continue;
 
-            if (dist2 < configMouse2) {
-                const distance = Math.sqrt(dist2);
-                ctx.beginPath();
-                const opacity = 1 - (distance / config.mouseDistance);
-                ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${opacity * 0.8})`;
-                ctx.lineWidth = 1.5;
-                ctx.moveTo(particles[i].x, particles[i].y);
-                ctx.lineTo(mouse.x, mouse.y);
-                ctx.stroke();
+                for (const p2 of neighbors) {
+                    if (p1.id === p2.id) continue;
+                    
+                    const idA = p1.id < p2.id ? p1.id : p2.id;
+                    const idB = p1.id < p2.id ? p2.id : p1.id;
+                    const index = idA * n + idB;
+                    if (collisionMatrix[index]) continue;
+                    collisionMatrix[index] = 1;
 
-                if (dist2 < 2500) {
-                    particles[i].x += dx * 0.02;
-                    particles[i].y += dy * 0.02;
+                    const dx = p1.x - p2.x;
+                    const dy = p1.y - p2.y;
+                    const d2 = dx * dx + dy * dy;
+                    
+                    let lMax = dynamicConnectionDistance * localMultiplier;
+                    const isH = p1.isHub || p2.isHub;
+                    if (isH) lMax *= 1.5;
+                    const lMax2 = lMax * lMax;
+
+                    if (d2 < lMax2) {
+                        const dist = Math.sqrt(d2);
+                        let op = (1 - (dist / lMax)) * 0.85;
+                        if (localMultiplier > 1.0) {
+                            op = Math.min(1.0, op * (1.0 + (localMultiplier - 1.0) * 0.8));
+                        }
+
+                        let bIdx = Math.floor(op * 10);
+                        if (bIdx > 9) bIdx = 9;
+                        if (bIdx < 0) bIdx = 0;
+
+                        if (isH) {
+                            hubBuckets[bIdx].moveTo(p1.x, p1.y);
+                            hubBuckets[bIdx].lineTo(p2.x, p2.y);
+                        } else {
+                            normalBuckets[bIdx].moveTo(p1.x, p1.y);
+                            normalBuckets[bIdx].lineTo(p2.x, p2.y);
+                        }
+                    } else if (d2 < lMax2 * 1.5 && isH) {
+                        backgroundPath.moveTo(p1.x, p1.y);
+                        backgroundPath.lineTo(p2.x, p2.y);
+                    }
                 }
             }
         }
     }
+
+    // 3. Batch Draw
+    ctx.lineWidth = 0.4;
+    ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, 0.12)`;
+    ctx.stroke(backgroundPath);
 
     ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, 0.1)`;
     ctx.fill(hubAuraPath);
@@ -152,17 +252,14 @@ const animate = (currentTime) => {
     ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, 0.5)`;
     ctx.fill(normalPath);
 
-    ctx.lineWidth = 0.8;
     for (let i = 0; i < 10; i++) {
-        const alpha = (i / 10) * 0.7;
-        ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${alpha})`;
+        const al = (i / 10) * 0.6;
+        ctx.lineWidth = 0.6;
+        ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${al})`;
         ctx.stroke(normalBuckets[i]);
-    }
-
-    ctx.lineWidth = 1.8;
-    for (let i = 0; i < 10; i++) {
-        const alpha = (i / 10) * 0.9;
-        ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${alpha})`;
+        
+        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${al * 1.2})`;
         ctx.stroke(hubBuckets[i]);
     }
 }
@@ -178,12 +275,10 @@ self.onmessage = (e) => {
             height = payload.height;
             canvas.width = width;
             canvas.height = height;
-            
             const area = width * height;
-            const density = 20000;
-            const targetCount = Math.min(Math.floor(area / density), 70);
+            const density = 13000; 
+            const targetCount = Math.min(Math.floor(area / density), 125);
             initParticles(targetCount, width, height);
-            
             animate();
             break;
 
@@ -194,14 +289,14 @@ self.onmessage = (e) => {
                 canvas.width = width;
                 canvas.height = height;
             }
-            const newArea = width * height;
-            const newDensity = 20000;
-            const newTargetCount = Math.min(Math.floor(newArea / newDensity), 70);
-            initParticles(newTargetCount, width, height);
+            const nArea = width * height;
+            const nDensity = 13000;
+            const nCount = Math.min(Math.floor(nArea / nDensity), 125);
+            initParticles(nCount, width, height);
             break;
 
         case 'MOUSE':
-            mouse = payload;
+            targetMouse = payload;
             break;
 
         default:
