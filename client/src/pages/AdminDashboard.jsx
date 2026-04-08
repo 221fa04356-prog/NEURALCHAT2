@@ -17,7 +17,6 @@ import {
     ResponsiveContainer, PieChart, Pie, Cell, Legend, Label
 } from 'recharts';
 import logo from '../assets/logo.png';
-import NeuralBackground from '../components/NeuralBackground';
 
 const formatEventTimeString = (startDate, startTime, endDate, endTime) => {
     if (!startDate && !startTime) return '';
@@ -2798,8 +2797,7 @@ export default function AdminDashboard() {
 
     return (
         <div style={{ display: 'flex', height: '100vh', width: '100vw', background: 'transparent', fontFamily: "'Open Sans', sans-serif", position: 'relative', overflow: 'hidden' }}>
-            <NeuralBackground />
-
+            
             {/* Mobile Sidebar Overlay */}
             {isMobile && mobileSidebarOpen && (
                 <div
