@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import '../styles/Snackbar.css';
 import { X, MoreHorizontal, Send, AlertCircle, CheckCircle, Info } from 'lucide-react';
 import logo from '../assets/logo.png'; // Import App Logo
@@ -9,14 +9,20 @@ const Snackbar = ({ message, senderName, senderAvatar, type = 'info', onClose, d
 
     const [isFocused, setIsFocused] = useState(false);
 
+    const onCloseRef = useRef(onClose);
     useEffect(() => {
-        if (duration && duration > 0) {
-            const timer = setTimeout(() => {
-                onClose();
-            }, duration);
-            return () => clearTimeout(timer);
-        }
-    }, [duration, onClose]);
+        onCloseRef.current = onClose;
+    }, [onClose]);
+
+    useEffect(() => {
+        if (!duration || duration <= 0 || isPaused) return;
+
+        const timer = setTimeout(() => {
+            onCloseRef.current();
+        }, duration);
+
+        return () => clearTimeout(timer);
+    }, [duration, isPaused, message]); // Removed onClose from dependencies
 
     const handleSendReply = () => {
         if (replyText.trim() && onReply) {

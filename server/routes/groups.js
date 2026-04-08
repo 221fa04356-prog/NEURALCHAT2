@@ -821,6 +821,15 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             linkPreview = await fetchLinkPreview(urlMatch[0]);
         }
 
+        let eventData = req.body.event;
+        if (typeof eventData === 'string') {
+            try { eventData = JSON.parse(eventData); } catch (e) { eventData = null; }
+        }
+        let pollData = req.body.poll;
+        if (typeof pollData === 'string') {
+            try { pollData = JSON.parse(pollData); } catch (e) { pollData = null; }
+        }
+
         const msg = await GroupMessage.create({
             group_id: groupId,
             sender_id: senderId,
@@ -839,7 +848,11 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             
             // E2EE fields
             ciphertext: req.body.ciphertext,
-            sender_key_id: req.body.sender_key_id
+            sender_key_id: req.body.sender_key_id,
+
+            // Forwarded Data
+            event: eventData || undefined,
+            poll: pollData || undefined
         });
 
         const populated = await GroupMessage.findById(msg._id)
