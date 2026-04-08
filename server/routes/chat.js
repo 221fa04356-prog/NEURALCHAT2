@@ -947,7 +947,14 @@ router.post('/send', authenticateToken, (req, res, next) => {
     const { userId, content, reply_to, toUserId } = req.body;
     const file = req.file;
 
-    if (!userId) return res.status(400).json({ error: 'User ID required' });
+    let event = req.body.event;
+    if (typeof event === 'string') {
+        try { event = JSON.parse(event); } catch (e) { event = null; }
+    }
+    let poll = req.body.poll;
+    if (typeof poll === 'string') {
+        try { poll = JSON.parse(poll); } catch (e) { poll = null; }
+    }
 
     // Security check
     if (userId !== req.user.id) {
@@ -1178,7 +1185,11 @@ router.post('/send', authenticateToken, (req, res, next) => {
 
                 // E2EE fields
                 ciphertext: req.body.ciphertext,
-                session_header: req.body.session_header ? JSON.parse(req.body.session_header) : undefined
+                session_header: req.body.session_header ? JSON.parse(req.body.session_header) : undefined,
+
+                // Forwarded Poll/Event
+                poll: poll || undefined,
+                event: event || undefined
             });
 
 

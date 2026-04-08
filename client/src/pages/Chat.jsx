@@ -1176,8 +1176,10 @@ export default function Chat() {
                     }
                     if (!isAttending) return;
 
+                    if (!ev.startDate || typeof ev.startDate !== 'string') return;
                     const startStr = `${ev.startDate.split('T')[0]}T${ev.startTime || '00:00'}`;
                     const startObj = new Date(startStr);
+                    if (isNaN(startObj.getTime())) return;
                     const diffMs = startObj.getTime() - now.getTime();
                     
                     const rt = ev.reminderTiming || 'default';
@@ -7724,7 +7726,45 @@ export default function Chat() {
                                                         </div>
                                                     </div>
                                                 )}
-                                                {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && <div className="wa-msg-text" style={{ fontSize: '14.2px', lineHeight: '19px', color: '#111b21', wordBreak: 'break-word' }}>{msg.content}</div>}
+                                                {msg.type === 'event' && msg.event && (
+                                                    <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
+                                                        <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
+                                                            <div style={{ display: 'flex', gap: '14px' }}>
+                                                                <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                    <Calendar size={24} color="#0EA5BE" />
+                                                                </div>
+                                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                                    <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{msg.event.name}</div>
+                                                                    <div style={{ fontSize: '14px', color: '#667781' }}>
+                                                                        {formatEventTimeString(msg.event.startDate, msg.event.startTime, msg.event.endDate, msg.event.endTime)}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', position: 'relative', gap: '8px' }}>
+                                                            {msg.event.cancelled ? (
+                                                                <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
+                                                            ) : (() => {
+                                                                const dateValue = msg.event.endDate || msg.event.startDate;
+                                                                if (!dateValue || typeof dateValue !== 'string') return null;
+                                                                const dStr = dateValue.split('T')[0];
+                                                                const endStr = `${dStr}T${msg.event.endTime || '23:59'}:00`;
+                                                                const isEnded = new Date(endStr) <= new Date();
+                                                                const startDValue = msg.event.startDate || '';
+                                                                if (!startDValue || typeof startDValue !== 'string') return null;
+                                                                const startDStr = startDValue.split('T')[0];
+                                                                const startStr = `${startDStr}T${msg.event.startTime || '00:00'}:00`;
+                                                                const isStarted = new Date(startStr) <= new Date();
+                                                                return (
+                                                                    <span style={{ color: isEnded ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
+                                                                        {isEnded ? 'Event ended' : isStarted ? 'Event started' : 'Upcoming event'}
+                                                                    </span>
+                                                                );
+                                                            })()}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && msg.type !== 'event' && <div className="wa-msg-text" style={{ fontSize: '14.2px', lineHeight: '19px', color: '#111b21', wordBreak: 'word-break' }}>{msg.content}</div>}
                                             </div>
                                             <div className="wa-starred-meta" style={{ display: 'flex', justifyContent: 'flex-end', gap: '4px', alignItems: 'center', marginTop: '2px' }}>
                                                 <Star size={10} fill="#8696a0" color="#8696a0" />
@@ -9426,7 +9466,45 @@ export default function Chat() {
                                                         </div>
                                                     </div>
                                                 )}
-                                                {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && <div className="wa-msg-text">{msg.content}</div>}
+                                                {msg.type === 'event' && msg.event && (
+                                                    <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
+                                                        <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
+                                                            <div style={{ display: 'flex', gap: '14px' }}>
+                                                                <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                    <Calendar size={24} color="#0EA5BE" />
+                                                                </div>
+                                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                                    <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{msg.event.name}</div>
+                                                                    <div style={{ fontSize: '14px', color: '#667781' }}>
+                                                                        {formatEventTimeString(msg.event.startDate, msg.event.startTime, msg.event.endDate, msg.event.endTime)}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', position: 'relative', gap: '8px' }}>
+                                                            {msg.event.cancelled ? (
+                                                                <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
+                                                            ) : (() => {
+                                                                const dateValue = msg.event.endDate || msg.event.startDate;
+                                                                if (!dateValue || typeof dateValue !== 'string') return null;
+                                                                const dStr = dateValue.split('T')[0];
+                                                                const endStr = `${dStr}T${msg.event.endTime || '23:59'}:00`;
+                                                                const isEnded = new Date(endStr) <= new Date();
+                                                                const startDValue = msg.event.startDate || '';
+                                                                if (!startDValue || typeof startDValue !== 'string') return null;
+                                                                const startDStr = startDValue.split('T')[0];
+                                                                const startStr = `${startDStr}T${msg.event.startTime || '00:00'}:00`;
+                                                                const isStarted = new Date(startStr) <= new Date();
+                                                                return (
+                                                                    <span style={{ color: isEnded ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
+                                                                        {isEnded ? 'Event ended' : isStarted ? 'Event started' : 'Upcoming event'}
+                                                                    </span>
+                                                                );
+                                                            })()}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && msg.type !== 'event' && <div className="wa-msg-text">{msg.content}</div>}
                                             </div>
                                             <div className="wa-starred-meta">
                                                 <Star size={12} fill="#8696a0" color="#8696a0" />
@@ -12796,36 +12874,54 @@ export default function Chat() {
             {isArchivedChatsOpen && renderArchivedChatsDrawer()}
             {isGlobalStarredOpen && renderGlobalStarredDrawer()}
             {isRemindersModalOpen && (
-                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'white', zIndex: 100, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', padding: '14px 23px', borderBottom: '1px solid #e9edef', background: '#f0f2f5' }}>
-                        <button style={{ background: 'none', border: 'none', cursor: 'pointer', marginRight: 20 }} onClick={() => setIsRemindersModalOpen(false)}>
+                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'white', zIndex: 500, display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '14px 23px', borderBottom: '1px solid #e9edef', background: '#f0f2f5', position: 'relative', minHeight: '59px' }}>
+                        <button 
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', position: 'absolute', left: 23, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center' }} 
+                            onClick={() => setIsRemindersModalOpen(false)}
+                        >
                             <ArrowLeft size={24} color="#54656f" />
                         </button>
-                        <span style={{ fontSize: '16px', color: '#111b21', fontWeight: 500 }}>Event Reminders</span>
+                        <span style={{ fontSize: '18px', color: '#111b21', fontWeight: 600, whiteSpace: 'nowrap' }}>Event Reminders</span>
                     </div>
                     <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px' }}>
                         {(() => {
-                            const approachingEvents = [];
-                            const allScheduledEvents = [];
                             const now = new Date();
+                            const approachingEvents = [];
+                            
+                            // Sort logic: Active first, then by createdAt desc
+                            const sortedEvents = [...remindersList].sort((a, b) => {
+                                const aEv = a.event;
+                                const bEv = b.event;
+                                if (!aEv || !bEv) return 0;
+                                
+                                // 1. Active (not cancelled) first
+                                if (aEv.cancelled !== bEv.cancelled) {
+                                    return aEv.cancelled ? 1 : -1;
+                                }
+                                
+                                // 2. Recently created (newest first)
+                                return new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0);
+                            });
 
-                            remindersList.forEach((m) => {
+                            sortedEvents.forEach((m) => {
                                 const ev = m.event;
                                 if (!ev) return;
                                 
                                 let isAttending = false;
                                 if (m.isGroup) {
-                                     isAttending = ev.responses && ev.responses.some(r => String(r.user_id._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
+                                     isAttending = ev.responses && ev.responses.some(r => String(r.user_id?._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
                                      if (String(m.sender_id?._id || m.sender_id) === String(user.id)) isAttending = true;
                                 } else {
-                                     isAttending = ev.responses && ev.responses.some(r => String(r.user_id._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
+                                     isAttending = ev.responses && ev.responses.some(r => String(r.user_id?._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
                                      if (String(m.user_id?._id || m.user_id) === String(user.id)) isAttending = true;
                                 }
 
-                                let isNear = false;
                                 if (isAttending && !ev.cancelled) {
+                                    if (!ev.startDate || typeof ev.startDate !== 'string') return;
                                     const startStr = `${ev.startDate.split('T')[0]}T${ev.startTime || '00:00'}`;
                                     const startObj = new Date(startStr);
+                                    if (isNaN(startObj.getTime())) return;
                                     const diffMs = startObj.getTime() - now.getTime();
                                     
                                     const rt = ev.reminderTiming || 'default';
@@ -12840,19 +12936,52 @@ export default function Chat() {
                                         }
                                     }
                                     if (diffMs > 0 && diffMs <= targetMs) {
-                                        isNear = true;
+                                        approachingEvents.push(m);
                                     }
                                 }
-
-                                allScheduledEvents.push(m);
-                                if (isNear) approachingEvents.push(m);
                             });
 
                             const renderEventCard = (m, keyStr, isImportant) => {
                                 const ev = m.event;
                                 const isCancelled = ev.cancelled;
                                 return (
-                                    <div key={keyStr} style={{ padding: '15px', background: isImportant ? '#e6f7ff' : '#f0f2f5', borderRadius: '8px', marginBottom: '10px', border: isImportant ? '1px solid #1890ff' : 'none' }}>
+                                    <div 
+                                        key={keyStr} 
+                                        onClick={() => {
+                                            setIsRemindersModalOpen(false);
+                                            if (m.isGroup) {
+                                                const groupObj = groups.find(g => String(g._id) === String(m.group_id?._id || m.group_id));
+                                                if (groupObj) {
+                                                    setSelectedGroup(groupObj);
+                                                    setSelectedUser(null);
+                                                    setSelectedCommunity(null);
+                                                    setIsCommunityHomeOpen(false);
+                                                    if (selectedUserRef) selectedUserRef.current = null;
+                                                    if (selectedGroupRef) selectedGroupRef.current = groupObj;
+                                                    fetchGroupMessages(groupObj._id);
+                                                }
+                                            } else {
+                                                const otherId = String(m.sender_id?._id || m.sender_id) === String(user.id) 
+                                                    ? (m.receiver_id?._id || m.receiver_id) 
+                                                    : (m.sender_id?._id || m.sender_id || m.user_id?._id || m.user_id);
+                                                const userObj = users.find(u => String(u._id) === String(otherId));
+                                                if (userObj) {
+                                                    handleUserSelect(userObj);
+                                                }
+                                            }
+                                        }}
+                                        style={{ 
+                                            padding: '15px', 
+                                            background: isImportant ? '#e6f7ff' : '#f0f2f5', 
+                                            borderRadius: '8px', 
+                                            marginBottom: '10px', 
+                                            border: isImportant ? '1px solid #1890ff' : 'none',
+                                            cursor: 'pointer',
+                                            transition: 'background 0.2s'
+                                        }}
+                                        onMouseEnter={(e) => e.currentTarget.style.background = isImportant ? '#bae7ff' : '#e9edef'}
+                                        onMouseLeave={(e) => e.currentTarget.style.background = isImportant ? '#e6f7ff' : '#f0f2f5'}
+                                    >
                                         <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#111b21', marginBottom: 4 }}>{ev.name}</div>
                                         {isCancelled ? (
                                             <div style={{ color: '#ef4444', fontSize: '14px', fontWeight: 'bold' }}>Event Cancelled</div>
@@ -12878,16 +13007,16 @@ export default function Chat() {
                                     {approachingEvents.length > 0 && (
                                         <div style={{ marginBottom: 20 }}>
                                             <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#0EA5BE', marginBottom: 10, paddingLeft: 4 }}>Upcoming Reminders</div>
-                                            {approachingEvents.map((m, i) => renderEventCard(m, `near-${i}`, true))}
+                                            {approachingEvents.map((m, i) => renderEventCard(m, `near-${m._id || i}`, true))}
                                         </div>
                                     )}
                                     
                                     <div>
                                         <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#54656f', marginBottom: 10, paddingLeft: 4 }}>All Scheduled Events</div>
-                                        {allScheduledEvents.length === 0 ? (
+                                        {sortedEvents.length === 0 ? (
                                             <div style={{ textAlign: 'center', color: '#8696a0', marginTop: 40 }}>No events scheduled.</div>
                                         ) : (
-                                            allScheduledEvents.map((m, i) => renderEventCard(m, `all-${i}`, false))
+                                            sortedEvents.map((m, i) => renderEventCard(m, `all-${m._id || i}`, false))
                                         )}
                                     </div>
                                 </>
@@ -13648,7 +13777,9 @@ export default function Chat() {
                         fileName: msg.fileName,
                         fileSize: msg.fileSize,
                         isForwarded: true,
-                        duration: msg.duration || 0
+                        duration: msg.duration || 0,
+                        event: msg.event,
+                        poll: msg.poll
                     } : new FormData();
 
                     if (!isGroup) {
@@ -13663,6 +13794,12 @@ export default function Chat() {
                             formData.append('duration', msg.duration || 0);
                         } else {
                             formData.append('type', msg.type || 'text');
+                        }
+                        if (msg.event) {
+                            formData.append('event', JSON.stringify(msg.event));
+                        }
+                        if (msg.poll) {
+                            formData.append('poll', JSON.stringify(msg.poll));
                         }
                         formData.append('isForwarded', 'true');
                         formData.append('forward_count', msg.forward_count || 0);
@@ -13696,7 +13833,9 @@ export default function Chat() {
                             file_path: sentMsg.file_path,
                             duration: sentMsg.duration,
                             isForwarded: true,
-                            created_at: sentMsg.created_at
+                            created_at: sentMsg.created_at,
+                            event: sentMsg.event,
+                            poll: sentMsg.poll
                         });
                     } else {
                         socket.emit('send_group_message', {
@@ -14928,10 +15067,14 @@ export default function Chat() {
                                                                                     {msg.event.cancelled ? (
                                                                                         <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
                                                                                     ) : (() => {
-                                                                                        const dStr = (msg.event.endDate || msg.event.startDate).split('T')[0];
+                                                                                        const dateValue = msg.event.endDate || msg.event.startDate;
+                                                                                        if (!dateValue || typeof dateValue !== 'string') return null;
+                                                                                        const dStr = dateValue.split('T')[0];
                                                                                         const endStr = `${dStr}T${msg.event.endTime || '23:59'}:00`;
                                                                                         const isEnded = new Date(endStr) <= new Date();
-                                                                                        const startDStr = (msg.event.startDate || '').split('T')[0];
+                                                                                        const startDValue = msg.event.startDate || '';
+                                                                                        if (!startDValue || typeof startDValue !== 'string') return null;
+                                                                                        const startDStr = startDValue.split('T')[0];
                                                                                         const startStr = `${startDStr}T${msg.event.startTime || '00:00'}:00`;
                                                                                         const isStarted = new Date(startStr) <= new Date();
 
@@ -16361,10 +16504,14 @@ export default function Chat() {
                                                                                     {msg.event.cancelled ? (
                                                                                         <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
                                                                                     ) : (() => {
-                                                                                        const dStr = (msg.event.endDate || msg.event.startDate).split('T')[0];
+                                                                                        const dateValue = msg.event.endDate || msg.event.startDate;
+                                                                                        if (!dateValue || typeof dateValue !== 'string') return null;
+                                                                                        const dStr = dateValue.split('T')[0];
                                                                                         const endStr = `${dStr}T${msg.event.endTime || '23:59'}:00`;
                                                                                         const isEnded = new Date(endStr) <= new Date();
-                                                                                        const startDStr = (msg.event.startDate || '').split('T')[0];
+                                                                                        const startDValue = msg.event.startDate || '';
+                                                                                        if (!startDValue || typeof startDValue !== 'string') return null;
+                                                                                        const startDStr = startDValue.split('T')[0];
                                                                                         const startStr = `${startDStr}T${msg.event.startTime || '00:00'}:00`;
                                                                                         const isStarted = new Date(startStr) <= new Date();
 
