@@ -1070,7 +1070,30 @@ export default function Chat() {
     const [isEventEditOpen, setIsEventEditOpen] = useState(false);
     const [isRemindersModalOpen, setIsRemindersModalOpen] = useState(false);
     const [remindersList, setRemindersList] = useState([]);
+    const [unreadRemindersCount, setUnreadRemindersCount] = useState(0);
     const [eventEditTarget, setEventEditTarget] = useState(null);
+
+    useEffect(() => {
+        const checkUnread = () => {
+            const uid = user?.id || user?._id;
+            if (!uid) return;
+            const lastChecked = parseInt(localStorage.getItem(`lastRemindersChecked_${uid}`) || '0', 10);
+            let count = 0;
+            remindersList.forEach(m => {
+                const ev = m.event;
+                if (!ev || ev.cancelled) return;
+
+                // Do not show unread count to the event creator
+                const senderId = String(m.sender_id?._id || m.sender_id || m.user_id?._id || m.user_id);
+                if (senderId === String(uid)) return;
+
+                const d = m.created_at || m.createdAt || ev.createdAt || ev.startDate;
+                if (d && new Date(d).getTime() > lastChecked) count++;
+            });
+            setUnreadRemindersCount(count);
+        };
+        checkUnread();
+    }, [remindersList, user]);
     const [isCancelEventConfirmOpen, setIsCancelEventConfirmOpen] = useState(false);
     const [eventTick, setEventTick] = useState(0); // For global re-render of expired states
 
@@ -3045,6 +3068,10 @@ export default function Chat() {
                 fetchUsers();
             }
 
+            if (data.type === 'event') {
+                fetchReminders();
+            }
+
             // Optimistic Update for Sidebar (Unread Count + Last Message + Counts)
             if (data._id && !processedMessageIdsRef.current.has(String(data._id))) {
                 processedMessageIdsRef.current.add(String(data._id));
@@ -3336,6 +3363,7 @@ export default function Chat() {
         socket.on('poll_voted', onPollVoted);
         const onEventUpdated = (data) => {
             console.log('Socket: event_updated', data);
+            fetchReminders();
             const { messageId, event, isGroup } = data;
             const updateFn = prev => prev.map(m => (String(m._id || m.id) === String(messageId)) ? { ...m, event: event } : m);
             if (isGroup) {
@@ -3684,6 +3712,10 @@ export default function Chat() {
                         onReply: (text) => handleGroupNotificationReply(text, data.groupId)
                     });
                 }
+            }
+
+            if (data.message?.type === 'event') {
+                fetchReminders();
             }
 
             // Update sidebars/drawers
@@ -7764,7 +7796,61 @@ export default function Chat() {
                                                         </div>
                                                     </div>
                                                 )}
-                                                {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && msg.type !== 'event' && <div className="wa-msg-text" style={{ fontSize: '14.2px', lineHeight: '19px', color: '#111b21', wordBreak: 'word-break' }}>{msg.content}</div>}
+                                                {(() => {
+                                                    let lp = msg.link_preview;
+                                                    const ytId = (msg.content && typeof msg.content === 'string') ? getYouTubeVideoId(msg.content) : null;
+                                                    if ((!lp || !lp.title) && ytId) {
+                                                        lp = { url: msg.content, title: 'YouTube Video', domain: 'youtube.com', image: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` };
+                                                    }
+                                                    if (lp && lp.title) {
+                                                        return (
+                                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                                <div
+                                                                    className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''} ${((lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be'))) ? 'youtube' : ''}`}
+                                                                    onClick={(e) => { e.stopPropagation(); window.open(lp.url, '_blank'); }}
+                                                                    style={{ cursor: 'pointer', transition: 'none', marginBottom: (msg.content && msg.content.trim() !== lp.url.trim()) ? '8px' : '0' }}
+                                                                >
+                                                                    {lp.image && (
+                                                                        <div className="wa-link-preview-image">
+                                                                            <img src={lp.image} alt={lp.title} />
+                                                                            {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) && (
+                                                                                <div className="wa-link-preview-play-btn">
+                                                                                    <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                    <div className="wa-link-preview-content">
+                                                                        <div className="wa-link-preview-title">{lp.title}</div>
+                                                                        {lp.description && <div className="wa-link-preview-description">{lp.description}</div>}
+                                                                        <div className="wa-link-preview-domain">
+                                                                            {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) ? (
+                                                                                <>
+                                                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                                                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ff0000" />
+                                                                                    </svg>
+                                                                                    <span style={{ color: '#ff0000', fontWeight: 'bold' }}>{lp.domain}</span>
+                                                                                </>
+                                                                            ) : (
+                                                                                <>
+                                                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                                                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                                                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                                                    </svg>
+                                                                                    <span>{lp.domain}</span>
+                                                                                </>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                {msg.content && msg.content.trim() !== lp.url.trim() && <div className="wa-msg-text" style={{ fontSize: '14.2px', lineHeight: '19px', color: '#111b21', wordBreak: 'word-break' }}>{msg.content}</div>}
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return (
+                                                        msg.content && msg.type !== 'contact' && msg.type !== 'poll' && msg.type !== 'event' && <div className="wa-msg-text" style={{ fontSize: '14.2px', lineHeight: '19px', color: '#111b21', wordBreak: 'word-break' }}>{msg.content}</div>
+                                                    );
+                                                })()}
                                             </div>
                                             <div className="wa-starred-meta" style={{ display: 'flex', justifyContent: 'flex-end', gap: '4px', alignItems: 'center', marginTop: '2px' }}>
                                                 <Star size={10} fill="#8696a0" color="#8696a0" />
@@ -9504,7 +9590,61 @@ export default function Chat() {
                                                         </div>
                                                     </div>
                                                 )}
-                                                {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && msg.type !== 'event' && <div className="wa-msg-text">{msg.content}</div>}
+                                                {(() => {
+                                                    let lp = msg.link_preview;
+                                                    const ytId = (msg.content && typeof msg.content === 'string') ? getYouTubeVideoId(msg.content) : null;
+                                                    if ((!lp || !lp.title) && ytId) {
+                                                        lp = { url: msg.content, title: 'YouTube Video', domain: 'youtube.com', image: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` };
+                                                    }
+                                                    if (lp && lp.title) {
+                                                        return (
+                                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                                <div
+                                                                    className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''} ${((lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be'))) ? 'youtube' : ''}`}
+                                                                    onClick={(e) => { e.stopPropagation(); window.open(lp.url, '_blank'); }}
+                                                                    style={{ cursor: 'pointer', transition: 'none', marginBottom: (msg.content && msg.content.trim() !== lp.url.trim()) ? '8px' : '0' }}
+                                                                >
+                                                                    {lp.image && (
+                                                                        <div className="wa-link-preview-image">
+                                                                            <img src={lp.image} alt={lp.title} />
+                                                                            {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) && (
+                                                                                <div className="wa-link-preview-play-btn">
+                                                                                    <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                    <div className="wa-link-preview-content">
+                                                                        <div className="wa-link-preview-title">{lp.title}</div>
+                                                                        {lp.description && <div className="wa-link-preview-description">{lp.description}</div>}
+                                                                        <div className="wa-link-preview-domain">
+                                                                            {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) ? (
+                                                                                <>
+                                                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                                                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ff0000" />
+                                                                                    </svg>
+                                                                                    <span style={{ color: '#ff0000', fontWeight: 'bold' }}>{lp.domain}</span>
+                                                                                </>
+                                                                            ) : (
+                                                                                <>
+                                                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                                                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                                                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                                                    </svg>
+                                                                                    <span>{lp.domain}</span>
+                                                                                </>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                {msg.content && msg.content.trim() !== lp.url.trim() && <div className="wa-msg-text">{msg.content}</div>}
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return (
+                                                        msg.content && msg.type !== 'contact' && msg.type !== 'poll' && msg.type !== 'event' && <div className="wa-msg-text">{msg.content}</div>
+                                                    );
+                                                })()}
                                             </div>
                                             <div className="wa-starred-meta">
                                                 <Star size={12} fill="#8696a0" color="#8696a0" />
@@ -9712,9 +9852,61 @@ export default function Chat() {
                                 ) : (
                                     <div style={{ padding: '15px', textAlign: 'center', background: '#f8f9fa', borderRadius: '12px' }}>Event</div>
                                 )
-                            ) : (
-                                <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{infoMessage.content}</p>
-                            )}
+                            ) : (() => {
+                                let lp = infoMessage.link_preview;
+                                const ytId = (infoMessage.content && typeof infoMessage.content === 'string') ? getYouTubeVideoId(infoMessage.content) : null;
+                                if ((!lp || !lp.title) && ytId) {
+                                    lp = { url: infoMessage.content, title: 'YouTube Video', domain: 'youtube.com', image: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` };
+                                }
+                                if (lp && lp.title) {
+                                    return (
+                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                            <div
+                                                className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''} ${((lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be'))) ? 'youtube' : ''}`}
+                                                onClick={() => window.open(lp.url, '_blank')}
+                                                style={{ cursor: 'pointer', transition: 'none', marginBottom: (infoMessage.content && infoMessage.content.trim() !== lp.url.trim()) ? '8px' : '0' }}
+                                            >
+                                                {lp.image && (
+                                                    <div className="wa-link-preview-image">
+                                                        <img src={lp.image} alt={lp.title} />
+                                                        {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) && (
+                                                            <div className="wa-link-preview-play-btn">
+                                                                <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                <div className="wa-link-preview-content">
+                                                    <div className="wa-link-preview-title">{lp.title}</div>
+                                                    {lp.description && <div className="wa-link-preview-description">{lp.description}</div>}
+                                                    <div className="wa-link-preview-domain">
+                                                        {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) ? (
+                                                            <>
+                                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ff0000" />
+                                                                </svg>
+                                                                <span style={{ color: '#ff0000', fontWeight: 'bold' }}>{lp.domain}</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                                </svg>
+                                                                <span>{lp.domain}</span>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {infoMessage.content && infoMessage.content.trim() !== lp.url.trim() && <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{infoMessage.content}</p>}
+                                        </div>
+                                    );
+                                }
+                                return (
+                                    <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{infoMessage.content}</p>
+                                );
+                            })()}
                             <div className="wa-msg-meta">
                                 {infoMessage.is_edited && <span style={{ fontSize: '10px', color: '#667781', marginRight: '2px', opacity: 0.9 }}>Edited</span>}
                                 {formatTime(infoMessage.created_at)}
@@ -12944,31 +13136,99 @@ export default function Chat() {
                             const renderEventCard = (m, keyStr, isImportant) => {
                                 const ev = m.event;
                                 const isCancelled = ev.cancelled;
+                                const scrollToMsg = (msgId, retries = 30) => {
+                                    const el = document.getElementById(`msg-${msgId}`);
+                                    if (el) {
+                                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                        el.style.backgroundColor = 'rgba(14, 165, 190, 0.2)';
+                                        setTimeout(() => el.style.backgroundColor = '', 2000);
+                                        return;
+                                    }
+                                    if (retries > 0) {
+                                        setTimeout(() => scrollToMsg(msgId, retries - 1), 300);
+                                    }
+                                };
                                 return (
                                     <div 
                                         key={keyStr} 
                                         onClick={() => {
-                                            setIsRemindersModalOpen(false);
+                                            const targetMsgId = m._id || m.id;
+
                                             if (m.isGroup) {
-                                                const groupObj = groups.find(g => String(g._id) === String(m.group_id?._id || m.group_id));
+                                                const targetGrpId = String(m.group_id?._id || m.group_id);
+                                                let groupObj = groups.find(g => String(g._id) === targetGrpId);
+                                                let foundCommunity = null;
+                                                
+                                                if (!groupObj) {
+                                                    for (const c of communities) {
+                                                        const annId = String(c.announcements?._id || c.announcements?.id || c.announcements);
+                                                        if (annId === targetGrpId && typeof c.announcements === 'object') {
+                                                            groupObj = {
+                                                                ...c.announcements,
+                                                                name: c.name,
+                                                                isCommunityAnnouncements: true,
+                                                                communityName: c.name,
+                                                                communityIcon: c.icon,
+                                                                communityDescription: c.description
+                                                            };
+                                                            foundCommunity = c;
+                                                            break;
+                                                        }
+                                                        const gInC = (c.groups || []).find(g => String(g._id || g.id) === targetGrpId);
+                                                        if (gInC) {
+                                                            groupObj = gInC;
+                                                            foundCommunity = c;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                if (!groupObj && m.group_id) {
+                                                    groupObj = { _id: targetGrpId, name: m.group_id.name || 'Group', icon: m.group_id.icon, members: [user.id] };
+                                                }
+                                                
                                                 if (groupObj) {
                                                     setSelectedGroup(groupObj);
+                                                    setSelectedCommunity(foundCommunity);
                                                     setSelectedUser(null);
-                                                    setSelectedCommunity(null);
                                                     setIsCommunityHomeOpen(false);
                                                     if (selectedUserRef) selectedUserRef.current = null;
                                                     if (selectedGroupRef) selectedGroupRef.current = groupObj;
-                                                    fetchGroupMessages(groupObj._id);
+                                                    
+                                                    // Ensure the server accurately rehydrates the announcement messages array
+                                                    fetchGroupMessages(groupObj._id || groupObj.id);
+                                                    
+                                                    scrollToMsg(targetMsgId);
                                                 }
                                             } else {
-                                                const otherId = String(m.sender_id?._id || m.sender_id) === String(user.id) 
-                                                    ? (m.receiver_id?._id || m.receiver_id) 
-                                                    : (m.sender_id?._id || m.sender_id || m.user_id?._id || m.user_id);
-                                                const userObj = users.find(u => String(u._id) === String(otherId));
+                                                const p2pSenderId = m.user_id?._id || m.user_id || m.sender_id?._id || m.sender_id;
+                                                const p2pReceiverId = m.receiver_id?._id || m.receiver_id;
+                                                const currentUserId = user.id || user._id;
+                                                
+                                                const otherId = String(p2pSenderId) === String(currentUserId) 
+                                                    ? p2pReceiverId 
+                                                    : p2pSenderId;
+                                                
+                                                let userObj = users.find(u => String(u._id || u.id) === String(otherId));
+                                                
+                                                if (!userObj) {
+                                                   const fallbackName = String(p2pSenderId) === String(otherId) 
+                                                    ? (m.user_id?.name || m.sender_id?.name) 
+                                                    : m.receiver_id?.name;
+                                                   userObj = { _id: otherId, name: fallbackName || 'User' };
+                                                }
+                                                
                                                 if (userObj) {
+                                                    // Explicitly ensure the fallback object isn't triggering a restricted status by injecting default accepted state
+                                                    if (!userObj.requestStatus) userObj.requestStatus = 'accepted';
                                                     handleUserSelect(userObj);
+                                                    scrollToMsg(targetMsgId);
                                                 }
                                             }
+
+                                            // On mobile, interacting with sidebar items usually closes out overlay if intended, 
+                                            // but since user explicitly requested "the left panel should stay put until i manually exit back"
+                                            // we will not force close it.
                                         }}
                                         style={{ 
                                             padding: '15px', 
@@ -13037,11 +13297,17 @@ export default function Chat() {
                             title="Reminders"
                             onClick={(e) => {
                                 e.stopPropagation();
+                                const uid = user?.id || user?._id;
+                                if (uid) {
+                                    localStorage.setItem(`lastRemindersChecked_${uid}`, Date.now().toString());
+                                    setUnreadRemindersCount(0);
+                                }
                                 fetchReminders();
                                 setIsRemindersModalOpen(true);
                             }}
                         >
                             <Calendar size={20} />
+                            {unreadRemindersCount > 0 && <span className="wa-bell-badge" style={{ right: '4px', top: '4px' }}>{unreadRemindersCount}</span>}
                         </button>
                     </div>
                     <div style={{ position: 'relative' }}>
@@ -14201,12 +14467,12 @@ export default function Chat() {
     const renderMainChat = () => (
         <div className="wa-main-chat-wrapper" style={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden' }}>
             <div
-                className={`wa-main-chat ${(isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? 'wa-main-chat-with-panel' : ''}`}
+                className={`wa-main-chat ${(!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? 'wa-main-chat-with-panel' : ''}`}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 style={{
                     flex: 1,
-                    borderRight: (isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? '1px solid #d1d7db' : 'none'
+                    borderRight: (!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? '1px solid #d1d7db' : 'none'
                 }}
             >
 
@@ -14871,46 +15137,54 @@ export default function Chat() {
 
 
                                                                     {/* Link Preview Card */}
-                                                                    {msg.link_preview && msg.link_preview.title && (
-                                                                        <div
-                                                                            className={`wa-link-preview-card ${!msg.link_preview.image ? 'no-image' : ''} ${((msg.link_preview.domain?.includes('youtube') || msg.link_preview.domain?.includes('youtu.be'))) ? 'youtube' : ''}`}
-                                                                            onClick={() => window.open(msg.link_preview.url, '_blank')}
-                                                                            style={{ cursor: 'pointer', transition: 'none' }}
-                                                                        >
-                                                                            {msg.link_preview.image && (
-                                                                                <div className="wa-link-preview-image">
-                                                                                    <img src={msg.link_preview.image} alt={msg.link_preview.title} />
-                                                                                    {(msg.link_preview.domain?.includes('youtube') || msg.link_preview.domain?.includes('youtu.be')) && (
-                                                                                        <div className="wa-link-preview-play-btn">
-                                                                                            <div className="wa-play-icon">Ã¢â€“Â¶</div>
-                                                                                        </div>
-                                                                                    )}
-                                                                                </div>
-                                                                            )}
-                                                                            <div className="wa-link-preview-content">
-                                                                                <div className="wa-link-preview-title">{msg.link_preview.title}</div>
-                                                                                {msg.link_preview.description && <div className="wa-link-preview-description">{msg.link_preview.description}</div>}
-                                                                                <div className="wa-link-preview-domain">
-                                                                                    {(msg.link_preview.domain?.includes('youtube') || msg.link_preview.domain?.includes('youtu.be')) ? (
-                                                                                        <>
-                                                                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                                                                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ff0000" />
-                                                                                            </svg>
-                                                                                            <span style={{ color: '#ff0000', fontWeight: 'bold' }}>{msg.link_preview.domain}</span>
-                                                                                        </>
-                                                                                    ) : (
-                                                                                        <>
-                                                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                                                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                                                                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                                                                            </svg>
-                                                                                            <span>{msg.link_preview.domain}</span>
-                                                                                        </>
-                                                                                    )}
+                                                                    {(() => {
+                                                                        let lp = msg.link_preview;
+                                                                        const ytId = (msg.content && typeof msg.content === 'string') ? getYouTubeVideoId(msg.content) : null;
+                                                                        if ((!lp || !lp.title) && ytId) {
+                                                                            lp = { url: msg.content, title: 'YouTube Video', domain: 'youtube.com', image: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` };
+                                                                        }
+                                                                        if (!lp || !lp.title) return null;
+                                                                        return (
+                                                                            <div
+                                                                                className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''} ${((lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be'))) ? 'youtube' : ''}`}
+                                                                                onClick={(e) => { e.stopPropagation(); window.open(lp.url, '_blank'); }}
+                                                                                style={{ cursor: 'pointer', transition: 'none' }}
+                                                                            >
+                                                                                {lp.image && (
+                                                                                    <div className="wa-link-preview-image">
+                                                                                        <img src={lp.image} alt={lp.title} />
+                                                                                        {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) && (
+                                                                                            <div className="wa-link-preview-play-btn">
+                                                                                                <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+                                                                                )}
+                                                                                <div className="wa-link-preview-content">
+                                                                                    <div className="wa-link-preview-title">{lp.title}</div>
+                                                                                    {lp.description && <div className="wa-link-preview-description">{lp.description}</div>}
+                                                                                    <div className="wa-link-preview-domain">
+                                                                                        {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) ? (
+                                                                                            <>
+                                                                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                                                                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ff0000" />
+                                                                                                </svg>
+                                                                                                <span style={{ color: '#ff0000', fontWeight: 'bold' }}>{lp.domain}</span>
+                                                                                            </>
+                                                                                        ) : (
+                                                                                            <>
+                                                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                                                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                                                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                                                                </svg>
+                                                                                                <span>{lp.domain}</span>
+                                                                                            </>
+                                                                                        )}
+                                                                                    </div>
                                                                                 </div>
                                                                             </div>
-                                                                        </div>
-                                                                    )}
+                                                                        );
+                                                                    })()}
                                                                     {msg.type === 'contact' && (() => {
                                                                         let cDataArray;
                                                                         try {
@@ -16307,44 +16581,54 @@ export default function Chat() {
 
 
 
-                                                                    {msg.link_preview && (
-                                                                        <div
-                                                                            className={`wa-link-preview-card ${getYouTubeVideoId(msg.link_preview.url) ? 'youtube' : ''}`}
-                                                                            onClick={() => window.open(msg.link_preview.url, '_blank')}
-                                                                        >
-                                                                            {msg.link_preview.image && (
-                                                                                <div className="wa-link-preview-image">
-                                                                                    <img src={msg.link_preview.image} alt="preview" />
-                                                                                    {getYouTubeVideoId(msg.link_preview.url) && (
-                                                                                        <div
-                                                                                            className="wa-yt-preview-overlay"
-                                                                                            onClick={(e) => {
-                                                                                                e.stopPropagation();
-                                                                                                setPreviewVideoUrl(msg.link_preview.url);
-                                                                                            }}
-                                                                                        >
-                                                                                            <div className="wa-yt-play-btn">
-                                                                                                <Play size={32} color="white" fill="white" />
+                                                                    {(() => {
+                                                                        let lp = msg.link_preview;
+                                                                        const ytId = (msg.content && typeof msg.content === 'string') ? getYouTubeVideoId(msg.content) : null;
+                                                                        if ((!lp || !lp.title) && ytId) {
+                                                                            lp = { url: msg.content, title: 'YouTube Video', domain: 'youtube.com', image: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` };
+                                                                        }
+                                                                        if (!lp || !lp.title) return null;
+                                                                        return (
+                                                                            <div
+                                                                                className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''} ${((lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be'))) ? 'youtube' : ''}`}
+                                                                                onClick={(e) => { e.stopPropagation(); window.open(lp.url, '_blank'); }}
+                                                                                style={{ cursor: 'pointer', transition: 'none' }}
+                                                                            >
+                                                                                {lp.image && (
+                                                                                    <div className="wa-link-preview-image">
+                                                                                        <img src={lp.image} alt={lp.title} />
+                                                                                        {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) && (
+                                                                                            <div className="wa-link-preview-play-btn">
+                                                                                                <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
                                                                                             </div>
-                                                                                        </div>
-                                                                                    )}
-                                                                                </div>
-                                                                            )}
-                                                                            <div className="wa-link-preview-info">
-                                                                                <div className="wa-link-preview-title">{msg.link_preview.title}</div>
-                                                                                <div className="wa-link-preview-desc">{msg.link_preview.description}</div>
-                                                                                <div className="wa-link-preview-url">
-                                                                                    {(() => {
-                                                                                        try {
-                                                                                            return new URL(msg.link_preview.url).hostname;
-                                                                                        } catch (e) {
-                                                                                            return msg.link_preview.url;
-                                                                                        }
-                                                                                    })()}
+                                                                                        )}
+                                                                                    </div>
+                                                                                )}
+                                                                                <div className="wa-link-preview-content">
+                                                                                    <div className="wa-link-preview-title">{lp.title}</div>
+                                                                                    {lp.description && <div className="wa-link-preview-description">{lp.description}</div>}
+                                                                                    <div className="wa-link-preview-domain">
+                                                                                        {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) ? (
+                                                                                            <>
+                                                                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                                                                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ff0000" />
+                                                                                                </svg>
+                                                                                                <span style={{ color: '#ff0000', fontWeight: 'bold' }}>{lp.domain}</span>
+                                                                                            </>
+                                                                                        ) : (
+                                                                                            <>
+                                                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                                                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                                                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                                                                </svg>
+                                                                                                <span>{lp.domain}</span>
+                                                                                            </>
+                                                                                        )}
+                                                                                    </div>
                                                                                 </div>
                                                                             </div>
-                                                                        </div>
-                                                                    )}
+                                                                        );
+                                                                    })()}
 
                                                                     {msg.type === 'contact' && (() => {
                                                                         let cDataArray;
