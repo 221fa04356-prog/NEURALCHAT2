@@ -831,11 +831,16 @@ export default function Chat() {
     }, []);
 
     const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const activeChatStorageKey = `activeChat_${user.id || user._id || 'unknown'}`;
     const navigate = useNavigate();
     const bottomRef = useRef(null);
     const chatMessagesRef = useRef(null);
     const isApplyingSuggestionRef = useRef(false);
     const [showScrollBtn, setShowScrollBtn] = useState(false);
+    const [pendingNewMsgCount, setPendingNewMsgCount] = useState(0);
+    const [firstUnreadMessageId, setFirstUnreadMessageId] = useState(null);
+    const [unreadBarLockedUntil, setUnreadBarLockedUntil] = useState(0);
+    const unreadCountedIdsRef = useRef(new Set());
 
     // --- File Upload State ---
     const [file, setFile] = useState(null);
@@ -905,6 +910,8 @@ export default function Chat() {
     }, [archivedChatIds, user.id, user._id]);
     const [isArchivedChatsOpen, setIsArchivedChatsOpen] = useState(false);
     const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
+    const [showAttachmentHint, setShowAttachmentHint] = useState(false);
+    const [attachmentHintPos, setAttachmentHintPos] = useState({ x: 0, y: 0 });
     const attachmentMenuRef = useRef(null);
     const attachmentTypeRef = useRef('all');
     const processedMessageIdsRef = useRef(new Set());
@@ -917,6 +924,36 @@ export default function Chat() {
     const [selectedGroupMembers, setSelectedGroupMembers] = useState([]);
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
     const [isMessageSearchOpen, setIsMessageSearchOpen] = useState(false);
+
+    const isChatNearBottom = () => {
+        const el = chatMessagesRef.current;
+        if (!el) return true;
+        const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+        return distFromBottom <= 80;
+    };
+
+    const clearPendingUnread = (force = false) => {
+        if (!force && Date.now() < unreadBarLockedUntil) return;
+        setPendingNewMsgCount(0);
+        setFirstUnreadMessageId(null);
+        setUnreadBarLockedUntil(0);
+        unreadCountedIdsRef.current = new Set();
+    };
+
+    // Reset pending unread marker when switching chats
+    useEffect(() => {
+        clearPendingUnread(true);
+    }, [selectedUser?._id, selectedGroup?._id]);
+
+    useEffect(() => {
+        if (!unreadBarLockedUntil) return;
+        const remaining = unreadBarLockedUntil - Date.now();
+        if (remaining <= 0) return;
+        const timer = setTimeout(() => {
+            if (isChatNearBottom()) clearPendingUnread(true);
+        }, remaining + 30);
+        return () => clearTimeout(timer);
+    }, [unreadBarLockedUntil]);
 
     const [isContactInfoOpen, setIsContactInfoOpen] = useState(false); // Controls "Contact Info" panel
     const [messageSearchQuery, setMessageSearchQuery] = useState('');
@@ -931,6 +968,19 @@ export default function Chat() {
     const [showCustomListsDropdown, setShowCustomListsDropdown] = useState(false);
     const [typingUsers, setTypingUsers] = useState({}); // { [chatId]: Set<userId> }
     const typingTimeoutRef = useRef({}); // { [chatId]: timeoutId }
+
+    const updateAttachmentHintPosition = (target) => {
+        if (!target || typeof target.getBoundingClientRect !== 'function') return;
+        const rect = target.getBoundingClientRect();
+        setAttachmentHintPos({
+            x: rect.left,
+            y: rect.top - 24
+        });
+    };
+
+    useEffect(() => {
+        if (!isAttachmentMenuOpen) setShowAttachmentHint(false);
+    }, [isAttachmentMenuOpen]);
 
     // Fetch custom lists from backend on mount
     useEffect(() => {
@@ -992,6 +1042,8 @@ export default function Chat() {
     useEffect(() => { msgToDeleteRef.current = msgToDelete; }, [msgToDelete]);
     const adminConfirmModal = useState(null)[0];
     const selectedUserRef = useRef(null);
+    const messageCacheByUserRef = useRef({});
+    const hasRestoredActiveChatRef = useRef(false);
     const userRef = useRef(user);
     const groupsRef = useRef([]);
     const searchSource = useRef('chat_header'); // 'chat_header' | 'contact_info'
@@ -1795,19 +1847,20 @@ export default function Chat() {
                 }
             case 'event':
                 if (msg.event) {
-                    const myId = user.id || user._id || userData?.id || userData?._id;
-                    const senderId = msg.sender_id?._id || msg.sender_id || msg.user_id?._id || msg.user_id;
-                    const isMe = String(senderId) === String(myId);
-                    const senderName = msg.sender_id?.name || msg.user_id?.name || 'Someone';
-                    const eventDisplayName = msg.event.name || 'an event';
+                    const eventDisplayName = msg.event.name || msg.event.title || 'event';
                     return (
                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                             <Calendar size={14} color="#667781" />
-                            {isMe ? `You created an event ${eventDisplayName}` : `${senderName} created an event ${eventDisplayName}`}
+                            {`new event: ${eventDisplayName}`}
                         </span>
                     );
                 }
-                return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Calendar size={14} color="#667781" /> Event</span>;
+                return (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <Calendar size={14} color="#667781" />
+                        {'new event: event'}
+                    </span>
+                );
             case 'poll':
                 return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><List size={14} color="#667781" /> Poll: {msg.poll?.question || 'Question'}</span>;
             default:
@@ -2107,6 +2160,113 @@ export default function Chat() {
         selectedGroupRef.current = selectedGroup;
     }, [selectedGroup]);
 
+    // Persist currently open chat so refresh restores the same conversation.
+    useEffect(() => {
+        const userId = user.id || user._id;
+        if (!userId) return;
+
+        if (selectedUser?._id || selectedUser?.id) {
+            localStorage.setItem(activeChatStorageKey, JSON.stringify({
+                type: 'user',
+                id: String(selectedUser._id || selectedUser.id)
+            }));
+            return;
+        }
+
+        if (selectedGroup?._id || selectedGroup?.id) {
+            localStorage.setItem(activeChatStorageKey, JSON.stringify({
+                type: 'group',
+                id: String(selectedGroup._id || selectedGroup.id)
+            }));
+            return;
+        }
+
+        if (selectedCommunity?._id || selectedCommunity?.id) {
+            localStorage.setItem(activeChatStorageKey, JSON.stringify({
+                type: 'community',
+                id: String(selectedCommunity._id || selectedCommunity.id)
+            }));
+            return;
+        }
+
+        localStorage.removeItem(activeChatStorageKey);
+    }, [selectedUser, selectedGroup, selectedCommunity, activeChatStorageKey, user.id, user._id]);
+
+    // One-time restore on page refresh: reopen the last active chat.
+    useEffect(() => {
+        if (!isDataLoaded || hasRestoredActiveChatRef.current) return;
+        const raw = localStorage.getItem(activeChatStorageKey);
+        if (!raw) {
+            hasRestoredActiveChatRef.current = true;
+            return;
+        }
+
+        let parsed = null;
+        try {
+            parsed = JSON.parse(raw);
+        } catch {
+            localStorage.removeItem(activeChatStorageKey);
+            hasRestoredActiveChatRef.current = true;
+            return;
+        }
+
+        const targetId = String(parsed?.id || '');
+        if (!targetId) {
+            hasRestoredActiveChatRef.current = true;
+            return;
+        }
+
+        if (parsed.type === 'user') {
+            const targetUser = users.find(u => String(u._id || u.id) === targetId);
+            if (targetUser) {
+                handleUserSelect(targetUser);
+                hasRestoredActiveChatRef.current = true;
+            } else if ((users || []).length > 0) {
+                // Target no longer exists in list, stop retrying.
+                hasRestoredActiveChatRef.current = true;
+                localStorage.removeItem(activeChatStorageKey);
+            }
+            return;
+        }
+
+        if (parsed.type === 'group') {
+            const targetGroup = groups.find(g => String(g._id || g.id) === targetId);
+            if (targetGroup) {
+                setSelectedGroup(targetGroup);
+                setSelectedUser(null);
+                if (selectedUserRef) selectedUserRef.current = null;
+                if (selectedGroupRef) selectedGroupRef.current = targetGroup;
+                fetchGroupMessages(targetGroup._id || targetGroup.id);
+                hasRestoredActiveChatRef.current = true;
+            } else if ((groups || []).length > 0) {
+                hasRestoredActiveChatRef.current = true;
+                localStorage.removeItem(activeChatStorageKey);
+            }
+            return;
+        }
+
+        if (parsed.type === 'community') {
+            const targetCommunity = communities.find(c => String(c._id || c.id) === targetId);
+            if (targetCommunity) {
+                setSelectedCommunity(targetCommunity);
+                setIsCommunityHomeOpen(true);
+                setSelectedUser(null);
+                setSelectedGroup(null);
+                if (selectedUserRef) selectedUserRef.current = null;
+                if (selectedGroupRef) selectedGroupRef.current = null;
+                hasRestoredActiveChatRef.current = true;
+            } else if ((communities || []).length > 0) {
+                hasRestoredActiveChatRef.current = true;
+                localStorage.removeItem(activeChatStorageKey);
+            }
+            return;
+        }
+
+        // Unknown saved type: stop retries and clear stale data.
+        hasRestoredActiveChatRef.current = true;
+        localStorage.removeItem(activeChatStorageKey);
+    }, [isDataLoaded, users, groups, communities, activeChatStorageKey]);
+
     useEffect(() => {
         userRef.current = userData;
     }, [userData]);
@@ -2184,12 +2344,9 @@ export default function Chat() {
 
     // --- Scroll to Bottom Effect ---
     useEffect(() => {
-        if (bottomRef.current) {
-            // Use a short timeout to ensure the DOM has finished rendering height changes
-            setTimeout(() => {
-                bottomRef.current.scrollIntoView({ behavior: 'smooth' });
-            }, 100);
-        }
+        // Do not force-scroll when user is reading older messages at top.
+        if (!bottomRef.current || !isChatNearBottom()) return;
+        bottomRef.current.scrollIntoView({ behavior: 'auto' });
     }, [messages, groupMessages]);
 
     // Helper to highlight text and make links clickable
@@ -2692,9 +2849,12 @@ export default function Chat() {
         // --- Grammar check ONLY for text messages (no files or link previews) ---
         const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(input);
         const containsUrl = /https?:\/\/[^\s]+/.test(input);
-        if (file || !input.trim() || typingLinkPreview || containsUrl || isEmojiPresent) {
+        const trimmedNow = input.trim();
+        if (file || !trimmedNow || trimmedNow.length < 3 || typingLinkPreview || containsUrl || isEmojiPresent) {
             setGrammarSuggestions(null);
             setShowGrammarBar(false);
+            setIsGrammarLoading(false);
+            setIsGarbageMessage(false);
             setSuggestionApplied(true); // Bypass AI check requirement
             return;
         }
@@ -2765,7 +2925,7 @@ export default function Chat() {
             } finally {
                 setIsGrammarLoading(false);
             }
-        }, 1000);
+        }, 1400);
 
         return () => clearTimeout(timer);
     }, [input, file, typingLinkPreview]);
@@ -2931,6 +3091,13 @@ export default function Chat() {
         selectedUserRef.current = selectedUser;
     }, [selectedUser]);
 
+    // Keep a per-contact cache so switching chats can render instantly.
+    useEffect(() => {
+        const currentUserId = selectedUser?._id || selectedUser?.id;
+        if (!currentUserId) return;
+        messageCacheByUserRef.current[String(currentUserId)] = messages;
+    }, [messages, selectedUser]);
+
     useEffect(() => {
         userRef.current = user;
     }, [user]);
@@ -2988,7 +3155,12 @@ export default function Chat() {
                     data.content = decrypted;
                 } catch (e2eeErr) {
                     console.error('[E2EE] Real-time decryption failed:', e2eeErr);
-                    data.content = '<<< Encrypted Message >>>';
+                    if (data.type === 'event') {
+                        const evName = data.event?.name || data.event?.title || 'event';
+                        data.content = `new event: ${evName}`;
+                    } else {
+                        data.content = '<<< Encrypted Message >>>';
+                    }
                 }
             }
 
@@ -3023,11 +3195,23 @@ export default function Chat() {
 
             if (isActiveChat) {
                 console.log('[DEBUG] Active chat open, adding message to view and marking read.');
+                const nearBottom = isChatNearBottom();
+                const incomingMsgId = String(data._id || data.id || '');
                 setMessages(prev => {
                     if (prev.find(m => m._id === data._id)) return prev;
                     return [...prev, { ...data, role: 'user' }];
                 });
-                markAsRead(senderId);
+                if (nearBottom) {
+                    markAsRead(senderId);
+                    clearPendingUnread(true);
+                } else {
+                    if (incomingMsgId && unreadCountedIdsRef.current.has(incomingMsgId)) return;
+                    if (incomingMsgId) unreadCountedIdsRef.current.add(incomingMsgId);
+                    setShowScrollBtn(true);
+                    setPendingNewMsgCount(prev => prev + 1);
+                    setFirstUnreadMessageId(prev => prev || (data._id || data.id));
+                    setUnreadBarLockedUntil(Date.now() + 5000);
+                }
             } else {
                 console.log('[DEBUG] Background message from', senderId, '- showing notification.');
 
@@ -3392,6 +3576,24 @@ export default function Chat() {
 
         const onNewMessageRequest = (data) => {
             console.log('Socket: new_message_request', data);
+            const existingContact = (usersRef.current || []).find(
+                u => String(u._id || u.id) === String(data.senderId)
+            );
+            const hasExistingConversation = !!(
+                existingContact &&
+                (
+                    existingContact.requestStatus === 'accepted' ||
+                    existingContact.lastMessage?._id ||
+                    existingContact.lastMessage?.content ||
+                    existingContact.lastMessage?.created_at
+                )
+            );
+
+            // Do not show "message request" popup if users already have chat history.
+            if (hasExistingConversation) {
+                fetchUsers();
+                return;
+            }
             setSnackbar({ message: `New message request from ${data.senderName}`, type: 'info', variant: 'system' });
             fetchMessageRequests();
         };
@@ -3681,12 +3883,23 @@ export default function Chat() {
                     if (isMyOwnMessage) return prev; // Avoid duplicating optimistic message
                     return [...prev, data.message];
                 });
-                setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-
-                if (token && !isMyOwnMessage) {
-                    axios.post(`/api/groups/${data.groupId}/messages/mark-read`, {}, {
-                        headers: { 'Authorization': `Bearer ${token}` }
-                    }).catch(err => console.error('Auto-mark read error:', err));
+                const nearBottom = isChatNearBottom();
+                const groupIncomingMsgId = String(data.message?._id || data.message?.id || '');
+                if (nearBottom) {
+                    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+                    if (token && !isMyOwnMessage) {
+                        axios.post(`/api/groups/${data.groupId}/messages/mark-read`, {}, {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        }).catch(err => console.error('Auto-mark read error:', err));
+                    }
+                    clearPendingUnread(true);
+                } else if (!isMyOwnMessage) {
+                    if (groupIncomingMsgId && unreadCountedIdsRef.current.has(groupIncomingMsgId)) return;
+                    if (groupIncomingMsgId) unreadCountedIdsRef.current.add(groupIncomingMsgId);
+                    setShowScrollBtn(true);
+                    setPendingNewMsgCount(prev => prev + 1);
+                    setFirstUnreadMessageId(prev => prev || (data.message?._id || data.message?.id));
+                    setUnreadBarLockedUntil(Date.now() + 5000);
                 }
             } else {
                 // Not in group, show notification if not muted and not me
@@ -4349,10 +4562,10 @@ export default function Chat() {
                 if (chatMessagesRef.current) {
                     chatMessagesRef.current.scrollTo({
                         top: chatMessagesRef.current.scrollHeight,
-                        behavior: 'smooth'
+                        behavior: 'auto'
                     });
                 }
-            }, 200);
+            }, 0);
             // Mark unread messages as read
             await axios.post(`/api/groups/${groupId}/messages/mark-read`, {}, {
                 headers: { 'Authorization': `Bearer ${token}` }
@@ -4748,8 +4961,32 @@ export default function Chat() {
         } catch (err) { console.error(err); }
     };
 
+    const scrollChatToLatest = (behavior = 'auto') => {
+        const applyScroll = () => {
+            const el = chatMessagesRef.current;
+            if (!el) return;
+            el.scrollTo({ top: el.scrollHeight, behavior });
+            setShowScrollBtn(false);
+        };
+
+        // Run multiple times across paint/layout frames so contact switches
+        // always settle at latest message even when DOM height updates late.
+        requestAnimationFrame(() => {
+            applyScroll();
+            requestAnimationFrame(applyScroll);
+        });
+        setTimeout(applyScroll, 40);
+    };
+
     const fetchP2PRequest = async (otherId) => {
         try {
+            const cacheKey = String(otherId);
+            const cachedMessages = messageCacheByUserRef.current[cacheKey];
+            if (Array.isArray(cachedMessages)) {
+                setMessages(cachedMessages);
+                scrollChatToLatest('auto');
+            }
+
             const token = localStorage.getItem('token');
             const res = await axios.get(`/api/chat/p2p/${user.id}/${otherId}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
@@ -4770,6 +5007,10 @@ export default function Chat() {
                             return { ...msg, content: decrypted };
                         } catch (e2eeErr) {
                             console.error('[E2EE] Decryption failed for history message:', e2eeErr);
+                            if (msg.type === 'event') {
+                                const evName = msg.event?.name || msg.event?.title || 'event';
+                                return { ...msg, content: `new event: ${evName}` };
+                            }
                             return { ...msg, content: '<<< Encrypted Message >>>' };
                         }
                     } else {
@@ -4780,14 +5021,8 @@ export default function Chat() {
             }));
 
             setMessages(decryptedMessages);
-            setTimeout(() => {
-                if (chatMessagesRef.current) {
-                    chatMessagesRef.current.scrollTo({
-                        top: chatMessagesRef.current.scrollHeight,
-                        behavior: 'smooth'
-                    });
-                }
-            }, 200);
+            messageCacheByUserRef.current[cacheKey] = decryptedMessages;
+            scrollChatToLatest('auto');
         } catch (err) { console.error(err); }
     };
 
@@ -4815,9 +5050,22 @@ export default function Chat() {
             setIsEventDetailsOpen(false);
         }
         setSelectedUser(u);
+        const cachedMessages = messageCacheByUserRef.current[String(u._id)];
+        if (Array.isArray(cachedMessages)) {
+            setMessages(cachedMessages);
+            scrollChatToLatest('auto');
+        } else {
+            // Avoid showing previous contact messages while loading first time.
+            setMessages([]);
+        }
         fetchP2PRequest(u._id);
         if (u.unreadCount > 0) markAsRead(u._id);
     };
+
+    useEffect(() => {
+        if (!selectedUser?._id) return;
+        scrollChatToLatest('auto');
+    }, [selectedUser?._id]);
 
     const handleTogglePinMessage = async (e) => {
         if (e) e.preventDefault();
@@ -14741,6 +14989,10 @@ export default function Chat() {
                                 if (!el) return;
                                 const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
                                 setShowScrollBtn(distFromBottom > 80);
+                                if (distFromBottom <= 80 && pendingNewMsgCount > 0) {
+                                    clearPendingUnread();
+                                    if (selectedUser?._id) markAsRead(selectedUser._id);
+                                }
                             }}
                             onContextMenu={(e) => {
                                 e.preventDefault();
@@ -14781,8 +15033,16 @@ export default function Chat() {
                                         )}
                                         <div className="wa-group-messages">
                                             {group.msgs.map((msg, msgIdx) => {
+                                                const msgId = msg._id || msg.id;
                                                 const isMe = isMeMsg(msg);
                                                 const senderName = isMe ? 'You' : (selectedUser?.name || 'User');
+                                                const unreadSeparator = (firstUnreadMessageId && String(msgId) === String(firstUnreadMessageId)) ? (
+                                                    <div className="wa-unread-separator">
+                                                        <span>
+                                                            {pendingNewMsgCount === 1 ? '1 unread message' : `${pendingNewMsgCount} unread messages`}
+                                                        </span>
+                                                    </div>
+                                                ) : null;
 
                                                 if (msg.is_system || msg.type === 'system') {
                                                     const content = msg.content || '';
@@ -14810,7 +15070,10 @@ export default function Chat() {
                                                 }
 
                                                 return (
-                                                    <div key={msg._id || msg.id || msgIdx}
+                                                    <React.Fragment key={msgId || msgIdx}>
+                                                        {unreadSeparator}
+                                                        <div
+                                                            key={msgId || msgIdx}
                                                         id={`msg-${msg._id}`}
                                                         className={`wa-message-container ${isForwardingMode ? 'forward-mode' : ''}`}
                                                         onDoubleClick={() => { if (!isForwardingMode) setReplyingTo(msg); }}
@@ -15487,6 +15750,7 @@ export default function Chat() {
                                                             })()}
                                                         </div>
                                                     </div>
+                                                    </React.Fragment>
                                                 );
                                             })}
                                         </div>
@@ -15713,9 +15977,30 @@ export default function Chat() {
                                                     <div style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '0 4px 0 12px', minHeight: '54px' }}>
                                                         <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
                                                             {renderAttachmentMenu()}
-                                                            <button className="wa-nav-icon-btn wa-attachment-trigger-btn" onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} data-tooltip="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, Video (up to 1GB)">
-                                                                <Paperclip size={22} color="#54656f" />
+                                                            <button
+                                                                className={`wa-nav-icon-btn wa-attachment-trigger-btn ${isAttachmentMenuOpen ? 'active' : ''}`}
+                                                                onMouseEnter={(e) => {
+                                                                    updateAttachmentHintPosition(e.currentTarget);
+                                                                    setShowAttachmentHint(true);
+                                                                }}
+                                                                onMouseLeave={() => setShowAttachmentHint(false)}
+                                                                onClick={(e) => {
+                                                                    updateAttachmentHintPosition(e.currentTarget);
+                                                                    setIsAttachmentMenuOpen(!isAttachmentMenuOpen);
+                                                                    setShowAttachmentHint(false);
+                                                                }}
+                                                                aria-label="Attachment options"
+                                                            >
+                                                                <Paperclip size={22} color={isAttachmentMenuOpen ? "#0EA5BE" : "#54656f"} />
                                                             </button>
+                                                            {showAttachmentHint && (
+                                                                <div
+                                                                    className="wa-attachment-floating-hint"
+                                                                    style={{ left: `${attachmentHintPos.x}px`, top: `${attachmentHintPos.y}px` }}
+                                                                >
+                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)
+                                                                </div>
+                                                            )}
                                                             <input
                                                                 type="file"
                                                                 ref={fileInputRef}
@@ -15985,6 +16270,15 @@ export default function Chat() {
                                 if (!el) return;
                                 const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
                                 setShowScrollBtn(distFromBottom > 80);
+                                if (distFromBottom <= 80 && pendingNewMsgCount > 0) {
+                                    clearPendingUnread();
+                                    const token = localStorage.getItem('token');
+                                    if (token && selectedGroup?._id) {
+                                        axios.post(`/api/groups/${selectedGroup._id}/messages/mark-read`, {}, {
+                                            headers: { 'Authorization': `Bearer ${token}` }
+                                        }).catch(() => { });
+                                    }
+                                }
                             }}
                             onContextMenu={(e) => {
                                 e.preventDefault();
@@ -16068,6 +16362,14 @@ export default function Chat() {
                                                 const myId = user.id || user._id;
                                                 const isMe = isMeMsg(msg);
                                                 const senderName = msg.sender_id?.name || 'User';
+                                                const msgId = msg._id || msg.id;
+                                                const unreadSeparator = (firstUnreadMessageId && String(msgId) === String(firstUnreadMessageId)) ? (
+                                                    <div className="wa-unread-separator">
+                                                        <span>
+                                                            {pendingNewMsgCount === 1 ? '1 unread message' : `${pendingNewMsgCount} unread messages`}
+                                                        </span>
+                                                    </div>
+                                                ) : null;
 
                                                 if ((msg.is_system || msg.type === 'system') && msg.type !== 'community_link') {
                                                     const content = msg.content || '';
@@ -16152,11 +16454,14 @@ export default function Chat() {
                                                     }
 
                                                     return (
-                                                        <div key={msg._id} style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
-                                                            <div className="wa-system-message">
-                                                                {displayContent}
+                                                        <React.Fragment key={msgId || msg._id || mIdx}>
+                                                            {unreadSeparator}
+                                                            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+                                                                <div className="wa-system-message">
+                                                                    {displayContent}
+                                                                </div>
                                                             </div>
-                                                        </div>
+                                                        </React.Fragment>
                                                     );
                                                 }
 
@@ -16168,8 +16473,10 @@ export default function Chat() {
                                                     const content = isMe ? `You added this group to the community: ${commName}` : `${msg.sender_id?.name || 'Admin'} added this group to the community: ${commName}`;
 
                                                     return (
-                                                        <div key={msg._id} style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-                                                            <div style={{
+                                                        <React.Fragment key={msgId || msg._id || mIdx}>
+                                                            {unreadSeparator}
+                                                            <div key={msg._id} style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+                                                                <div style={{
                                                                 background: '#F3FDFE',
                                                                 borderRadius: '12px',
                                                                 padding: '24px',
@@ -16244,13 +16551,17 @@ export default function Chat() {
                                                                 >
                                                                     Manage the community
                                                                 </div>
+                                                                </div>
                                                             </div>
-                                                        </div>
+                                                        </React.Fragment>
                                                     );
                                                 }
 
                                                 return (
-                                                    <div key={msg._id}
+                                                    <React.Fragment key={msgId || msg._id || mIdx}>
+                                                        {unreadSeparator}
+                                                        <div
+                                                            key={msg._id}
                                                         id={`msg-${msg._id}`}
                                                         className={`wa-message-container ${isForwardingMode ? 'forward-mode' : ''}`}
                                                         onDoubleClick={() => { if (!isForwardingMode) setReplyingTo(msg); }}
@@ -16921,7 +17232,8 @@ export default function Chat() {
                                                                 );
                                                             })()}
                                                         </div>
-                                                    </div>
+                                                        </div>
+                                                    </React.Fragment>
                                                 );
                                             })}
                                         </div>
@@ -17269,9 +17581,30 @@ export default function Chat() {
                                                     <div style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '0 4px 0 12px', minHeight: '54px' }}>
                                                         <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
                                                             {renderAttachmentMenu()}
-                                                            <button className={`wa-nav-icon-btn wa-attachment-trigger-btn ${isAttachmentMenuOpen ? 'active' : ''}`} onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)} title="Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)">
+                                                            <button
+                                                                className={`wa-nav-icon-btn wa-attachment-trigger-btn ${isAttachmentMenuOpen ? 'active' : ''}`}
+                                                                onMouseEnter={(e) => {
+                                                                    updateAttachmentHintPosition(e.currentTarget);
+                                                                    setShowAttachmentHint(true);
+                                                                }}
+                                                                onMouseLeave={() => setShowAttachmentHint(false)}
+                                                                onClick={(e) => {
+                                                                    updateAttachmentHintPosition(e.currentTarget);
+                                                                    setIsAttachmentMenuOpen(!isAttachmentMenuOpen);
+                                                                    setShowAttachmentHint(false);
+                                                                }}
+                                                                aria-label="Attachment options"
+                                                            >
                                                                 <Paperclip size={22} color={isAttachmentMenuOpen ? "#0EA5BE" : "#54656f"} />
                                                             </button>
+                                                            {showAttachmentHint && (
+                                                                <div
+                                                                    className="wa-attachment-floating-hint"
+                                                                    style={{ left: `${attachmentHintPos.x}px`, top: `${attachmentHintPos.y}px` }}
+                                                                >
+                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)
+                                                                </div>
+                                                            )}
                                                             <input
                                                                 type="file"
                                                                 ref={fileInputRef}
@@ -17362,6 +17695,11 @@ export default function Chat() {
                         }}
                         title="Scroll to latest"
                     >
+                        {pendingNewMsgCount > 0 && (
+                            <span className="wa-scroll-btn-badge">
+                                {pendingNewMsgCount > 99 ? '99+' : pendingNewMsgCount}
+                            </span>
+                        )}
                         <ChevronDown size={22} />
                     </button>
                 )}
@@ -19477,8 +19815,10 @@ export default function Chat() {
                                     style={{
                                         position: 'absolute',
                                         inset: 0,
-                                        background: 'rgba(11, 20, 26, 0.96)',
-                                        backdropFilter: 'blur(12px)',
+                                        background: 'rgba(255, 255, 255, 0.08)',
+                                        backdropFilter: 'blur(18px) saturate(140%)',
+                                        WebkitBackdropFilter: 'blur(18px) saturate(140%)',
+                                        border: '1px solid rgba(255, 255, 255, 0.18)',
                                         zIndex: 60000,
                                         display: 'flex',
                                         flexDirection: 'column',
@@ -19495,14 +19835,14 @@ export default function Chat() {
                                                 <img 
                                                     src={selectedUser.avatar || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png'} 
                                                     alt="User"
-                                                    style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid #3b4a54', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}
+                                                    style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid rgba(255,255,255,0.35)', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.18)' }}
                                                 />
                                             ) : (
-                                                <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#0EA5BE', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #3b4a54', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
+                                                <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: 'rgba(14, 165, 190, 0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid rgba(255,255,255,0.35)', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.18)' }}>
                                                     <Users size={50} color="white" />
                                                 </div>
                                             )}
-                                            <h2 style={{ color: 'white', marginTop: '16px', fontSize: '22px', fontWeight: '600' }}>
+                                            <h2 style={{ color: '#0b1f2a', marginTop: '16px', fontSize: '22px', fontWeight: '700' }}>
                                                 {selectedUser ? selectedUser.name : (() => {
                                                     if (selectedGroup?.name === 'Announcements' && selectedGroup?.community_id) {
                                                         const comm = communities.find(c => String(c._id || c.id) === String(selectedGroup.community_id));
@@ -19519,17 +19859,17 @@ export default function Chat() {
                                         <img src={logo} alt="Neural Chat" style={{ width: '80px', height: '80px' }} />
                                     </div>
 
-                                    <div style={{ textAlign: 'center', color: '#8696a0', maxWidth: '400px', padding: '0 20px' }}>
-                                        <div style={{ color: '#0EA5BE', fontSize: '19px', fontWeight: '600', marginBottom: '12px', lineHeight: '1.4' }}>
+                                    <div style={{ textAlign: 'center', color: '#334155', maxWidth: '420px', padding: '0 20px' }}>
+                                        <div style={{ color: '#0EA5BE', fontSize: '19px', fontWeight: '700', marginBottom: '10px', lineHeight: '1.4' }}>
                                             You are diverted out of focus from the screen.
                                         </div>
-                                        <div style={{ fontSize: '16px', color: '#8696a0' }}>
+                                        <div style={{ fontSize: '15px', color: '#475569' }}>
                                             Please return to the screen to start the conversation
                                         </div>
                                     </div>
 
                                     {/* Visual indicator of "sleep" */}
-                                    <div style={{ position: 'absolute', bottom: '40px', color: '#3b4a54', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '2px' }}>
+                                    <div style={{ position: 'absolute', bottom: '40px', color: 'rgba(11, 31, 42, 0.55)', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '2px' }}>
                                         Encrypted Session Asleep
                                     </div>
                                 </div>
