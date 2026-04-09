@@ -1075,8 +1075,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
                     $or: [
                         { user_id: new mongoose.Types.ObjectId(userId), receiver_id: new mongoose.Types.ObjectId(toUserId) },
                         { user_id: new mongoose.Types.ObjectId(toUserId), receiver_id: new mongoose.Types.ObjectId(userId) }
-                    ],
-                    deleted_for: { $ne: new mongoose.Types.ObjectId(userId) } // Use SENDER (userId) to determine if they start fresh
+                    ]
                 });
 
                 if (priorMessageCount > 0) {

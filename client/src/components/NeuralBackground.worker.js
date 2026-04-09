@@ -6,7 +6,7 @@ let particles = [];
 const config = {
     baseColor: { r: 13, g: 159, b: 183 }, // #0D9FB7
     baseConnectionDistance: 135, // Increased slightly for better look with fewer particles
-    baseSpeed: 1.0, // Reduced slightly from 1.8 for better balance
+    baseSpeed: 0.7, // Slightly slower background motion
 };
 
 // Spatial grid for performance
