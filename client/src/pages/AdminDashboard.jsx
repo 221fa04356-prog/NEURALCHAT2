@@ -517,8 +517,7 @@ export default function AdminDashboard() {
         const token = localStorage.getItem('token');
         if (!token) return;
 
-        // Use Vite dev server URL - it will proxy WebSocket to backend via /socket.io
-        const SOCKET_URL = window.location.origin;
+        const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
         const socket = io(SOCKET_URL, {
             auth: { token },
             transports: ['websocket', 'polling'], // Allow polling as fallback
