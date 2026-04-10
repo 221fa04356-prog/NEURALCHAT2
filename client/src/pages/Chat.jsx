@@ -1139,7 +1139,8 @@ export default function Chat() {
                 const senderId = String(m.sender_id?._id || m.sender_id || m.user_id?._id || m.user_id);
                 if (senderId === String(uid)) return;
 
-                const d = m.created_at || m.createdAt || ev.createdAt || ev.startDate;
+                // Use message logic creation dates, skip ev.startDate to prevent future dates triggering unread count indefinitely.
+                const d = m.created_at || m.createdAt || ev.createdAt;
                 if (d && new Date(d).getTime() > lastChecked) count++;
             });
             setUnreadRemindersCount(count);
@@ -4249,7 +4250,7 @@ export default function Chat() {
                     return;
                 }
                 
-                if (selectedUser || selectedGroup) {
+                if (selectedUser || selectedGroup || selectedCommunity) {
                     if (showUnblockModal) {
                          setShowUnblockModal(false);
                          return;
@@ -4309,7 +4310,7 @@ export default function Chat() {
             window.removeEventListener('click', handleClickOutside);
             window.removeEventListener('keydown', handleGlobalKeyDown);
         };
-    }, [openDropdown, chatContextMenu, showMenu, isCountryDropdownOpen, selectedUser, isNewChatOpen, showUnblockModal]);
+    }, [openDropdown, chatContextMenu, showMenu, isCountryDropdownOpen, selectedUser, selectedGroup, selectedCommunity, isNewChatOpen, isNewGroupOpen, showInputEmojiPicker, showUnblockModal, selectedFontSize]);
 
     useEffect(() => {
         const handleClickOutside = (e) => {
@@ -8007,7 +8008,7 @@ export default function Chat() {
                                                     </div>
                                                 )}
                                                 {msg.type === 'event' && msg.event && (
-                                                    <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
+                                                    <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '280px', maxWidth: '100%', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
                                                         <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
                                                             <div style={{ display: 'flex', gap: '14px' }}>
                                                                 <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -9801,7 +9802,7 @@ export default function Chat() {
                                                     </div>
                                                 )}
                                                 {msg.type === 'event' && msg.event && (
-                                                    <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
+                                                    <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '280px', maxWidth: '100%', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
                                                         <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
                                                             <div style={{ display: 'flex', gap: '14px' }}>
                                                                 <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -10069,7 +10070,7 @@ export default function Chat() {
                                 </div>
                             ) : infoMessage.type === 'event' ? (
                                 infoMessage.event ? (
-                                    <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'default', opacity: infoMessage.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
+                                    <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: '280px', maxWidth: '100%', cursor: 'default', opacity: infoMessage.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}>
                                         <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
                                             <div style={{ display: 'flex', gap: '14px' }}>
                                                 <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -13324,7 +13325,7 @@ export default function Chat() {
                         </button>
                         <span style={{ fontSize: '18px', color: '#111b21', fontWeight: 600, whiteSpace: 'nowrap' }}>Event Reminders</span>
                     </div>
-                    <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px' }}>
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px', paddingBottom: isMobile ? '70px' : '10px' }}>
                         {(() => {
                             const now = new Date();
                             const approachingEvents = [];
@@ -13861,7 +13862,7 @@ export default function Chat() {
             )}
 
             {/* Chat List: Groups + Users combined */}
-            <div className="wa-user-list" onScroll={() => { setOpenDropdown(null); }}>
+            <div className="wa-user-list" onScroll={() => { setOpenDropdown(null); }} style={{ paddingBottom: isMobile ? '60px' : '0' }}>
                 {!isDataLoaded ? (
                     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0' }}>
                         <CircleDashed size={24} className="wa-spinner" style={{ animation: 'waSpinner 1s linear infinite' }} />
@@ -13910,6 +13911,7 @@ export default function Chat() {
                                     if (filterType === 'unread') return matchesSearch && (item.unreadCount > 0);
                                     if (filterType === 'favorites') return matchesSearch && item.isFavorite;
                                     if (filterType === 'groups') return matchesSearch && item.is_group;
+                                    if (filterType === 'communities') return matchesSearch && item.is_community;
                                     return matchesSearch;
                                 })
                                 .sort((a, b) => {
@@ -14110,6 +14112,65 @@ export default function Chat() {
                     </>
                 )}
             </div>
+
+            {/* Mobile Bottom Navigation Bar */}
+            {isMobile && (
+                <div style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-around',
+                    height: '60px',
+                    backgroundColor: '#ffffff',
+                    borderTop: '1px solid #e9edef',
+                    zIndex: 9999,
+                    boxShadow: '0 -2px 10px rgba(0,0,0,0.05)'
+                }}>
+                   <button 
+                       onClick={(e) => {
+                            e.stopPropagation();
+                            setIsRemindersModalOpen(false);
+                            setFilterType('all');
+                       }} 
+                       style={{ background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', color: !isRemindersModalOpen && filterType !== 'communities' ? '#111b21' : '#54656f', gap: '4px', cursor: 'pointer', flex: 1 }}>
+                       <MessageSquare size={24} />
+                       <span style={{ fontSize: '12px', fontWeight: !isRemindersModalOpen && filterType !== 'communities' ? 600 : 400 }}>Chats</span>
+                   </button>
+
+                   <button 
+                       onClick={(e) => {
+                           e.stopPropagation();
+                           const uid = user?.id || user?._id;
+                           if (uid) {
+                               localStorage.setItem(`lastRemindersChecked_${uid}`, Date.now().toString());
+                               setUnreadRemindersCount(0);
+                           }
+                           fetchReminders();
+                           setIsRemindersModalOpen(true);
+                           setFilterType('all');
+                       }} 
+                       style={{ background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', color: isRemindersModalOpen ? '#111b21' : '#54656f', gap: '4px', position: 'relative', cursor: 'pointer', flex: 1 }}>
+                       <Calendar size={24} />
+                       {unreadRemindersCount > 0 && <span style={{ position: 'absolute', top: '-4px', right: 'calc(50% - 18px)', background: '#0ea5be', color: 'white', borderRadius: '50%', minWidth: '16px', padding: '2px 4px', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{unreadRemindersCount}</span>}
+                       <span style={{ fontSize: '12px', fontWeight: isRemindersModalOpen ? 600 : 400 }}>Reminders</span>
+                   </button>
+                   
+                   <button 
+                       onClick={(e) => {
+                            e.stopPropagation();
+                            setIsRemindersModalOpen(false);
+                            setFilterType('communities');
+                       }} 
+                       style={{ background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', color: !isRemindersModalOpen && filterType === 'communities' ? '#111b21' : '#54656f', gap: '4px', cursor: 'pointer', flex: 1 }}>
+                       <Users size={24} />
+                       <span style={{ fontSize: '12px', fontWeight: !isRemindersModalOpen && filterType === 'communities' ? 600 : 400 }}>Communities</span>
+                   </button>
+                </div>
+            )}
+
             {/* Resize Handle */}
             <div
                 className="wa-resize-handle"
@@ -15571,7 +15632,7 @@ export default function Chat() {
                                                                         const myResponse = (msg.event.responses || []).find(r => String(r.user_id) === myId);
 
                                                                         return (
-                                                                            <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                            <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '280px', maxWidth: '100%', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
                                                                                 <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
                                                                                     <div style={{ display: 'flex', gap: '14px' }}>
                                                                                         <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -17064,7 +17125,7 @@ export default function Chat() {
                                                                         const myResponse = (msg.event.responses || []).find(r => String(r.user_id) === myId);
 
                                                                         return (
-                                                                            <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                            <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '280px', maxWidth: '100%', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
                                                                                 <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
                                                                                     <div style={{ display: 'flex', gap: '14px' }}>
                                                                                         <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -18767,7 +18828,10 @@ export default function Chat() {
                                     e.preventDefault();
                                     handleEditMessageSubmit();
                                 }
-                                if (e.key === 'Escape') setEditingMessage(null);
+                                if (e.key === 'Escape') {
+                                    e.stopPropagation();
+                                    setEditingMessage(null);
+                                }
                             }}
                             rows={1}
                             style={{
@@ -19838,7 +19902,7 @@ export default function Chat() {
                                                     style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid rgba(255,255,255,0.35)', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.18)' }}
                                                 />
                                             ) : (
-                                                <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: 'rgba(14, 165, 190, 0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid rgba(255,255,255,0.35)', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.18)' }}>
+                                                <div style={{ width: '100px', height: '100px', margin: '0 auto', borderRadius: '50%', background: 'rgba(14, 165, 190, 0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid rgba(255,255,255,0.35)', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.18)' }}>
                                                     <Users size={50} color="white" />
                                                 </div>
                                             )}
