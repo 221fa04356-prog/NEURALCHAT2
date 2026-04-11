@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, memo } from 'react';
+import React, { useDeferredValue, useEffect, useState, useRef, memo } from 'react';
 import axios from 'axios';
 import ImageEditorModal from '../components/ImageEditorModal';
 import logo from '../assets/logo.png';
@@ -433,9 +433,23 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                                 ctx.fillStyle = '#8696a0';
                                 const x = startX + idx * totalBarWidth;
                                 const y = (h - pointHeight) / 2;
-
+                                const radius = Math.min(3, pointHeight / 2);
                                 ctx.beginPath();
-                                ctx.roundRect(x, y, barWidth, pointHeight, 3);
+                                if (typeof ctx.roundRect === 'function') {
+                                    ctx.roundRect(x, y, barWidth, pointHeight, radius);
+                                } else {
+                                    // Fallback for browsers without Canvas roundRect support.
+                                    ctx.moveTo(x + radius, y);
+                                    ctx.lineTo(x + barWidth - radius, y);
+                                    ctx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
+                                    ctx.lineTo(x + barWidth, y + pointHeight - radius);
+                                    ctx.quadraticCurveTo(x + barWidth, y + pointHeight, x + barWidth - radius, y + pointHeight);
+                                    ctx.lineTo(x + radius, y + pointHeight);
+                                    ctx.quadraticCurveTo(x, y + pointHeight, x, y + pointHeight - radius);
+                                    ctx.lineTo(x, y + radius);
+                                    ctx.quadraticCurveTo(x, y, x + radius, y);
+                                }
+                                ctx.closePath();
                                 ctx.fill();
                             });
                         }
@@ -450,6 +464,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                 if (e.data && e.data.size > 0) {
                     audioChunksRef.current.push(e.data);
                     const blob = new Blob(audioChunksRef.current, { type: mimeTypeRef.current });
+                    if (audioUrl && audioUrl.startsWith('blob:')) URL.revokeObjectURL(audioUrl);
                     const url = URL.createObjectURL(blob);
                     setAudioBlob(blob);
                     setAudioUrl(url);
@@ -458,6 +473,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
 
             mediaRecorder.onstop = () => {
                 const blob = new Blob(audioChunksRef.current, { type: mimeTypeRef.current });
+                if (audioUrl && audioUrl.startsWith('blob:')) URL.revokeObjectURL(audioUrl);
                 const url = URL.createObjectURL(blob);
                 setAudioBlob(blob);
                 setAudioUrl(url);
@@ -482,7 +498,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                 }
             };
 
-            mediaRecorder.start();
+            mediaRecorder.start(250);
             if (waveformTimerHandler.current) waveformTimerHandler.current();
 
             accumulatedDurationRef.current = 0;
@@ -790,6 +806,7 @@ export default function Chat() {
 
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
+    const deferredInput = useDeferredValue(input);
     const [isMessagingBlocked, setIsMessagingBlocked] = useState(false);
     const [unblockRequested, setUnblockRequested] = useState(false);
     const [showUnblockModal, setShowUnblockModal] = useState(false);
@@ -844,7 +861,9 @@ export default function Chat() {
 
     // --- File Upload State ---
     const [file, setFile] = useState(null);
+    const [selectedFiles, setSelectedFiles] = useState([]);
     const fileInputRef = useRef(null);
+    const filePreviewUrlCacheRef = useRef(new Map());
 
     const [showViewOnceModal, setShowViewOnceModal] = useState(false);
     const [viewOnceMsg, setViewOnceMsg] = useState(null);
@@ -2847,9 +2866,9 @@ export default function Chat() {
         }
 
         // --- Grammar check ONLY for text messages (no files or link previews) ---
-        const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(input);
-        const containsUrl = /https?:\/\/[^\s]+/.test(input);
-        const trimmedNow = input.trim();
+        const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(deferredInput);
+        const containsUrl = /https?:\/\/[^\s]+/.test(deferredInput);
+        const trimmedNow = deferredInput.trim();
         if (file || !trimmedNow || trimmedNow.length < 3 || typingLinkPreview || containsUrl || isEmojiPresent) {
             setGrammarSuggestions(null);
             setShowGrammarBar(false);
@@ -2863,7 +2882,7 @@ export default function Chat() {
         setSuggestionApplied(false);
 
         const timer = setTimeout(async () => {
-            const trimmedInput = input.trim();
+            const trimmedInput = deferredInput.trim();
             const hasVowels = /[aeiouy]/i.test(trimmedInput);
             const hasNumbers = /[0-9]/.test(trimmedInput);
             const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(trimmedInput);
@@ -2894,7 +2913,7 @@ export default function Chat() {
             setShowGrammarBar(true); // Show bar immediately with loader
             try {
                 const token = localStorage.getItem('token');
-                const res = await axios.post('/api/chat/grammar-check', { text: input }, {
+                const res = await axios.post('/api/chat/grammar-check', { text: deferredInput }, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
                 const suggestions = res.data;
@@ -2928,7 +2947,7 @@ export default function Chat() {
         }, 1400);
 
         return () => clearTimeout(timer);
-    }, [input, file, typingLinkPreview]);
+    }, [deferredInput, file, typingLinkPreview]);
 
     const applyGrammarSuggestion = (text) => {
         const trimmedInput = input.trim();
@@ -3059,7 +3078,7 @@ export default function Chat() {
 
     useEffect(() => {
         const urlRegex = /(https?:\/\/[^\s]+)/g;
-        const match = input.match(urlRegex);
+        const match = deferredInput.match(urlRegex);
         if (match) {
             const url = match[0];
             // Only fetch if it's a new URL or preview is null
@@ -3084,7 +3103,7 @@ export default function Chat() {
             }
             setTypingLinkPreview(null);
         }
-    }, [input]);
+    }, [deferredInput]);
 
     // Critical: Keep ref in sync with state for socket listeners
     useEffect(() => {
@@ -5030,6 +5049,7 @@ export default function Chat() {
         if (!selectedUser || selectedUser._id !== u._id) {
             setInput('');
             setFile(null);
+            setSelectedFiles([]);
             setTypingLinkPreview(null);
             setReplyingTo(null);
             setIsChatSelectionMode(false);
@@ -5836,36 +5856,67 @@ export default function Chat() {
 
 
 
+    const getAllowedExtensionsForAttachmentType = () => {
+        if (attachmentTypeRef.current === 'document') {
+            return ['doc', 'docx', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx'];
+        }
+        if (attachmentTypeRef.current === 'media') {
+            return ['jpg', 'jpeg', 'png', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
+        }
+        return ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
+    };
+
+    const isAllowedFile = (selectedFile, allowedExtensions) => {
+        if (!selectedFile) return false;
+        const extension = (selectedFile.name?.split('.').pop() || '').toLowerCase();
+        if (allowedExtensions.includes(extension)) return true;
+
+        const mime = (selectedFile.type || '').toLowerCase();
+        const officeMimeAllowed = {
+            'ppt': ['application/vnd.ms-powerpoint'],
+            'pptx': ['application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+            'doc': ['application/msword'],
+            'docx': ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+            'xls': ['application/vnd.ms-excel'],
+            'xlsx': ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+            'pdf': ['application/pdf']
+        };
+        return allowedExtensions.some(ext => officeMimeAllowed[ext]?.includes(mime));
+    };
+
+    const addSelectedFile = (nextFile) => {
+        if (!nextFile) return;
+        setSelectedFiles(prev => [...prev, nextFile]);
+        setFile(nextFile);
+    };
+
     const handleFileSelect = (e) => {
-        if (e.target.files && e.target.files[0]) {
-            const selectedFile = e.target.files[0];
-            const extension = selectedFile.name.split('.').pop().toLowerCase();
+        if (e.target.files && e.target.files.length > 0) {
+            const allowedExtensions = getAllowedExtensionsForAttachmentType();
+            const files = Array.from(e.target.files);
+            let addedCount = 0;
 
-            let allowedExtensions;
-            if (attachmentTypeRef.current === 'document') {
-                allowedExtensions = ['doc', 'docx', 'pdf', 'xls', 'xlsx'];
-            } else if (attachmentTypeRef.current === 'media') {
-                allowedExtensions = ['jpg', 'jpeg', 'png', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            } else {
-                allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            }
-
-            if (allowedExtensions.includes(extension)) {
-                if (selectedFile.size > 1073741824) { // 1GB
-                    setSnackbar({ message: 'File must be less than 1GB', type: 'error', variant: 'system' });
-                    e.target.value = '';
-                } else {
-                    setFile(selectedFile);
+            for (const selectedFile of files) {
+                if (!isAllowedFile(selectedFile, allowedExtensions)) {
+                    setSnackbar({ message: 'Unauthorized file type. Please choose only allowed files.', type: 'error', variant: 'system' });
+                    continue;
                 }
-            } else {
-                setSnackbar({ message: 'Unsupported file format.', type: 'error', variant: 'system' });
-                e.target.value = ''; // Reset input
+                if (selectedFile.size > 1073741824) {
+                    setSnackbar({ message: 'File must be less than 1GB', type: 'error', variant: 'system' });
+                    continue;
+                }
+                addSelectedFile(selectedFile);
+                addedCount += 1;
             }
 
-            // reset to all after selection attempt
+            if (files.length > 1 && addedCount > 0) {
+                setSnackbar({ message: `${addedCount} files ready to send`, type: 'success', variant: 'system', duration: 1500 });
+            }
+
+            e.target.value = '';
             attachmentTypeRef.current = 'all';
             if (fileInputRef.current) {
-                fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*";
+                fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*,*/*";
             }
         }
     };
@@ -6343,11 +6394,27 @@ export default function Chat() {
         }
     };
 
-    const handleSend = async (e, contentOverride = null, voiceFile = null, voiceDuration = null, voiceIsViewOnce = null) => {
+    const handleSend = async (e, contentOverride = null, voiceFile = null, voiceDuration = null, voiceIsViewOnce = null, fileOverride = null, isBatchChild = false) => {
         if (e) e.preventDefault();
 
         const textToSend = contentOverride !== null ? contentOverride : input;
-        const targetFile = voiceFile || file;
+        const queuedFiles = selectedFiles.length ? selectedFiles : (file ? [file] : []);
+        if (!voiceFile && !fileOverride && queuedFiles.length > 1) {
+            const filesBatch = [...queuedFiles];
+            const firstCaption = textToSend;
+            setInput('');
+            setReplyingTo(null);
+            setTypingLinkPreview(null);
+            setSuggestionApplied(false);
+            setSelectedFiles([]);
+            setFile(null);
+            for (let i = 0; i < filesBatch.length; i++) {
+                await handleSend(null, i === 0 ? firstCaption : '', null, null, null, filesBatch[i], true);
+            }
+            return;
+        }
+        const targetFile = fileOverride || voiceFile || file;
+        const isVoiceMessage = !!voiceFile && !fileOverride;
 
         // 1. Basic empty check
         if ((!textToSend.trim() && !targetFile) || (!selectedUser && !selectedGroup)) return;
@@ -6375,7 +6442,7 @@ export default function Chat() {
             group_id: selectedGroup ? selectedGroup._id : null,
             role: 'user',
             content: textToSend,
-            type: voiceFile ? 'audio' : (file ? (file.type.startsWith('image/') ? 'image' : (file.type.startsWith('video/') ? 'video' : 'file')) : 'text'),
+            type: isVoiceMessage ? 'audio' : (targetFile ? (targetFile.type.startsWith('image/') ? 'image' : (targetFile.type.startsWith('video/') ? 'video' : (targetFile.type.startsWith('audio/') ? 'audio' : 'file'))) : 'text'),
             file_path: targetFile ? URL.createObjectURL(targetFile) : null, // Local preview
             fileName: targetFile ? targetFile.name : null,
             fileSize: targetFile ? targetFile.size : null,
@@ -6398,10 +6465,13 @@ export default function Chat() {
         } else {
             setInput('');
         }
-        setFile(null); // Clear file immediately from UI
-        setReplyingTo(null); // Clear reply context immediately
-        setTypingLinkPreview(null); // Clear typing preview immediately
-        setSuggestionApplied(false); // Reset correction state for next message
+        if (!isBatchChild) {
+            setFile(null); // Clear file immediately from UI
+            setSelectedFiles([]);
+            setReplyingTo(null); // Clear reply context immediately
+            setTypingLinkPreview(null); // Clear typing preview immediately
+            setSuggestionApplied(false); // Reset correction state for next message
+        }
 
         try {
             const formData = new FormData();
@@ -7663,7 +7733,7 @@ export default function Chat() {
                 icon: FileText, label: t('chat_window.document'), color: '#7f66ff', onClick: () => {
                     attachmentTypeRef.current = 'document';
                     if (fileInputRef.current) {
-                        fileInputRef.current.accept = ".doc,.docx,.pdf,.xls,.xlsx";
+                        fileInputRef.current.accept = ".doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,*/*";
                         fileInputRef.current.click();
                     }
                     setIsAttachmentMenuOpen(false);
@@ -8443,39 +8513,131 @@ export default function Chat() {
         );
     };
 
+    const getDisplayFileType = (selectedFile) => {
+        const ext = (selectedFile?.name?.split('.').pop() || '').toUpperCase();
+        if (ext) return ext;
+        const mime = (selectedFile?.type || '').split('/').pop() || 'FILE';
+        return mime.toUpperCase();
+    };
+
+    const getFilePreviewUrl = (selectedFile) => {
+        if (!selectedFile) return '';
+        const cache = filePreviewUrlCacheRef.current;
+        const existing = cache.get(selectedFile);
+        if (existing) return existing;
+        const created = URL.createObjectURL(selectedFile);
+        cache.set(selectedFile, created);
+        return created;
+    };
+
+    const downloadPreviewFile = () => {
+        if (!file) return;
+        const link = document.createElement('a');
+        link.href = getFilePreviewUrl(file);
+        link.download = file.name || 'download';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    useEffect(() => {
+        return () => {
+            filePreviewUrlCacheRef.current.forEach((url) => URL.revokeObjectURL(url));
+            filePreviewUrlCacheRef.current.clear();
+        };
+    }, []);
+
+    const openAllFilesPickerFromPreview = () => {
+        attachmentTypeRef.current = 'all';
+        if (fileInputRef.current) {
+            fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*,*/*";
+            fileInputRef.current.click();
+        }
+    };
+
+    const removeSelectedFileAt = (idx) => {
+        setSelectedFiles(prev => {
+            const next = prev.filter((_, i) => i !== idx);
+            setFile(next.length ? next[Math.max(0, idx - 1)] : null);
+            return next;
+        });
+    };
+
     const renderFilePreview = () => (
         <div className="wa-file-preview-overlay" style={{
             height: '100%',
             display: 'flex',
             flexDirection: 'column',
-            background: '#e9edef', // Light Application Theme Background
+            background: '#f2f2f2',
             position: 'relative',
             zIndex: 1000
         }}>
-            {/* Header */}
+            {(() => {
+                const filesInTray = (selectedFiles.length ? selectedFiles : (file ? [file] : []));
+                const isSingleImageOnly = filesInTray.length === 1 && !!file && file.type.startsWith('image/');
+                const isImagePreview = !!file && file.type.startsWith('image/');
+                return (
+                    <>
+            {/* Preview Header (below existing chat contact bar) */}
             <div style={{
-                padding: '16px 20px',
+                padding: '10px 20px',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'space-between',
+                justifyContent: 'center',
                 background: '#f0f2f5',
                 color: '#111b21',
                 flexShrink: 0,
-                borderBottom: '1px solid #d1d7db'
+                borderBottom: '1px solid #d1d7db',
+                minHeight: 52
             }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                {isImagePreview ? (
+                    <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <button
+                            onClick={() => {
+                                setFile(null);
+                                setSelectedFiles([]);
+                            }}
+                            style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 0 }}
+                            title="Close preview"
+                        >
+                            <X size={24} />
+                        </button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 18, color: '#667781' }}>
+                            <button style={{ background: 'none', border: 'none', color: 'inherit', display: 'flex', cursor: 'pointer' }} title="Rotate"><RotateCcw size={20} /></button>
+                            <button style={{ background: 'none', border: 'none', color: 'inherit', display: 'flex', cursor: 'pointer' }} title="Draw"><Pencil size={20} /></button>
+                            <button style={{ background: 'none', border: 'none', color: 'inherit', display: 'flex', cursor: 'pointer' }} title="Crop"><Crop size={20} /></button>
+                            <button style={{ background: 'none', border: 'none', color: 'inherit', display: 'flex', cursor: 'pointer' }} title="Sticker"><Sticker size={20} /></button>
+                            <button style={{ background: 'none', border: 'none', color: 'inherit', display: 'flex', cursor: 'pointer' }} title="Emoji"><Smile size={20} /></button>
+                            <button style={{ background: 'none', border: 'none', color: 'inherit', display: 'flex', cursor: 'pointer' }} title="Text"><span style={{ fontSize: 22, lineHeight: 1, fontWeight: 500 }}>Aa</span></button>
+                        </div>
+                        <button
+                            onClick={downloadPreviewFile}
+                            style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 0 }}
+                            title="Download"
+                        >
+                            <Download size={22} />
+                        </button>
+                    </div>
+                ) : (
+                    <>
                     <button
                         onClick={() => {
                             setFile(null);
-                            // Cleanup object URL if needed, though browsers usually handle it
+                            setSelectedFiles([]);
                         }}
-                        style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 4 }}
+                        style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 4, position: 'absolute', left: 20 }}
                         title="Close preview"
                     >
                         <X size={24} />
                     </button>
-                    <span style={{ fontSize: 16, fontWeight: 500, color: '#111b21' }}>Preview</span>
-                </div>
+                    <div style={{ textAlign: 'center', lineHeight: 1.2 }}>
+                        <div style={{ fontSize: 19, fontWeight: 500, color: '#111b21' }}>{file?.name || 'Preview'}</div>
+                        <div style={{ fontSize: 13, color: '#667781', marginTop: 4 }}>
+                            {file?.name?.toLowerCase().endsWith('.pdf') ? '1 page' : getDisplayFileType(file).toLowerCase()}
+                        </div>
+                    </div>
+                    </>
+                )}
             </div>
 
             {/* Content Area */}
@@ -8486,13 +8648,13 @@ export default function Chat() {
                 justifyContent: 'center',
                 alignItems: 'center',
                 overflow: 'hidden',
-                padding: '20px 40px',
+                padding: isSingleImageOnly ? '12px 24px' : '20px 40px',
                 position: 'relative',
-                background: '#f0f2f5' // Matches chat background color generally
+                background: '#f2f2f2'
             }}>
                 {file && file.type.startsWith('image/') ? (
                     <img
-                        src={URL.createObjectURL(file)}
+                        src={getFilePreviewUrl(file)}
                         alt="Preview"
                         style={{
                             maxWidth: '100%',
@@ -8505,7 +8667,7 @@ export default function Chat() {
                 ) : file && file.type.startsWith('video/') ? (
                     <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                         <video
-                            src={URL.createObjectURL(file)}
+                            src={getFilePreviewUrl(file)}
                             controls
                             autoPlay
                             muted
@@ -8519,20 +8681,39 @@ export default function Chat() {
                             }}
                         />
                     </div>
+                ) : file && file.type.startsWith('audio/') ? (
+                    <div style={{ width: '100%', maxWidth: 700, textAlign: 'center' }}>
+                        <div style={{ marginBottom: 14, fontSize: 18, fontWeight: 500, color: '#111b21' }}>{file?.name}</div>
+                        <audio src={getFilePreviewUrl(file)} controls style={{ width: '100%' }} />
+                    </div>
                 ) : (
                     <div style={{
                         textAlign: 'center',
-                        padding: 60,
+                        padding: '40px 32px',
                         background: '#ffffff',
                         borderRadius: 12,
                         boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
                         color: '#111b21',
-                        border: '1px solid #d1d7db'
+                        border: '1px solid #d1d7db',
+                        minWidth: 340,
+                        maxWidth: 640
                     }}>
-                        <div style={{ fontSize: 48, marginBottom: 16 }}>Ã°Å¸â€œâ€ž</div>
-                        <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8, color: '#111b21' }}>{file?.name}</div>
+                        <div style={{
+                            width: 96,
+                            height: 96,
+                            margin: '0 auto 16px',
+                            borderRadius: 12,
+                            background: '#f0f2f5',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                        }}>
+                            <FileText size={44} color="#8696a0" />
+                        </div>
+                        <div style={{ fontSize: 14, color: '#8696a0', marginBottom: 8 }}>No preview available</div>
+                        <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8, color: '#111b21', wordBreak: 'break-word' }}>{file?.name}</div>
                         <div style={{ fontSize: 14, color: '#54656f' }}>
-                            {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} Ã¢â‚¬Â¢ {file?.type?.split('/').pop().toUpperCase()}
+                            {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} - {getDisplayFileType(file)}
                         </div>
                     </div>
                 )}
@@ -8545,31 +8726,35 @@ export default function Chat() {
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 12,
-                borderTop: '1px solid #d1d7db'
+                borderTop: 'none'
             }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', maxWidth: 720, margin: '0 auto' }}>
                     <div className="wa-input-pill" style={{
                         flex: 1,
                         background: '#ffffff',
-                        borderRadius: 8,
-                        padding: '4px 12px',
+                        borderRadius: 12,
+                        padding: '1px 0 1px 10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        position: 'relative',
                         border: '1px solid #d1d7db'
                     }}>
                         <input
                             type="text"
                             id="caption-input"
                             name="caption"
-                            aria-label="Add a caption"
+                            aria-label="Type a message"
                             style={{
                                 width: '100%',
+                                flex: 1,
                                 background: 'transparent',
                                 border: 'none',
                                 outline: 'none',
                                 color: '#111b21',
-                                padding: '10px 0',
+                                padding: '7px 34px 7px 0',
                                 fontSize: 15
                             }}
-                            placeholder="Add a caption..."
+                            placeholder="Type a message"
                             value={input}
                             onChange={e => setInput(e.target.value)}
                             onKeyDown={e => {
@@ -8577,12 +8762,171 @@ export default function Chat() {
                             }}
                             autoFocus
                         />
+                        <button
+                            type="button"
+                            className={`wa-nav-icon-btn ${showInputEmojiPicker ? 'active' : ''}`}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
+                                setShowInputEmojiPicker(!showInputEmojiPicker);
+                            }}
+                            style={{
+                                position: 'absolute',
+                                right: 0.5,
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                background: 'transparent',
+                                margin: 0,
+                                padding: 0,
+                                width: 30,
+                                height: 30,
+                                minWidth: 30,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                border: 'none'
+                            }}
+                        >
+                            <Smile size={22} color={showInputEmojiPicker ? "#0EA5BE" : "#54656f"} />
+                        </button>
                     </div>
+                </div>
+
+                {!isSingleImageOnly && <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div
+                        style={{
+                            flex: 1,
+                            overflowX: selectedFiles.length > 10 ? 'auto' : 'hidden',
+                            paddingBottom: selectedFiles.length > 10 ? 6 : 0,
+                            WebkitOverflowScrolling: 'touch',
+                            scrollBehavior: 'smooth',
+                            touchAction: 'pan-x'
+                        }}
+                        onWheel={(e) => {
+                            if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                                e.currentTarget.scrollLeft += e.deltaY;
+                            }
+                        }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: selectedFiles.length > 10 ? 'max-content' : '100%', justifyContent: 'center', paddingRight: selectedFiles.length >= 14 ? 8 : 0 }}>
+                        {(selectedFiles.length ? selectedFiles : (file ? [file] : [])).map((f, idx) => (
+                        <div
+                            className="wa-preview-file-tile"
+                            key={`${f.name}-${f.size}-${idx}`}
+                            onClick={() => setFile(f)}
+                            style={{
+                            minWidth: 56,
+                            width: 56,
+                            height: 56,
+                            borderRadius: 10,
+                            border: file === f ? '2px solid #0EA5BE' : '1px solid #d1d7db',
+                            background: '#ffffff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: 6,
+                            cursor: 'pointer',
+                            position: 'relative',
+                            flexShrink: 0
+                        }}>
+                            {f?.type?.startsWith('image/') ? (
+                                <img
+                                    src={getFilePreviewUrl(f)}
+                                    alt="selected file"
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }}
+                                />
+                            ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                    {f?.type?.startsWith('audio/') ? <Play size={18} color="#0EA5BE" /> : <FileText size={20} color="#0EA5BE" />}
+                                    <span style={{ fontSize: 8, color: '#0EA5BE', fontWeight: 700 }}>
+                                        {getDisplayFileType(f)}
+                                    </span>
+                                </div>
+                            )}
+                            {(selectedFiles.length ? selectedFiles : (file ? [file] : [])).length > 1 && (
+                                <button
+                                    className="wa-preview-remove-btn"
+                                    type="button"
+                                    onClick={(ev) => { ev.stopPropagation(); removeSelectedFileAt(idx); }}
+                                    style={{
+                                        position: 'absolute',
+                                        top: 3,
+                                        right: 3,
+                                        width: 18,
+                                        height: 18,
+                                        borderRadius: '50%',
+                                        background: 'var(--wa-active-icon, #0EA5BE)',
+                                        border: '1px solid white',
+                                        color: '#ffffff',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: 'pointer',
+                                        padding: 0,
+                                        opacity: 0,
+                                        transform: 'scale(0.8)',
+                                        zIndex: 10,
+                                        transition: 'opacity 0.1s ease, transform 0.1s ease'
+                                    }}
+                                >
+                                    <X size={10} strokeWidth={4} />
+                                </button>
+                            )}
+                        </div>
+                    ))}
+                        {selectedFiles.length < 14 && (
+                            <button
+                                type="button"
+                                onClick={openAllFilesPickerFromPreview}
+                                style={{
+                                    width: 56,
+                                    height: 56,
+                                    borderRadius: 10,
+                                    border: '1px solid #d1d7db',
+                                    background: '#fff',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    flexShrink: 0
+                                }}
+                                title="Add another file"
+                            >
+                                <Plus size={20} color="#54656f" />
+                            </button>
+                        )}
+                        </div>
+                    </div>
+                    {selectedFiles.length >= 14 ? (
+                        <button
+                            type="button"
+                            onClick={openAllFilesPickerFromPreview}
+                            style={{
+                                width: 56,
+                                height: 56,
+                                borderRadius: 10,
+                                border: '1px solid #d1d7db',
+                                background: '#fff',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                flexShrink: 0,
+                                marginLeft: -66,
+                                zIndex: 3,
+                                boxShadow: '-8px 0 14px rgba(233, 237, 239, 0.95)'
+                            }}
+                            title="Add another file"
+                        >
+                            <Plus size={20} color="#54656f" />
+                        </button>
+                    ) : null}
                     <button
                         onClick={handleSend}
                         style={{
-                            width: 44,
-                            height: 44,
+                            width: 56,
+                            height: 56,
                             borderRadius: '50%',
                             background: '#0EA5BE',
                             border: 'none',
@@ -8591,13 +8935,37 @@ export default function Chat() {
                             justifyContent: 'center',
                             cursor: 'pointer',
                             boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
-                            flexShrink: 0
+                            flexShrink: 0,
+                            position: 'relative'
                         }}
                     >
-                        <Send size={22} color="white" />
+                        <Send size={24} color="white" />
+                        {selectedFiles.length > 1 && (
+                            <span style={{
+                                position: 'absolute',
+                                top: -6,
+                                right: -6,
+                                minWidth: 20,
+                                height: 20,
+                                borderRadius: 10,
+                                background: '#ffffff',
+                                color: '#0EA5BE',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                padding: '0 4px'
+                            }}>
+                                {selectedFiles.length}
+                            </span>
+                        )}
                     </button>
-                </div>
+                </div>}
             </div>
+                    </>
+                );
+            })()}
         </div>
     );
 
@@ -14162,17 +14530,15 @@ export default function Chat() {
         if (e.clipboardData.files && e.clipboardData.files.length > 0) {
             e.preventDefault();
             const pastedFile = e.clipboardData.files[0];
-            const allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            const extension = pastedFile.name.split('.').pop().toLowerCase();
-
-            if (allowedExtensions.includes(extension)) {
+            const allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
+            if (isAllowedFile(pastedFile, allowedExtensions)) {
                 if (pastedFile.size > 1073741824) {
                     setSnackbar({ message: 'File must be less than 1GB', type: 'error', variant: 'system' });
                 } else {
-                    setFile(pastedFile);
+                    addSelectedFile(pastedFile);
                 }
             } else {
-                setSnackbar({ message: 'Only JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, and Video files are allowed.', type: 'error', variant: 'system' });
+                setSnackbar({ message: 'Only JPG, JPEG, PNG, DOC, DOCX, PPT, PPTX, PDF, Excel, and Video files are allowed.', type: 'error', variant: 'system' });
             }
         }
     };
@@ -14188,31 +14554,22 @@ export default function Chat() {
 
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             const droppedFile = e.dataTransfer.files[0];
-            const extension = droppedFile.name.split('.').pop().toLowerCase();
+            const allowedExtensions = getAllowedExtensionsForAttachmentType();
 
-            let allowedExtensions;
-            if (attachmentTypeRef.current === 'document') {
-                allowedExtensions = ['doc', 'docx', 'pdf', 'xls', 'xlsx'];
-            } else if (attachmentTypeRef.current === 'media') {
-                allowedExtensions = ['jpg', 'jpeg', 'png', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            } else {
-                allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            }
-
-            if (allowedExtensions.includes(extension)) {
+            if (isAllowedFile(droppedFile, allowedExtensions)) {
                 if (droppedFile.size > 1073741824) {
                     setSnackbar({ message: 'File must be less than 1GB', type: 'error', variant: 'system' });
                 } else {
-                    setFile(droppedFile);
+                    addSelectedFile(droppedFile);
                 }
             } else {
-                setSnackbar({ message: 'Unsupported file format.', type: 'error', variant: 'system' });
+                setSnackbar({ message: 'Unauthorized file type. Please choose only allowed files.', type: 'error', variant: 'system' });
             }
 
             // reset to all after drop attempt
             attachmentTypeRef.current = 'all';
             if (fileInputRef.current) {
-                fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*";
+                fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*,*/*";
             }
         }
     };
@@ -14224,6 +14581,7 @@ export default function Chat() {
         setSelectedCommunity(null);
         setInput('');
         setFile(null);
+        setSelectedFiles([]);
         setTypingLinkPreview(null);
         setReplyingTo(null);
         setIsChatSelectionMode(false);
@@ -15998,14 +16356,15 @@ export default function Chat() {
                                                                     className="wa-attachment-floating-hint"
                                                                     style={{ left: `${attachmentHintPos.x}px`, top: `${attachmentHintPos.y}px` }}
                                                                 >
-                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)
+                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PPTX, PDF, Excel, Video (up to 1GB)
                                                                 </div>
                                                             )}
                                                             <input
                                                                 type="file"
                                                                 ref={fileInputRef}
+                                                                multiple
                                                                 style={{ display: 'none' }}
-                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
+                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.mp4,.avi,.mkv,.mov,.webm,video/*,*/*"
                                                                 onChange={handleFileSelect}
                                                             />
                                                             <button
@@ -16024,7 +16383,7 @@ export default function Chat() {
                                                             {file && (
                                                                 <div className="wa-file-preview-badge">
                                                                     {file.name.substring(0, 15)}...
-                                                                    <button onClick={() => setFile(null)}>✕</button>
+                                                                    <button onClick={() => { setFile(null); setSelectedFiles([]); }}>✕</button>
                                                                 </div>
                                                             )}
                                                             <textarea
@@ -17602,14 +17961,15 @@ export default function Chat() {
                                                                     className="wa-attachment-floating-hint"
                                                                     style={{ left: `${attachmentHintPos.x}px`, top: `${attachmentHintPos.y}px` }}
                                                                 >
-                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)
+                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PPTX, PDF, Excel, Video (up to 1GB)
                                                                 </div>
                                                             )}
                                                             <input
                                                                 type="file"
                                                                 ref={fileInputRef}
+                                                                multiple
                                                                 style={{ display: 'none' }}
-                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.ppt,.pptx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
+                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.ppt,.pptx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*,*/*"
                                                                 onChange={handleFileSelect}
                                                             />
                                                             <button
@@ -17628,7 +17988,7 @@ export default function Chat() {
                                                             {file && (
                                                                 <div className="wa-file-preview-badge">
                                                                     {file.name.substring(0, 15)}...
-                                                                    <button onClick={() => setFile(null)}>×</button>
+                                                                    <button onClick={() => { setFile(null); setSelectedFiles([]); }}>×</button>
                                                                 </div>
                                                             )}
                                                             <textarea
@@ -19792,6 +20152,7 @@ export default function Chat() {
                 .wa-left-panel, .wa-left-sidebar { background: white; z-index: 2; position: relative; }
                 .wa-chat-header { background: transparent !important; }
                 .wa-pinned-messages-banner { background: rgba(255, 255, 255, 0.85) !important; backdrop-filter: blur(8px) !important; }
+                .wa-preview-file-tile:hover .wa-preview-remove-btn { opacity: 1 !important; transform: scale(1) !important; }
             `}</style>
 
             <div className={`wa-app-container ${(selectedUser || selectedGroup) ? 'chat-active' : 'list-active'}`} style={{ position: 'relative', background: 'transparent' }}>
@@ -19809,16 +20170,16 @@ export default function Chat() {
 
                             {/* Sleep Mode Overlay - Restricted strictly to the Chat Area */}
                             {isAppAsleep && (selectedUser || selectedGroup) && (
-                                <div 
+                                <div
                                     className="wa-sleep-overlay"
                                     onClick={() => setIsAppAsleep(false)}
                                     style={{
                                         position: 'absolute',
                                         inset: 0,
-                                        background: 'rgba(255, 255, 255, 0.08)',
-                                        backdropFilter: 'blur(18px) saturate(140%)',
-                                        WebkitBackdropFilter: 'blur(18px) saturate(140%)',
-                                        border: '1px solid rgba(255, 255, 255, 0.18)',
+                                        background: '#ffffff',
+                                        backdropFilter: 'none',
+                                        WebkitBackdropFilter: 'none',
+                                        border: 'none',
                                         zIndex: 60000,
                                         display: 'flex',
                                         flexDirection: 'column',
@@ -19828,43 +20189,56 @@ export default function Chat() {
                                         cursor: 'pointer'
                                     }}
                                 >
-                                    {/* Avatar / Icon */}
-                                    {(selectedUser || selectedGroup) && (
-                                        <div style={{ marginBottom: '24px', textAlign: 'center' }}>
-                                            {selectedUser ? (
-                                                <img 
-                                                    src={selectedUser.avatar || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png'} 
-                                                    alt="User"
-                                                    style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid rgba(255,255,255,0.35)', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.18)' }}
-                                                />
-                                            ) : (
-                                                <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: 'rgba(14, 165, 190, 0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid rgba(255,255,255,0.35)', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.18)' }}>
-                                                    <Users size={50} color="white" />
-                                                </div>
-                                            )}
-                                            <h2 style={{ color: '#0b1f2a', marginTop: '16px', fontSize: '22px', fontWeight: '700' }}>
-                                                {selectedUser ? selectedUser.name : (() => {
-                                                    if (selectedGroup?.name === 'Announcements' && selectedGroup?.community_id) {
-                                                        const comm = communities.find(c => String(c._id || c.id) === String(selectedGroup.community_id));
-                                                        if (comm) return `${comm.name} Announcements`;
-                                                    }
-                                                    return selectedGroup?.name || '';
-                                                })()}
-                                            </h2>
-                                        </div>
-                                    )}
+                                    <div
+                                        style={{
+                                            background: 'linear-gradient(180deg, #ffffff 0%, #f7fafc 100%)',
+                                            border: '1px solid #e6edf3',
+                                            boxShadow: '0 14px 34px rgba(15, 23, 42, 0.12)',
+                                            borderRadius: 22,
+                                            padding: '28px 26px',
+                                            maxWidth: 520,
+                                            width: 'calc(100% - 48px)',
+                                            textAlign: 'center'
+                                        }}
+                                    >
+                                        {/* Avatar / Icon */}
+                                        {(selectedUser || selectedGroup) && (
+                                            <div style={{ marginBottom: '24px', textAlign: 'center' }}>
+                                                {selectedUser ? (
+                                                    <img
+                                                        src={selectedUser.avatar || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png'}
+                                                        alt="User"
+                                                        style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid #ffffff', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.14)' }}
+                                                    />
+                                                ) : (
+                                                    <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#0EA5BE', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #ffffff', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.14)' }}>
+                                                        <Users size={50} color="white" />
+                                                    </div>
+                                                )}
+                                                <h2 style={{ color: '#0b1f2a', marginTop: '16px', fontSize: '22px', fontWeight: '700' }}>
+                                                    {selectedUser ? selectedUser.name : (() => {
+                                                        if (selectedGroup?.name === 'Announcements' && selectedGroup?.community_id) {
+                                                            const comm = communities.find(c => String(c._id || c.id) === String(selectedGroup.community_id));
+                                                            if (comm) return `${comm.name} Announcements`;
+                                                        }
+                                                        return selectedGroup?.name || '';
+                                                    })()}
+                                                </h2>
+                                            </div>
+                                        )}
 
-                                    {/* Neural Chat logo Branding */}
-                                    <div style={{ marginBottom: '28px', animation: 'wa-popover-in 0.4s ease-out' }}>
-                                        <img src={logo} alt="Neural Chat" style={{ width: '80px', height: '80px' }} />
-                                    </div>
-
-                                    <div style={{ textAlign: 'center', color: '#334155', maxWidth: '420px', padding: '0 20px' }}>
-                                        <div style={{ color: '#0EA5BE', fontSize: '19px', fontWeight: '700', marginBottom: '10px', lineHeight: '1.4' }}>
-                                            You are diverted out of focus from the screen.
+                                        {/* Neural Chat logo Branding */}
+                                        <div style={{ marginBottom: '28px', animation: 'wa-popover-in 0.4s ease-out' }}>
+                                            <img src={logo} alt="Neural Chat" style={{ width: '80px', height: '80px' }} />
                                         </div>
-                                        <div style={{ fontSize: '15px', color: '#475569' }}>
-                                            Please return to the screen to start the conversation
+
+                                        <div style={{ textAlign: 'center', color: '#334155', maxWidth: '420px', margin: '0 auto' }}>
+                                            <div style={{ color: '#0EA5BE', fontSize: '19px', fontWeight: '700', marginBottom: '10px', lineHeight: '1.4' }}>
+                                                You are diverted out of focus from the screen.
+                                            </div>
+                                            <div style={{ fontSize: '15px', color: '#475569' }}>
+                                                Please return to the screen to start the conversation
+                                            </div>
                                         </div>
                                     </div>
 
@@ -19876,8 +20250,8 @@ export default function Chat() {
                             )}
 
                             {/* File Preview Overlay (Restricted to Chat Area) */}
-                            {file && (
-                                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 2000, display: 'flex', flexDirection: 'column', background: '#e9edef' }}>
+                            {(file || selectedFiles.length > 0) && (
+                                <div style={{ position: 'absolute', top: 60, left: 0, width: '100%', height: 'calc(100% - 60px)', zIndex: 2000, display: 'flex', flexDirection: 'column', background: '#e9edef' }}>
                                     {renderFilePreview()}
                                 </div>
                             )}
