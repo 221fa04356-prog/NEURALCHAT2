@@ -517,8 +517,7 @@ export default function AdminDashboard() {
         const token = localStorage.getItem('token');
         if (!token) return;
 
-        // Use Vite dev server URL - it will proxy WebSocket to backend via /socket.io
-        const SOCKET_URL = window.location.origin;
+        const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
         const socket = io(SOCKET_URL, {
             auth: { token },
             transports: ['websocket', 'polling'], // Allow polling as fallback
@@ -3509,7 +3508,7 @@ export default function AdminDashboard() {
                                                                         })()}
 
                                                                         {msg.type === 'event' && msg.event && (
-                                                                            <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '100%', minWidth: '220px', maxWidth: '320px', cursor: 'default', opacity: msg.event.cancelled ? 0.7 : 1, marginTop: '8px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                            <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '280px', maxWidth: '100%', cursor: 'default', opacity: msg.event.cancelled ? 0.7 : 1, marginTop: '8px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
                                                                                 <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
                                                                                     <div style={{ display: 'flex', gap: '14px' }}>
                                                                                         <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>

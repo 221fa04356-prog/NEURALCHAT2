@@ -14,16 +14,9 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: [
-            "https://chatneural2-frontend.onrender.com", 
-            "http://localhost:5173", 
-            "https://localhost:5173",
-            "http://127.0.0.1:5173", 
-            "https://127.0.0.1:5173",
-            "http://172.21.43.52:5173",
-            "https://172.21.43.52:5173"
-        ],
-        methods: ["GET", "POST"]
+        origin: process.env.CLIENT_URL ? [process.env.CLIENT_URL, "http://localhost:5173"] : true,
+        methods: ["GET", "POST"],
+        credentials: true
     }
 });
 
@@ -45,7 +38,12 @@ connectDB().then(async () => {
         console.error('[STARTUP] Error resetting user statuses on startup:', err);
     }
 });
-app.use(cors());
+
+const corsOptions = {
+    origin: process.env.CLIENT_URL ? [process.env.CLIENT_URL, "http://localhost:5173"] : true,
+    credentials: true
+};
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
