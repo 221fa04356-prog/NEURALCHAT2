@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, memo } from 'react';
+import React, { useDeferredValue, useEffect, useState, useRef, memo } from 'react';
 import axios from 'axios';
 import ImageEditorModal from '../components/ImageEditorModal';
 import logo from '../assets/logo.png';
@@ -328,20 +328,20 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
             const hp1 = audioContext.createBiquadFilter(); hp1.type = 'highpass'; hp1.frequency.value = 140;
             const hp2 = audioContext.createBiquadFilter(); hp2.type = 'highpass'; hp2.frequency.value = 140;
             const hp3 = audioContext.createBiquadFilter(); hp3.type = 'highpass'; hp3.frequency.value = 140;
- 
+
             // 2. Presence & Studio Crispness (Capturing the natural human speech clarity)
             const presenceBoost = audioContext.createBiquadFilter();
             presenceBoost.type = 'peaking';
             presenceBoost.frequency.value = 3500;
             presenceBoost.gain.value = 8; // Gently boost clarity
             presenceBoost.Q.value = 1.0;
- 
+
             const sibilanceFocus = audioContext.createBiquadFilter();
             sibilanceFocus.type = 'peaking';
             sibilanceFocus.frequency.value = 5200;
             sibilanceFocus.gain.value = 4;
             sibilanceFocus.Q.value = 1.2;
- 
+
             // 3. Quad-Stage "Air Guard" Low-pass (4x 8500Hz): Natural high-end cutoff
             const lp1 = audioContext.createBiquadFilter(); lp1.type = 'lowpass'; lp1.frequency.value = 8500;
             const lp2 = audioContext.createBiquadFilter(); lp2.type = 'lowpass'; lp2.frequency.value = 8500;
@@ -433,9 +433,23 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                                 ctx.fillStyle = '#8696a0';
                                 const x = startX + idx * totalBarWidth;
                                 const y = (h - pointHeight) / 2;
-
+                                const radius = Math.min(3, pointHeight / 2);
                                 ctx.beginPath();
-                                ctx.roundRect(x, y, barWidth, pointHeight, 3);
+                                if (typeof ctx.roundRect === 'function') {
+                                    ctx.roundRect(x, y, barWidth, pointHeight, radius);
+                                } else {
+                                    // Fallback for browsers without Canvas roundRect support.
+                                    ctx.moveTo(x + radius, y);
+                                    ctx.lineTo(x + barWidth - radius, y);
+                                    ctx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
+                                    ctx.lineTo(x + barWidth, y + pointHeight - radius);
+                                    ctx.quadraticCurveTo(x + barWidth, y + pointHeight, x + barWidth - radius, y + pointHeight);
+                                    ctx.lineTo(x + radius, y + pointHeight);
+                                    ctx.quadraticCurveTo(x, y + pointHeight, x, y + pointHeight - radius);
+                                    ctx.lineTo(x, y + radius);
+                                    ctx.quadraticCurveTo(x, y, x + radius, y);
+                                }
+                                ctx.closePath();
                                 ctx.fill();
                             });
                         }
@@ -450,6 +464,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                 if (e.data && e.data.size > 0) {
                     audioChunksRef.current.push(e.data);
                     const blob = new Blob(audioChunksRef.current, { type: mimeTypeRef.current });
+                    if (audioUrl && audioUrl.startsWith('blob:')) URL.revokeObjectURL(audioUrl);
                     const url = URL.createObjectURL(blob);
                     setAudioBlob(blob);
                     setAudioUrl(url);
@@ -458,6 +473,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
 
             mediaRecorder.onstop = () => {
                 const blob = new Blob(audioChunksRef.current, { type: mimeTypeRef.current });
+                if (audioUrl && audioUrl.startsWith('blob:')) URL.revokeObjectURL(audioUrl);
                 const url = URL.createObjectURL(blob);
                 setAudioBlob(blob);
                 setAudioUrl(url);
@@ -482,7 +498,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                 }
             };
 
-            mediaRecorder.start();
+            mediaRecorder.start(250);
             if (waveformTimerHandler.current) waveformTimerHandler.current();
 
             accumulatedDurationRef.current = 0;
@@ -696,8 +712,8 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                             ref={waveformRef}
                             width={220}
                             height={36}
-                            style={{ 
-                                width: '100%', 
+                            style={{
+                                width: '100%',
                                 height: '100%',
                                 opacity: (isPaused || isReviewing) ? 0.8 : 1
                             }}
@@ -733,7 +749,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                                 window.addEventListener('mousemove', onMouseMove);
                                 window.addEventListener('mouseup', onMouseUp);
 
-                                updateSeekFromEvent(e); 
+                                updateSeekFromEvent(e);
                             }}
                         />
                         {(isPaused || isReviewing) && (
@@ -742,7 +758,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                                 left: `${previewProgress}%`,
                                 width: '10px',
                                 height: '10px',
-                                backgroundColor: '#0EA5BE', 
+                                backgroundColor: '#0EA5BE',
                                 borderRadius: '50%',
                                 pointerEvents: 'none',
                                 transform: 'translateX(-50%)',
@@ -790,6 +806,7 @@ export default function Chat() {
 
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
+    const deferredInput = useDeferredValue(input);
     const [isMessagingBlocked, setIsMessagingBlocked] = useState(false);
     const [unblockRequested, setUnblockRequested] = useState(false);
     const [showUnblockModal, setShowUnblockModal] = useState(false);
@@ -844,7 +861,9 @@ export default function Chat() {
 
     // --- File Upload State ---
     const [file, setFile] = useState(null);
+    const [selectedFiles, setSelectedFiles] = useState([]);
     const fileInputRef = useRef(null);
+    const filePreviewUrlCacheRef = useRef(new Map());
 
     const [showViewOnceModal, setShowViewOnceModal] = useState(false);
     const [viewOnceMsg, setViewOnceMsg] = useState(null);
@@ -1244,11 +1263,11 @@ export default function Chat() {
 
                     let isAttending = false;
                     if (m.isGroup) {
-                         isAttending = ev.responses && ev.responses.some(r => String(r.user_id._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
-                         if (String(m.sender_id?._id || m.sender_id) === String(user.id)) isAttending = true;
+                        isAttending = ev.responses && ev.responses.some(r => String(r.user_id._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
+                        if (String(m.sender_id?._id || m.sender_id) === String(user.id)) isAttending = true;
                     } else {
-                         isAttending = ev.responses && ev.responses.some(r => String(r.user_id._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
-                         if (String(m.user_id?._id || m.user_id) === String(user.id)) isAttending = true;
+                        isAttending = ev.responses && ev.responses.some(r => String(r.user_id._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
+                        if (String(m.user_id?._id || m.user_id) === String(user.id)) isAttending = true;
                     }
                     if (!isAttending) return;
 
@@ -1257,7 +1276,7 @@ export default function Chat() {
                     const startObj = new Date(startStr);
                     if (isNaN(startObj.getTime())) return;
                     const diffMs = startObj.getTime() - now.getTime();
-                    
+
                     const rt = ev.reminderTiming || 'default';
                     let targetMs = 24 * 60 * 60 * 1000;
                     if (rt === '15m') targetMs = 15 * 60 * 1000;
@@ -1284,7 +1303,7 @@ export default function Chat() {
                         }
                     }
                 });
-                
+
                 // Keep UI updated if events expire
                 setEventTick(prev => prev + 1);
             }
@@ -2848,9 +2867,9 @@ export default function Chat() {
         }
 
         // --- Grammar check ONLY for text messages (no files or link previews) ---
-        const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(input);
-        const containsUrl = /https?:\/\/[^\s]+/.test(input);
-        const trimmedNow = input.trim();
+        const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(deferredInput);
+        const containsUrl = /https?:\/\/[^\s]+/.test(deferredInput);
+        const trimmedNow = deferredInput.trim();
         if (file || !trimmedNow || trimmedNow.length < 3 || typingLinkPreview || containsUrl || isEmojiPresent) {
             setGrammarSuggestions(null);
             setShowGrammarBar(false);
@@ -2864,7 +2883,7 @@ export default function Chat() {
         setSuggestionApplied(false);
 
         const timer = setTimeout(async () => {
-            const trimmedInput = input.trim();
+            const trimmedInput = deferredInput.trim();
             const hasVowels = /[aeiouy]/i.test(trimmedInput);
             const hasNumbers = /[0-9]/.test(trimmedInput);
             const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(trimmedInput);
@@ -2895,7 +2914,7 @@ export default function Chat() {
             setShowGrammarBar(true); // Show bar immediately with loader
             try {
                 const token = localStorage.getItem('token');
-                const res = await axios.post('/api/chat/grammar-check', { text: input }, {
+                const res = await axios.post('/api/chat/grammar-check', { text: deferredInput }, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
                 const suggestions = res.data;
@@ -2929,7 +2948,7 @@ export default function Chat() {
         }, 1400);
 
         return () => clearTimeout(timer);
-    }, [input, file, typingLinkPreview]);
+    }, [deferredInput, file, typingLinkPreview]);
 
     const applyGrammarSuggestion = (text) => {
         const trimmedInput = input.trim();
@@ -3060,7 +3079,7 @@ export default function Chat() {
 
     useEffect(() => {
         const urlRegex = /(https?:\/\/[^\s]+)/g;
-        const match = input.match(urlRegex);
+        const match = deferredInput.match(urlRegex);
         if (match) {
             const url = match[0];
             // Only fetch if it's a new URL or preview is null
@@ -3085,7 +3104,7 @@ export default function Chat() {
             }
             setTypingLinkPreview(null);
         }
-    }, [input]);
+    }, [deferredInput]);
 
     // Critical: Keep ref in sync with state for socket listeners
     useEffect(() => {
@@ -4224,38 +4243,38 @@ export default function Chat() {
                     e.preventDefault();
                     return;
                 }
-                
+
                 if (chatContextMenu) {
                     setChatContextMenu(null);
                     return;
                 }
-                
+
                 if (openDropdown) {
                     setOpenDropdown(null);
                     return;
                 }
-                
+
                 if (showMenu) {
                     setShowMenu(false);
                     return;
                 }
-                
+
                 if (isNewGroupOpen) {
                     setIsNewGroupOpen(false);
                     return;
                 }
-                
+
                 if (isNewChatOpen) {
                     setIsNewChatOpen(false);
                     return;
                 }
-                
+
                 if (selectedUser || selectedGroup || selectedCommunity) {
                     if (showUnblockModal) {
-                         setShowUnblockModal(false);
-                         return;
+                        setShowUnblockModal(false);
+                        return;
                     }
-                    
+
                     // Reset all panels and selection modes
                     handleBackToChatList();
                     setSelectedGroup(null);
@@ -5031,6 +5050,7 @@ export default function Chat() {
         if (!selectedUser || selectedUser._id !== u._id) {
             setInput('');
             setFile(null);
+            setSelectedFiles([]);
             setTypingLinkPreview(null);
             setReplyingTo(null);
             setIsChatSelectionMode(false);
@@ -5837,36 +5857,67 @@ export default function Chat() {
 
 
 
+    const getAllowedExtensionsForAttachmentType = () => {
+        if (attachmentTypeRef.current === 'document') {
+            return ['doc', 'docx', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx'];
+        }
+        if (attachmentTypeRef.current === 'media') {
+            return ['jpg', 'jpeg', 'png', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
+        }
+        return ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
+    };
+
+    const isAllowedFile = (selectedFile, allowedExtensions) => {
+        if (!selectedFile) return false;
+        const extension = (selectedFile.name?.split('.').pop() || '').toLowerCase();
+        if (allowedExtensions.includes(extension)) return true;
+
+        const mime = (selectedFile.type || '').toLowerCase();
+        const officeMimeAllowed = {
+            'ppt': ['application/vnd.ms-powerpoint'],
+            'pptx': ['application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+            'doc': ['application/msword'],
+            'docx': ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+            'xls': ['application/vnd.ms-excel'],
+            'xlsx': ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+            'pdf': ['application/pdf']
+        };
+        return allowedExtensions.some(ext => officeMimeAllowed[ext]?.includes(mime));
+    };
+
+    const addSelectedFile = (nextFile) => {
+        if (!nextFile) return;
+        setSelectedFiles(prev => [...prev, nextFile]);
+        setFile(nextFile);
+    };
+
     const handleFileSelect = (e) => {
-        if (e.target.files && e.target.files[0]) {
-            const selectedFile = e.target.files[0];
-            const extension = selectedFile.name.split('.').pop().toLowerCase();
+        if (e.target.files && e.target.files.length > 0) {
+            const allowedExtensions = getAllowedExtensionsForAttachmentType();
+            const files = Array.from(e.target.files);
+            let addedCount = 0;
 
-            let allowedExtensions;
-            if (attachmentTypeRef.current === 'document') {
-                allowedExtensions = ['doc', 'docx', 'pdf', 'xls', 'xlsx'];
-            } else if (attachmentTypeRef.current === 'media') {
-                allowedExtensions = ['jpg', 'jpeg', 'png', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            } else {
-                allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            }
-
-            if (allowedExtensions.includes(extension)) {
-                if (selectedFile.size > 1073741824) { // 1GB
-                    setSnackbar({ message: 'File must be less than 1GB', type: 'error', variant: 'system' });
-                    e.target.value = '';
-                } else {
-                    setFile(selectedFile);
+            for (const selectedFile of files) {
+                if (!isAllowedFile(selectedFile, allowedExtensions)) {
+                    setSnackbar({ message: 'Unauthorized file type. Please choose only allowed files.', type: 'error', variant: 'system' });
+                    continue;
                 }
-            } else {
-                setSnackbar({ message: 'Unsupported file format.', type: 'error', variant: 'system' });
-                e.target.value = ''; // Reset input
+                if (selectedFile.size > 1073741824) {
+                    setSnackbar({ message: 'File must be less than 1GB', type: 'error', variant: 'system' });
+                    continue;
+                }
+                addSelectedFile(selectedFile);
+                addedCount += 1;
             }
 
-            // reset to all after selection attempt
+            if (files.length > 1 && addedCount > 0) {
+                setSnackbar({ message: `${addedCount} files ready to send`, type: 'success', variant: 'system', duration: 1500 });
+            }
+
+            e.target.value = '';
             attachmentTypeRef.current = 'all';
             if (fileInputRef.current) {
-                fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*";
+                fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*,*/*";
             }
         }
     };
@@ -6344,11 +6395,27 @@ export default function Chat() {
         }
     };
 
-    const handleSend = async (e, contentOverride = null, voiceFile = null, voiceDuration = null, voiceIsViewOnce = null) => {
+    const handleSend = async (e, contentOverride = null, voiceFile = null, voiceDuration = null, voiceIsViewOnce = null, fileOverride = null, isBatchChild = false) => {
         if (e) e.preventDefault();
 
         const textToSend = contentOverride !== null ? contentOverride : input;
-        const targetFile = voiceFile || file;
+        const queuedFiles = selectedFiles.length ? selectedFiles : (file ? [file] : []);
+        if (!voiceFile && !fileOverride && queuedFiles.length > 1) {
+            const filesBatch = [...queuedFiles];
+            const firstCaption = textToSend;
+            setInput('');
+            setReplyingTo(null);
+            setTypingLinkPreview(null);
+            setSuggestionApplied(false);
+            setSelectedFiles([]);
+            setFile(null);
+            for (let i = 0; i < filesBatch.length; i++) {
+                await handleSend(null, i === 0 ? firstCaption : '', null, null, null, filesBatch[i], true);
+            }
+            return;
+        }
+        const targetFile = fileOverride || voiceFile || file;
+        const isVoiceMessage = !!voiceFile && !fileOverride;
 
         // 1. Basic empty check
         if ((!textToSend.trim() && !targetFile) || (!selectedUser && !selectedGroup)) return;
@@ -6376,7 +6443,7 @@ export default function Chat() {
             group_id: selectedGroup ? selectedGroup._id : null,
             role: 'user',
             content: textToSend,
-            type: voiceFile ? 'audio' : (file ? (file.type.startsWith('image/') ? 'image' : (file.type.startsWith('video/') ? 'video' : 'file')) : 'text'),
+            type: isVoiceMessage ? 'audio' : (targetFile ? (targetFile.type.startsWith('image/') ? 'image' : (targetFile.type.startsWith('video/') ? 'video' : (targetFile.type.startsWith('audio/') ? 'audio' : 'file'))) : 'text'),
             file_path: targetFile ? URL.createObjectURL(targetFile) : null, // Local preview
             fileName: targetFile ? targetFile.name : null,
             fileSize: targetFile ? targetFile.size : null,
@@ -6399,10 +6466,13 @@ export default function Chat() {
         } else {
             setInput('');
         }
-        setFile(null); // Clear file immediately from UI
-        setReplyingTo(null); // Clear reply context immediately
-        setTypingLinkPreview(null); // Clear typing preview immediately
-        setSuggestionApplied(false); // Reset correction state for next message
+        if (!isBatchChild) {
+            setFile(null); // Clear file immediately from UI
+            setSelectedFiles([]);
+            setReplyingTo(null); // Clear reply context immediately
+            setTypingLinkPreview(null); // Clear typing preview immediately
+            setSuggestionApplied(false); // Reset correction state for next message
+        }
 
         try {
             const formData = new FormData();
@@ -7664,7 +7734,7 @@ export default function Chat() {
                 icon: FileText, label: t('chat_window.document'), color: '#7f66ff', onClick: () => {
                     attachmentTypeRef.current = 'document';
                     if (fileInputRef.current) {
-                        fileInputRef.current.accept = ".doc,.docx,.pdf,.xls,.xlsx";
+                        fileInputRef.current.accept = ".doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,*/*";
                         fileInputRef.current.click();
                     }
                     setIsAttachmentMenuOpen(false);
@@ -8444,161 +8514,459 @@ export default function Chat() {
         );
     };
 
+    const getDisplayFileType = (selectedFile) => {
+        const ext = (selectedFile?.name?.split('.').pop() || '').toUpperCase();
+        if (ext) return ext;
+        const mime = (selectedFile?.type || '').split('/').pop() || 'FILE';
+        return mime.toUpperCase();
+    };
+
+    const getFilePreviewUrl = (selectedFile) => {
+        if (!selectedFile) return '';
+        const cache = filePreviewUrlCacheRef.current;
+        const existing = cache.get(selectedFile);
+        if (existing) return existing;
+        const created = URL.createObjectURL(selectedFile);
+        cache.set(selectedFile, created);
+        return created;
+    };
+
+    const downloadPreviewFile = () => {
+        if (!file) return;
+        const link = document.createElement('a');
+        link.href = getFilePreviewUrl(file);
+        link.download = file.name || 'download';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    useEffect(() => {
+        return () => {
+            filePreviewUrlCacheRef.current.forEach((url) => URL.revokeObjectURL(url));
+            filePreviewUrlCacheRef.current.clear();
+        };
+    }, []);
+
+    const openAllFilesPickerFromPreview = () => {
+        attachmentTypeRef.current = 'all';
+        if (fileInputRef.current) {
+            fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*,*/*";
+            fileInputRef.current.click();
+        }
+    };
+
+    const removeSelectedFileAt = (idx) => {
+        setSelectedFiles(prev => {
+            const next = prev.filter((_, i) => i !== idx);
+            setFile(next.length ? next[Math.max(0, idx - 1)] : null);
+            return next;
+        });
+    };
+
     const renderFilePreview = () => (
         <div className="wa-file-preview-overlay" style={{
             height: '100%',
             display: 'flex',
             flexDirection: 'column',
-            background: '#e9edef', // Light Application Theme Background
+            background: '#f2f2f2',
             position: 'relative',
             zIndex: 1000
         }}>
-            {/* Header */}
-            <div style={{
-                padding: '16px 20px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                background: '#f0f2f5',
-                color: '#111b21',
-                flexShrink: 0,
-                borderBottom: '1px solid #d1d7db'
-            }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                    <button
-                        onClick={() => {
-                            setFile(null);
-                            // Cleanup object URL if needed, though browsers usually handle it
-                        }}
-                        style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 4 }}
-                        title="Close preview"
-                    >
-                        <X size={24} />
-                    </button>
-                    <span style={{ fontSize: 16, fontWeight: 500, color: '#111b21' }}>Preview</span>
-                </div>
-            </div>
-
-            {/* Content Area */}
-            <div style={{
-                flex: 1,
-                minHeight: 0,
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                overflow: 'hidden',
-                padding: '20px 40px',
-                position: 'relative',
-                background: '#f0f2f5' // Matches chat background color generally
-            }}>
-                {file && file.type.startsWith('image/') ? (
-                    <img
-                        src={URL.createObjectURL(file)}
-                        alt="Preview"
-                        style={{
-                            maxWidth: '100%',
-                            maxHeight: '100%',
-                            objectFit: 'contain',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                            borderRadius: 4
-                        }}
-                    />
-                ) : file && file.type.startsWith('video/') ? (
-                    <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                        <video
-                            src={URL.createObjectURL(file)}
-                            controls
-                            autoPlay
-                            muted
-                            controlsList="nodownload"
-                            style={{
-                                maxWidth: '100%',
-                                maxHeight: '100%',
-                                borderRadius: 8,
-                                boxShadow: '0 8px 12px rgba(0,0,0,0.1)',
-                                background: '#111b21'
-                            }}
-                        />
-                    </div>
-                ) : (
-                    <div style={{
-                        textAlign: 'center',
-                        padding: 60,
-                        background: '#ffffff',
-                        borderRadius: 12,
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-                        color: '#111b21',
-                        border: '1px solid #d1d7db'
-                    }}>
-                        <div style={{ fontSize: 48, marginBottom: 16 }}>Ã°Å¸â€œâ€ž</div>
-                        <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8, color: '#111b21' }}>{file?.name}</div>
-                        <div style={{ fontSize: 14, color: '#54656f' }}>
-                            {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} Ã¢â‚¬Â¢ {file?.type?.split('/').pop().toUpperCase()}
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* Footer / Caption Input */}
-            <div style={{
-                padding: '12px 24px 32px',
-                background: '#f0f2f5',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12,
-                borderTop: '1px solid #d1d7db'
-            }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div className="wa-input-pill" style={{
-                        flex: 1,
-                        background: '#ffffff',
-                        borderRadius: 8,
-                        padding: '4px 12px',
-                        border: '1px solid #d1d7db'
-                    }}>
-                        <input
-                            type="text"
-                            id="caption-input"
-                            name="caption"
-                            aria-label="Add a caption"
-                            style={{
-                                width: '100%',
-                                background: 'transparent',
-                                border: 'none',
-                                outline: 'none',
-                                color: '#111b21',
-                                padding: '10px 0',
-                                fontSize: 15
-                            }}
-                            placeholder="Add a caption..."
-                            value={input}
-                            onChange={e => setInput(e.target.value)}
-                            onKeyDown={e => {
-                                if (e.key === 'Enter') handleSend(e);
-                            }}
-                            autoFocus
-                        />
-                    </div>
-                    <button
-                        onClick={handleSend}
-                        style={{
-                            width: 44,
-                            height: 44,
-                            borderRadius: '50%',
-                            background: '#0EA5BE',
-                            border: 'none',
+            {(() => {
+                const filesInTray = (selectedFiles.length ? selectedFiles : (file ? [file] : []));
+                const isSingleImageOnly = filesInTray.length === 1 && !!file && file.type.startsWith('image/');
+                const isImagePreview = !!file && file.type.startsWith('image/');
+                return (
+                    <>
+                        {/* Preview Header (below existing chat contact bar) */}
+                        <div style={{
+                            padding: '10px 20px',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            cursor: 'pointer',
-                            boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
-                            flexShrink: 0
-                        }}
-                    >
-                        <Send size={22} color="white" />
-                    </button>
-                </div>
-            </div>
+                            background: '#f0f2f5',
+                            color: '#111b21',
+                            flexShrink: 0,
+                            borderBottom: '1px solid #d1d7db',
+                            minHeight: 52
+                        }}>
+                            {isImagePreview ? (
+                                <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <button
+                                        onClick={() => {
+                                            setFile(null);
+                                            setSelectedFiles([]);
+                                        }}
+                                        style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 0 }}
+                                        title="Close preview"
+                                    >
+                                        <X size={24} />
+                                    </button>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 18, color: '#667781' }}>
+                                        <button style={{ background: 'none', border: 'none', color: 'inherit', display: 'flex', cursor: 'pointer' }} title="Rotate"><RotateCcw size={20} /></button>
+                                        <button style={{ background: 'none', border: 'none', color: 'inherit', display: 'flex', cursor: 'pointer' }} title="Draw"><Pencil size={20} /></button>
+                                        <button style={{ background: 'none', border: 'none', color: 'inherit', display: 'flex', cursor: 'pointer' }} title="Crop"><Crop size={20} /></button>
+                                        <button style={{ background: 'none', border: 'none', color: 'inherit', display: 'flex', cursor: 'pointer' }} title="Sticker"><Sticker size={20} /></button>
+                                        <button style={{ background: 'none', border: 'none', color: 'inherit', display: 'flex', cursor: 'pointer' }} title="Emoji"><Smile size={20} /></button>
+                                        <button style={{ background: 'none', border: 'none', color: 'inherit', display: 'flex', cursor: 'pointer' }} title="Text"><span style={{ fontSize: 22, lineHeight: 1, fontWeight: 500 }}>Aa</span></button>
+                                    </div>
+                                    <button
+                                        onClick={downloadPreviewFile}
+                                        style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 0 }}
+                                        title="Download"
+                                    >
+                                        <Download size={22} />
+                                    </button>
+                                </div>
+                            ) : (
+                                <>
+                                    <button
+                                        onClick={() => {
+                                            setFile(null);
+                                            setSelectedFiles([]);
+                                        }}
+                                        style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 4, position: 'absolute', left: 20 }}
+                                        title="Close preview"
+                                    >
+                                        <X size={24} />
+                                    </button>
+                                    <div style={{ textAlign: 'center', lineHeight: 1.2 }}>
+                                        <div style={{ fontSize: 19, fontWeight: 500, color: '#111b21' }}>{file?.name || 'Preview'}</div>
+                                        <div style={{ fontSize: 13, color: '#667781', marginTop: 4 }}>
+                                            {file?.name?.toLowerCase().endsWith('.pdf') ? '1 page' : getDisplayFileType(file).toLowerCase()}
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        {/* Content Area */}
+                        <div style={{
+                            flex: 1,
+                            minHeight: 0,
+                            display: 'flex',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            overflow: 'hidden',
+                            padding: isSingleImageOnly ? '12px 24px' : '20px 40px',
+                            position: 'relative',
+                            background: '#f2f2f2'
+                        }}>
+                            {file && file.type.startsWith('image/') ? (
+                                <img
+                                    src={getFilePreviewUrl(file)}
+                                    alt="Preview"
+                                    style={{
+                                        maxWidth: '100%',
+                                        maxHeight: '100%',
+                                        objectFit: 'contain',
+                                        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                                        borderRadius: 4
+                                    }}
+                                />
+                            ) : file && file.type.startsWith('video/') ? (
+                                <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                                    <video
+                                        src={getFilePreviewUrl(file)}
+                                        controls
+                                        autoPlay
+                                        muted
+                                        controlsList="nodownload"
+                                        style={{
+                                            maxWidth: '100%',
+                                            maxHeight: '100%',
+                                            borderRadius: 8,
+                                            boxShadow: '0 8px 12px rgba(0,0,0,0.1)',
+                                            background: '#111b21'
+                                        }}
+                                    />
+                                </div>
+                            ) : file && file.type.startsWith('audio/') ? (
+                                <div style={{ width: '100%', maxWidth: 700, textAlign: 'center' }}>
+                                    <div style={{ marginBottom: 14, fontSize: 18, fontWeight: 500, color: '#111b21' }}>{file?.name}</div>
+                                    <audio src={getFilePreviewUrl(file)} controls style={{ width: '100%' }} />
+                                </div>
+                            ) : (
+                                <div style={{
+                                    textAlign: 'center',
+                                    padding: '40px 32px',
+                                    background: '#ffffff',
+                                    borderRadius: 12,
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+                                    color: '#111b21',
+                                    border: '1px solid #d1d7db',
+                                    minWidth: 340,
+                                    maxWidth: 640
+                                }}>
+                                    <div style={{
+                                        width: 96,
+                                        height: 96,
+                                        margin: '0 auto 16px',
+                                        borderRadius: 12,
+                                        background: '#f0f2f5',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                    }}>
+                                        <FileText size={44} color="#8696a0" />
+                                    </div>
+                                    <div style={{ fontSize: 14, color: '#8696a0', marginBottom: 8 }}>No preview available</div>
+                                    <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8, color: '#111b21', wordBreak: 'break-word' }}>{file?.name}</div>
+                                    <div style={{ fontSize: 14, color: '#54656f' }}>
+                                        {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} - {getDisplayFileType(file)}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Footer / Caption Input */}
+                        <div style={{
+                            padding: '12px 24px 32px',
+                            background: '#f0f2f5',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 12,
+                            borderTop: 'none'
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', maxWidth: 720, margin: '0 auto' }}>
+                                <div className="wa-input-pill" style={{
+                                    flex: 1,
+                                    background: '#ffffff',
+                                    borderRadius: 12,
+                                    padding: '1px 0 1px 10px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    position: 'relative',
+                                    border: '1px solid #d1d7db'
+                                }}>
+                                    <input
+                                        type="text"
+                                        id="caption-input"
+                                        name="caption"
+                                        aria-label="Type a message"
+                                        style={{
+                                            width: '100%',
+                                            flex: 1,
+                                            background: 'transparent',
+                                            border: 'none',
+                                            outline: 'none',
+                                            color: '#111b21',
+                                            padding: '7px 34px 7px 0',
+                                            fontSize: 15
+                                        }}
+                                        placeholder="Type a message"
+                                        value={input}
+                                        onChange={e => setInput(e.target.value)}
+                                        onKeyDown={e => {
+                                            if (e.key === 'Enter') handleSend(e);
+                                        }}
+                                        autoFocus
+                                    />
+                                    <button
+                                        type="button"
+                                        className={`wa-nav-icon-btn ${showInputEmojiPicker ? 'active' : ''}`}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            const rect = e.currentTarget.getBoundingClientRect();
+                                            setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
+                                            setShowInputEmojiPicker(!showInputEmojiPicker);
+                                        }}
+                                        style={{
+                                            position: 'absolute',
+                                            right: 0.5,
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            background: 'transparent',
+                                            margin: 0,
+                                            padding: 0,
+                                            width: 30,
+                                            height: 30,
+                                            minWidth: 30,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            border: 'none'
+                                        }}
+                                    >
+                                        <Smile size={22} color={showInputEmojiPicker ? "#0EA5BE" : "#54656f"} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {!isSingleImageOnly && <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <div
+                                    style={{
+                                        flex: 1,
+                                        overflowX: selectedFiles.length > 10 ? 'auto' : 'hidden',
+                                        paddingBottom: selectedFiles.length > 10 ? 6 : 0,
+                                        WebkitOverflowScrolling: 'touch',
+                                        scrollBehavior: 'smooth',
+                                        touchAction: 'pan-x'
+                                    }}
+                                    onWheel={(e) => {
+                                        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                                            e.currentTarget.scrollLeft += e.deltaY;
+                                        }
+                                    }}
+                                >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: selectedFiles.length > 10 ? 'max-content' : '100%', justifyContent: 'center', paddingRight: selectedFiles.length >= 14 ? 8 : 0 }}>
+                                        {(selectedFiles.length ? selectedFiles : (file ? [file] : [])).map((f, idx) => (
+                                            <div
+                                                className="wa-preview-file-tile"
+                                                key={`${f.name}-${f.size}-${idx}`}
+                                                onClick={() => setFile(f)}
+                                                style={{
+                                                    minWidth: 56,
+                                                    width: 56,
+                                                    height: 56,
+                                                    borderRadius: 10,
+                                                    border: file === f ? '2px solid #0EA5BE' : '1px solid #d1d7db',
+                                                    background: '#ffffff',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    padding: 6,
+                                                    cursor: 'pointer',
+                                                    position: 'relative',
+                                                    flexShrink: 0
+                                                }}>
+                                                {f?.type?.startsWith('image/') ? (
+                                                    <img
+                                                        src={getFilePreviewUrl(f)}
+                                                        alt="selected file"
+                                                        style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }}
+                                                    />
+                                                ) : (
+                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                                        {f?.type?.startsWith('audio/') ? <Play size={18} color="#0EA5BE" /> : <FileText size={20} color="#0EA5BE" />}
+                                                        <span style={{ fontSize: 8, color: '#0EA5BE', fontWeight: 700 }}>
+                                                            {getDisplayFileType(f)}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                {(selectedFiles.length ? selectedFiles : (file ? [file] : [])).length > 1 && (
+                                                    <button
+                                                        className="wa-preview-remove-btn"
+                                                        type="button"
+                                                        onClick={(ev) => { ev.stopPropagation(); removeSelectedFileAt(idx); }}
+                                                        style={{
+                                                            position: 'absolute',
+                                                            top: 3,
+                                                            right: 3,
+                                                            width: 18,
+                                                            height: 18,
+                                                            borderRadius: '50%',
+                                                            background: 'var(--wa-active-icon, #0EA5BE)',
+                                                            border: '1px solid white',
+                                                            color: '#ffffff',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            cursor: 'pointer',
+                                                            padding: 0,
+                                                            opacity: 0,
+                                                            transform: 'scale(0.8)',
+                                                            zIndex: 10,
+                                                            transition: 'opacity 0.1s ease, transform 0.1s ease'
+                                                        }}
+                                                    >
+                                                        <X size={10} strokeWidth={4} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        ))}
+                                        {selectedFiles.length < 14 && (
+                                            <button
+                                                type="button"
+                                                onClick={openAllFilesPickerFromPreview}
+                                                style={{
+                                                    width: 56,
+                                                    height: 56,
+                                                    borderRadius: 10,
+                                                    border: '1px solid #d1d7db',
+                                                    background: '#fff',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    cursor: 'pointer',
+                                                    flexShrink: 0
+                                                }}
+                                                title="Add another file"
+                                            >
+                                                <Plus size={20} color="#54656f" />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                {selectedFiles.length >= 14 ? (
+                                    <button
+                                        type="button"
+                                        onClick={openAllFilesPickerFromPreview}
+                                        style={{
+                                            width: 56,
+                                            height: 56,
+                                            borderRadius: 10,
+                                            border: '1px solid #d1d7db',
+                                            background: '#fff',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            cursor: 'pointer',
+                                            flexShrink: 0,
+                                            marginLeft: -66,
+                                            zIndex: 3,
+                                            boxShadow: '-8px 0 14px rgba(233, 237, 239, 0.95)'
+                                        }}
+                                        title="Add another file"
+                                    >
+                                        <Plus size={20} color="#54656f" />
+                                    </button>
+                                ) : null}
+                                <button
+                                    onClick={handleSend}
+                                    style={{
+                                        width: 56,
+                                        height: 56,
+                                        borderRadius: '50%',
+                                        background: '#0EA5BE',
+                                        border: 'none',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: 'pointer',
+                                        boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
+                                        flexShrink: 0,
+                                        position: 'relative'
+                                    }}
+                                >
+                                    <Send size={24} color="white" />
+                                    {selectedFiles.length > 1 && (
+                                        <span style={{
+                                            position: 'absolute',
+                                            top: -6,
+                                            right: -6,
+                                            minWidth: 20,
+                                            height: 20,
+                                            borderRadius: 10,
+                                            background: '#ffffff',
+                                            color: '#0EA5BE',
+                                            fontSize: 11,
+                                            fontWeight: 700,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            padding: '0 4px'
+                                        }}>
+                                            {selectedFiles.length}
+                                        </span>
+                                    )}
+                                </button>
+                            </div>}
+                        </div>
+                    </>
+                );
+            })()}
         </div>
     );
 
@@ -13317,8 +13685,8 @@ export default function Chat() {
             {isRemindersModalOpen && (
                 <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'white', zIndex: 500, display: 'flex', flexDirection: 'column' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '14px 23px', borderBottom: '1px solid #e9edef', background: '#f0f2f5', position: 'relative', minHeight: '59px' }}>
-                        <button 
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', position: 'absolute', left: 23, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center' }} 
+                        <button
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', position: 'absolute', left: 23, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center' }}
                             onClick={() => setIsRemindersModalOpen(false)}
                         >
                             <ArrowLeft size={24} color="#54656f" />
@@ -13329,18 +13697,18 @@ export default function Chat() {
                         {(() => {
                             const now = new Date();
                             const approachingEvents = [];
-                            
+
                             // Sort logic: Active first, then by createdAt desc
                             const sortedEvents = [...remindersList].sort((a, b) => {
                                 const aEv = a.event;
                                 const bEv = b.event;
                                 if (!aEv || !bEv) return 0;
-                                
+
                                 // 1. Active (not cancelled) first
                                 if (aEv.cancelled !== bEv.cancelled) {
                                     return aEv.cancelled ? 1 : -1;
                                 }
-                                
+
                                 // 2. Recently created (newest first)
                                 return new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0);
                             });
@@ -13348,14 +13716,14 @@ export default function Chat() {
                             sortedEvents.forEach((m) => {
                                 const ev = m.event;
                                 if (!ev) return;
-                                
+
                                 let isAttending = false;
                                 if (m.isGroup) {
-                                     isAttending = ev.responses && ev.responses.some(r => String(r.user_id?._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
-                                     if (String(m.sender_id?._id || m.sender_id) === String(user.id)) isAttending = true;
+                                    isAttending = ev.responses && ev.responses.some(r => String(r.user_id?._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
+                                    if (String(m.sender_id?._id || m.sender_id) === String(user.id)) isAttending = true;
                                 } else {
-                                     isAttending = ev.responses && ev.responses.some(r => String(r.user_id?._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
-                                     if (String(m.user_id?._id || m.user_id) === String(user.id)) isAttending = true;
+                                    isAttending = ev.responses && ev.responses.some(r => String(r.user_id?._id || r.user_id) === String(user.id) && ['Going', 'Maybe'].includes(r.status));
+                                    if (String(m.user_id?._id || m.user_id) === String(user.id)) isAttending = true;
                                 }
 
                                 if (isAttending && !ev.cancelled) {
@@ -13364,7 +13732,7 @@ export default function Chat() {
                                     const startObj = new Date(startStr);
                                     if (isNaN(startObj.getTime())) return;
                                     const diffMs = startObj.getTime() - now.getTime();
-                                    
+
                                     const rt = ev.reminderTiming || 'default';
                                     let targetMs = 24 * 60 * 60 * 1000;
                                     if (rt === '15m') targetMs = 15 * 60 * 1000;
@@ -13398,8 +13766,8 @@ export default function Chat() {
                                     }
                                 };
                                 return (
-                                    <div 
-                                        key={keyStr} 
+                                    <div
+                                        key={keyStr}
                                         onClick={() => {
                                             const targetMsgId = m._id || m.id;
 
@@ -13407,7 +13775,7 @@ export default function Chat() {
                                                 const targetGrpId = String(m.group_id?._id || m.group_id);
                                                 let groupObj = groups.find(g => String(g._id) === targetGrpId);
                                                 let foundCommunity = null;
-                                                
+
                                                 if (!groupObj) {
                                                     for (const c of communities) {
                                                         const annId = String(c.announcements?._id || c.announcements?.id || c.announcements);
@@ -13431,11 +13799,11 @@ export default function Chat() {
                                                         }
                                                     }
                                                 }
-                                                
+
                                                 if (!groupObj && m.group_id) {
                                                     groupObj = { _id: targetGrpId, name: m.group_id.name || 'Group', icon: m.group_id.icon, members: [user.id] };
                                                 }
-                                                
+
                                                 if (groupObj) {
                                                     setSelectedGroup(groupObj);
                                                     setSelectedCommunity(foundCommunity);
@@ -13443,30 +13811,30 @@ export default function Chat() {
                                                     setIsCommunityHomeOpen(false);
                                                     if (selectedUserRef) selectedUserRef.current = null;
                                                     if (selectedGroupRef) selectedGroupRef.current = groupObj;
-                                                    
+
                                                     // Ensure the server accurately rehydrates the announcement messages array
                                                     fetchGroupMessages(groupObj._id || groupObj.id);
-                                                    
+
                                                     scrollToMsg(targetMsgId);
                                                 }
                                             } else {
                                                 const p2pSenderId = m.user_id?._id || m.user_id || m.sender_id?._id || m.sender_id;
                                                 const p2pReceiverId = m.receiver_id?._id || m.receiver_id;
                                                 const currentUserId = user.id || user._id;
-                                                
-                                                const otherId = String(p2pSenderId) === String(currentUserId) 
-                                                    ? p2pReceiverId 
+
+                                                const otherId = String(p2pSenderId) === String(currentUserId)
+                                                    ? p2pReceiverId
                                                     : p2pSenderId;
-                                                
+
                                                 let userObj = users.find(u => String(u._id || u.id) === String(otherId));
-                                                
+
                                                 if (!userObj) {
-                                                   const fallbackName = String(p2pSenderId) === String(otherId) 
-                                                    ? (m.user_id?.name || m.sender_id?.name) 
-                                                    : m.receiver_id?.name;
-                                                   userObj = { _id: otherId, name: fallbackName || 'User' };
+                                                    const fallbackName = String(p2pSenderId) === String(otherId)
+                                                        ? (m.user_id?.name || m.sender_id?.name)
+                                                        : m.receiver_id?.name;
+                                                    userObj = { _id: otherId, name: fallbackName || 'User' };
                                                 }
-                                                
+
                                                 if (userObj) {
                                                     // Explicitly ensure the fallback object isn't triggering a restricted status by injecting default accepted state
                                                     if (!userObj.requestStatus) userObj.requestStatus = 'accepted';
@@ -13479,11 +13847,11 @@ export default function Chat() {
                                             // but since user explicitly requested "the left panel should stay put until i manually exit back"
                                             // we will not force close it.
                                         }}
-                                        style={{ 
-                                            padding: '15px', 
-                                            background: isImportant ? '#e6f7ff' : '#f0f2f5', 
-                                            borderRadius: '8px', 
-                                            marginBottom: '10px', 
+                                        style={{
+                                            padding: '15px',
+                                            background: isImportant ? '#e6f7ff' : '#f0f2f5',
+                                            borderRadius: '8px',
+                                            marginBottom: '10px',
                                             border: isImportant ? '1px solid #1890ff' : 'none',
                                             cursor: 'pointer',
                                             transition: 'background 0.2s'
@@ -13519,7 +13887,7 @@ export default function Chat() {
                                             {approachingEvents.map((m, i) => renderEventCard(m, `near-${m._id || i}`, true))}
                                         </div>
                                     )}
-                                    
+
                                     <div>
                                         <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#54656f', marginBottom: 10, paddingLeft: 4 }}>All Scheduled Events</div>
                                         {sortedEvents.length === 0 ? (
@@ -14129,45 +14497,45 @@ export default function Chat() {
                     zIndex: 9999,
                     boxShadow: '0 -2px 10px rgba(0,0,0,0.05)'
                 }}>
-                   <button 
-                       onClick={(e) => {
+                    <button
+                        onClick={(e) => {
                             e.stopPropagation();
                             setIsRemindersModalOpen(false);
                             setFilterType('all');
-                       }} 
-                       style={{ background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', color: !isRemindersModalOpen && filterType !== 'communities' ? '#111b21' : '#54656f', gap: '4px', cursor: 'pointer', flex: 1 }}>
-                       <MessageSquare size={24} />
-                       <span style={{ fontSize: '12px', fontWeight: !isRemindersModalOpen && filterType !== 'communities' ? 600 : 400 }}>Chats</span>
-                   </button>
+                        }}
+                        style={{ background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', color: !isRemindersModalOpen && filterType !== 'communities' ? '#111b21' : '#54656f', gap: '4px', cursor: 'pointer', flex: 1 }}>
+                        <MessageSquare size={24} />
+                        <span style={{ fontSize: '12px', fontWeight: !isRemindersModalOpen && filterType !== 'communities' ? 600 : 400 }}>Chats</span>
+                    </button>
 
-                   <button 
-                       onClick={(e) => {
-                           e.stopPropagation();
-                           const uid = user?.id || user?._id;
-                           if (uid) {
-                               localStorage.setItem(`lastRemindersChecked_${uid}`, Date.now().toString());
-                               setUnreadRemindersCount(0);
-                           }
-                           fetchReminders();
-                           setIsRemindersModalOpen(true);
-                           setFilterType('all');
-                       }} 
-                       style={{ background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', color: isRemindersModalOpen ? '#111b21' : '#54656f', gap: '4px', position: 'relative', cursor: 'pointer', flex: 1 }}>
-                       <Calendar size={24} />
-                       {unreadRemindersCount > 0 && <span style={{ position: 'absolute', top: '-4px', right: 'calc(50% - 18px)', background: '#0ea5be', color: 'white', borderRadius: '50%', minWidth: '16px', padding: '2px 4px', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{unreadRemindersCount}</span>}
-                       <span style={{ fontSize: '12px', fontWeight: isRemindersModalOpen ? 600 : 400 }}>Reminders</span>
-                   </button>
-                   
-                   <button 
-                       onClick={(e) => {
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            const uid = user?.id || user?._id;
+                            if (uid) {
+                                localStorage.setItem(`lastRemindersChecked_${uid}`, Date.now().toString());
+                                setUnreadRemindersCount(0);
+                            }
+                            fetchReminders();
+                            setIsRemindersModalOpen(true);
+                            setFilterType('all');
+                        }}
+                        style={{ background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', color: isRemindersModalOpen ? '#111b21' : '#54656f', gap: '4px', position: 'relative', cursor: 'pointer', flex: 1 }}>
+                        <Calendar size={24} />
+                        {unreadRemindersCount > 0 && <span style={{ position: 'absolute', top: '-4px', right: 'calc(50% - 18px)', background: '#0ea5be', color: 'white', borderRadius: '50%', minWidth: '16px', padding: '2px 4px', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{unreadRemindersCount}</span>}
+                        <span style={{ fontSize: '12px', fontWeight: isRemindersModalOpen ? 600 : 400 }}>Reminders</span>
+                    </button>
+
+                    <button
+                        onClick={(e) => {
                             e.stopPropagation();
                             setIsRemindersModalOpen(false);
                             setFilterType('communities');
-                       }} 
-                       style={{ background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', color: !isRemindersModalOpen && filterType === 'communities' ? '#111b21' : '#54656f', gap: '4px', cursor: 'pointer', flex: 1 }}>
-                       <Users size={24} />
-                       <span style={{ fontSize: '12px', fontWeight: !isRemindersModalOpen && filterType === 'communities' ? 600 : 400 }}>Communities</span>
-                   </button>
+                        }}
+                        style={{ background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', color: !isRemindersModalOpen && filterType === 'communities' ? '#111b21' : '#54656f', gap: '4px', cursor: 'pointer', flex: 1 }}>
+                        <Users size={24} />
+                        <span style={{ fontSize: '12px', fontWeight: !isRemindersModalOpen && filterType === 'communities' ? 600 : 400 }}>Communities</span>
+                    </button>
                 </div>
             )}
 
@@ -14223,17 +14591,15 @@ export default function Chat() {
         if (e.clipboardData.files && e.clipboardData.files.length > 0) {
             e.preventDefault();
             const pastedFile = e.clipboardData.files[0];
-            const allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            const extension = pastedFile.name.split('.').pop().toLowerCase();
-
-            if (allowedExtensions.includes(extension)) {
+            const allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
+            if (isAllowedFile(pastedFile, allowedExtensions)) {
                 if (pastedFile.size > 1073741824) {
                     setSnackbar({ message: 'File must be less than 1GB', type: 'error', variant: 'system' });
                 } else {
-                    setFile(pastedFile);
+                    addSelectedFile(pastedFile);
                 }
             } else {
-                setSnackbar({ message: 'Only JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, and Video files are allowed.', type: 'error', variant: 'system' });
+                setSnackbar({ message: 'Only JPG, JPEG, PNG, DOC, DOCX, PPT, PPTX, PDF, Excel, and Video files are allowed.', type: 'error', variant: 'system' });
             }
         }
     };
@@ -14249,31 +14615,22 @@ export default function Chat() {
 
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             const droppedFile = e.dataTransfer.files[0];
-            const extension = droppedFile.name.split('.').pop().toLowerCase();
+            const allowedExtensions = getAllowedExtensionsForAttachmentType();
 
-            let allowedExtensions;
-            if (attachmentTypeRef.current === 'document') {
-                allowedExtensions = ['doc', 'docx', 'pdf', 'xls', 'xlsx'];
-            } else if (attachmentTypeRef.current === 'media') {
-                allowedExtensions = ['jpg', 'jpeg', 'png', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            } else {
-                allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            }
-
-            if (allowedExtensions.includes(extension)) {
+            if (isAllowedFile(droppedFile, allowedExtensions)) {
                 if (droppedFile.size > 1073741824) {
                     setSnackbar({ message: 'File must be less than 1GB', type: 'error', variant: 'system' });
                 } else {
-                    setFile(droppedFile);
+                    addSelectedFile(droppedFile);
                 }
             } else {
-                setSnackbar({ message: 'Unsupported file format.', type: 'error', variant: 'system' });
+                setSnackbar({ message: 'Unauthorized file type. Please choose only allowed files.', type: 'error', variant: 'system' });
             }
 
             // reset to all after drop attempt
             attachmentTypeRef.current = 'all';
             if (fileInputRef.current) {
-                fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*";
+                fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*,*/*";
             }
         }
     };
@@ -14285,6 +14642,7 @@ export default function Chat() {
         setSelectedCommunity(null);
         setInput('');
         setFile(null);
+        setSelectedFiles([]);
         setTypingLinkPreview(null);
         setReplyingTo(null);
         setIsChatSelectionMode(false);
@@ -15135,682 +15493,682 @@ export default function Chat() {
                                                         {unreadSeparator}
                                                         <div
                                                             key={msgId || msgIdx}
-                                                        id={`msg-${msg._id}`}
-                                                        className={`wa-message-container ${isForwardingMode ? 'forward-mode' : ''}`}
-                                                        onDoubleClick={() => { if (!isForwardingMode) setReplyingTo(msg); }}
-                                                        onClick={() => {
-                                                            if (isForwardingMode) {
-                                                                const isSelected = forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id));
-                                                                if (isSelected) {
-                                                                    setForwardSelectedMsgs(prev => prev.filter(m => String(m._id || m.id) !== String(msg._id || msg.id)));
-                                                                } else {
-                                                                    if (!msg._id && !msg.id) {
-                                                                        setSnackbar({ message: "Please wait for message to sync before selecting", type: 'info' });
-                                                                        return;
+                                                            id={`msg-${msg._id}`}
+                                                            className={`wa-message-container ${isForwardingMode ? 'forward-mode' : ''}`}
+                                                            onDoubleClick={() => { if (!isForwardingMode) setReplyingTo(msg); }}
+                                                            onClick={() => {
+                                                                if (isForwardingMode) {
+                                                                    const isSelected = forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id));
+                                                                    if (isSelected) {
+                                                                        setForwardSelectedMsgs(prev => prev.filter(m => String(m._id || m.id) !== String(msg._id || msg.id)));
+                                                                    } else {
+                                                                        if (!msg._id && !msg.id) {
+                                                                            setSnackbar({ message: "Please wait for message to sync before selecting", type: 'info' });
+                                                                            return;
+                                                                        }
+                                                                        setForwardSelectedMsgs(prev => [...prev, msg]);
                                                                     }
-                                                                    setForwardSelectedMsgs(prev => [...prev, msg]);
                                                                 }
-                                                            }
-                                                        }}
-                                                    >
-                                                        {isForwardingMode && (
-                                                            <div className="wa-msg-checkbox">
-                                                                {forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ?
-                                                                    <CheckSquare size={24} color="white" fill="#0EA5BE" /> :
-                                                                    <div className="wa-checkbox-empty" />
-                                                                }
-                                                            </div>
-                                                        )}
-                                                        <div
-                                                            className={`wa-message-bubble ${isMe ? 'wa-msg-sent' : 'wa-msg-rec'} ${msg.link_preview ? 'has-link-preview' : ''}`}
-                                                            onContextMenu={(e) => { if (!isForwardingMode) { e.preventDefault(); handleMsgDropdownOpen(e, msg._id, msg); } }}
-                                                            onTouchStart={(e) => { if (!isForwardingMode) { e.persist(); longPressTimer.current = setTimeout(() => { handleMsgDropdownOpen(e, msg._id, msg); }, 600); } }}
-                                                            onTouchEnd={() => clearTimeout(longPressTimer.current)}
-                                                            onTouchMove={() => clearTimeout(longPressTimer.current)}
+                                                            }}
                                                         >
-                                                            {(msg.isForwarded || msg.is_forwarded) && !isMe && (
-                                                                <div className="wa-forwarded-tag">
-                                                                    <Forward size={12} style={{ marginRight: 4 }} />
-                                                                    {(msg.forward_count || 0) >= 4 ? 'Forwarded many times' : 'Forwarded'}
+                                                            {isForwardingMode && (
+                                                                <div className="wa-msg-checkbox">
+                                                                    {forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ?
+                                                                        <CheckSquare size={24} color="white" fill="#0EA5BE" /> :
+                                                                        <div className="wa-checkbox-empty" />
+                                                                    }
                                                                 </div>
                                                             )}
-                                                            {!isForwardingMode && (
-                                                                <div className="wa-dropdown-trigger msg-trigger" onClick={(e) => handleMsgDropdownOpen(e, msg._id, msg)}>
-                                                                    <ChevronDown size={18} />
-                                                                </div>
-                                                            )}
-
-                                                            {/* Reply Context Rendering */}
-                                                            {msg.reply_to && (
-                                                                <div className="wa-reply-context">
-                                                                    <div className="wa-reply-context-name">
-                                                                        {isMeMsg(msg.reply_to) ? 'You' : (selectedUser.name || 'User')}
+                                                            <div
+                                                                className={`wa-message-bubble ${isMe ? 'wa-msg-sent' : 'wa-msg-rec'} ${msg.link_preview ? 'has-link-preview' : ''}`}
+                                                                onContextMenu={(e) => { if (!isForwardingMode) { e.preventDefault(); handleMsgDropdownOpen(e, msg._id, msg); } }}
+                                                                onTouchStart={(e) => { if (!isForwardingMode) { e.persist(); longPressTimer.current = setTimeout(() => { handleMsgDropdownOpen(e, msg._id, msg); }, 600); } }}
+                                                                onTouchEnd={() => clearTimeout(longPressTimer.current)}
+                                                                onTouchMove={() => clearTimeout(longPressTimer.current)}
+                                                            >
+                                                                {(msg.isForwarded || msg.is_forwarded) && !isMe && (
+                                                                    <div className="wa-forwarded-tag">
+                                                                        <Forward size={12} style={{ marginRight: 4 }} />
+                                                                        {(msg.forward_count || 0) >= 4 ? 'Forwarded many times' : 'Forwarded'}
                                                                     </div>
-                                                                    <div className="wa-reply-context-text">
-                                                                        {(() => {
-                                                                            if (msg.reply_to.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
-                                                                            if (msg.reply_to.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
-                                                                            if (msg.reply_to.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>📊 <span>{msg.reply_to.poll?.question || 'Poll'}</span></span>;
-                                                                            if (msg.reply_to.type === 'voice' || msg.reply_to.type === 'audio') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mic size={14} color="#027EB5" /> <span>Voice message</span></span>;
-                                                                            if (msg.reply_to.type === 'contact') {
-                                                                                try {
-                                                                                    const parsed = JSON.parse(msg.reply_to.content);
-                                                                                    const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
-                                                                                    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
-                                                                                } catch (e) {
-                                                                                    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+                                                                )}
+                                                                {!isForwardingMode && (
+                                                                    <div className="wa-dropdown-trigger msg-trigger" onClick={(e) => handleMsgDropdownOpen(e, msg._id, msg)}>
+                                                                        <ChevronDown size={18} />
+                                                                    </div>
+                                                                )}
+
+                                                                {/* Reply Context Rendering */}
+                                                                {msg.reply_to && (
+                                                                    <div className="wa-reply-context">
+                                                                        <div className="wa-reply-context-name">
+                                                                            {isMeMsg(msg.reply_to) ? 'You' : (selectedUser.name || 'User')}
+                                                                        </div>
+                                                                        <div className="wa-reply-context-text">
+                                                                            {(() => {
+                                                                                if (msg.reply_to.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
+                                                                                if (msg.reply_to.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
+                                                                                if (msg.reply_to.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>📊 <span>{msg.reply_to.poll?.question || 'Poll'}</span></span>;
+                                                                                if (msg.reply_to.type === 'voice' || msg.reply_to.type === 'audio') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mic size={14} color="#027EB5" /> <span>Voice message</span></span>;
+                                                                                if (msg.reply_to.type === 'contact') {
+                                                                                    try {
+                                                                                        const parsed = JSON.parse(msg.reply_to.content);
+                                                                                        const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
+                                                                                        return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
+                                                                                    } catch (e) {
+                                                                                        return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+                                                                                    }
                                                                                 }
-                                                                            }
-                                                                            return msg.reply_to.content || '';
-                                                                        })()}
+                                                                                return msg.reply_to.content || '';
+                                                                            })()}
+                                                                        </div>
                                                                     </div>
-                                                                </div>
-                                                            )}
+                                                                )}
 
-                                                            {msg.is_deleted_by_admin ? (
-                                                                <div className="wa-deleted-tag">
-                                                                    <Trash2 size={16} /> {t('chat_window.deleted_admin')}
-                                                                </div>
-                                                            ) : (msg.deleted_for && msg.deleted_for.includes(user.id || user._id)) ? (
-                                                                <div className="wa-deleted-tag">
-                                                                    <XCircle size={16} /> {t('chat_window.deleted_user_me')}
-                                                                </div>
-                                                            ) : msg.is_deleted_by_user ? (
-                                                                <div className="wa-deleted-tag">
-                                                                    <XCircle size={16} /> {t('chat_window.deleted_user_other')}
-                                                                </div>
-                                                            ) : (
-                                                                <>
-                                                                    {/* Image Rendering */}
-                                                                    {msg.type === 'image' && (
-                                                                        <div className="wa-msg-image-container" onClick={(e) => {
-                                                                            if (isForwardingMode) return;
-                                                                            e.stopPropagation();
-                                                                            setViewingImage(msg);
-                                                                        }}>
-                                                                            <img src={msg.file_path} alt="Sent" className="wa-msg-image" />
-                                                                        </div>
-                                                                    )}
-                                                                    {/* File Rendering */}
-                                                                    {msg.type === 'file' && (
-                                                                        <div
-                                                                            className="wa-msg-doc-bubble"
-                                                                            onClick={() => handleDownload(msg.file_path, msg.fileName)}
-                                                                            style={{ cursor: 'pointer' }}
-                                                                        >
-                                                                            {/* Top: Preview */}
-                                                                            <div className="wa-doc-preview-area">
-                                                                                {/* Simulated Page Content */}
-                                                                                <div className="wa-doc-preview-simulated">
-                                                                                    {/* Simulate text lines */}
-                                                                                    <div style={{ width: '80%', height: 6, background: '#d1d7db', marginBottom: 6 }}></div>
-                                                                                    <div style={{ width: '100%', height: 4, background: '#e9edef', marginBottom: 3 }}></div>
-                                                                                    <div style={{ width: '100%', height: 4, background: '#e9edef', marginBottom: 3 }}></div>
-                                                                                    <div style={{ width: '90%', height: 4, background: '#e9edef', marginBottom: 3 }}></div>
-
-                                                                                    <div style={{ marginTop: 10, width: '40%', height: 20, background: '#e9edef' }}></div> {/* Image placeholder */}
-
-                                                                                    <div style={{ flex: 1 }}></div>
-                                                                                    <div style={{ fontSize: 8, color: '#999', textAlign: 'center' }}>Page 1</div>
-                                                                                </div>
-                                                                            </div>
-
-                                                                            {/* Bottom: Info Footer */}
-                                                                            <div className="wa-doc-info-area">
-                                                                                <div className="wa-doc-icon" style={{ background: 'transparent', padding: 0 }}>
-                                                                                    <FileText size={30} color="#e53935" strokeWidth={1.5} />
-                                                                                </div>
-                                                                                <div className="wa-doc-details">
-                                                                                    <div className="wa-doc-filename" title={msg.fileName || 'Document'}>
-                                                                                        {msg.fileName || 'Document.pdf'}
-                                                                                    </div>
-                                                                                    <div className="wa-doc-meta">
-                                                                                        {msg.pageCount || 1} pages • {(msg.fileName || msg.file_path)?.split('.').pop()?.toUpperCase() || 'PDF'} • {msg.fileSize ? Math.ceil(msg.fileSize / 1024) + ' kB' : 'Unknown size'}
-                                                                                    </div>
-                                                                                </div>
-
-                                                                            </div>
-                                                                        </div>
-                                                                    )}
-                                                                    {/* Audio Rendering */}
-                                                                    {msg.type === 'audio' && (
-                                                                        <div
-                                                                            className={`wa-voice-bubble-content ${String(playingAudioId) === String(msg._id || msg.id) ? 'wa-glassy-playing' : ''} ${msg.is_view_once ? 'wa-view-once-glassy' : ''} ${msg.is_view_once && msg.is_viewed ? 'spent' : ''}`}
-                                                                            onClick={(e) => {
+                                                                {msg.is_deleted_by_admin ? (
+                                                                    <div className="wa-deleted-tag">
+                                                                        <Trash2 size={16} /> {t('chat_window.deleted_admin')}
+                                                                    </div>
+                                                                ) : (msg.deleted_for && msg.deleted_for.includes(user.id || user._id)) ? (
+                                                                    <div className="wa-deleted-tag">
+                                                                        <XCircle size={16} /> {t('chat_window.deleted_user_me')}
+                                                                    </div>
+                                                                ) : msg.is_deleted_by_user ? (
+                                                                    <div className="wa-deleted-tag">
+                                                                        <XCircle size={16} /> {t('chat_window.deleted_user_other')}
+                                                                    </div>
+                                                                ) : (
+                                                                    <>
+                                                                        {/* Image Rendering */}
+                                                                        {msg.type === 'image' && (
+                                                                            <div className="wa-msg-image-container" onClick={(e) => {
                                                                                 if (isForwardingMode) return;
-                                                                                if (msg.is_view_once && msg.is_viewed && !isMeMsg(msg)) {
-                                                                                    setSnackbar({ message: "This voice message has already been played.", type: 'info', variant: 'system' });
-                                                                                    return;
-                                                                                }
                                                                                 e.stopPropagation();
-                                                                                handlePlayAudio(msg);
-                                                                            }}
-                                                                            style={{
-                                                                                background: 'rgba(255, 255, 255, 0.82)',
-                                                                                backdropFilter: 'blur(20px)',
-                                                                                WebkitBackdropFilter: 'blur(20px)',
-                                                                                borderRadius: '16px',
-                                                                                border: '1px solid rgba(2, 126, 181, 0.18)',
-                                                                                boxShadow: '0 4px 20px rgba(2, 126, 181, 0.06)',
-                                                                                padding: '10px 14px',
-                                                                                transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-                                                                                margin: '2px 0',
-                                                                                display: 'flex',
-                                                                                alignItems: 'center',
-                                                                                gap: isMobile ? '8px' : '12px',
-                                                                                minWidth: isMobile ? '200px' : '280px'
-                                                                            }}
-                                                                        >
-                                                                            {msg.is_view_once && msg.is_viewed && !isMeMsg(msg) && String(playingAudioId) !== String(msg._id || msg.id) ? (
-                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px' }}>
-                                                                                    <div className="wa-voice-bubble-avatar" style={{ opacity: 0.6, background: '#f0f2f5' }}>
-                                                                                        <Mic size={18} color="#8696a0" />
-                                                                                    </div>
-                                                                                    <div className="wa-voice-bubble-player">
-                                                                                        <div style={{ color: '#8696a0', fontSize: '15px', fontWeight: 500 }}>Voice message</div>
-                                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                                                            <div className="wa-view-once-badge spent">
-                                                                                                <span className="wa-view-once-circle" style={{ borderColor: '#8696a0', color: '#8696a0', transform: 'scale(0.8)' }}>1</span>
-                                                                                            </div>
-                                                                                            <span style={{ color: '#8696a0', fontSize: '13px' }}>Opened</span>
-                                                                                        </div>
+                                                                                setViewingImage(msg);
+                                                                            }}>
+                                                                                <img src={msg.file_path} alt="Sent" className="wa-msg-image" />
+                                                                            </div>
+                                                                        )}
+                                                                        {/* File Rendering */}
+                                                                        {msg.type === 'file' && (
+                                                                            <div
+                                                                                className="wa-msg-doc-bubble"
+                                                                                onClick={() => handleDownload(msg.file_path, msg.fileName)}
+                                                                                style={{ cursor: 'pointer' }}
+                                                                            >
+                                                                                {/* Top: Preview */}
+                                                                                <div className="wa-doc-preview-area">
+                                                                                    {/* Simulated Page Content */}
+                                                                                    <div className="wa-doc-preview-simulated">
+                                                                                        {/* Simulate text lines */}
+                                                                                        <div style={{ width: '80%', height: 6, background: '#d1d7db', marginBottom: 6 }}></div>
+                                                                                        <div style={{ width: '100%', height: 4, background: '#e9edef', marginBottom: 3 }}></div>
+                                                                                        <div style={{ width: '100%', height: 4, background: '#e9edef', marginBottom: 3 }}></div>
+                                                                                        <div style={{ width: '90%', height: 4, background: '#e9edef', marginBottom: 3 }}></div>
+
+                                                                                        <div style={{ marginTop: 10, width: '40%', height: 20, background: '#e9edef' }}></div> {/* Image placeholder */}
+
+                                                                                        <div style={{ flex: 1 }}></div>
+                                                                                        <div style={{ fontSize: 8, color: '#999', textAlign: 'center' }}>Page 1</div>
                                                                                     </div>
                                                                                 </div>
-                                                                            ) : (
-                                                                                <>
-                                                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
-                                                                                        <div className="wa-voice-bubble-avatar" style={{ position: 'relative', margin: 0 }}>
-                                                                                            {String(playingAudioId) === String(msg._id || msg.id) ? (
-                                                                                                <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
-                                                                                                    {msg.is_view_once ? viewOncePlaybackSpeed : playbackSpeed}x
+
+                                                                                {/* Bottom: Info Footer */}
+                                                                                <div className="wa-doc-info-area">
+                                                                                    <div className="wa-doc-icon" style={{ background: 'transparent', padding: 0 }}>
+                                                                                        <FileText size={30} color="#e53935" strokeWidth={1.5} />
+                                                                                    </div>
+                                                                                    <div className="wa-doc-details">
+                                                                                        <div className="wa-doc-filename" title={msg.fileName || 'Document'}>
+                                                                                            {msg.fileName || 'Document.pdf'}
+                                                                                        </div>
+                                                                                        <div className="wa-doc-meta">
+                                                                                            {msg.pageCount || 1} pages • {(msg.fileName || msg.file_path)?.split('.').pop()?.toUpperCase() || 'PDF'} • {msg.fileSize ? Math.ceil(msg.fileSize / 1024) + ' kB' : 'Unknown size'}
+                                                                                        </div>
+                                                                                    </div>
+
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                        {/* Audio Rendering */}
+                                                                        {msg.type === 'audio' && (
+                                                                            <div
+                                                                                className={`wa-voice-bubble-content ${String(playingAudioId) === String(msg._id || msg.id) ? 'wa-glassy-playing' : ''} ${msg.is_view_once ? 'wa-view-once-glassy' : ''} ${msg.is_view_once && msg.is_viewed ? 'spent' : ''}`}
+                                                                                onClick={(e) => {
+                                                                                    if (isForwardingMode) return;
+                                                                                    if (msg.is_view_once && msg.is_viewed && !isMeMsg(msg)) {
+                                                                                        setSnackbar({ message: "This voice message has already been played.", type: 'info', variant: 'system' });
+                                                                                        return;
+                                                                                    }
+                                                                                    e.stopPropagation();
+                                                                                    handlePlayAudio(msg);
+                                                                                }}
+                                                                                style={{
+                                                                                    background: 'rgba(255, 255, 255, 0.82)',
+                                                                                    backdropFilter: 'blur(20px)',
+                                                                                    WebkitBackdropFilter: 'blur(20px)',
+                                                                                    borderRadius: '16px',
+                                                                                    border: '1px solid rgba(2, 126, 181, 0.18)',
+                                                                                    boxShadow: '0 4px 20px rgba(2, 126, 181, 0.06)',
+                                                                                    padding: '10px 14px',
+                                                                                    transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                                                                                    margin: '2px 0',
+                                                                                    display: 'flex',
+                                                                                    alignItems: 'center',
+                                                                                    gap: isMobile ? '8px' : '12px',
+                                                                                    minWidth: isMobile ? '200px' : '280px'
+                                                                                }}
+                                                                            >
+                                                                                {msg.is_view_once && msg.is_viewed && !isMeMsg(msg) && String(playingAudioId) !== String(msg._id || msg.id) ? (
+                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px' }}>
+                                                                                        <div className="wa-voice-bubble-avatar" style={{ opacity: 0.6, background: '#f0f2f5' }}>
+                                                                                            <Mic size={18} color="#8696a0" />
+                                                                                        </div>
+                                                                                        <div className="wa-voice-bubble-player">
+                                                                                            <div style={{ color: '#8696a0', fontSize: '15px', fontWeight: 500 }}>Voice message</div>
+                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                                                                <div className="wa-view-once-badge spent">
+                                                                                                    <span className="wa-view-once-circle" style={{ borderColor: '#8696a0', color: '#8696a0', transform: 'scale(0.8)' }}>1</span>
                                                                                                 </div>
-                                                                                            ) : (
-                                                                                                <>
-                                                                                                    {isMe ? (
-                                                                                                        (userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo) ? (
-                                                                                                            <img
-                                                                                                                src={userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo}
-                                                                                                                alt="me"
-                                                                                                                style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
-                                                                                                                onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'; }}
-                                                                                                            />
-                                                                                                        ) : null
-                                                                                                    ) : (
-                                                                                                        (msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar) ? (
-                                                                                                            <img
-                                                                                                                src={msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar}
-                                                                                                                alt="user"
-                                                                                                                style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
-                                                                                                                onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'; }}
-                                                                                                            />
-                                                                                                        ) : null
-                                                                                                    )}
-                                                                                                    <div className="wa-avatar-letter" style={{ display: (isMe ? (userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo) : (msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar)) ? 'none' : 'flex' }}>
-                                                                                                        {isMe ? (userData?.name || user?.name || 'M')[0].toUpperCase() : (msg.sender_id?.name || selectedUser?.name || 'U')[0].toUpperCase()}
-                                                                                                    </div>
-                                                                                                </>
-                                                                                            )}
-                                                                                            <div className="wa-voice-mic-badge">
-                                                                                                <Mic size={12} color={msg.is_read ? '#53bdeb' : (msg.is_view_once ? '#0EA5BE' : '#8696a0')} />
+                                                                                                <span style={{ color: '#8696a0', fontSize: '13px' }}>Opened</span>
                                                                                             </div>
                                                                                         </div>
-                                                                                        <span style={{
-                                                                                            color: (String(playingAudioId) === String(msg._id || msg.id) || (msg.is_view_once && !msg.is_viewed)) ? '#0EA5BE' : '#8696a0',
-                                                                                            fontSize: '11px',
-                                                                                            fontWeight: 500,
-                                                                                            marginTop: '2px'
-                                                                                        }}>
-                                                                                            {String(playingAudioId) === String(msg._id || msg.id) ? formatVoiceTime(viewOnceElapsed) : formatVoiceTime(msg.duration || 0)}
-                                                                                        </span>
                                                                                     </div>
-                                                                                    <div className="wa-voice-bubble-player" style={{ flex: 1, minWidth: 0 }}>
-                                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                                                            <button className="wa-voice-play-btn" style={{ background: 'none', border: 'none', color: (String(playingAudioId) === String(msg._id || msg.id) || msg.is_view_once) ? '#0EA5BE' : '#54656f', padding: 0, cursor: 'pointer', transition: 'transform 0.2s' }}>
-                                                                                                {String(playingAudioId) === String(msg._id || msg.id) ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
-                                                                                            </button>
-                                                                                            <div
-                                                                                                className="wa-voice-waveform-static"
-                                                                                                style={{
-                                                                                                    display: 'flex',
-                                                                                                    alignItems: 'center',
-                                                                                                    height: '24px',
-                                                                                                    position: 'relative',
-                                                                                                    cursor: 'pointer',
-                                                                                                    outline: 'none',
-                                                                                                    width: '144px',
-                                                                                                    flexShrink: 0,
-                                                                                                    overflow: 'hidden',
-                                                                                                    padding: '0 2px'
-                                                                                                }}
-                                                                                                onMouseDown={(e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    const rect = e.currentTarget.getBoundingClientRect();
-                                                                                                    const updateSeek = (moveEvent) => {
-                                                                                                        const x = moveEvent.clientX - rect.left;
-                                                                                                        const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
-                                                                                                        if (String(playingAudioId) === String(msg._id || msg.id) && audioInstanceRef.current) {
-                                                                                                            audioInstanceRef.current.currentTime = (percent / 100) * (msg.duration || 1);
-                                                                                                        } else {
-                                                                                                            handlePlayAudio(msg, (percent / 100) * (msg.duration || 1));
-                                                                                                        }
-                                                                                                    };
-                                                                                                    const onMouseMove = (moveEvent) => updateSeek(moveEvent);
-                                                                                                    const onMouseUp = () => {
-                                                                                                        window.removeEventListener('mousemove', onMouseMove);
-                                                                                                        window.removeEventListener('mouseup', onMouseUp);
-                                                                                                    };
-                                                                                                    window.addEventListener('mousemove', onMouseMove);
-                                                                                                    window.addEventListener('mouseup', onMouseUp);
-                                                                                                    updateSeek(e);
-                                                                                                }}
-                                                                                            >
-                                                                                                {/* WAVEFORM BARS BASES (GRAY) */}
-                                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '3px', width: '100%', justifyContent: 'space-between', opacity: 0.3 }}>
-                                                                                                    {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
-                                                                                                        <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#8696a0', borderRadius: '4px' }} />
-                                                                                                    ))}
+                                                                                ) : (
+                                                                                    <>
+                                                                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+                                                                                            <div className="wa-voice-bubble-avatar" style={{ position: 'relative', margin: 0 }}>
+                                                                                                {String(playingAudioId) === String(msg._id || msg.id) ? (
+                                                                                                    <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
+                                                                                                        {msg.is_view_once ? viewOncePlaybackSpeed : playbackSpeed}x
+                                                                                                    </div>
+                                                                                                ) : (
+                                                                                                    <>
+                                                                                                        {isMe ? (
+                                                                                                            (userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo) ? (
+                                                                                                                <img
+                                                                                                                    src={userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo}
+                                                                                                                    alt="me"
+                                                                                                                    style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                                                                                                                    onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'; }}
+                                                                                                                />
+                                                                                                            ) : null
+                                                                                                        ) : (
+                                                                                                            (msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar) ? (
+                                                                                                                <img
+                                                                                                                    src={msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar}
+                                                                                                                    alt="user"
+                                                                                                                    style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                                                                                                                    onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'; }}
+                                                                                                                />
+                                                                                                            ) : null
+                                                                                                        )}
+                                                                                                        <div className="wa-avatar-letter" style={{ display: (isMe ? (userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo) : (msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || selectedUser?.profile_photo || selectedUser?.avatar)) ? 'none' : 'flex' }}>
+                                                                                                            {isMe ? (userData?.name || user?.name || 'M')[0].toUpperCase() : (msg.sender_id?.name || selectedUser?.name || 'U')[0].toUpperCase()}
+                                                                                                        </div>
+                                                                                                    </>
+                                                                                                )}
+                                                                                                <div className="wa-voice-mic-badge">
+                                                                                                    <Mic size={12} color={msg.is_read ? '#53bdeb' : (msg.is_view_once ? '#0EA5BE' : '#8696a0')} />
                                                                                                 </div>
+                                                                                            </div>
+                                                                                            <span style={{
+                                                                                                color: (String(playingAudioId) === String(msg._id || msg.id) || (msg.is_view_once && !msg.is_viewed)) ? '#0EA5BE' : '#8696a0',
+                                                                                                fontSize: '11px',
+                                                                                                fontWeight: 500,
+                                                                                                marginTop: '2px'
+                                                                                            }}>
+                                                                                                {String(playingAudioId) === String(msg._id || msg.id) ? formatVoiceTime(viewOnceElapsed) : formatVoiceTime(msg.duration || 0)}
+                                                                                            </span>
+                                                                                        </div>
+                                                                                        <div className="wa-voice-bubble-player" style={{ flex: 1, minWidth: 0 }}>
+                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                                                                <button className="wa-voice-play-btn" style={{ background: 'none', border: 'none', color: (String(playingAudioId) === String(msg._id || msg.id) || msg.is_view_once) ? '#0EA5BE' : '#54656f', padding: 0, cursor: 'pointer', transition: 'transform 0.2s' }}>
+                                                                                                    {String(playingAudioId) === String(msg._id || msg.id) ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
+                                                                                                </button>
+                                                                                                <div
+                                                                                                    className="wa-voice-waveform-static"
+                                                                                                    style={{
+                                                                                                        display: 'flex',
+                                                                                                        alignItems: 'center',
+                                                                                                        height: '24px',
+                                                                                                        position: 'relative',
+                                                                                                        cursor: 'pointer',
+                                                                                                        outline: 'none',
+                                                                                                        width: '144px',
+                                                                                                        flexShrink: 0,
+                                                                                                        overflow: 'hidden',
+                                                                                                        padding: '0 2px'
+                                                                                                    }}
+                                                                                                    onMouseDown={(e) => {
+                                                                                                        e.stopPropagation();
+                                                                                                        const rect = e.currentTarget.getBoundingClientRect();
+                                                                                                        const updateSeek = (moveEvent) => {
+                                                                                                            const x = moveEvent.clientX - rect.left;
+                                                                                                            const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
+                                                                                                            if (String(playingAudioId) === String(msg._id || msg.id) && audioInstanceRef.current) {
+                                                                                                                audioInstanceRef.current.currentTime = (percent / 100) * (msg.duration || 1);
+                                                                                                            } else {
+                                                                                                                handlePlayAudio(msg, (percent / 100) * (msg.duration || 1));
+                                                                                                            }
+                                                                                                        };
+                                                                                                        const onMouseMove = (moveEvent) => updateSeek(moveEvent);
+                                                                                                        const onMouseUp = () => {
+                                                                                                            window.removeEventListener('mousemove', onMouseMove);
+                                                                                                            window.removeEventListener('mouseup', onMouseUp);
+                                                                                                        };
+                                                                                                        window.addEventListener('mousemove', onMouseMove);
+                                                                                                        window.addEventListener('mouseup', onMouseUp);
+                                                                                                        updateSeek(e);
+                                                                                                    }}
+                                                                                                >
+                                                                                                    {/* WAVEFORM BARS BASES (GRAY) */}
+                                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', width: '100%', justifyContent: 'space-between', opacity: 0.3 }}>
+                                                                                                        {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
+                                                                                                            <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#8696a0', borderRadius: '4px' }} />
+                                                                                                        ))}
+                                                                                                    </div>
 
-                                                                                                {/* WAVEFORM PROGRESS (BLUE) - SMOOTH CLIPPING */}
-                                                                                                <div style={{
-                                                                                                    display: 'flex',
-                                                                                                    alignItems: 'center',
-                                                                                                    gap: '3px',
-                                                                                                    width: '100%',
-                                                                                                    justifyContent: 'space-between',
-                                                                                                    position: 'absolute',
-                                                                                                    left: 2,
-                                                                                                    right: 2,
-                                                                                                    clipPath: `inset(0 ${100 - ((String(playingAudioId) === String(msg._id || msg.id) ? viewOnceElapsed : 0) / (msg.duration || 1)) * 100}% 0 0)`,
-                                                                                                    transition: String(playingAudioId) === String(msg._id || msg.id) ? 'none' : 'clip-path 0.3s ease'
-                                                                                                }}>
-                                                                                                    {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
-                                                                                                        <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#0EA5BE', borderRadius: '4px' }} />
-                                                                                                    ))}
-                                                                                                </div>
-
-                                                                                                {/* PLAYHEAD CIRCULAR DOT (THUMB) */}
-                                                                                                {String(playingAudioId) === String(msg._id || msg.id) && (
+                                                                                                    {/* WAVEFORM PROGRESS (BLUE) - SMOOTH CLIPPING */}
                                                                                                     <div style={{
+                                                                                                        display: 'flex',
+                                                                                                        alignItems: 'center',
+                                                                                                        gap: '3px',
+                                                                                                        width: '100%',
+                                                                                                        justifyContent: 'space-between',
                                                                                                         position: 'absolute',
-                                                                                                        left: `${(viewOnceElapsed / (msg.duration || 1)) * 100}%`,
-                                                                                                        width: '10px',
-                                                                                                        height: '10px',
-                                                                                                        backgroundColor: '#0EA5BE',
-                                                                                                        borderRadius: '50%',
-                                                                                                        transform: 'translate(-50%, -50%)',
-                                                                                                        top: '50%',
-                                                                                                        zIndex: 11,
-                                                                                                        boxShadow: '0 0 4px rgba(2, 126, 181, 0.4)'
-                                                                                                    }} />
+                                                                                                        left: 2,
+                                                                                                        right: 2,
+                                                                                                        clipPath: `inset(0 ${100 - ((String(playingAudioId) === String(msg._id || msg.id) ? viewOnceElapsed : 0) / (msg.duration || 1)) * 100}% 0 0)`,
+                                                                                                        transition: String(playingAudioId) === String(msg._id || msg.id) ? 'none' : 'clip-path 0.3s ease'
+                                                                                                    }}>
+                                                                                                        {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
+                                                                                                            <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#0EA5BE', borderRadius: '4px' }} />
+                                                                                                        ))}
+                                                                                                    </div>
+
+                                                                                                    {/* PLAYHEAD CIRCULAR DOT (THUMB) */}
+                                                                                                    {String(playingAudioId) === String(msg._id || msg.id) && (
+                                                                                                        <div style={{
+                                                                                                            position: 'absolute',
+                                                                                                            left: `${(viewOnceElapsed / (msg.duration || 1)) * 100}%`,
+                                                                                                            width: '10px',
+                                                                                                            height: '10px',
+                                                                                                            backgroundColor: '#0EA5BE',
+                                                                                                            borderRadius: '50%',
+                                                                                                            transform: 'translate(-50%, -50%)',
+                                                                                                            top: '50%',
+                                                                                                            zIndex: 11,
+                                                                                                            boxShadow: '0 0 4px rgba(2, 126, 181, 0.4)'
+                                                                                                        }} />
+                                                                                                    )}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                            <div className="wa-voice-meta-row" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: '2px' }}>
+                                                                                                {msg.is_view_once && (
+                                                                                                    <div className="wa-view-once-badge">
+                                                                                                        <span className="wa-view-once-circle" style={{ borderColor: msg.is_viewed ? '#8696a0' : '#0EA5BE', color: msg.is_viewed ? '#8696a0' : '#0EA5BE', fontSize: '10px', width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1.5px solid currentColor', fontWeight: 'bold' }}>1</span>
+                                                                                                    </div>
                                                                                                 )}
                                                                                             </div>
                                                                                         </div>
-                                                                                        <div className="wa-voice-meta-row" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: '2px' }}>
-                                                                                            {msg.is_view_once && (
-                                                                                                <div className="wa-view-once-badge">
-                                                                                                    <span className="wa-view-once-circle" style={{ borderColor: msg.is_viewed ? '#8696a0' : '#0EA5BE', color: msg.is_viewed ? '#8696a0' : '#0EA5BE', fontSize: '10px', width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '1.5px solid currentColor', fontWeight: 'bold' }}>1</span>
+                                                                                    </>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+
+
+                                                                        {/* Link Preview Card */}
+                                                                        {(() => {
+                                                                            let lp = msg.link_preview;
+                                                                            const ytId = (msg.content && typeof msg.content === 'string') ? getYouTubeVideoId(msg.content) : null;
+                                                                            if ((!lp || !lp.title) && ytId) {
+                                                                                lp = { url: msg.content, title: 'YouTube Video', domain: 'youtube.com', image: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` };
+                                                                            }
+                                                                            if (!lp || !lp.title) return null;
+                                                                            return (
+                                                                                <div
+                                                                                    className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''} ${((lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be'))) ? 'youtube' : ''}`}
+                                                                                    onClick={(e) => { e.stopPropagation(); window.open(lp.url, '_blank'); }}
+                                                                                    style={{ cursor: 'pointer', transition: 'none' }}
+                                                                                >
+                                                                                    {lp.image && (
+                                                                                        <div className="wa-link-preview-image">
+                                                                                            <img src={lp.image} alt={lp.title} />
+                                                                                            {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) && (
+                                                                                                <div className="wa-link-preview-play-btn">
+                                                                                                    <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
                                                                                                 </div>
                                                                                             )}
                                                                                         </div>
-                                                                                    </div>
-                                                                                </>
-                                                                            )}
-                                                                        </div>
-                                                                    )}
-
-
-                                                                    {/* Link Preview Card */}
-                                                                    {(() => {
-                                                                        let lp = msg.link_preview;
-                                                                        const ytId = (msg.content && typeof msg.content === 'string') ? getYouTubeVideoId(msg.content) : null;
-                                                                        if ((!lp || !lp.title) && ytId) {
-                                                                            lp = { url: msg.content, title: 'YouTube Video', domain: 'youtube.com', image: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` };
-                                                                        }
-                                                                        if (!lp || !lp.title) return null;
-                                                                        return (
-                                                                            <div
-                                                                                className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''} ${((lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be'))) ? 'youtube' : ''}`}
-                                                                                onClick={(e) => { e.stopPropagation(); window.open(lp.url, '_blank'); }}
-                                                                                style={{ cursor: 'pointer', transition: 'none' }}
-                                                                            >
-                                                                                {lp.image && (
-                                                                                    <div className="wa-link-preview-image">
-                                                                                        <img src={lp.image} alt={lp.title} />
-                                                                                        {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) && (
-                                                                                            <div className="wa-link-preview-play-btn">
-                                                                                                <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
-                                                                                            </div>
-                                                                                        )}
-                                                                                    </div>
-                                                                                )}
-                                                                                <div className="wa-link-preview-content">
-                                                                                    <div className="wa-link-preview-title">{lp.title}</div>
-                                                                                    {lp.description && <div className="wa-link-preview-description">{lp.description}</div>}
-                                                                                    <div className="wa-link-preview-domain">
-                                                                                        {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) ? (
-                                                                                            <>
-                                                                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                                                                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ff0000" />
-                                                                                                </svg>
-                                                                                                <span style={{ color: '#ff0000', fontWeight: 'bold' }}>{lp.domain}</span>
-                                                                                            </>
-                                                                                        ) : (
-                                                                                            <>
-                                                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                                                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                                                                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                                                                                </svg>
-                                                                                                <span>{lp.domain}</span>
-                                                                                            </>
-                                                                                        )}
+                                                                                    )}
+                                                                                    <div className="wa-link-preview-content">
+                                                                                        <div className="wa-link-preview-title">{lp.title}</div>
+                                                                                        {lp.description && <div className="wa-link-preview-description">{lp.description}</div>}
+                                                                                        <div className="wa-link-preview-domain">
+                                                                                            {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) ? (
+                                                                                                <>
+                                                                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                                                                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ff0000" />
+                                                                                                    </svg>
+                                                                                                    <span style={{ color: '#ff0000', fontWeight: 'bold' }}>{lp.domain}</span>
+                                                                                                </>
+                                                                                            ) : (
+                                                                                                <>
+                                                                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                                                                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                                                                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                                                                    </svg>
+                                                                                                    <span>{lp.domain}</span>
+                                                                                                </>
+                                                                                            )}
+                                                                                        </div>
                                                                                     </div>
                                                                                 </div>
-                                                                            </div>
-                                                                        );
-                                                                    })()}
-                                                                    {msg.type === 'contact' && (() => {
-                                                                        let cDataArray;
-                                                                        try {
-                                                                            const rawData = JSON.parse(msg.content);
-                                                                            cDataArray = Array.isArray(rawData) ? rawData : [rawData];
-                                                                        } catch (e) {
-                                                                            cDataArray = [{ name: 'Contact' }];
-                                                                        }
+                                                                            );
+                                                                        })()}
+                                                                        {msg.type === 'contact' && (() => {
+                                                                            let cDataArray;
+                                                                            try {
+                                                                                const rawData = JSON.parse(msg.content);
+                                                                                cDataArray = Array.isArray(rawData) ? rawData : [rawData];
+                                                                            } catch (e) {
+                                                                                cDataArray = [{ name: 'Contact' }];
+                                                                            }
 
-                                                                        if (cDataArray.length > 1) {
-                                                                            return (
-                                                                                <div
-                                                                                    className="wa-contact-msg-card-multiple"
-                                                                                    onClick={(e) => { e.stopPropagation(); setViewingContact(cDataArray); }}
-                                                                                    style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '260px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}
-                                                                                >
-                                                                                    <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
-                                                                                        <div style={{ position: 'relative', width: 66, height: 44, marginRight: 12, flexShrink: 0 }}>
-                                                                                            <div className="wa-avatar" style={{ position: 'absolute', right: 0, zIndex: 1, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
-                                                                                                {cDataArray[1].image ? <img src={cDataArray[1].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                            if (cDataArray.length > 1) {
+                                                                                return (
+                                                                                    <div
+                                                                                        className="wa-contact-msg-card-multiple"
+                                                                                        onClick={(e) => { e.stopPropagation(); setViewingContact(cDataArray); }}
+                                                                                        style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '260px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}
+                                                                                    >
+                                                                                        <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                                            <div style={{ position: 'relative', width: 66, height: 44, marginRight: 12, flexShrink: 0 }}>
+                                                                                                <div className="wa-avatar" style={{ position: 'absolute', right: 0, zIndex: 1, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                                                                    {cDataArray[1].image ? <img src={cDataArray[1].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                                </div>
+                                                                                                <div className="wa-avatar" style={{ position: 'absolute', left: 0, zIndex: 2, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                                                                    {cDataArray[0].image ? <img src={cDataArray[0].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                                </div>
                                                                                             </div>
-                                                                                            <div className="wa-avatar" style={{ position: 'absolute', left: 0, zIndex: 2, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
-                                                                                                {cDataArray[0].image ? <img src={cDataArray[0].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                            <div style={{ color: '#111b21', fontSize: '15px', fontWeight: 600, lineHeight: '1.3' }}>
+                                                                                                {cDataArray[0].name || cDataArray[0].mobile} and {cDataArray.length - 1} other contact{cDataArray.length > 2 ? 's' : ''}
                                                                                             </div>
                                                                                         </div>
-                                                                                        <div style={{ color: '#111b21', fontSize: '15px', fontWeight: 600, lineHeight: '1.3' }}>
-                                                                                            {cDataArray[0].name || cDataArray[0].mobile} and {cDataArray.length - 1} other contact{cDataArray.length > 2 ? 's' : ''}
+                                                                                        <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                                                            <button style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>
+                                                                                                View all
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                );
+                                                                            }
+
+                                                                            const cData = cDataArray[0];
+                                                                            return (
+                                                                                <div
+                                                                                    className="wa-contact-msg-card"
+                                                                                    onClick={(e) => { e.stopPropagation(); setViewingContact(cData); }}
+                                                                                    style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '240px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}
+                                                                                >
+                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                                        <div className="wa-avatar" style={{ width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                                            {cData.image ? <img src={cData.image} alt={cData.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                        </div>
+                                                                                        <div style={{ color: '#111b21', fontSize: '16px', fontWeight: 600 }}>
+                                                                                            {cData.name || 'Contact'}
                                                                                         </div>
                                                                                     </div>
                                                                                     <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
-                                                                                        <button style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>
-                                                                                            View all
+                                                                                        <button
+                                                                                            className="wa-contact-card-action"
+                                                                                            onClick={(e) => { e.stopPropagation(); handleUserSelect({ ...cData, id: cData._id }); }}
+                                                                                            style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+                                                                                        >
+                                                                                            Message
                                                                                         </button>
                                                                                     </div>
                                                                                 </div>
                                                                             );
-                                                                        }
+                                                                        })()}
 
-                                                                        const cData = cDataArray[0];
-                                                                        return (
-                                                                            <div
-                                                                                className="wa-contact-msg-card"
-                                                                                onClick={(e) => { e.stopPropagation(); setViewingContact(cData); }}
-                                                                                style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '240px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}
-                                                                            >
-                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
-                                                                                    <div className="wa-avatar" style={{ width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                                                        {cData.image ? <img src={cData.image} alt={cData.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
-                                                                                    </div>
-                                                                                    <div style={{ color: '#111b21', fontSize: '16px', fontWeight: 600 }}>
-                                                                                        {cData.name || 'Contact'}
-                                                                                    </div>
+                                                                        {msg.type === 'poll' && msg.poll && (
+                                                                            <div className="wa-poll-card" style={{ background: '#ffffff', borderRadius: '12px', padding: '15px', minWidth: '280px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                                <div style={{ paddingBottom: '10px', fontWeight: 'bold', color: '#111b21', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                                    <List size={20} color="#0EA5BE" />
+                                                                                    {msg.poll.question}
                                                                                 </div>
-                                                                                <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                                                <div style={{ color: '#8696a0', fontSize: '13px', marginBottom: '12px' }}>
+                                                                                    {msg.poll.allowMultipleAnswers ? 'Select one or more' : 'Select one'}
+                                                                                </div>
+                                                                                <div className="wa-poll-options" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                                                    {msg.poll.options.map((opt, idx) => {
+                                                                                        const totalVotes = msg.poll.options.reduce((sum, o) => sum + (o.voters?.length || 0), 0);
+                                                                                        const votes = opt.voters?.length || 0;
+                                                                                        const percentage = totalVotes === 0 ? 0 : Math.round((votes / totalVotes) * 100);
+                                                                                        const myId = String(user.id || user._id);
+                                                                                        const hasVotedOpt = (opt.voters || []).some(v => String(v) === myId || String(v?._id || v) === myId);
+                                                                                        const hasAnyVote = totalVotes > 0;
+
+                                                                                        return (
+                                                                                            <div
+                                                                                                key={idx}
+                                                                                                onClick={(e) => { e.stopPropagation(); handleVotePoll(msg, idx); }}
+                                                                                                style={{ cursor: 'pointer', position: 'relative', overflow: 'hidden', padding: '10px', borderRadius: '8px', border: hasVotedOpt ? '1px solid #0EA5BE' : '1px solid #e9edef', background: hasVotedOpt ? 'rgba(14, 165, 190, 0.05)' : '#ffffff', transition: 'all 0.2s' }}
+                                                                                            >
+                                                                                                {hasAnyVote && (
+                                                                                                    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${percentage}%`, background: 'rgba(14, 165, 190, 0.15)', zIndex: 1, transition: 'width 0.3s ease' }} />
+                                                                                                )}
+                                                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
+                                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px', color: '#111b21' }}>
+                                                                                                        <div style={{ width: '18px', height: '18px', borderRadius: msg.poll.allowMultipleAnswers ? '4px' : '50%', border: hasVotedOpt ? '2px solid #0EA5BE' : '2px solid #8696a0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                                                            {hasVotedOpt && <div style={{ width: '10px', height: '10px', borderRadius: msg.poll.allowMultipleAnswers ? '2px' : '50%', background: '#0EA5BE' }} />}
+                                                                                                        </div>
+                                                                                                        {opt.text}
+                                                                                                    </div>
+                                                                                                    {votes > 0 && <span style={{ fontSize: '12px', color: '#54656f', fontWeight: '500' }}>{votes}</span>}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        );
+                                                                                    })}
+                                                                                </div>
+                                                                                <div style={{ borderTop: '1px solid #e9edef', marginTop: '15px', paddingTop: '10px' }}>
                                                                                     <button
-                                                                                        className="wa-contact-card-action"
-                                                                                        onClick={(e) => { e.stopPropagation(); handleUserSelect({ ...cData, id: cData._id }); }}
-                                                                                        style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+                                                                                        onClick={(e) => { e.stopPropagation(); setPollDetails(msg.poll); setIsPollDetailsOpen(true); }}
+                                                                                        disabled={msg.poll.options.every(o => !(o.voters?.length > 0))}
+                                                                                        style={{ background: 'none', border: 'none', width: '100%', color: msg.poll.options.some(o => o.voters?.length > 0) ? '#0EA5BE' : '#8696a0', fontSize: '14px', fontWeight: 'bold', padding: '6px 0', cursor: msg.poll.options.some(o => o.voters?.length > 0) ? 'pointer' : 'default', transition: 'color 0.2s' }}
                                                                                     >
-                                                                                        Message
+                                                                                        View votes
                                                                                     </button>
                                                                                 </div>
                                                                             </div>
-                                                                        );
-                                                                    })()}
+                                                                        )}
 
-                                                                    {msg.type === 'poll' && msg.poll && (
-                                                                        <div className="wa-poll-card" style={{ background: '#ffffff', borderRadius: '12px', padding: '15px', minWidth: '280px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
-                                                                            <div style={{ paddingBottom: '10px', fontWeight: 'bold', color: '#111b21', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                                <List size={20} color="#0EA5BE" />
-                                                                                {msg.poll.question}
-                                                                            </div>
-                                                                            <div style={{ color: '#8696a0', fontSize: '13px', marginBottom: '12px' }}>
-                                                                                {msg.poll.allowMultipleAnswers ? 'Select one or more' : 'Select one'}
-                                                                            </div>
-                                                                            <div className="wa-poll-options" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                                                                {msg.poll.options.map((opt, idx) => {
-                                                                                    const totalVotes = msg.poll.options.reduce((sum, o) => sum + (o.voters?.length || 0), 0);
-                                                                                    const votes = opt.voters?.length || 0;
-                                                                                    const percentage = totalVotes === 0 ? 0 : Math.round((votes / totalVotes) * 100);
-                                                                                    const myId = String(user.id || user._id);
-                                                                                    const hasVotedOpt = (opt.voters || []).some(v => String(v) === myId || String(v?._id || v) === myId);
-                                                                                    const hasAnyVote = totalVotes > 0;
+                                                                        {msg.type === 'event' && msg.event && (() => {
+                                                                            const myId = String(user.id || user._id);
+                                                                            const myResponse = (msg.event.responses || []).find(r => String(r.user_id) === myId);
 
-                                                                                    return (
-                                                                                        <div
-                                                                                            key={idx}
-                                                                                            onClick={(e) => { e.stopPropagation(); handleVotePoll(msg, idx); }}
-                                                                                            style={{ cursor: 'pointer', position: 'relative', overflow: 'hidden', padding: '10px', borderRadius: '8px', border: hasVotedOpt ? '1px solid #0EA5BE' : '1px solid #e9edef', background: hasVotedOpt ? 'rgba(14, 165, 190, 0.05)' : '#ffffff', transition: 'all 0.2s' }}
-                                                                                        >
-                                                                                            {hasAnyVote && (
-                                                                                                <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${percentage}%`, background: 'rgba(14, 165, 190, 0.15)', zIndex: 1, transition: 'width 0.3s ease' }} />
-                                                                                            )}
-                                                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
-                                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px', color: '#111b21' }}>
-                                                                                                    <div style={{ width: '18px', height: '18px', borderRadius: msg.poll.allowMultipleAnswers ? '4px' : '50%', border: hasVotedOpt ? '2px solid #0EA5BE' : '2px solid #8696a0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                                                                        {hasVotedOpt && <div style={{ width: '10px', height: '10px', borderRadius: msg.poll.allowMultipleAnswers ? '2px' : '50%', background: '#0EA5BE' }} />}
-                                                                                                    </div>
-                                                                                                    {opt.text}
-                                                                                                </div>
-                                                                                                {votes > 0 && <span style={{ fontSize: '12px', color: '#54656f', fontWeight: '500' }}>{votes}</span>}
+                                                                            return (
+                                                                                <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '280px', maxWidth: '100%', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                                    <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
+                                                                                        <div style={{ display: 'flex', gap: '14px' }}>
+                                                                                            <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                                                <Calendar size={24} color="#0EA5BE" />
                                                                                             </div>
-                                                                                        </div>
-                                                                                    );
-                                                                                })}
-                                                                            </div>
-                                                                            <div style={{ borderTop: '1px solid #e9edef', marginTop: '15px', paddingTop: '10px' }}>
-                                                                                <button
-                                                                                    onClick={(e) => { e.stopPropagation(); setPollDetails(msg.poll); setIsPollDetailsOpen(true); }}
-                                                                                    disabled={msg.poll.options.every(o => !(o.voters?.length > 0))}
-                                                                                    style={{ background: 'none', border: 'none', width: '100%', color: msg.poll.options.some(o => o.voters?.length > 0) ? '#0EA5BE' : '#8696a0', fontSize: '14px', fontWeight: 'bold', padding: '6px 0', cursor: msg.poll.options.some(o => o.voters?.length > 0) ? 'pointer' : 'default', transition: 'color 0.2s' }}
-                                                                                >
-                                                                                    View votes
-                                                                                </button>
-                                                                            </div>
-                                                                        </div>
-                                                                    )}
-
-                                                                    {msg.type === 'event' && msg.event && (() => {
-                                                                        const myId = String(user.id || user._id);
-                                                                        const myResponse = (msg.event.responses || []).find(r => String(r.user_id) === myId);
-
-                                                                        return (
-                                                                            <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '280px', maxWidth: '100%', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
-                                                                                <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
-                                                                                    <div style={{ display: 'flex', gap: '14px' }}>
-                                                                                        <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                                                                            <Calendar size={24} color="#0EA5BE" />
-                                                                                        </div>
-                                                                                        <div style={{ flex: 1, minWidth: 0 }}>
-                                                                                            <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{msg.event.name}</div>
-                                                                                            <div style={{ fontSize: '14px', color: '#667781' }}>
-                                                                                                {formatEventTimeString(msg.event.startDate, msg.event.startTime, msg.event.endDate, msg.event.endTime)}
-                                                                                            </div>
-                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
-                                                                                                <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
-                                                                                                    <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                                                                                                        {msg.event.participants?.length > 0 ? (
-                                                                                                            (() => {
-                                                                                                                const p = users.find(u => String(u._id || u.id) === String(msg.event.participants[0]));
-                                                                                                                return p && (p.avatar || p.image || p.profile_photo) ? <img src={p.avatar || p.image || p.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />;
-                                                                                                            })()
-                                                                                                        ) : (
-                                                                                                            <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />
-                                                                                                        )}
-                                                                                                    </div>
+                                                                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                                                                <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{msg.event.name}</div>
+                                                                                                <div style={{ fontSize: '14px', color: '#667781' }}>
+                                                                                                    {formatEventTimeString(msg.event.startDate, msg.event.startTime, msg.event.endDate, msg.event.endTime)}
                                                                                                 </div>
-                                                                                                <span onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }} style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500, cursor: 'pointer' }}>{msg.event.responses?.length || 0} responded</span>
+                                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+                                                                                                    <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
+                                                                                                        <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                                                                                            {msg.event.participants?.length > 0 ? (
+                                                                                                                (() => {
+                                                                                                                    const p = users.find(u => String(u._id || u.id) === String(msg.event.participants[0]));
+                                                                                                                    return p && (p.avatar || p.image || p.profile_photo) ? <img src={p.avatar || p.image || p.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />;
+                                                                                                                })()
+                                                                                                            ) : (
+                                                                                                                <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />
+                                                                                                            )}
+                                                                                                        </div>
+                                                                                                    </div>
+                                                                                                    <span onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }} style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500, cursor: 'pointer' }}>{msg.event.responses?.length || 0} responded</span>
+                                                                                                </div>
                                                                                             </div>
                                                                                         </div>
                                                                                     </div>
-                                                                                </div>
-                                                                                <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', position: 'relative', gap: '8px' }}>
-                                                                                    {msg.event.cancelled ? (
-                                                                                        <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
-                                                                                    ) : (() => {
-                                                                                        const dateValue = msg.event.endDate || msg.event.startDate;
-                                                                                        if (!dateValue || typeof dateValue !== 'string') return null;
-                                                                                        const dStr = dateValue.split('T')[0];
-                                                                                        const endStr = `${dStr}T${msg.event.endTime || '23:59'}:00`;
-                                                                                        const isEnded = new Date(endStr) <= new Date();
-                                                                                        const startDValue = msg.event.startDate || '';
-                                                                                        if (!startDValue || typeof startDValue !== 'string') return null;
-                                                                                        const startDStr = startDValue.split('T')[0];
-                                                                                        const startStr = `${startDStr}T${msg.event.startTime || '00:00'}:00`;
-                                                                                        const isStarted = new Date(startStr) <= new Date();
+                                                                                    <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', position: 'relative', gap: '8px' }}>
+                                                                                        {msg.event.cancelled ? (
+                                                                                            <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
+                                                                                        ) : (() => {
+                                                                                            const dateValue = msg.event.endDate || msg.event.startDate;
+                                                                                            if (!dateValue || typeof dateValue !== 'string') return null;
+                                                                                            const dStr = dateValue.split('T')[0];
+                                                                                            const endStr = `${dStr}T${msg.event.endTime || '23:59'}:00`;
+                                                                                            const isEnded = new Date(endStr) <= new Date();
+                                                                                            const startDValue = msg.event.startDate || '';
+                                                                                            if (!startDValue || typeof startDValue !== 'string') return null;
+                                                                                            const startDStr = startDValue.split('T')[0];
+                                                                                            const startStr = `${startDStr}T${msg.event.startTime || '00:00'}:00`;
+                                                                                            const isStarted = new Date(startStr) <= new Date();
 
-                                                                                        if (isStarted || isEnded) {
+                                                                                            if (isStarted || isEnded) {
+                                                                                                return (
+                                                                                                    <>
+                                                                                                        {isMe && !isEnded && (
+                                                                                                            <div
+                                                                                                                onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }}
+                                                                                                                style={{ width: '100%', textAlign: 'center', color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer', paddingBottom: '8px', borderBottom: '1px solid #f0f2f5', marginBottom: '4px' }}
+                                                                                                            >
+                                                                                                                Edit event
+                                                                                                            </div>
+                                                                                                        )}
+                                                                                                        <div style={{ width: '100%', textAlign: 'center' }}>
+                                                                                                            <span key={`started-p2p-${eventTick}`} style={{ color: isEnded ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
+                                                                                                                {isEnded ? 'Event ended' : 'Event started'}
+                                                                                                            </span>
+                                                                                                        </div>
+                                                                                                    </>
+                                                                                                );
+                                                                                            }
+
                                                                                             return (
                                                                                                 <>
-                                                                                                    {isMe && !isEnded && (
-                                                                                                        <div 
-                                                                                                            onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} 
+                                                                                                    {isMe && (
+                                                                                                        <div
+                                                                                                            onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }}
                                                                                                             style={{ width: '100%', textAlign: 'center', color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer', paddingBottom: '8px', borderBottom: '1px solid #f0f2f5', marginBottom: '4px' }}
                                                                                                         >
                                                                                                             Edit event
                                                                                                         </div>
                                                                                                     )}
                                                                                                     <div style={{ width: '100%', textAlign: 'center' }}>
-                                                                                                        <span key={`started-p2p-${eventTick}`} style={{ color: isEnded ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
-                                                                                                            {isEnded ? 'Event ended' : 'Event started'}
-                                                                                                        </span>
+                                                                                                        <div
+                                                                                                            onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
+                                                                                                            style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
+                                                                                                        >
+                                                                                                            {myResponse ? myResponse.status : 'Respond'}
+                                                                                                            <ChevronDown size={18} />
+                                                                                                        </div>
                                                                                                     </div>
                                                                                                 </>
                                                                                             );
-                                                                                        }
-                                                                                        
-                                                                                        return (
-                                                                                            <>
-                                                                                                {isMe && (
-                                                                                                    <div 
-                                                                                                        onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} 
-                                                                                                        style={{ width: '100%', textAlign: 'center', color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer', paddingBottom: '8px', borderBottom: '1px solid #f0f2f5', marginBottom: '4px' }}
-                                                                                                    >
-                                                                                                        Edit event
-                                                                                                    </div>
-                                                                                                )}
-                                                                                                <div style={{ width: '100%', textAlign: 'center' }}>
+                                                                                        })()}
+
+                                                                                        {openEventRespondId === msg._id && !msg.event.cancelled && (
+                                                                                            <div style={{
+                                                                                                position: 'absolute',
+                                                                                                bottom: 'calc(100% + 5px)',
+                                                                                                left: '50%',
+                                                                                                transform: 'translateX(-50%)',
+                                                                                                background: '#ffffff',
+                                                                                                borderRadius: '10px',
+                                                                                                boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+                                                                                                zIndex: 1000,
+                                                                                                minWidth: '130px',
+                                                                                                padding: '4px 0',
+                                                                                                overflow: 'hidden',
+                                                                                                border: '1px solid #e9edef'
+                                                                                            }}>
+                                                                                                {['Going', 'Maybe', 'Not going'].map(status => (
                                                                                                     <div
-                                                                                                        onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
-                                                                                                        style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
+                                                                                                        key={status}
+                                                                                                        onClick={(e) => { e.stopPropagation(); handleEventRespond(msg, status); setOpenEventRespondId(null); }}
+                                                                                                        style={{
+                                                                                                            padding: '12px 16px',
+                                                                                                            fontSize: '14px',
+                                                                                                            color: '#111b21',
+                                                                                                            textAlign: 'left',
+                                                                                                            cursor: 'pointer',
+                                                                                                            borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none',
+                                                                                                            background: myResponse?.status === status ? '#f0f2f5' : 'white',
+                                                                                                            fontWeight: myResponse?.status === status ? '600' : 'normal',
+                                                                                                            display: 'flex',
+                                                                                                            alignItems: 'center',
+                                                                                                            justifyContent: 'space-between'
+                                                                                                        }}
                                                                                                     >
-                                                                                                        {myResponse ? myResponse.status : 'Respond'}
-                                                                                                        <ChevronDown size={18} />
+                                                                                                        {status}
+                                                                                                        {myResponse?.status === status && <Check size={14} color="#0EA5BE" />}
                                                                                                     </div>
-                                                                                                </div>
-                                                                                            </>
-                                                                                        );
-                                                                                    })()}
-
-                                                                                    {openEventRespondId === msg._id && !msg.event.cancelled && (
-                                                                                        <div style={{
-                                                                                            position: 'absolute',
-                                                                                            bottom: 'calc(100% + 5px)',
-                                                                                            left: '50%',
-                                                                                            transform: 'translateX(-50%)',
-                                                                                            background: '#ffffff',
-                                                                                            borderRadius: '10px',
-                                                                                            boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
-                                                                                            zIndex: 1000,
-                                                                                            minWidth: '130px',
-                                                                                            padding: '4px 0',
-                                                                                            overflow: 'hidden',
-                                                                                            border: '1px solid #e9edef'
-                                                                                        }}>
-                                                                                            {['Going', 'Maybe', 'Not going'].map(status => (
-                                                                                                <div
-                                                                                                    key={status}
-                                                                                                    onClick={(e) => { e.stopPropagation(); handleEventRespond(msg, status); setOpenEventRespondId(null); }}
-                                                                                                    style={{
-                                                                                                        padding: '12px 16px',
-                                                                                                        fontSize: '14px',
-                                                                                                        color: '#111b21',
-                                                                                                        textAlign: 'left',
-                                                                                                        cursor: 'pointer',
-                                                                                                        borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none',
-                                                                                                        background: myResponse?.status === status ? '#f0f2f5' : 'white',
-                                                                                                        fontWeight: myResponse?.status === status ? '600' : 'normal',
-                                                                                                        display: 'flex',
-                                                                                                        alignItems: 'center',
-                                                                                                        justifyContent: 'space-between'
-                                                                                                    }}
-                                                                                                >
-                                                                                                    {status}
-                                                                                                    {myResponse?.status === status && <Check size={14} color="#0EA5BE" />}
-                                                                                                </div>
-                                                                                            ))}
-                                                                                        </div>
-                                                                                    )}
+                                                                                                ))}
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
                                                                                 </div>
-                                                                            </div>
-                                                                        );
-                                                                    })()}
+                                                                            );
+                                                                        })()}
 
-                                                                    {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && msg.type !== 'event' && (
-                                                                        <span>{renderContent(msg.content)}</span>
-                                                                    )}
-                                                                </>
-                                                            )}
-
-                                                            <div className="wa-msg-meta">
-                                                                {msg.is_edited && <span style={{ fontSize: '10px', color: '#667781', marginRight: '2px', opacity: 0.9 }}>Edited</span>}
-                                                                {msg.is_pinned && <Pin size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3, transform: 'rotate(45deg)' }} />}
-                                                                {msg.is_starred && <Star size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3 }} />}
-                                                                <span>{formatTime(msg.created_at)}</span>
-                                                                {isMe && (
-                                                                    msg.is_read
-                                                                        ? <CheckCheck size={14} color="#53bdeb" />
-                                                                        : <CheckCheck size={14} color="#9ca3af" />
+                                                                        {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && msg.type !== 'event' && (
+                                                                            <span>{renderContent(msg.content)}</span>
+                                                                        )}
+                                                                    </>
                                                                 )}
-                                                            </div>
-                                                            {/* Reaction display badges - P2P */}
-                                                            {msg.reactions && msg.reactions.length > 0 && (() => {
-                                                                const currentUserId = user.id || user._id;
-                                                                const grouped = msg.reactions.reduce((acc, r) => {
-                                                                    if (!acc[r.emoji]) acc[r.emoji] = { count: 0, reactedByMe: false, userNames: [] };
-                                                                    acc[r.emoji].count++;
-                                                                    const isMeReaction = String(r.user_id) === String(currentUserId);
-                                                                    if (isMeReaction) acc[r.emoji].reactedByMe = true;
 
-                                                                    const uName = isMeReaction ? 'You' : (users.find(u => String(u._id || u.id) === String(r.user_id))?.name || 'User');
-                                                                    if (!acc[r.emoji].userNames.includes(uName)) {
-                                                                        acc[r.emoji].userNames.push(uName);
-                                                                    }
-                                                                    return acc;
-                                                                }, {});
-                                                                return (
-                                                                    <div className={`wa-reaction-badges ${isMe ? 'wa-reaction-badges-sent' : 'wa-reaction-badges-recv'}`}>
-                                                                        {Object.entries(grouped).map(([emoji, { count, reactedByMe, userNames }]) => (
-                                                                            <span
-                                                                                key={emoji}
-                                                                                className={`wa-reaction-badge ${reactedByMe ? 'reacted' : ''}`}
-                                                                                onClick={(e) => { e.stopPropagation(); const bubble = e.currentTarget.closest('.wa-message-bubble') || e.currentTarget.closest('.wa-msg-sent') || e.currentTarget.closest('.wa-msg-recv'); setReactionDetails({ msg, isGroup: false, rect: (bubble || e.currentTarget).getBoundingClientRect() }); }}
-                                                                            >
-                                                                                {emoji}{count > 1 && <span className="wa-reaction-count">{count}</span>}
-                                                                            </span>
-                                                                        ))}
-                                                                    </div>
-                                                                );
-                                                            })()}
+                                                                <div className="wa-msg-meta">
+                                                                    {msg.is_edited && <span style={{ fontSize: '10px', color: '#667781', marginRight: '2px', opacity: 0.9 }}>Edited</span>}
+                                                                    {msg.is_pinned && <Pin size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3, transform: 'rotate(45deg)' }} />}
+                                                                    {msg.is_starred && <Star size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3 }} />}
+                                                                    <span>{formatTime(msg.created_at)}</span>
+                                                                    {isMe && (
+                                                                        msg.is_read
+                                                                            ? <CheckCheck size={14} color="#53bdeb" />
+                                                                            : <CheckCheck size={14} color="#9ca3af" />
+                                                                    )}
+                                                                </div>
+                                                                {/* Reaction display badges - P2P */}
+                                                                {msg.reactions && msg.reactions.length > 0 && (() => {
+                                                                    const currentUserId = user.id || user._id;
+                                                                    const grouped = msg.reactions.reduce((acc, r) => {
+                                                                        if (!acc[r.emoji]) acc[r.emoji] = { count: 0, reactedByMe: false, userNames: [] };
+                                                                        acc[r.emoji].count++;
+                                                                        const isMeReaction = String(r.user_id) === String(currentUserId);
+                                                                        if (isMeReaction) acc[r.emoji].reactedByMe = true;
+
+                                                                        const uName = isMeReaction ? 'You' : (users.find(u => String(u._id || u.id) === String(r.user_id))?.name || 'User');
+                                                                        if (!acc[r.emoji].userNames.includes(uName)) {
+                                                                            acc[r.emoji].userNames.push(uName);
+                                                                        }
+                                                                        return acc;
+                                                                    }, {});
+                                                                    return (
+                                                                        <div className={`wa-reaction-badges ${isMe ? 'wa-reaction-badges-sent' : 'wa-reaction-badges-recv'}`}>
+                                                                            {Object.entries(grouped).map(([emoji, { count, reactedByMe, userNames }]) => (
+                                                                                <span
+                                                                                    key={emoji}
+                                                                                    className={`wa-reaction-badge ${reactedByMe ? 'reacted' : ''}`}
+                                                                                    onClick={(e) => { e.stopPropagation(); const bubble = e.currentTarget.closest('.wa-message-bubble') || e.currentTarget.closest('.wa-msg-sent') || e.currentTarget.closest('.wa-msg-recv'); setReactionDetails({ msg, isGroup: false, rect: (bubble || e.currentTarget).getBoundingClientRect() }); }}
+                                                                                >
+                                                                                    {emoji}{count > 1 && <span className="wa-reaction-count">{count}</span>}
+                                                                                </span>
+                                                                            ))}
+                                                                        </div>
+                                                                    );
+                                                                })()}
+                                                            </div>
                                                         </div>
-                                                    </div>
                                                     </React.Fragment>
                                                 );
                                             })}
@@ -16059,14 +16417,15 @@ export default function Chat() {
                                                                     className="wa-attachment-floating-hint"
                                                                     style={{ left: `${attachmentHintPos.x}px`, top: `${attachmentHintPos.y}px` }}
                                                                 >
-                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)
+                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PPTX, PDF, Excel, Video (up to 1GB)
                                                                 </div>
                                                             )}
                                                             <input
                                                                 type="file"
                                                                 ref={fileInputRef}
+                                                                multiple
                                                                 style={{ display: 'none' }}
-                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
+                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.mp4,.avi,.mkv,.mov,.webm,video/*,*/*"
                                                                 onChange={handleFileSelect}
                                                             />
                                                             <button
@@ -16085,7 +16444,7 @@ export default function Chat() {
                                                             {file && (
                                                                 <div className="wa-file-preview-badge">
                                                                     {file.name.substring(0, 15)}...
-                                                                    <button onClick={() => setFile(null)}>✕</button>
+                                                                    <button onClick={() => { setFile(null); setSelectedFiles([]); }}>✕</button>
                                                                 </div>
                                                             )}
                                                             <textarea
@@ -16538,80 +16897,80 @@ export default function Chat() {
                                                             {unreadSeparator}
                                                             <div key={msg._id} style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
                                                                 <div style={{
-                                                                background: '#F3FDFE',
-                                                                borderRadius: '12px',
-                                                                padding: '24px',
-                                                                width: '100%',
-                                                                maxWidth: '430px',
-                                                                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1)',
-                                                                color: '#111b21',
-                                                                textAlign: 'center'
-                                                            }}>
-                                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', marginBottom: '24px' }}>
-                                                                    <div style={{ padding: '10px', background: '#e1f5fe', borderRadius: '50%', border: '2px solid #e1f5fe' }}>
-                                                                        <Users size={22} color="#0EA5BE" />
-                                                                    </div>
-                                                                    <ArrowRight size={22} color="#8696a0" />
-                                                                    <div style={{ padding: '10px', background: '#e1f5fe', borderRadius: '50%', border: '2px solid #e1f5fe' }}>
-                                                                        <Users size={22} color="#0EA5BE" />
-                                                                    </div>
-                                                                </div>
-                                                                <div style={{ fontSize: '17px', fontWeight: '500', marginBottom: '16px', lineHeight: '1.4' }}>
-                                                                    {content}
-                                                                </div>
-                                                                <ul style={{
-                                                                    textAlign: 'left',
-                                                                    listStyle: 'none',
-                                                                    padding: 0,
-                                                                    margin: '0 0 24px 0',
-                                                                    fontSize: '14.5px',
-                                                                    color: '#54656f',
-                                                                    lineHeight: '1.6'
+                                                                    background: '#F3FDFE',
+                                                                    borderRadius: '12px',
+                                                                    padding: '24px',
+                                                                    width: '100%',
+                                                                    maxWidth: '430px',
+                                                                    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1)',
+                                                                    color: '#111b21',
+                                                                    textAlign: 'center'
                                                                 }}>
-                                                                    <li style={{ display: 'flex', marginBottom: '8px', alignItems: 'flex-start' }}>
-                                                                        <span style={{ marginRight: '10px', marginTop: '2px' }}>•</span>
-                                                                        <span>Members in this group are now community members.</span>
-                                                                    </li>
-                                                                    <li style={{ display: 'flex', alignItems: 'flex-start' }}>
-                                                                        <span style={{ marginRight: '10px', marginTop: '2px' }}>•</span>
-                                                                        <span>Anyone in the community can join this group.</span>
-                                                                    </li>
-                                                                </ul>
-                                                                <div style={{ height: '1px', background: '#e9edef', margin: '0 -24px 20px -24px' }}></div>
-                                                                <div
-                                                                    onClick={async () => {
-                                                                        if (!commId) return;
-                                                                        try {
-                                                                            const token = localStorage.getItem('token');
-                                                                            const res = await axios.get(`/api/communities/my-communities`, {
-                                                                                headers: { 'Authorization': `Bearer ${token}` }
-                                                                            });
-                                                                            const comm = (res.data || []).find(c => String(c._id || c.id) === String(commId));
-                                                                            if (comm) {
-                                                                                const id = String(comm._id || comm.id);
-                                                                                const pinnedKey = `pinnedCommunities_${user.id || user._id}`;
-                                                                                const pinnedIds = JSON.parse(localStorage.getItem(pinnedKey)) || [];
-                                                                                const formatted = { ...comm, id, isPinned: pinnedIds.includes(id) };
+                                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', marginBottom: '24px' }}>
+                                                                        <div style={{ padding: '10px', background: '#e1f5fe', borderRadius: '50%', border: '2px solid #e1f5fe' }}>
+                                                                            <Users size={22} color="#0EA5BE" />
+                                                                        </div>
+                                                                        <ArrowRight size={22} color="#8696a0" />
+                                                                        <div style={{ padding: '10px', background: '#e1f5fe', borderRadius: '50%', border: '2px solid #e1f5fe' }}>
+                                                                            <Users size={22} color="#0EA5BE" />
+                                                                        </div>
+                                                                    </div>
+                                                                    <div style={{ fontSize: '17px', fontWeight: '500', marginBottom: '16px', lineHeight: '1.4' }}>
+                                                                        {content}
+                                                                    </div>
+                                                                    <ul style={{
+                                                                        textAlign: 'left',
+                                                                        listStyle: 'none',
+                                                                        padding: 0,
+                                                                        margin: '0 0 24px 0',
+                                                                        fontSize: '14.5px',
+                                                                        color: '#54656f',
+                                                                        lineHeight: '1.6'
+                                                                    }}>
+                                                                        <li style={{ display: 'flex', marginBottom: '8px', alignItems: 'flex-start' }}>
+                                                                            <span style={{ marginRight: '10px', marginTop: '2px' }}>•</span>
+                                                                            <span>Members in this group are now community members.</span>
+                                                                        </li>
+                                                                        <li style={{ display: 'flex', alignItems: 'flex-start' }}>
+                                                                            <span style={{ marginRight: '10px', marginTop: '2px' }}>•</span>
+                                                                            <span>Anyone in the community can join this group.</span>
+                                                                        </li>
+                                                                    </ul>
+                                                                    <div style={{ height: '1px', background: '#e9edef', margin: '0 -24px 20px -24px' }}></div>
+                                                                    <div
+                                                                        onClick={async () => {
+                                                                            if (!commId) return;
+                                                                            try {
+                                                                                const token = localStorage.getItem('token');
+                                                                                const res = await axios.get(`/api/communities/my-communities`, {
+                                                                                    headers: { 'Authorization': `Bearer ${token}` }
+                                                                                });
+                                                                                const comm = (res.data || []).find(c => String(c._id || c.id) === String(commId));
+                                                                                if (comm) {
+                                                                                    const id = String(comm._id || comm.id);
+                                                                                    const pinnedKey = `pinnedCommunities_${user.id || user._id}`;
+                                                                                    const pinnedIds = JSON.parse(localStorage.getItem(pinnedKey)) || [];
+                                                                                    const formatted = { ...comm, id, isPinned: pinnedIds.includes(id) };
 
-                                                                                setSelectedCommunity(formatted);
-                                                                                setIsCommunityInfoOpen(true);
+                                                                                    setSelectedCommunity(formatted);
+                                                                                    setIsCommunityInfoOpen(true);
+                                                                                }
+                                                                            } catch (e) {
+                                                                                console.error('Failed to open community from link:', e);
                                                                             }
-                                                                        } catch (e) {
-                                                                            console.error('Failed to open community from link:', e);
-                                                                        }
-                                                                    }}
-                                                                    style={{
-                                                                        color: '#0EA5BE',
-                                                                        fontWeight: '600',
-                                                                        fontSize: '14px',
-                                                                        cursor: 'pointer',
-                                                                        display: 'inline-block',
-                                                                        transition: 'color 0.2s'
-                                                                    }}
-                                                                    className="wa-manage-community-text"
-                                                                >
-                                                                    Manage the community
-                                                                </div>
+                                                                        }}
+                                                                        style={{
+                                                                            color: '#0EA5BE',
+                                                                            fontWeight: '600',
+                                                                            fontSize: '14px',
+                                                                            cursor: 'pointer',
+                                                                            display: 'inline-block',
+                                                                            transition: 'color 0.2s'
+                                                                        }}
+                                                                        className="wa-manage-community-text"
+                                                                    >
+                                                                        Manage the community
+                                                                    </div>
                                                                 </div>
                                                             </div>
                                                         </React.Fragment>
@@ -16623,676 +16982,676 @@ export default function Chat() {
                                                         {unreadSeparator}
                                                         <div
                                                             key={msg._id}
-                                                        id={`msg-${msg._id}`}
-                                                        className={`wa-message-container ${isForwardingMode ? 'forward-mode' : ''}`}
-                                                        onDoubleClick={() => { if (!isForwardingMode) setReplyingTo(msg); }}
-                                                        onClick={() => {
-                                                            if (isForwardingMode) {
-                                                                const isSelected = forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id));
-                                                                if (isSelected) {
-                                                                    setForwardSelectedMsgs(prev => prev.filter(m => String(m._id || m.id) !== String(msg._id || msg.id)));
-                                                                } else {
-                                                                    setForwardSelectedMsgs(prev => [...prev, msg]);
+                                                            id={`msg-${msg._id}`}
+                                                            className={`wa-message-container ${isForwardingMode ? 'forward-mode' : ''}`}
+                                                            onDoubleClick={() => { if (!isForwardingMode) setReplyingTo(msg); }}
+                                                            onClick={() => {
+                                                                if (isForwardingMode) {
+                                                                    const isSelected = forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id));
+                                                                    if (isSelected) {
+                                                                        setForwardSelectedMsgs(prev => prev.filter(m => String(m._id || m.id) !== String(msg._id || msg.id)));
+                                                                    } else {
+                                                                        setForwardSelectedMsgs(prev => [...prev, msg]);
+                                                                    }
                                                                 }
-                                                            }
-                                                        }}
-                                                    >
-                                                        {isForwardingMode && (
-                                                            <div className="wa-msg-checkbox">
-                                                                {forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ?
-                                                                    <CheckSquare size={24} color="white" fill="#0EA5BE" /> :
-                                                                    <div className="wa-checkbox-empty" />
-                                                                }
-                                                            </div>
-                                                        )}
-                                                        <div
-                                                            className={`wa-message-bubble ${isMe ? 'wa-msg-sent' : 'wa-msg-rec'}`}
-                                                            onContextMenu={(e) => { if (!isForwardingMode) { e.preventDefault(); handleMsgDropdownOpen(e, msg._id, msg); } }}
+                                                            }}
                                                         >
-                                                            {!isForwardingMode && (
-                                                                <div className={`wa-dropdown-trigger msg-trigger ${(openDropdown?.type === "msg" && openDropdown?.id === msg._id) ? "active" : ""}`} onClick={(e) => handleMsgDropdownOpen(e, msg._id, msg)}>
-                                                                    <ChevronDown size={18} />
+                                                            {isForwardingMode && (
+                                                                <div className="wa-msg-checkbox">
+                                                                    {forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ?
+                                                                        <CheckSquare size={24} color="white" fill="#0EA5BE" /> :
+                                                                        <div className="wa-checkbox-empty" />
+                                                                    }
                                                                 </div>
                                                             )}
-
-                                                            {msg.reply_to && (
-                                                                <div className="wa-reply-context">
-                                                                    <div className="wa-reply-context-name">
-                                                                        {isMeMsg(msg.reply_to) ? 'You' : (msg.reply_to.sender_id?.name || 'User')}
+                                                            <div
+                                                                className={`wa-message-bubble ${isMe ? 'wa-msg-sent' : 'wa-msg-rec'}`}
+                                                                onContextMenu={(e) => { if (!isForwardingMode) { e.preventDefault(); handleMsgDropdownOpen(e, msg._id, msg); } }}
+                                                            >
+                                                                {!isForwardingMode && (
+                                                                    <div className={`wa-dropdown-trigger msg-trigger ${(openDropdown?.type === "msg" && openDropdown?.id === msg._id) ? "active" : ""}`} onClick={(e) => handleMsgDropdownOpen(e, msg._id, msg)}>
+                                                                        <ChevronDown size={18} />
                                                                     </div>
-                                                                    <div className="wa-reply-context-text">
-                                                                        {(() => {
-                                                                            if (msg.reply_to.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
-                                                                            if (msg.reply_to.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
-                                                                            if (msg.reply_to.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>📊 <span>{msg.reply_to.poll?.question || 'Poll'}</span></span>;
-                                                                            if (msg.reply_to.type === 'voice' || msg.reply_to.type === 'audio') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mic size={14} color="#027EB5" /> <span>Voice message</span></span>;
-                                                                            if (msg.reply_to.type === 'contact') {
-                                                                                try {
-                                                                                    const parsed = JSON.parse(msg.reply_to.content);
-                                                                                    const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
-                                                                                    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
-                                                                                } catch (e) {
-                                                                                    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+                                                                )}
+
+                                                                {msg.reply_to && (
+                                                                    <div className="wa-reply-context">
+                                                                        <div className="wa-reply-context-name">
+                                                                            {isMeMsg(msg.reply_to) ? 'You' : (msg.reply_to.sender_id?.name || 'User')}
+                                                                        </div>
+                                                                        <div className="wa-reply-context-text">
+                                                                            {(() => {
+                                                                                if (msg.reply_to.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
+                                                                                if (msg.reply_to.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
+                                                                                if (msg.reply_to.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>📊 <span>{msg.reply_to.poll?.question || 'Poll'}</span></span>;
+                                                                                if (msg.reply_to.type === 'voice' || msg.reply_to.type === 'audio') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mic size={14} color="#027EB5" /> <span>Voice message</span></span>;
+                                                                                if (msg.reply_to.type === 'contact') {
+                                                                                    try {
+                                                                                        const parsed = JSON.parse(msg.reply_to.content);
+                                                                                        const txt = Array.isArray(parsed) ? `${parsed.length} contacts` : (parsed.name || parsed.mobile || 'Contact');
+                                                                                        return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>{txt}</span></span>;
+                                                                                    } catch (e) {
+                                                                                        return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon size={14} color="#027EB5" /> <span>Contact</span></span>;
+                                                                                    }
                                                                                 }
-                                                                            }
-                                                                            return msg.reply_to.content || '';
-                                                                        })()}
+                                                                                return msg.reply_to.content || '';
+                                                                            })()}
+                                                                        </div>
                                                                     </div>
-                                                                </div>
-                                                            )}
+                                                                )}
 
-                                                            {!isMe && <div style={{ fontSize: 12, fontWeight: 700, color: '#0EA5BE', marginBottom: 4 }}>{senderName}</div>}
+                                                                {!isMe && <div style={{ fontSize: 12, fontWeight: 700, color: '#0EA5BE', marginBottom: 4 }}>{senderName}</div>}
 
-                                                            {msg.is_deleted_by_admin ? (
-                                                                <div className="wa-deleted-tag">
-                                                                    <Trash2 size={16} /> {t('chat_window.deleted_admin')}
-                                                                </div>
-                                                            ) : (msg.deleted_for && msg.deleted_for.includes(user.id || user._id)) ? (
-                                                                <div className="wa-deleted-tag">
-                                                                    <XCircle size={16} /> {t('chat_window.deleted_user_me')}
-                                                                </div>
-                                                            ) : msg.is_deleted_by_user ? (
-                                                                <div className="wa-deleted-tag">
-                                                                    <XCircle size={16} /> {t('chat_window.deleted_user_other')}
-                                                                </div>
-                                                            ) : (
-                                                                <>
-                                                                    {msg.type === 'image' && msg.file_path && (
-                                                                        <div className="wa-msg-image-wrapper" onClick={() => setViewingImage(msg)}>
-                                                                            <img src={msg.file_path} alt="msg" className="wa-msg-image" />
-                                                                        </div>
-                                                                    )}
+                                                                {msg.is_deleted_by_admin ? (
+                                                                    <div className="wa-deleted-tag">
+                                                                        <Trash2 size={16} /> {t('chat_window.deleted_admin')}
+                                                                    </div>
+                                                                ) : (msg.deleted_for && msg.deleted_for.includes(user.id || user._id)) ? (
+                                                                    <div className="wa-deleted-tag">
+                                                                        <XCircle size={16} /> {t('chat_window.deleted_user_me')}
+                                                                    </div>
+                                                                ) : msg.is_deleted_by_user ? (
+                                                                    <div className="wa-deleted-tag">
+                                                                        <XCircle size={16} /> {t('chat_window.deleted_user_other')}
+                                                                    </div>
+                                                                ) : (
+                                                                    <>
+                                                                        {msg.type === 'image' && msg.file_path && (
+                                                                            <div className="wa-msg-image-wrapper" onClick={() => setViewingImage(msg)}>
+                                                                                <img src={msg.file_path} alt="msg" className="wa-msg-image" />
+                                                                            </div>
+                                                                        )}
 
-                                                                    {msg.type === 'video' && msg.file_path && (
-                                                                        <div className="wa-msg-video-wrapper" onClick={() => setViewingImage(msg)}>
-                                                                            <video src={msg.file_path} controls className="wa-msg-video" />
-                                                                        </div>
-                                                                    )}
+                                                                        {msg.type === 'video' && msg.file_path && (
+                                                                            <div className="wa-msg-video-wrapper" onClick={() => setViewingImage(msg)}>
+                                                                                <video src={msg.file_path} controls className="wa-msg-video" />
+                                                                            </div>
+                                                                        )}
 
-                                                                    {msg.type === 'file' && msg.file_path && (
-                                                                        isDocument(msg.fileName) ? (
-                                                                            <div className="wa-msg-document">
-                                                                                {msg.thumbnail_path && (
-                                                                                    <div className="wa-msg-document-preview">
-                                                                                        <img src={msg.thumbnail_path} alt="document preview" />
-                                                                                    </div>
-                                                                                )}
-                                                                                <div className="wa-msg-document-details">
-                                                                                    <div className="wa-msg-document-icon-wrapper">
-                                                                                        {getDocIcon(msg.fileName)}
-                                                                                    </div>
-                                                                                    <div className="wa-msg-document-info">
-                                                                                        <div className="wa-msg-document-name" title={msg.fileName}>{msg.fileName || 'document.pdf'}</div>
-                                                                                        <div className="wa-msg-document-meta">
-                                                                                            {(msg.pageCount > 0) ? `${msg.pageCount} ${msg.pageCount === 1 ? 'page' : 'pages'} • ` : ''}
-                                                                                            {msg.fileName?.split('.').pop().toUpperCase()} • {formatFileSize(msg.fileSize)}
+                                                                        {msg.type === 'file' && msg.file_path && (
+                                                                            isDocument(msg.fileName) ? (
+                                                                                <div className="wa-msg-document">
+                                                                                    {msg.thumbnail_path && (
+                                                                                        <div className="wa-msg-document-preview">
+                                                                                            <img src={msg.thumbnail_path} alt="document preview" />
                                                                                         </div>
-                                                                                    </div>
-                                                                                </div>
-                                                                                <div className="wa-msg-document-actions">
-                                                                                    <button className="wa-msg-document-action-btn" onClick={() => handleOpenFile(msg.file_path, msg.fileName)}>
-                                                                                        Open
-                                                                                    </button>
-                                                                                    <button className="wa-msg-document-action-btn" onClick={() => handleDownload(msg.file_path, msg.fileName)}>
-                                                                                        Save as...
-                                                                                    </button>
-                                                                                </div>
-                                                                            </div>
-                                                                        ) : (
-                                                                            <div className="wa-msg-file" onClick={() => handleDownload(msg.file_path, msg.fileName)}>
-                                                                                <FileText size={32} color="#8696a0" />
-                                                                                <div className="wa-msg-file-info">
-                                                                                    <div className="wa-msg-file-name">{msg.fileName || 'document.pdf'}</div>
-                                                                                    <div className="wa-msg-file-meta">{formatFileSize(msg.fileSize)} • {msg.fileName?.split('.').pop().toUpperCase()}</div>
-                                                                                </div>
-                                                                                <Download size={20} color="#8696a0" className="wa-file-download-icon" />
-                                                                            </div>
-                                                                        )
-                                                                    )}
-
-                                                                    {/* Audio Rendering */}
-                                                                    {msg.type === 'audio' && (
-                                                                        <div
-                                                                            id={`audio-${msg._id}`}
-                                                                            className={`wa-voice-bubble-content ${String(playingAudioId) === String(msg._id || msg.id) ? 'wa-glassy-playing' : ''} ${msg.is_view_once ? 'view-once' : ''}`}
-                                                                            onClick={(e) => {
-                                                                                if (isForwardingMode) return;
-                                                                                e.stopPropagation();
-                                                                                handlePlayAudio(msg);
-                                                                            }}
-                                                                            style={{
-                                                                                cursor: (msg.is_view_once && (msg.is_viewed || selfPlayedMsgs.has(String(msg._id)))) ? 'default' : 'pointer',
-                                                                                background: 'rgba(255, 255, 255, 0.82)',
-                                                                                backdropFilter: 'blur(20px)',
-                                                                                WebkitBackdropFilter: 'blur(20px)',
-                                                                                borderRadius: '16px',
-                                                                                border: '1px solid rgba(2, 126, 181, 0.18)',
-                                                                                boxShadow: '0 4px 20px rgba(2, 126, 181, 0.06)',
-                                                                                padding: '10px 14px',
-                                                                                transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-                                                                                display: 'flex',
-                                                                                alignItems: 'center',
-                                                                                gap: isMobile ? '8px' : '12px',
-                                                                                minWidth: isMobile ? '200px' : '280px'
-                                                                            }}
-                                                                        >
-                                                                            {!msg.is_view_once ? (
-                                                                                <>
-                                                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
-                                                                                        <div className="wa-voice-bubble-avatar" style={{ position: 'relative', margin: 0 }}>
-                                                                                            {String(playingAudioId) === String(msg._id || msg.id) ? (
-                                                                                                <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
-                                                                                                    {msg.is_view_once ? viewOncePlaybackSpeed : playbackSpeed}x
-                                                                                                </div>
-                                                                                            ) : (
-                                                                                                <>
-                                                                                                    {isMeMsg(msg) ? (
-                                                                                                        ((userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo) ? (<img src={userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo} alt="me" style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} />) : (<div className="wa-avatar-letter" style={{ display: "flex", width: "100%", height: "100%", justifyContent: "center", alignItems: "center", fontSize: 13, background: "#dfe5e7", borderRadius: "50%", color: "#3b4a54", fontWeight: 600 }}>{(userData?.name || user?.name || "M")[0].toUpperCase()}</div>))
-                                                                                                    ) : (
-                                                                                                        ((msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar) ? (<img src={msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar} alt="user" style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} />) : (<div className="wa-avatar-letter" style={{ display: "flex", width: "100%", height: "100%", justifyContent: "center", alignItems: "center", fontSize: 13, background: "#dfe5e7", borderRadius: "50%", color: "#3b4a54", fontWeight: 600 }}>{(msg.sender_id?.name || "U")[0].toUpperCase()}</div>))
-                                                                                                    )}
-                                                                                                </>
-                                                                                            )}
-                                                                                            <div className="wa-voice-mic-badge">
-                                                                                                <Mic size={12} color={msg.is_read ? '#53bdeb' : '#8696a0'} />
+                                                                                    )}
+                                                                                    <div className="wa-msg-document-details">
+                                                                                        <div className="wa-msg-document-icon-wrapper">
+                                                                                            {getDocIcon(msg.fileName)}
+                                                                                        </div>
+                                                                                        <div className="wa-msg-document-info">
+                                                                                            <div className="wa-msg-document-name" title={msg.fileName}>{msg.fileName || 'document.pdf'}</div>
+                                                                                            <div className="wa-msg-document-meta">
+                                                                                                {(msg.pageCount > 0) ? `${msg.pageCount} ${msg.pageCount === 1 ? 'page' : 'pages'} • ` : ''}
+                                                                                                {msg.fileName?.split('.').pop().toUpperCase()} • {formatFileSize(msg.fileSize)}
                                                                                             </div>
                                                                                         </div>
-                                                                                        <span style={{
-                                                                                            color: (String(playingAudioId) === String(msg._id || msg.id)) ? '#0EA5BE' : '#8696a0',
-                                                                                            fontSize: '11px',
-                                                                                            fontWeight: 500,
-                                                                                            marginTop: '2px'
-                                                                                        }}>
-                                                                                            {String(playingAudioId) === String(msg._id || msg.id) ? formatVoiceTime(viewOnceElapsed) : formatVoiceTime(msg.duration || 0)}
-                                                                                        </span>
                                                                                     </div>
-                                                                                    <div className="wa-voice-bubble-player" style={{ flex: 1, minWidth: 0 }}>
-                                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                                                            <button className="wa-voice-play-btn" style={{ background: 'none', border: 'none', color: (String(playingAudioId) === String(msg._id || msg.id)) ? '#0EA5BE' : '#54656f', padding: 0, cursor: 'pointer', transition: 'transform 0.2s' }}>
-                                                                                                {String(playingAudioId) === String(msg._id || msg.id) ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
-                                                                                            </button>
-                                                                                            <div
-                                                                                                className="wa-voice-waveform-static"
-                                                                                                style={{
-                                                                                                    display: 'flex',
-                                                                                                    alignItems: 'center',
-                                                                                                    height: '24px',
-                                                                                                    position: 'relative',
-                                                                                                    cursor: 'pointer',
-                                                                                                    outline: 'none',
-                                                                                                    width: '144px',
-                                                                                                    flexShrink: 0,
-                                                                                                    overflow: 'hidden',
-                                                                                                    padding: '0 2px'
-                                                                                                }}
-                                                                                                onMouseDown={(e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    const rect = e.currentTarget.getBoundingClientRect();
-                                                                                                    const updateSeek = (moveEvent) => {
-                                                                                                        const x = moveEvent.clientX - rect.left;
-                                                                                                        const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
-                                                                                                        if (String(playingAudioId) === String(msg._id || msg.id) && audioInstanceRef.current) {
-                                                                                                            audioInstanceRef.current.currentTime = (percent / 100) * (msg.duration || 1);
-                                                                                                        } else {
-                                                                                                            handlePlayAudio(msg, (percent / 100) * (msg.duration || 1));
-                                                                                                        }
-                                                                                                    };
-                                                                                                    const onMouseMove = (moveEvent) => updateSeek(moveEvent);
-                                                                                                    const onMouseUp = () => {
-                                                                                                        window.removeEventListener('mousemove', onMouseMove);
-                                                                                                        window.removeEventListener('mouseup', onMouseUp);
-                                                                                                    };
-                                                                                                    window.addEventListener('mousemove', onMouseMove);
-                                                                                                    window.addEventListener('mouseup', onMouseUp);
-                                                                                                    updateSeek(e);
-                                                                                                }}
-                                                                                            >
-                                                                                                {/* WAVEFORM BARS BASES (GRAY) */}
-                                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '3px', width: '100%', justifyContent: 'space-between', opacity: 0.3 }}>
-                                                                                                    {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
-                                                                                                        <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#8696a0', borderRadius: '4px' }} />
-                                                                                                    ))}
-                                                                                                </div>
-
-                                                                                                {/* WAVEFORM PROGRESS (BLUE) - SMOOTH CLIPPING */}
-                                                                                                <div style={{
-                                                                                                    display: 'flex',
-                                                                                                    alignItems: 'center',
-                                                                                                    gap: '3px',
-                                                                                                    width: '100%',
-                                                                                                    justifyContent: 'space-between',
-                                                                                                    position: 'absolute',
-                                                                                                    left: 2,
-                                                                                                    right: 2,
-                                                                                                    clipPath: `inset(0 ${100 - ((String(playingAudioId) === String(msg._id || msg.id) ? viewOnceElapsed : 0) / (msg.duration || 1)) * 100}% 0 0)`,
-                                                                                                    transition: String(playingAudioId) === String(msg._id || msg.id) ? 'none' : 'clip-path 0.3s ease'
-                                                                                                }}>
-                                                                                                    {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
-                                                                                                        <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#0EA5BE', borderRadius: '4px' }} />
-                                                                                                    ))}
-                                                                                                </div>
-
-                                                                                                {/* PLAYHEAD CIRCULAR DOT (THUMB) */}
-                                                                                                {String(playingAudioId) === String(msg._id || msg.id) && (
-                                                                                                    <div style={{
-                                                                                                        position: 'absolute',
-                                                                                                        left: `${(viewOnceElapsed / (msg.duration || 1)) * 100}%`,
-                                                                                                        width: '10px',
-                                                                                                        height: '10px',
-                                                                                                        backgroundColor: '#0EA5BE',
-                                                                                                        borderRadius: '50%',
-                                                                                                        transform: 'translate(-50%, -50%)',
-                                                                                                        top: '50%',
-                                                                                                        zIndex: 11,
-                                                                                                        boxShadow: '0 0 4px rgba(2, 126, 181, 0.4)'
-                                                                                                    }} />
-                                                                                                )}
-                                                                                            </div>
-                                                                                        </div>
-                                                                                        <div className="wa-voice-meta-row" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: '2px' }}>
-                                                                                        </div>
+                                                                                    <div className="wa-msg-document-actions">
+                                                                                        <button className="wa-msg-document-action-btn" onClick={() => handleOpenFile(msg.file_path, msg.fileName)}>
+                                                                                            Open
+                                                                                        </button>
+                                                                                        <button className="wa-msg-document-action-btn" onClick={() => handleDownload(msg.file_path, msg.fileName)}>
+                                                                                            Save as...
+                                                                                        </button>
                                                                                     </div>
-                                                                                </>
+                                                                                </div>
                                                                             ) : (
-                                                                                <div style={{
+                                                                                <div className="wa-msg-file" onClick={() => handleDownload(msg.file_path, msg.fileName)}>
+                                                                                    <FileText size={32} color="#8696a0" />
+                                                                                    <div className="wa-msg-file-info">
+                                                                                        <div className="wa-msg-file-name">{msg.fileName || 'document.pdf'}</div>
+                                                                                        <div className="wa-msg-file-meta">{formatFileSize(msg.fileSize)} • {msg.fileName?.split('.').pop().toUpperCase()}</div>
+                                                                                    </div>
+                                                                                    <Download size={20} color="#8696a0" className="wa-file-download-icon" />
+                                                                                </div>
+                                                                            )
+                                                                        )}
+
+                                                                        {/* Audio Rendering */}
+                                                                        {msg.type === 'audio' && (
+                                                                            <div
+                                                                                id={`audio-${msg._id}`}
+                                                                                className={`wa-voice-bubble-content ${String(playingAudioId) === String(msg._id || msg.id) ? 'wa-glassy-playing' : ''} ${msg.is_view_once ? 'view-once' : ''}`}
+                                                                                onClick={(e) => {
+                                                                                    if (isForwardingMode) return;
+                                                                                    e.stopPropagation();
+                                                                                    handlePlayAudio(msg);
+                                                                                }}
+                                                                                style={{
+                                                                                    cursor: (msg.is_view_once && (msg.is_viewed || selfPlayedMsgs.has(String(msg._id)))) ? 'default' : 'pointer',
+                                                                                    background: 'rgba(255, 255, 255, 0.82)',
+                                                                                    backdropFilter: 'blur(20px)',
+                                                                                    WebkitBackdropFilter: 'blur(20px)',
+                                                                                    borderRadius: '16px',
+                                                                                    border: '1px solid rgba(2, 126, 181, 0.18)',
+                                                                                    boxShadow: '0 4px 20px rgba(2, 126, 181, 0.06)',
+                                                                                    padding: '10px 14px',
+                                                                                    transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
                                                                                     display: 'flex',
                                                                                     alignItems: 'center',
-                                                                                    gap: '12px',
-                                                                                    padding: '8px 12px',
-                                                                                    minWidth: '180px'
-                                                                                }}>
+                                                                                    gap: isMobile ? '8px' : '12px',
+                                                                                    minWidth: isMobile ? '200px' : '280px'
+                                                                                }}
+                                                                            >
+                                                                                {!msg.is_view_once ? (
+                                                                                    <>
+                                                                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+                                                                                            <div className="wa-voice-bubble-avatar" style={{ position: 'relative', margin: 0 }}>
+                                                                                                {String(playingAudioId) === String(msg._id || msg.id) ? (
+                                                                                                    <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
+                                                                                                        {msg.is_view_once ? viewOncePlaybackSpeed : playbackSpeed}x
+                                                                                                    </div>
+                                                                                                ) : (
+                                                                                                    <>
+                                                                                                        {isMeMsg(msg) ? (
+                                                                                                            ((userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo) ? (<img src={userData?.image || user?.profile_pic || user?.avatar || user?.profile_photo} alt="me" style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} />) : (<div className="wa-avatar-letter" style={{ display: "flex", width: "100%", height: "100%", justifyContent: "center", alignItems: "center", fontSize: 13, background: "#dfe5e7", borderRadius: "50%", color: "#3b4a54", fontWeight: 600 }}>{(userData?.name || user?.name || "M")[0].toUpperCase()}</div>))
+                                                                                                        ) : (
+                                                                                                            ((msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar) ? (<img src={msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar} alt="user" style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} />) : (<div className="wa-avatar-letter" style={{ display: "flex", width: "100%", height: "100%", justifyContent: "center", alignItems: "center", fontSize: 13, background: "#dfe5e7", borderRadius: "50%", color: "#3b4a54", fontWeight: 600 }}>{(msg.sender_id?.name || "U")[0].toUpperCase()}</div>))
+                                                                                                        )}
+                                                                                                    </>
+                                                                                                )}
+                                                                                                <div className="wa-voice-mic-badge">
+                                                                                                    <Mic size={12} color={msg.is_read ? '#53bdeb' : '#8696a0'} />
+                                                                                                </div>
+                                                                                            </div>
+                                                                                            <span style={{
+                                                                                                color: (String(playingAudioId) === String(msg._id || msg.id)) ? '#0EA5BE' : '#8696a0',
+                                                                                                fontSize: '11px',
+                                                                                                fontWeight: 500,
+                                                                                                marginTop: '2px'
+                                                                                            }}>
+                                                                                                {String(playingAudioId) === String(msg._id || msg.id) ? formatVoiceTime(viewOnceElapsed) : formatVoiceTime(msg.duration || 0)}
+                                                                                            </span>
+                                                                                        </div>
+                                                                                        <div className="wa-voice-bubble-player" style={{ flex: 1, minWidth: 0 }}>
+                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                                                                <button className="wa-voice-play-btn" style={{ background: 'none', border: 'none', color: (String(playingAudioId) === String(msg._id || msg.id)) ? '#0EA5BE' : '#54656f', padding: 0, cursor: 'pointer', transition: 'transform 0.2s' }}>
+                                                                                                    {String(playingAudioId) === String(msg._id || msg.id) ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
+                                                                                                </button>
+                                                                                                <div
+                                                                                                    className="wa-voice-waveform-static"
+                                                                                                    style={{
+                                                                                                        display: 'flex',
+                                                                                                        alignItems: 'center',
+                                                                                                        height: '24px',
+                                                                                                        position: 'relative',
+                                                                                                        cursor: 'pointer',
+                                                                                                        outline: 'none',
+                                                                                                        width: '144px',
+                                                                                                        flexShrink: 0,
+                                                                                                        overflow: 'hidden',
+                                                                                                        padding: '0 2px'
+                                                                                                    }}
+                                                                                                    onMouseDown={(e) => {
+                                                                                                        e.stopPropagation();
+                                                                                                        const rect = e.currentTarget.getBoundingClientRect();
+                                                                                                        const updateSeek = (moveEvent) => {
+                                                                                                            const x = moveEvent.clientX - rect.left;
+                                                                                                            const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
+                                                                                                            if (String(playingAudioId) === String(msg._id || msg.id) && audioInstanceRef.current) {
+                                                                                                                audioInstanceRef.current.currentTime = (percent / 100) * (msg.duration || 1);
+                                                                                                            } else {
+                                                                                                                handlePlayAudio(msg, (percent / 100) * (msg.duration || 1));
+                                                                                                            }
+                                                                                                        };
+                                                                                                        const onMouseMove = (moveEvent) => updateSeek(moveEvent);
+                                                                                                        const onMouseUp = () => {
+                                                                                                            window.removeEventListener('mousemove', onMouseMove);
+                                                                                                            window.removeEventListener('mouseup', onMouseUp);
+                                                                                                        };
+                                                                                                        window.addEventListener('mousemove', onMouseMove);
+                                                                                                        window.addEventListener('mouseup', onMouseUp);
+                                                                                                        updateSeek(e);
+                                                                                                    }}
+                                                                                                >
+                                                                                                    {/* WAVEFORM BARS BASES (GRAY) */}
+                                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', width: '100%', justifyContent: 'space-between', opacity: 0.3 }}>
+                                                                                                        {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
+                                                                                                            <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#8696a0', borderRadius: '4px' }} />
+                                                                                                        ))}
+                                                                                                    </div>
+
+                                                                                                    {/* WAVEFORM PROGRESS (BLUE) - SMOOTH CLIPPING */}
+                                                                                                    <div style={{
+                                                                                                        display: 'flex',
+                                                                                                        alignItems: 'center',
+                                                                                                        gap: '3px',
+                                                                                                        width: '100%',
+                                                                                                        justifyContent: 'space-between',
+                                                                                                        position: 'absolute',
+                                                                                                        left: 2,
+                                                                                                        right: 2,
+                                                                                                        clipPath: `inset(0 ${100 - ((String(playingAudioId) === String(msg._id || msg.id) ? viewOnceElapsed : 0) / (msg.duration || 1)) * 100}% 0 0)`,
+                                                                                                        transition: String(playingAudioId) === String(msg._id || msg.id) ? 'none' : 'clip-path 0.3s ease'
+                                                                                                    }}>
+                                                                                                        {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
+                                                                                                            <div key={i} style={{ width: '3px', height: `${h}px`, backgroundColor: '#0EA5BE', borderRadius: '4px' }} />
+                                                                                                        ))}
+                                                                                                    </div>
+
+                                                                                                    {/* PLAYHEAD CIRCULAR DOT (THUMB) */}
+                                                                                                    {String(playingAudioId) === String(msg._id || msg.id) && (
+                                                                                                        <div style={{
+                                                                                                            position: 'absolute',
+                                                                                                            left: `${(viewOnceElapsed / (msg.duration || 1)) * 100}%`,
+                                                                                                            width: '10px',
+                                                                                                            height: '10px',
+                                                                                                            backgroundColor: '#0EA5BE',
+                                                                                                            borderRadius: '50%',
+                                                                                                            transform: 'translate(-50%, -50%)',
+                                                                                                            top: '50%',
+                                                                                                            zIndex: 11,
+                                                                                                            boxShadow: '0 0 4px rgba(2, 126, 181, 0.4)'
+                                                                                                        }} />
+                                                                                                    )}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                            <div className="wa-voice-meta-row" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: '2px' }}>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </>
+                                                                                ) : (
                                                                                     <div style={{
-                                                                                        width: '40px',
-                                                                                        height: '40px',
-                                                                                        borderRadius: '50%',
-                                                                                        background: '#f0f2f5',
                                                                                         display: 'flex',
                                                                                         alignItems: 'center',
-                                                                                        justifyContent: 'center',
-                                                                                        flexShrink: 0,
-                                                                                        position: 'relative'
+                                                                                        gap: '12px',
+                                                                                        padding: '8px 12px',
+                                                                                        minWidth: '180px'
                                                                                     }}>
-                                                                                        {String(playingAudioId) === String(msg._id || msg.id) ? (
-                                                                                            <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
-                                                                                                {viewOncePlaybackSpeed}x
-                                                                                            </div>
-                                                                                        ) : (
-                                                                                            <Mic size={20} color="#8696a0" />
-                                                                                        )}
-                                                                                    </div>
-                                                                                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                                                                         <div style={{
-                                                                                            fontSize: '16px',
-                                                                                            color: '#8696a0',
-                                                                                            fontWeight: '400'
-                                                                                        }}>
-                                                                                            Voice message
-                                                                                        </div>
-                                                                                        <div style={{
+                                                                                            width: '40px',
+                                                                                            height: '40px',
+                                                                                            borderRadius: '50%',
+                                                                                            background: '#f0f2f5',
                                                                                             display: 'flex',
                                                                                             alignItems: 'center',
-                                                                                            gap: '6px',
-                                                                                            fontSize: '14px',
-                                                                                            color: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#0EA5BE'
+                                                                                            justifyContent: 'center',
+                                                                                            flexShrink: 0,
+                                                                                            position: 'relative'
                                                                                         }}>
-                                                                                            <span className="wa-view-once-circle" style={{
-                                                                                                borderColor: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#0EA5BE',
-                                                                                                color: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#0EA5BE',
-                                                                                                width: '18px',
-                                                                                                height: '18px',
-                                                                                                fontSize: '10px',
-                                                                                                display: 'inline-flex'
-                                                                                            }}>1</span>
-                                                                                            <span>{(msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? 'Opened' : 'Voice message'}</span>
+                                                                                            {String(playingAudioId) === String(msg._id || msg.id) ? (
+                                                                                                <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
+                                                                                                    {viewOncePlaybackSpeed}x
+                                                                                                </div>
+                                                                                            ) : (
+                                                                                                <Mic size={20} color="#8696a0" />
+                                                                                            )}
                                                                                         </div>
-                                                                                    </div>
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                    )}
-
-
-
-                                                                    {(() => {
-                                                                        let lp = msg.link_preview;
-                                                                        const ytId = (msg.content && typeof msg.content === 'string') ? getYouTubeVideoId(msg.content) : null;
-                                                                        if ((!lp || !lp.title) && ytId) {
-                                                                            lp = { url: msg.content, title: 'YouTube Video', domain: 'youtube.com', image: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` };
-                                                                        }
-                                                                        if (!lp || !lp.title) return null;
-                                                                        return (
-                                                                            <div
-                                                                                className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''} ${((lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be'))) ? 'youtube' : ''}`}
-                                                                                onClick={(e) => { e.stopPropagation(); window.open(lp.url, '_blank'); }}
-                                                                                style={{ cursor: 'pointer', transition: 'none' }}
-                                                                            >
-                                                                                {lp.image && (
-                                                                                    <div className="wa-link-preview-image">
-                                                                                        <img src={lp.image} alt={lp.title} />
-                                                                                        {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) && (
-                                                                                            <div className="wa-link-preview-play-btn">
-                                                                                                <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
+                                                                                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                                                            <div style={{
+                                                                                                fontSize: '16px',
+                                                                                                color: '#8696a0',
+                                                                                                fontWeight: '400'
+                                                                                            }}>
+                                                                                                Voice message
                                                                                             </div>
-                                                                                        )}
+                                                                                            <div style={{
+                                                                                                display: 'flex',
+                                                                                                alignItems: 'center',
+                                                                                                gap: '6px',
+                                                                                                fontSize: '14px',
+                                                                                                color: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#0EA5BE'
+                                                                                            }}>
+                                                                                                <span className="wa-view-once-circle" style={{
+                                                                                                    borderColor: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#0EA5BE',
+                                                                                                    color: (msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? '#8696a0' : '#0EA5BE',
+                                                                                                    width: '18px',
+                                                                                                    height: '18px',
+                                                                                                    fontSize: '10px',
+                                                                                                    display: 'inline-flex'
+                                                                                                }}>1</span>
+                                                                                                <span>{(msg.is_viewed || (isMeMsg(msg) && selfPlayedMsgs.has(String(msg._id)))) ? 'Opened' : 'Voice message'}</span>
+                                                                                            </div>
+                                                                                        </div>
                                                                                     </div>
                                                                                 )}
-                                                                                <div className="wa-link-preview-content">
-                                                                                    <div className="wa-link-preview-title">{lp.title}</div>
-                                                                                    {lp.description && <div className="wa-link-preview-description">{lp.description}</div>}
-                                                                                    <div className="wa-link-preview-domain">
-                                                                                        {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) ? (
-                                                                                            <>
-                                                                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                                                                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ff0000" />
-                                                                                                </svg>
-                                                                                                <span style={{ color: '#ff0000', fontWeight: 'bold' }}>{lp.domain}</span>
-                                                                                            </>
-                                                                                        ) : (
-                                                                                            <>
-                                                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                                                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                                                                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                                                                                </svg>
-                                                                                                <span>{lp.domain}</span>
-                                                                                            </>
-                                                                                        )}
-                                                                                    </div>
-                                                                                </div>
                                                                             </div>
-                                                                        );
-                                                                    })()}
+                                                                        )}
 
-                                                                    {msg.type === 'contact' && (() => {
-                                                                        let cDataArray;
-                                                                        try {
-                                                                            const rawData = JSON.parse(msg.content);
-                                                                            cDataArray = Array.isArray(rawData) ? rawData : [rawData];
-                                                                        } catch (e) {
-                                                                            cDataArray = [{ name: 'Contact' }];
-                                                                        }
 
-                                                                        if (cDataArray.length > 1) {
+
+                                                                        {(() => {
+                                                                            let lp = msg.link_preview;
+                                                                            const ytId = (msg.content && typeof msg.content === 'string') ? getYouTubeVideoId(msg.content) : null;
+                                                                            if ((!lp || !lp.title) && ytId) {
+                                                                                lp = { url: msg.content, title: 'YouTube Video', domain: 'youtube.com', image: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` };
+                                                                            }
+                                                                            if (!lp || !lp.title) return null;
                                                                             return (
                                                                                 <div
-                                                                                    className="wa-contact-msg-card-multiple"
-                                                                                    onClick={(e) => { e.stopPropagation(); setViewingContact(cDataArray); }}
-                                                                                    style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '260px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}
+                                                                                    className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''} ${((lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be'))) ? 'youtube' : ''}`}
+                                                                                    onClick={(e) => { e.stopPropagation(); window.open(lp.url, '_blank'); }}
+                                                                                    style={{ cursor: 'pointer', transition: 'none' }}
                                                                                 >
-                                                                                    <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
-                                                                                        <div style={{ position: 'relative', width: 66, height: 44, marginRight: 12, flexShrink: 0 }}>
-                                                                                            <div className="wa-avatar" style={{ position: 'absolute', right: 0, zIndex: 1, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
-                                                                                                {cDataArray[1].image ? <img src={cDataArray[1].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                    {lp.image && (
+                                                                                        <div className="wa-link-preview-image">
+                                                                                            <img src={lp.image} alt={lp.title} />
+                                                                                            {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) && (
+                                                                                                <div className="wa-link-preview-play-btn">
+                                                                                                    <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
+                                                                                                </div>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    )}
+                                                                                    <div className="wa-link-preview-content">
+                                                                                        <div className="wa-link-preview-title">{lp.title}</div>
+                                                                                        {lp.description && <div className="wa-link-preview-description">{lp.description}</div>}
+                                                                                        <div className="wa-link-preview-domain">
+                                                                                            {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) ? (
+                                                                                                <>
+                                                                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                                                                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ff0000" />
+                                                                                                    </svg>
+                                                                                                    <span style={{ color: '#ff0000', fontWeight: 'bold' }}>{lp.domain}</span>
+                                                                                                </>
+                                                                                            ) : (
+                                                                                                <>
+                                                                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                                                                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                                                                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="#8696a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                                                                    </svg>
+                                                                                                    <span>{lp.domain}</span>
+                                                                                                </>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        })()}
+
+                                                                        {msg.type === 'contact' && (() => {
+                                                                            let cDataArray;
+                                                                            try {
+                                                                                const rawData = JSON.parse(msg.content);
+                                                                                cDataArray = Array.isArray(rawData) ? rawData : [rawData];
+                                                                            } catch (e) {
+                                                                                cDataArray = [{ name: 'Contact' }];
+                                                                            }
+
+                                                                            if (cDataArray.length > 1) {
+                                                                                return (
+                                                                                    <div
+                                                                                        className="wa-contact-msg-card-multiple"
+                                                                                        onClick={(e) => { e.stopPropagation(); setViewingContact(cDataArray); }}
+                                                                                        style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '260px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}
+                                                                                    >
+                                                                                        <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                                            <div style={{ position: 'relative', width: 66, height: 44, marginRight: 12, flexShrink: 0 }}>
+                                                                                                <div className="wa-avatar" style={{ position: 'absolute', right: 0, zIndex: 1, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                                                                    {cDataArray[1].image ? <img src={cDataArray[1].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                                </div>
+                                                                                                <div className="wa-avatar" style={{ position: 'absolute', left: 0, zIndex: 2, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
+                                                                                                    {cDataArray[0].image ? <img src={cDataArray[0].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                                </div>
                                                                                             </div>
-                                                                                            <div className="wa-avatar" style={{ position: 'absolute', left: 0, zIndex: 2, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
-                                                                                                {cDataArray[0].image ? <img src={cDataArray[0].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                            <div style={{ color: '#111b21', fontSize: '15px', fontWeight: 600, lineHeight: '1.3' }}>
+                                                                                                {cDataArray[0].name || cDataArray[0].mobile} and {cDataArray.length - 1} other contact{cDataArray.length > 2 ? 's' : ''}
                                                                                             </div>
                                                                                         </div>
-                                                                                        <div style={{ color: '#111b21', fontSize: '15px', fontWeight: 600, lineHeight: '1.3' }}>
-                                                                                            {cDataArray[0].name || cDataArray[0].mobile} and {cDataArray.length - 1} other contact{cDataArray.length > 2 ? 's' : ''}
+                                                                                        <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                                                            <button style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>
+                                                                                                View all
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                );
+                                                                            }
+
+                                                                            const cData = cDataArray[0];
+                                                                            return (
+                                                                                <div
+                                                                                    className="wa-contact-msg-card"
+                                                                                    onClick={(e) => { e.stopPropagation(); setViewingContact(cData); }}
+                                                                                    style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '240px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}
+                                                                                >
+                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                                        <div className="wa-avatar" style={{ width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                                            {cData.image ? <img src={cData.image} alt={cData.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                                                        </div>
+                                                                                        <div style={{ color: '#111b21', fontSize: '16px', fontWeight: 600 }}>
+                                                                                            {cData.name || 'Contact'}
                                                                                         </div>
                                                                                     </div>
                                                                                     <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
-                                                                                        <button style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>
-                                                                                            View all
+                                                                                        <button
+                                                                                            className="wa-contact-card-action"
+                                                                                            onClick={(e) => { e.stopPropagation(); handleUserSelect({ ...cData, id: cData._id }); }}
+                                                                                            style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+                                                                                        >
+                                                                                            Message
                                                                                         </button>
                                                                                     </div>
                                                                                 </div>
                                                                             );
-                                                                        }
+                                                                        })()}
 
-                                                                        const cData = cDataArray[0];
-                                                                        return (
-                                                                            <div
-                                                                                className="wa-contact-msg-card"
-                                                                                onClick={(e) => { e.stopPropagation(); setViewingContact(cData); }}
-                                                                                style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '240px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}
-                                                                            >
-                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
-                                                                                    <div className="wa-avatar" style={{ width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                                                        {cData.image ? <img src={cData.image} alt={cData.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
-                                                                                    </div>
-                                                                                    <div style={{ color: '#111b21', fontSize: '16px', fontWeight: 600 }}>
-                                                                                        {cData.name || 'Contact'}
-                                                                                    </div>
+                                                                        {msg.type === 'poll' && msg.poll && (
+                                                                            <div className="wa-poll-card" style={{ background: '#ffffff', borderRadius: '12px', padding: '15px', minWidth: '280px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                                <div style={{ paddingBottom: '10px', fontWeight: 'bold', color: '#111b21', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                                    <List size={20} color="#0EA5BE" />
+                                                                                    {msg.poll.question}
                                                                                 </div>
-                                                                                <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                                                                                <div style={{ color: '#8696a0', fontSize: '13px', marginBottom: '12px' }}>
+                                                                                    {msg.poll.allowMultipleAnswers ? 'Select one or more' : 'Select one'}
+                                                                                </div>
+                                                                                <div className="wa-poll-options" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                                                    {msg.poll.options.map((opt, idx) => {
+                                                                                        const totalVotes = msg.poll.options.reduce((sum, o) => sum + (o.voters?.length || 0), 0);
+                                                                                        const votes = opt.voters?.length || 0;
+                                                                                        const percentage = totalVotes === 0 ? 0 : Math.round((votes / totalVotes) * 100);
+                                                                                        const myId = String(user.id || user._id);
+                                                                                        const hasVotedOpt = (opt.voters || []).some(v => String(v) === myId || String(v?._id || v) === myId);
+                                                                                        const hasAnyVote = totalVotes > 0;
+
+                                                                                        return (
+                                                                                            <div
+                                                                                                key={idx}
+                                                                                                onClick={(e) => { e.stopPropagation(); handleVotePoll(msg, idx); }}
+                                                                                                style={{ cursor: 'pointer', position: 'relative', overflow: 'hidden', padding: '10px', borderRadius: '8px', border: hasVotedOpt ? '1px solid #0EA5BE' : '1px solid #e9edef', background: hasVotedOpt ? 'rgba(14, 165, 190, 0.05)' : '#ffffff', transition: 'all 0.2s' }}
+                                                                                            >
+                                                                                                {hasAnyVote && (
+                                                                                                    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${percentage}%`, background: 'rgba(14, 165, 190, 0.15)', zIndex: 1, transition: 'width 0.3s ease' }} />
+                                                                                                )}
+                                                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
+                                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px', color: '#111b21' }}>
+                                                                                                        <div style={{ width: '18px', height: '18px', borderRadius: msg.poll.allowMultipleAnswers ? '4px' : '50%', border: hasVotedOpt ? '2px solid #0EA5BE' : '2px solid #8696a0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                                                            {hasVotedOpt && <div style={{ width: '10px', height: '10px', borderRadius: msg.poll.allowMultipleAnswers ? '2px' : '50%', background: '#0EA5BE' }} />}
+                                                                                                        </div>
+                                                                                                        {opt.text}
+                                                                                                    </div>
+                                                                                                    {votes > 0 && <span style={{ fontSize: '12px', color: '#54656f', fontWeight: '500' }}>{votes}</span>}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        );
+                                                                                    })}
+                                                                                </div>
+                                                                                <div style={{ borderTop: '1px solid #e9edef', marginTop: '15px', paddingTop: '10px' }}>
                                                                                     <button
-                                                                                        className="wa-contact-card-action"
-                                                                                        onClick={(e) => { e.stopPropagation(); handleUserSelect({ ...cData, id: cData._id }); }}
-                                                                                        style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+                                                                                        onClick={(e) => { e.stopPropagation(); setPollDetails(msg.poll); setIsPollDetailsOpen(true); }}
+                                                                                        disabled={msg.poll.options.every(o => !(o.voters?.length > 0))}
+                                                                                        style={{ background: 'none', border: 'none', width: '100%', color: msg.poll.options.some(o => o.voters?.length > 0) ? '#0EA5BE' : '#8696a0', fontSize: '14px', fontWeight: 'bold', padding: '6px 0', cursor: msg.poll.options.some(o => o.voters?.length > 0) ? 'pointer' : 'default', transition: 'color 0.2s' }}
                                                                                     >
-                                                                                        Message
+                                                                                        View votes
                                                                                     </button>
                                                                                 </div>
                                                                             </div>
-                                                                        );
-                                                                    })()}
+                                                                        )}
 
-                                                                    {msg.type === 'poll' && msg.poll && (
-                                                                        <div className="wa-poll-card" style={{ background: '#ffffff', borderRadius: '12px', padding: '15px', minWidth: '280px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
-                                                                            <div style={{ paddingBottom: '10px', fontWeight: 'bold', color: '#111b21', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                                <List size={20} color="#0EA5BE" />
-                                                                                {msg.poll.question}
-                                                                            </div>
-                                                                            <div style={{ color: '#8696a0', fontSize: '13px', marginBottom: '12px' }}>
-                                                                                {msg.poll.allowMultipleAnswers ? 'Select one or more' : 'Select one'}
-                                                                            </div>
-                                                                            <div className="wa-poll-options" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                                                                {msg.poll.options.map((opt, idx) => {
-                                                                                    const totalVotes = msg.poll.options.reduce((sum, o) => sum + (o.voters?.length || 0), 0);
-                                                                                    const votes = opt.voters?.length || 0;
-                                                                                    const percentage = totalVotes === 0 ? 0 : Math.round((votes / totalVotes) * 100);
-                                                                                    const myId = String(user.id || user._id);
-                                                                                    const hasVotedOpt = (opt.voters || []).some(v => String(v) === myId || String(v?._id || v) === myId);
-                                                                                    const hasAnyVote = totalVotes > 0;
+                                                                        {msg.type === 'event' && msg.event && (() => {
+                                                                            const myId = String(user.id || user._id);
+                                                                            const myResponse = (msg.event.responses || []).find(r => String(r.user_id) === myId);
 
-                                                                                    return (
-                                                                                        <div
-                                                                                            key={idx}
-                                                                                            onClick={(e) => { e.stopPropagation(); handleVotePoll(msg, idx); }}
-                                                                                            style={{ cursor: 'pointer', position: 'relative', overflow: 'hidden', padding: '10px', borderRadius: '8px', border: hasVotedOpt ? '1px solid #0EA5BE' : '1px solid #e9edef', background: hasVotedOpt ? 'rgba(14, 165, 190, 0.05)' : '#ffffff', transition: 'all 0.2s' }}
-                                                                                        >
-                                                                                            {hasAnyVote && (
-                                                                                                <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${percentage}%`, background: 'rgba(14, 165, 190, 0.15)', zIndex: 1, transition: 'width 0.3s ease' }} />
-                                                                                            )}
-                                                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
-                                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px', color: '#111b21' }}>
-                                                                                                    <div style={{ width: '18px', height: '18px', borderRadius: msg.poll.allowMultipleAnswers ? '4px' : '50%', border: hasVotedOpt ? '2px solid #0EA5BE' : '2px solid #8696a0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                                                                        {hasVotedOpt && <div style={{ width: '10px', height: '10px', borderRadius: msg.poll.allowMultipleAnswers ? '2px' : '50%', background: '#0EA5BE' }} />}
-                                                                                                    </div>
-                                                                                                    {opt.text}
-                                                                                                </div>
-                                                                                                {votes > 0 && <span style={{ fontSize: '12px', color: '#54656f', fontWeight: '500' }}>{votes}</span>}
+                                                                            return (
+                                                                                <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '280px', maxWidth: '100%', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                                                                    <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
+                                                                                        <div style={{ display: 'flex', gap: '14px' }}>
+                                                                                            <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                                                <Calendar size={24} color="#0EA5BE" />
                                                                                             </div>
-                                                                                        </div>
-                                                                                    );
-                                                                                })}
-                                                                            </div>
-                                                                            <div style={{ borderTop: '1px solid #e9edef', marginTop: '15px', paddingTop: '10px' }}>
-                                                                                <button
-                                                                                    onClick={(e) => { e.stopPropagation(); setPollDetails(msg.poll); setIsPollDetailsOpen(true); }}
-                                                                                    disabled={msg.poll.options.every(o => !(o.voters?.length > 0))}
-                                                                                    style={{ background: 'none', border: 'none', width: '100%', color: msg.poll.options.some(o => o.voters?.length > 0) ? '#0EA5BE' : '#8696a0', fontSize: '14px', fontWeight: 'bold', padding: '6px 0', cursor: msg.poll.options.some(o => o.voters?.length > 0) ? 'pointer' : 'default', transition: 'color 0.2s' }}
-                                                                                >
-                                                                                    View votes
-                                                                                </button>
-                                                                            </div>
-                                                                        </div>
-                                                                    )}
-
-                                                                    {msg.type === 'event' && msg.event && (() => {
-                                                                        const myId = String(user.id || user._id);
-                                                                        const myResponse = (msg.event.responses || []).find(r => String(r.user_id) === myId);
-
-                                                                        return (
-                                                                            <div className="wa-event-card" onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }} style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '280px', maxWidth: '100%', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
-                                                                                <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
-                                                                                    <div style={{ display: 'flex', gap: '14px' }}>
-                                                                                        <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                                                                            <Calendar size={24} color="#0EA5BE" />
-                                                                                        </div>
-                                                                                        <div style={{ flex: 1, minWidth: 0 }}>
-                                                                                            <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{msg.event.name}</div>
-                                                                                            <div style={{ fontSize: '14px', color: '#667781' }}>
-                                                                                                {formatEventTimeString(msg.event.startDate, msg.event.startTime, msg.event.endDate, msg.event.endTime)}
-                                                                                            </div>
-                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
-                                                                                                <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
-                                                                                                    <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                                                                                                        {msg.event.participants?.length > 0 ? (
-                                                                                                            (() => {
-                                                                                                                const p = users.find(u => String(u._id || u.id) === String(msg.event.participants[0]));
-                                                                                                                return p && (p.avatar || p.image || p.profile_photo) ? <img src={p.avatar || p.image || p.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />;
-                                                                                                            })()
-                                                                                                        ) : (
-                                                                                                            <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />
-                                                                                                        )}
-                                                                                                    </div>
+                                                                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                                                                <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{msg.event.name}</div>
+                                                                                                <div style={{ fontSize: '14px', color: '#667781' }}>
+                                                                                                    {formatEventTimeString(msg.event.startDate, msg.event.startTime, msg.event.endDate, msg.event.endTime)}
                                                                                                 </div>
-                                                                                                <span 
-                                                                                                    onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }} 
-                                                                                                    style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500, cursor: 'pointer' }}>{msg.event.responses?.length || 0} responded</span>
+                                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+                                                                                                    <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
+                                                                                                        <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                                                                                            {msg.event.participants?.length > 0 ? (
+                                                                                                                (() => {
+                                                                                                                    const p = users.find(u => String(u._id || u.id) === String(msg.event.participants[0]));
+                                                                                                                    return p && (p.avatar || p.image || p.profile_photo) ? <img src={p.avatar || p.image || p.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />;
+                                                                                                                })()
+                                                                                                            ) : (
+                                                                                                                <UserIcon size={16} color="#8696a0" style={{ marginTop: '2px' }} />
+                                                                                                            )}
+                                                                                                        </div>
+                                                                                                    </div>
+                                                                                                    <span
+                                                                                                        onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
+                                                                                                        style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500, cursor: 'pointer' }}>{msg.event.responses?.length || 0} responded</span>
+                                                                                                </div>
                                                                                             </div>
                                                                                         </div>
                                                                                     </div>
-                                                                                </div>
-                                                                                <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', position: 'relative', gap: '8px' }}>
-                                                                                    {msg.event.cancelled ? (
-                                                                                        <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
-                                                                                    ) : (() => {
-                                                                                        const dateValue = msg.event.endDate || msg.event.startDate;
-                                                                                        if (!dateValue || typeof dateValue !== 'string') return null;
-                                                                                        const dStr = dateValue.split('T')[0];
-                                                                                        const endStr = `${dStr}T${msg.event.endTime || '23:59'}:00`;
-                                                                                        const isEnded = new Date(endStr) <= new Date();
-                                                                                        const startDValue = msg.event.startDate || '';
-                                                                                        if (!startDValue || typeof startDValue !== 'string') return null;
-                                                                                        const startDStr = startDValue.split('T')[0];
-                                                                                        const startStr = `${startDStr}T${msg.event.startTime || '00:00'}:00`;
-                                                                                        const isStarted = new Date(startStr) <= new Date();
+                                                                                    <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', position: 'relative', gap: '8px' }}>
+                                                                                        {msg.event.cancelled ? (
+                                                                                            <span style={{ color: '#667781', fontWeight: '600', fontSize: '15px' }}>Event cancelled</span>
+                                                                                        ) : (() => {
+                                                                                            const dateValue = msg.event.endDate || msg.event.startDate;
+                                                                                            if (!dateValue || typeof dateValue !== 'string') return null;
+                                                                                            const dStr = dateValue.split('T')[0];
+                                                                                            const endStr = `${dStr}T${msg.event.endTime || '23:59'}:00`;
+                                                                                            const isEnded = new Date(endStr) <= new Date();
+                                                                                            const startDValue = msg.event.startDate || '';
+                                                                                            if (!startDValue || typeof startDValue !== 'string') return null;
+                                                                                            const startDStr = startDValue.split('T')[0];
+                                                                                            const startStr = `${startDStr}T${msg.event.startTime || '00:00'}:00`;
+                                                                                            const isStarted = new Date(startStr) <= new Date();
 
-                                                                                        if (isStarted || isEnded) {
+                                                                                            if (isStarted || isEnded) {
+                                                                                                return (
+                                                                                                    <>
+                                                                                                        {isMe && !isEnded && (
+                                                                                                            <div
+                                                                                                                onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }}
+                                                                                                                style={{ width: '100%', textAlign: 'center', color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer', paddingBottom: '8px', borderBottom: '1px solid #f0f2f5', marginBottom: '4px' }}
+                                                                                                            >
+                                                                                                                Edit event
+                                                                                                            </div>
+                                                                                                        )}
+                                                                                                        <div style={{ width: '100%', textAlign: 'center' }}>
+                                                                                                            <span key={`started-grp-${eventTick}`} style={{ color: isEnded ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
+                                                                                                                {isEnded ? 'Event ended' : 'Event started'}
+                                                                                                            </span>
+                                                                                                        </div>
+                                                                                                    </>
+                                                                                                );
+                                                                                            }
+
                                                                                             return (
                                                                                                 <>
-                                                                                                    {isMe && !isEnded && (
-                                                                                                        <div 
-                                                                                                            onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} 
+                                                                                                    {isMe && (
+                                                                                                        <div
+                                                                                                            onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }}
                                                                                                             style={{ width: '100%', textAlign: 'center', color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer', paddingBottom: '8px', borderBottom: '1px solid #f0f2f5', marginBottom: '4px' }}
                                                                                                         >
                                                                                                             Edit event
                                                                                                         </div>
                                                                                                     )}
                                                                                                     <div style={{ width: '100%', textAlign: 'center' }}>
-                                                                                                        <span key={`started-grp-${eventTick}`} style={{ color: isEnded ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
-                                                                                                            {isEnded ? 'Event ended' : 'Event started'}
-                                                                                                        </span>
+                                                                                                        <div
+                                                                                                            onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
+                                                                                                            style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
+                                                                                                        >
+                                                                                                            {myResponse ? myResponse.status : 'Respond'}
+                                                                                                            <ChevronDown size={18} />
+                                                                                                        </div>
+                                                                                                        {openEventRespondId === msg._id && (
+                                                                                                            <div style={{
+                                                                                                                position: 'absolute',
+                                                                                                                bottom: '100%',
+                                                                                                                left: '50%',
+                                                                                                                transform: 'translateX(-50%)',
+                                                                                                                background: 'white',
+                                                                                                                borderRadius: '8px',
+                                                                                                                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                                                                                                zIndex: 10,
+                                                                                                                minWidth: '120px',
+                                                                                                                marginBottom: '4px',
+                                                                                                                overflow: 'hidden',
+                                                                                                                border: '1px solid #e9edef'
+                                                                                                            }}>
+                                                                                                                {['Going', 'Maybe', 'Not going'].map(status => (
+                                                                                                                    <div
+                                                                                                                        key={status}
+                                                                                                                        onClick={(e) => { e.stopPropagation(); handleEventRespond(msg, status); setOpenEventRespondId(null); }}
+                                                                                                                        style={{ padding: '10px 16px', fontSize: '14px', color: '#111b21', textAlign: 'left', borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none', background: myResponse?.status === status ? '#f0f2f5' : 'white' }}
+                                                                                                                    >
+                                                                                                                        {status}
+                                                                                                                    </div>
+                                                                                                                ))}
+                                                                                                            </div>
+                                                                                                        )}
                                                                                                     </div>
                                                                                                 </>
                                                                                             );
-                                                                                        }
-
-                                                                                        return (
-                                                                                            <>
-                                                                                                {isMe && (
-                                                                                                    <div 
-                                                                                                        onClick={(e) => { e.stopPropagation(); openEditEvent(msg); }} 
-                                                                                                        style={{ width: '100%', textAlign: 'center', color: '#0EA5BE', fontWeight: '600', fontSize: '15px', cursor: 'pointer', paddingBottom: '8px', borderBottom: '1px solid #f0f2f5', marginBottom: '4px' }}
-                                                                                                    >
-                                                                                                        Edit event
-                                                                                                    </div>
-                                                                                                )}
-                                                                                                <div style={{ width: '100%', textAlign: 'center' }}>
-                                                                                                    <div
-                                                                                                        onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === msg._id ? null : msg._id); }}
-                                                                                                        style={{ color: '#0EA5BE', fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
-                                                                                                    >
-                                                                                                        {myResponse ? myResponse.status : 'Respond'}
-                                                                                                        <ChevronDown size={18} />
-                                                                                                    </div>
-                                                                                                    {openEventRespondId === msg._id && (
-                                                                                                        <div style={{
-                                                                                                            position: 'absolute',
-                                                                                                            bottom: '100%',
-                                                                                                            left: '50%',
-                                                                                                            transform: 'translateX(-50%)',
-                                                                                                            background: 'white',
-                                                                                                            borderRadius: '8px',
-                                                                                                            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                                                                                                            zIndex: 10,
-                                                                                                            minWidth: '120px',
-                                                                                                            marginBottom: '4px',
-                                                                                                            overflow: 'hidden',
-                                                                                                            border: '1px solid #e9edef'
-                                                                                                        }}>
-                                                                                                            {['Going', 'Maybe', 'Not going'].map(status => (
-                                                                                                                <div
-                                                                                                                    key={status}
-                                                                                                                    onClick={(e) => { e.stopPropagation(); handleEventRespond(msg, status); setOpenEventRespondId(null); }}
-                                                                                                                    style={{ padding: '10px 16px', fontSize: '14px', color: '#111b21', textAlign: 'left', borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none', background: myResponse?.status === status ? '#f0f2f5' : 'white' }}
-                                                                                                                >
-                                                                                                                    {status}
-                                                                                                                </div>
-                                                                                                            ))}
-                                                                                                        </div>
-                                                                                                    )}
-                                                                                                </div>
-                                                                                            </>
-                                                                                        );
-                                                                                    })()}
+                                                                                        })()}
+                                                                                    </div>
                                                                                 </div>
-                                                                            </div>
-                                                                        );
-                                                                    })()}
+                                                                            );
+                                                                        })()}
 
-                                                                    {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && msg.type !== 'event' && <span>{renderContent(msg.content)}</span>}
-                                                                </>
-                                                            )}
-
-                                                            <div className="wa-msg-meta">
-                                                                {msg.is_edited && <span style={{ fontSize: '10px', color: '#667781', marginRight: '2px', opacity: 0.9 }}>Edited</span>}
-                                                                {msg.is_pinned && <Pin size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3, transform: 'rotate(45deg)' }} />}
-                                                                {msg.is_starred && <Star size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3 }} />}
-                                                                <span className="wa-timestamp">
-                                                                    {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
-                                                                </span>
-                                                                {isMe && (
-                                                                    <div className="wa-msg-status">
-                                                                        {msg.is_read
-                                                                            ? <CheckCheck size={14} color="#53bdeb" />
-                                                                            : <CheckCheck size={14} color="#8696a0" />}
-                                                                    </div>
+                                                                        {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && msg.type !== 'event' && <span>{renderContent(msg.content)}</span>}
+                                                                    </>
                                                                 )}
-                                                            </div>
-                                                            {/* Reaction display badges - Group */}
-                                                            {msg.reactions && msg.reactions.length > 0 && (() => {
-                                                                const currentUserId = user.id || user._id;
-                                                                const grouped = msg.reactions.reduce((acc, r) => {
-                                                                    if (!acc[r.emoji]) acc[r.emoji] = { count: 0, reactedByMe: false, userNames: [] };
-                                                                    acc[r.emoji].count++;
-                                                                    const isMeReaction = String(r.user_id) === String(currentUserId);
-                                                                    if (isMeReaction) acc[r.emoji].reactedByMe = true;
 
-                                                                    const uName = isMeReaction ? 'You' : (users.find(u => String(u._id || u.id) === String(r.user_id))?.name || 'User');
-                                                                    if (!acc[r.emoji].userNames.includes(uName)) {
-                                                                        acc[r.emoji].userNames.push(uName);
-                                                                    }
-                                                                    return acc;
-                                                                }, {});
-                                                                return (
-                                                                    <div className={`wa-reaction-badges ${isMe ? 'wa-reaction-badges-sent' : 'wa-reaction-badges-recv'}`}>
-                                                                        {Object.entries(grouped).map(([emoji, { count, reactedByMe, userNames }]) => (
-                                                                            <span
-                                                                                key={emoji}
-                                                                                className={`wa-reaction-badge ${reactedByMe ? 'reacted' : ''}`}
-                                                                                onClick={(e) => { e.stopPropagation(); const bubble = e.currentTarget.closest('.wa-message-bubble') || e.currentTarget.closest('.wa-msg-sent') || e.currentTarget.closest('.wa-msg-recv'); setReactionDetails({ msg, isGroup: true, rect: (bubble || e.currentTarget).getBoundingClientRect() }); }}
-                                                                            >
-                                                                                {emoji}{count > 1 && <span className="wa-reaction-count">{count}</span>}
-                                                                            </span>
-                                                                        ))}
-                                                                    </div>
-                                                                );
-                                                            })()}
-                                                        </div>
+                                                                <div className="wa-msg-meta">
+                                                                    {msg.is_edited && <span style={{ fontSize: '10px', color: '#667781', marginRight: '2px', opacity: 0.9 }}>Edited</span>}
+                                                                    {msg.is_pinned && <Pin size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3, transform: 'rotate(45deg)' }} />}
+                                                                    {msg.is_starred && <Star size={12} fill="#8696a0" color="#8696a0" style={{ marginRight: 3 }} />}
+                                                                    <span className="wa-timestamp">
+                                                                        {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                                                    </span>
+                                                                    {isMe && (
+                                                                        <div className="wa-msg-status">
+                                                                            {msg.is_read
+                                                                                ? <CheckCheck size={14} color="#53bdeb" />
+                                                                                : <CheckCheck size={14} color="#8696a0" />}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                                {/* Reaction display badges - Group */}
+                                                                {msg.reactions && msg.reactions.length > 0 && (() => {
+                                                                    const currentUserId = user.id || user._id;
+                                                                    const grouped = msg.reactions.reduce((acc, r) => {
+                                                                        if (!acc[r.emoji]) acc[r.emoji] = { count: 0, reactedByMe: false, userNames: [] };
+                                                                        acc[r.emoji].count++;
+                                                                        const isMeReaction = String(r.user_id) === String(currentUserId);
+                                                                        if (isMeReaction) acc[r.emoji].reactedByMe = true;
+
+                                                                        const uName = isMeReaction ? 'You' : (users.find(u => String(u._id || u.id) === String(r.user_id))?.name || 'User');
+                                                                        if (!acc[r.emoji].userNames.includes(uName)) {
+                                                                            acc[r.emoji].userNames.push(uName);
+                                                                        }
+                                                                        return acc;
+                                                                    }, {});
+                                                                    return (
+                                                                        <div className={`wa-reaction-badges ${isMe ? 'wa-reaction-badges-sent' : 'wa-reaction-badges-recv'}`}>
+                                                                            {Object.entries(grouped).map(([emoji, { count, reactedByMe, userNames }]) => (
+                                                                                <span
+                                                                                    key={emoji}
+                                                                                    className={`wa-reaction-badge ${reactedByMe ? 'reacted' : ''}`}
+                                                                                    onClick={(e) => { e.stopPropagation(); const bubble = e.currentTarget.closest('.wa-message-bubble') || e.currentTarget.closest('.wa-msg-sent') || e.currentTarget.closest('.wa-msg-recv'); setReactionDetails({ msg, isGroup: true, rect: (bubble || e.currentTarget).getBoundingClientRect() }); }}
+                                                                                >
+                                                                                    {emoji}{count > 1 && <span className="wa-reaction-count">{count}</span>}
+                                                                                </span>
+                                                                            ))}
+                                                                        </div>
+                                                                    );
+                                                                })()}
+                                                            </div>
                                                         </div>
                                                     </React.Fragment>
                                                 );
@@ -17663,14 +18022,15 @@ export default function Chat() {
                                                                     className="wa-attachment-floating-hint"
                                                                     style={{ left: `${attachmentHintPos.x}px`, top: `${attachmentHintPos.y}px` }}
                                                                 >
-                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)
+                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PPTX, PDF, Excel, Video (up to 1GB)
                                                                 </div>
                                                             )}
                                                             <input
                                                                 type="file"
                                                                 ref={fileInputRef}
+                                                                multiple
                                                                 style={{ display: 'none' }}
-                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.ppt,.pptx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*"
+                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.ppt,.pptx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*,*/*"
                                                                 onChange={handleFileSelect}
                                                             />
                                                             <button
@@ -17689,7 +18049,7 @@ export default function Chat() {
                                                             {file && (
                                                                 <div className="wa-file-preview-badge">
                                                                     {file.name.substring(0, 15)}...
-                                                                    <button onClick={() => setFile(null)}>×</button>
+                                                                    <button onClick={() => { setFile(null); setSelectedFiles([]); }}>×</button>
                                                                 </div>
                                                             )}
                                                             <textarea
@@ -17813,13 +18173,13 @@ export default function Chat() {
     const renderUnblockModal = () => {
         if (!showUnblockModal) return null;
         return (
-            <div 
-                className="wa-mute-modal-overlay" 
+            <div
+                className="wa-mute-modal-overlay"
                 onClick={() => setShowUnblockModal(false)}
                 style={{ zIndex: 5000, background: 'rgba(11, 20, 26, 0.85)', backdropFilter: 'blur(4px)' }}
             >
-                <div 
-                    className="wa-mute-modal" 
+                <div
+                    className="wa-mute-modal"
                     onClick={(e) => e.stopPropagation()}
                     style={{ maxWidth: '450px', background: '#ffffff', borderRadius: '24px', padding: '32px', textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}
                 >
@@ -18237,11 +18597,11 @@ export default function Chat() {
                         if (!eventDetailsMsg?.event) return null;
                         const ev = eventDetailsMsg.event;
                         const isSender = String(eventDetailsMsg.user_id || eventDetailsMsg.sender_id?._id || eventDetailsMsg.sender_id) === String(myId);
-                        
+
                         const dStr = (ev.endDate || ev.startDate).split('T')[0];
                         const endStr = `${dStr}T${ev.endTime || '23:59'}:00`;
                         const isEnded = new Date(endStr) <= new Date();
-                        
+
                         const startDStr = (ev.startDate || '').split('T')[0];
                         const startStr = `${startDStr}T${ev.startTime || '00:00'}:00`;
                         const isStarted = new Date(startStr) <= new Date();
@@ -18430,14 +18790,14 @@ export default function Chat() {
                             />
                             <MapPin size={22} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px' }} />
                         </div>
-                        
+
                         {/* Reminder Timing Dropdown */}
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
                             <div style={{ color: '#111b21', fontSize: '16px' }}>Reminder</div>
                             <div style={{ position: 'relative' }}>
-                                <select 
-                                    value={eventReminderTiming} 
-                                    onChange={(e) => setEventReminderTiming(e.target.value)} 
+                                <select
+                                    value={eventReminderTiming}
+                                    onChange={(e) => setEventReminderTiming(e.target.value)}
                                     style={{ background: '#f0f2f5', border: 'none', borderRadius: '18px', padding: '6px 16px', color: '#0EA5BE', cursor: 'pointer', outline: 'none' }}
                                 >
                                     <option value="default">Default auto</option>
@@ -19856,6 +20216,7 @@ export default function Chat() {
                 .wa-left-panel, .wa-left-sidebar { background: white; z-index: 2; position: relative; }
                 .wa-chat-header { background: transparent !important; }
                 .wa-pinned-messages-banner { background: rgba(255, 255, 255, 0.85) !important; backdrop-filter: blur(8px) !important; }
+                .wa-preview-file-tile:hover .wa-preview-remove-btn { opacity: 1 !important; transform: scale(1) !important; }
             `}</style>
 
             <div className={`wa-app-container ${(selectedUser || selectedGroup) ? 'chat-active' : 'list-active'}`} style={{ position: 'relative', background: 'transparent' }}>
@@ -19873,16 +20234,16 @@ export default function Chat() {
 
                             {/* Sleep Mode Overlay - Restricted strictly to the Chat Area */}
                             {isAppAsleep && (selectedUser || selectedGroup) && (
-                                <div 
+                                <div
                                     className="wa-sleep-overlay"
                                     onClick={() => setIsAppAsleep(false)}
                                     style={{
                                         position: 'absolute',
                                         inset: 0,
-                                        background: 'rgba(255, 255, 255, 0.08)',
-                                        backdropFilter: 'blur(18px) saturate(140%)',
-                                        WebkitBackdropFilter: 'blur(18px) saturate(140%)',
-                                        border: '1px solid rgba(255, 255, 255, 0.18)',
+                                        background: '#ffffff',
+                                        backdropFilter: 'none',
+                                        WebkitBackdropFilter: 'none',
+                                        border: 'none',
                                         zIndex: 60000,
                                         display: 'flex',
                                         flexDirection: 'column',
@@ -19892,43 +20253,56 @@ export default function Chat() {
                                         cursor: 'pointer'
                                     }}
                                 >
-                                    {/* Avatar / Icon */}
-                                    {(selectedUser || selectedGroup) && (
-                                        <div style={{ marginBottom: '24px', textAlign: 'center' }}>
-                                            {selectedUser ? (
-                                                <img 
-                                                    src={selectedUser.avatar || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png'} 
-                                                    alt="User"
-                                                    style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid rgba(255,255,255,0.35)', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.18)' }}
-                                                />
-                                            ) : (
-                                                <div style={{ width: '100px', height: '100px', margin: '0 auto', borderRadius: '50%', background: 'rgba(14, 165, 190, 0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid rgba(255,255,255,0.35)', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.18)' }}>
-                                                    <Users size={50} color="white" />
-                                                </div>
-                                            )}
-                                            <h2 style={{ color: '#0b1f2a', marginTop: '16px', fontSize: '22px', fontWeight: '700' }}>
-                                                {selectedUser ? selectedUser.name : (() => {
-                                                    if (selectedGroup?.name === 'Announcements' && selectedGroup?.community_id) {
-                                                        const comm = communities.find(c => String(c._id || c.id) === String(selectedGroup.community_id));
-                                                        if (comm) return `${comm.name} Announcements`;
-                                                    }
-                                                    return selectedGroup?.name || '';
-                                                })()}
-                                            </h2>
-                                        </div>
-                                    )}
+                                    <div
+                                        style={{
+                                            background: 'linear-gradient(180deg, #ffffff 0%, #f7fafc 100%)',
+                                            border: '1px solid #e6edf3',
+                                            boxShadow: '0 14px 34px rgba(15, 23, 42, 0.12)',
+                                            borderRadius: 22,
+                                            padding: '28px 26px',
+                                            maxWidth: 520,
+                                            width: 'calc(100% - 48px)',
+                                            textAlign: 'center'
+                                        }}
+                                    >
+                                        {/* Avatar / Icon */}
+                                        {(selectedUser || selectedGroup) && (
+                                            <div style={{ marginBottom: '24px', textAlign: 'center' }}>
+                                                {selectedUser ? (
+                                                    <img
+                                                        src={selectedUser.avatar || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png'}
+                                                        alt="User"
+                                                        style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid #ffffff', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.14)' }}
+                                                    />
+                                                ) : (
+                                                    <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#0EA5BE', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #ffffff', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.14)' }}>
+                                                        <Users size={50} color="white" />
+                                                    </div>
+                                                )}
+                                                <h2 style={{ color: '#0b1f2a', marginTop: '16px', fontSize: '22px', fontWeight: '700' }}>
+                                                    {selectedUser ? selectedUser.name : (() => {
+                                                        if (selectedGroup?.name === 'Announcements' && selectedGroup?.community_id) {
+                                                            const comm = communities.find(c => String(c._id || c.id) === String(selectedGroup.community_id));
+                                                            if (comm) return `${comm.name} Announcements`;
+                                                        }
+                                                        return selectedGroup?.name || '';
+                                                    })()}
+                                                </h2>
+                                            </div>
+                                        )}
 
-                                    {/* Neural Chat logo Branding */}
-                                    <div style={{ marginBottom: '28px', animation: 'wa-popover-in 0.4s ease-out' }}>
-                                        <img src={logo} alt="Neural Chat" style={{ width: '80px', height: '80px' }} />
-                                    </div>
-
-                                    <div style={{ textAlign: 'center', color: '#334155', maxWidth: '420px', padding: '0 20px' }}>
-                                        <div style={{ color: '#0EA5BE', fontSize: '19px', fontWeight: '700', marginBottom: '10px', lineHeight: '1.4' }}>
-                                            You are diverted out of focus from the screen.
+                                        {/* Neural Chat logo Branding */}
+                                        <div style={{ marginBottom: '28px', animation: 'wa-popover-in 0.4s ease-out' }}>
+                                            <img src={logo} alt="Neural Chat" style={{ width: '80px', height: '80px' }} />
                                         </div>
-                                        <div style={{ fontSize: '15px', color: '#475569' }}>
-                                            Please return to the screen to start the conversation
+
+                                        <div style={{ textAlign: 'center', color: '#334155', maxWidth: '420px', margin: '0 auto' }}>
+                                            <div style={{ color: '#0EA5BE', fontSize: '19px', fontWeight: '700', marginBottom: '10px', lineHeight: '1.4' }}>
+                                                You are diverted out of focus from the screen.
+                                            </div>
+                                            <div style={{ fontSize: '15px', color: '#475569' }}>
+                                                Please return to the screen to start the conversation
+                                            </div>
                                         </div>
                                     </div>
 
@@ -19940,8 +20314,8 @@ export default function Chat() {
                             )}
 
                             {/* File Preview Overlay (Restricted to Chat Area) */}
-                            {file && (
-                                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 2000, display: 'flex', flexDirection: 'column', background: '#e9edef' }}>
+                            {(file || selectedFiles.length > 0) && (
+                                <div style={{ position: 'absolute', top: 60, left: 0, width: '100%', height: 'calc(100% - 60px)', zIndex: 2000, display: 'flex', flexDirection: 'column', background: '#e9edef' }}>
                                     {renderFilePreview()}
                                 </div>
                             )}
@@ -20734,9 +21108,9 @@ export default function Chat() {
                                     <input type="date" value={eventEndDate} onChange={(e) => setEventEndDate(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', flex: 1 }} />
                                     <input type="time" value={eventEndTime} onChange={(e) => setEventEndTime(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', width: 140 }} />
                                 </div>
-                                <select 
-                                    value={eventReminderTiming} 
-                                    onChange={(e) => setEventReminderTiming(e.target.value)} 
+                                <select
+                                    value={eventReminderTiming}
+                                    onChange={(e) => setEventReminderTiming(e.target.value)}
                                     style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', width: '100%' }}
                                 >
                                     <option value="default">Default auto reminder</option>
