@@ -29,13 +29,6 @@ server_err.log
 !package.json
 !package-lock.json
 !composer.json
-*.txt
-*.webm
-*.pdf
-*.jpg
-*.jpeg
-*.png
-*.gif
 uploads/
 
 # Editor/OS files
