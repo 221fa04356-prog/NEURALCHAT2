@@ -1,0 +1,134 @@
+const fs = require('fs');
+const path = require('path');
+const mongoose = require('mongoose');
+
+const BUCKET_NAME = 'voiceFiles';
+
+const getBucket = () => {
+    if (!mongoose.connection?.db) {
+        throw new Error('Mongo connection is not ready for GridFS');
+    }
+    return new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: BUCKET_NAME });
+};
+
+const uploadLocalFileToGridFS = (absPath, filename, metadata = {}) => new Promise((resolve, reject) => {
+    const bucket = getBucket();
+    const readStream = fs.createReadStream(absPath);
+    const uploadStream = bucket.openUploadStream(filename, { metadata });
+
+    readStream.on('error', reject);
+    uploadStream.on('error', reject);
+    uploadStream.on('finish', () => {
+        resolve({
+            fileId: uploadStream.id,
+            length: uploadStream.length
+        });
+    });
+
+    readStream.pipe(uploadStream);
+});
+
+const parseRangeHeader = (range, fileSize) => {
+    if (!range || !range.startsWith('bytes=')) return null;
+    const parts = range.replace('bytes=', '').split('-');
+    const start = Number.parseInt(parts[0], 10);
+    const end = parts[1] ? Number.parseInt(parts[1], 10) : fileSize - 1;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || end >= fileSize) {
+        return null;
+    }
+    return { start, end };
+};
+
+const getContentTypeFromName = (name = '') => {
+    const ext = path.extname(name).toLowerCase();
+    const typeMap = {
+        '.ogg': 'audio/ogg',
+        '.webm': 'audio/webm',
+        '.mp3': 'audio/mpeg',
+        '.m4a': 'audio/mp4',
+        '.mp4': 'audio/mp4',
+        '.wav': 'audio/wav'
+    };
+    return typeMap[ext] || 'application/octet-stream';
+};
+
+const normalizeLegacyPath = (legacyPath = '') => {
+    if (!legacyPath || typeof legacyPath !== 'string') return '';
+    const withoutHost = legacyPath.replace(/^https?:\/\/[^/]+/i, '');
+    const stripped = withoutHost.replace(/^\/+/, '');
+    return stripped.startsWith('uploads/') ? `/${stripped}` : `/${stripped.replace(/^uploads\/?/i, 'uploads/')}`;
+};
+
+const resolveGridFSFileDoc = async (bucket, fileId, fallbackName = '', fallbackLegacyPath = '') => {
+    let fileDoc = null;
+    let streamId = null;
+
+    if (mongoose.Types.ObjectId.isValid(fileId)) {
+        streamId = new mongoose.Types.ObjectId(fileId);
+        fileDoc = await bucket.find({ _id: streamId }).next();
+    }
+
+    if (!fileDoc && fallbackLegacyPath) {
+        const normalizedLegacy = normalizeLegacyPath(fallbackLegacyPath);
+        const legacyCandidates = [fallbackLegacyPath, normalizedLegacy].filter(Boolean);
+        for (const legacy of legacyCandidates) {
+            fileDoc = await bucket.find({ 'metadata.legacyPath': legacy }).sort({ uploadDate: -1 }).next();
+            if (fileDoc) {
+                streamId = fileDoc._id;
+                break;
+            }
+        }
+    }
+
+    if (!fileDoc && fallbackName) {
+        fileDoc = await bucket.find({ filename: fallbackName }).sort({ uploadDate: -1 }).next();
+        if (fileDoc) {
+            streamId = fileDoc._id;
+        }
+    }
+
+    return { fileDoc, streamId };
+};
+
+const streamGridFSFileWithRange = async (req, res, fileId) => {
+    const bucket = getBucket();
+    const fallbackName = String(req.query.name || '');
+    const fallbackLegacyPath = String(req.query.legacyPath || req.query.path || '');
+    const { fileDoc, streamId } = await resolveGridFSFileDoc(bucket, fileId, fallbackName, fallbackLegacyPath);
+
+    if (!fileDoc || !streamId) {
+        res.status(404).json({ error: 'Media not found' });
+        return;
+    }
+
+    const fileSize = fileDoc.length;
+    const contentType = getContentTypeFromName(fileDoc.filename);
+    const parsedRange = parseRangeHeader(req.headers.range, fileSize);
+
+    if (parsedRange) {
+        const { start, end } = parsedRange;
+        const chunkSize = (end - start) + 1;
+        res.writeHead(206, {
+            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': chunkSize,
+            'Content-Type': contentType,
+            'Cache-Control': 'private, max-age=86400'
+        });
+        bucket.openDownloadStream(streamId, { start, end: end + 1 }).pipe(res);
+        return;
+    }
+
+    res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Content-Type': contentType,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'private, max-age=86400'
+    });
+    bucket.openDownloadStream(streamId).pipe(res);
+};
+
+module.exports = {
+    uploadLocalFileToGridFS,
+    streamGridFSFileWithRange
+};

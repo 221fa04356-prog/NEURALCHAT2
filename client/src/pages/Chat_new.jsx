@@ -2048,6 +2048,7 @@ export default function Chat() {
     const [isRecording, setIsRecording] = useState(false);
 
     const [playingAudioId, setPlayingAudioId] = useState(null);
+    const [activeAudioDuration, setActiveAudioDuration] = useState(0);
     const [playbackSpeed, setPlaybackSpeed] = useState(1);
     const [viewOncePlaybackSpeed, setViewOncePlaybackSpeed] = useState(1);
     const [editingMessage, setEditingMessage] = useState(null);
@@ -5384,9 +5385,40 @@ export default function Chat() {
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
+    const getAudioSeekableDuration = (audio) => {
+        if (!audio) return 0;
+        if (Number.isFinite(audio.duration) && audio.duration > 0) return audio.duration;
+        try {
+            if (audio.seekable && audio.seekable.length > 0) {
+                const end = audio.seekable.end(audio.seekable.length - 1);
+                if (Number.isFinite(end) && end > 0) return end;
+            }
+        } catch (_) { }
+        return 0;
+    };
+
+    const getEffectiveVoiceDuration = (msg) => {
+        const msgId = String(msg._id || msg.id);
+        const isCurrent = String(playingAudioId) === msgId;
+        const fallback = Number(msg.duration) || 0;
+        const audioDerived = isCurrent ? getAudioSeekableDuration(audioInstanceRef.current) : 0;
+        const derived = audioDerived > 0 ? audioDerived : (isCurrent ? activeAudioDuration : 0);
+        const resolved = derived > 0 ? derived : fallback;
+        return resolved > 0 ? resolved : 1;
+    };
+
+    const seekActiveAudioToPercent = (msg, percent) => {
+        const audio = audioInstanceRef.current;
+        if (!audio) return;
+        const baseDuration = getAudioSeekableDuration(audio) || getEffectiveVoiceDuration(msg);
+        const target = Math.max(0, Math.min(baseDuration, (percent / 100) * baseDuration));
+        audio.currentTime = target;
+        setViewOnceElapsed(target);
+    };
+
     const audioInstanceRef = useRef(null);
 
-    const handlePlayAudio = async (msg, startTime = 0) => {
+    const handlePlayAudio = async (msg, startTime = 0, startPercent = null) => {
         const audioUrlBase = msg.file_path || (typeof msg.content === 'string' && msg.content.includes('/uploads/') ? msg.content : null);
         if (!audioUrlBase) return;
 
@@ -5402,12 +5434,15 @@ export default function Chat() {
         }
 
         // If clicking the same message that's already playing, and NOT seeking, stop it
-        if (String(playingAudioId) === String(msg._id || msg.id) && startTime === 0) {
+        if (String(playingAudioId) === String(msg._id || msg.id) && startTime === 0 && startPercent === null) {
             if (audioInstanceRef.current) {
                 audioInstanceRef.current.pause();
                 audioInstanceRef.current = null;
             }
             setPlayingAudioId(null);
+            setActiveAudioDuration(0);
+            setActiveViewOnceMsg(null);
+            setViewOnceElapsed(0);
             return;
         }
 
@@ -5416,6 +5451,7 @@ export default function Chat() {
             audioInstanceRef.current.pause();
             audioInstanceRef.current = null;
         }
+        setActiveAudioDuration(0);
 
         // Handle URL formatting (Relative vs Absolute)
         let url = msg.file_path;
@@ -5445,15 +5481,54 @@ export default function Chat() {
         audio.playbackRate = 1;
         const currentMsgId = String(msg._id || msg.id); // Force string for comparison
         setPlayingAudioId(currentMsgId);
-        setViewOnceElapsed(startTime);
+        setActiveAudioDuration(Number(msg.duration) || 0);
+        setViewOnceElapsed(startPercent !== null ? ((Number(msg.duration) || 0) * (startPercent / 100)) : startTime);
+        setActiveViewOnceMsg(msg.is_view_once ? msg : null);
+
+        let initialSeekApplied = false;
+        const applyInitialSeek = () => {
+            if (initialSeekApplied) return;
+            let desiredTime = 0;
+            if (startPercent !== null) {
+                const d = getAudioSeekableDuration(audio);
+                if (!(d > 0)) return;
+                desiredTime = (startPercent / 100) * d;
+            } else {
+                desiredTime = startTime;
+            }
+            if (desiredTime > 0) {
+                const max = getAudioSeekableDuration(audio) || desiredTime;
+                audio.currentTime = Math.min(desiredTime, max);
+                setViewOnceElapsed(audio.currentTime);
+            }
+            initialSeekApplied = true;
+        };
 
         audio.onloadedmetadata = () => {
-            if (startTime > 0) {
-                audio.currentTime = startTime;
+            const d = getAudioSeekableDuration(audio);
+            if (d > 0) {
+                setActiveAudioDuration(d);
+            }
+            applyInitialSeek();
+        };
+
+        audio.ondurationchange = () => {
+            const d = getAudioSeekableDuration(audio);
+            if (d > 0) {
+                setActiveAudioDuration(d);
             }
         };
 
+        audio.oncanplay = () => {
+            applyInitialSeek();
+        };
+
         audio.ontimeupdate = () => {
+            const d = getAudioSeekableDuration(audio);
+            if (d > 0) {
+                setActiveAudioDuration(d);
+            }
+            applyInitialSeek();
             setViewOnceElapsed(audio.currentTime);
         };
 
@@ -5471,6 +5546,7 @@ export default function Chat() {
             }
             setPlayingAudioId(null);
             audioInstanceRef.current = null;
+            setActiveAudioDuration(0);
             setActiveViewOnceMsg(null);
             setViewOnceElapsed(0);
         };
@@ -5479,13 +5555,10 @@ export default function Chat() {
             console.error("Audio playback error:", e);
             setPlayingAudioId(null);
             audioInstanceRef.current = null;
+            setActiveAudioDuration(0);
             setActiveViewOnceMsg(null);
             setSnackbar({ message: "Error playing audio.", type: 'error' });
         };
-
-        if (msg.is_view_once) {
-            setActiveViewOnceMsg(msg);
-        }
 
         try {
             await audio.play();
@@ -5493,27 +5566,30 @@ export default function Chat() {
             console.error("Audio play failed:", err);
             setPlayingAudioId(null);
             audioInstanceRef.current = null;
+            setActiveAudioDuration(0);
+            setActiveViewOnceMsg(null);
         }
     };
 
-    const togglePlaybackSpeed = (e) => {
+    const togglePlaybackSpeed = (e, msg = null) => {
         if (e) e.stopPropagation();
 
         // Prioritize updating the audio element's playbackRate first for instant response
         const currentAudio = audioInstanceRef.current;
+        const isViewOnceContext = !!(msg?.is_view_once || activeViewOnceMsg);
 
-        if (activeViewOnceMsg) {
-            const nextSpeed = viewOncePlaybackSpeed === 1 ? 1.5 : (viewOncePlaybackSpeed === 1.5 ? 2 : 1);
-            if (currentAudio) {
-                currentAudio.playbackRate = nextSpeed;
-            }
-            setViewOncePlaybackSpeed(nextSpeed);
+        if (isViewOnceContext) {
+            setViewOncePlaybackSpeed(prev => {
+                const nextSpeed = prev === 1 ? 1.5 : (prev === 1.5 ? 2 : 1);
+                if (currentAudio) currentAudio.playbackRate = nextSpeed;
+                return nextSpeed;
+            });
         } else {
-            const nextSpeed = playbackSpeed === 1 ? 1.5 : (playbackSpeed === 1.5 ? 2 : 1);
-            if (currentAudio) {
-                currentAudio.playbackRate = nextSpeed;
-            }
-            setPlaybackSpeed(nextSpeed);
+            setPlaybackSpeed(prev => {
+                const nextSpeed = prev === 1 ? 1.5 : (prev === 1.5 ? 2 : 1);
+                if (currentAudio) currentAudio.playbackRate = nextSpeed;
+                return nextSpeed;
+            });
         }
     };
 
@@ -14573,7 +14649,7 @@ export default function Chat() {
                                                                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
                                                                                         <div className="wa-voice-bubble-avatar" style={{ position: 'relative', margin: 0 }}>
                                                                                             {String(playingAudioId) === String(msg._id || msg.id) ? (
-                                                                                                <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
+                                                                                                <div className="wa-playback-speed-badge" onClick={(e) => togglePlaybackSpeed(e, msg)}>
                                                                                                     {msg.is_view_once ? viewOncePlaybackSpeed : playbackSpeed}x
                                                                                                 </div>
                                                                                             ) : (
@@ -14641,9 +14717,9 @@ export default function Chat() {
                                                                                                         const x = moveEvent.clientX - rect.left;
                                                                                                         const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
                                                                                                         if (String(playingAudioId) === String(msg._id || msg.id) && audioInstanceRef.current) {
-                                                                                                            audioInstanceRef.current.currentTime = (percent / 100) * (msg.duration || 1);
+                                                                                                            seekActiveAudioToPercent(msg, percent);
                                                                                                         } else {
-                                                                                                            handlePlayAudio(msg, (percent / 100) * (msg.duration || 1));
+                                                                                                            handlePlayAudio(msg, 0, percent);
                                                                                                         }
                                                                                                     };
                                                                                                     const onMouseMove = (moveEvent) => updateSeek(moveEvent);
@@ -14673,7 +14749,7 @@ export default function Chat() {
                                                                                                     position: 'absolute',
                                                                                                     left: 2,
                                                                                                     right: 2,
-                                                                                                    clipPath: `inset(0 ${100 - ((String(playingAudioId) === String(msg._id || msg.id) ? viewOnceElapsed : 0) / (msg.duration || 1)) * 100}% 0 0)`,
+                                                                                                    clipPath: `inset(0 ${100 - ((String(playingAudioId) === String(msg._id || msg.id) ? viewOnceElapsed : 0) / getEffectiveVoiceDuration(msg)) * 100}% 0 0)`,
                                                                                                     transition: String(playingAudioId) === String(msg._id || msg.id) ? 'none' : 'clip-path 0.3s ease'
                                                                                                 }}>
                                                                                                     {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
@@ -14685,7 +14761,7 @@ export default function Chat() {
                                                                                                 {String(playingAudioId) === String(msg._id || msg.id) && (
                                                                                                     <div style={{
                                                                                                         position: 'absolute',
-                                                                                                        left: `${(viewOnceElapsed / (msg.duration || 1)) * 100}%`,
+                                                                                                        left: `${(viewOnceElapsed / getEffectiveVoiceDuration(msg)) * 100}%`,
                                                                                                         width: '10px',
                                                                                                         height: '10px',
                                                                                                         backgroundColor: '#0EA5BE',
@@ -15951,7 +16027,7 @@ export default function Chat() {
                                                                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
                                                                                         <div className="wa-voice-bubble-avatar" style={{ position: 'relative', margin: 0 }}>
                                                                                             {String(playingAudioId) === String(msg._id || msg.id) ? (
-                                                                                                <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
+                                                                                                <div className="wa-playback-speed-badge" onClick={(e) => togglePlaybackSpeed(e, msg)}>
                                                                                                     {msg.is_view_once ? viewOncePlaybackSpeed : playbackSpeed}x
                                                                                                 </div>
                                                                                             ) : (
@@ -16002,9 +16078,9 @@ export default function Chat() {
                                                                                                         const x = moveEvent.clientX - rect.left;
                                                                                                         const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
                                                                                                         if (String(playingAudioId) === String(msg._id || msg.id) && audioInstanceRef.current) {
-                                                                                                            audioInstanceRef.current.currentTime = (percent / 100) * (msg.duration || 1);
+                                                                                                            seekActiveAudioToPercent(msg, percent);
                                                                                                         } else {
-                                                                                                            handlePlayAudio(msg, (percent / 100) * (msg.duration || 1));
+                                                                                                            handlePlayAudio(msg, 0, percent);
                                                                                                         }
                                                                                                     };
                                                                                                     const onMouseMove = (moveEvent) => updateSeek(moveEvent);
@@ -16034,7 +16110,7 @@ export default function Chat() {
                                                                                                     position: 'absolute',
                                                                                                     left: 2,
                                                                                                     right: 2,
-                                                                                                    clipPath: `inset(0 ${100 - ((String(playingAudioId) === String(msg._id || msg.id) ? viewOnceElapsed : 0) / (msg.duration || 1)) * 100}% 0 0)`,
+                                                                                                    clipPath: `inset(0 ${100 - ((String(playingAudioId) === String(msg._id || msg.id) ? viewOnceElapsed : 0) / getEffectiveVoiceDuration(msg)) * 100}% 0 0)`,
                                                                                                     transition: String(playingAudioId) === String(msg._id || msg.id) ? 'none' : 'clip-path 0.3s ease'
                                                                                                 }}>
                                                                                                     {[8, 12, 6, 8, 14, 8, 12, 6, 8, 10, 6, 8, 12, 10, 8, 6, 8, 14, 12, 8, 6, 10, 8, 14, 6, 8, 10, 8, 6, 10].map((h, i) => (
@@ -16046,7 +16122,7 @@ export default function Chat() {
                                                                                                 {String(playingAudioId) === String(msg._id || msg.id) && (
                                                                                                     <div style={{
                                                                                                         position: 'absolute',
-                                                                                                        left: `${(viewOnceElapsed / (msg.duration || 1)) * 100}%`,
+                                                                                                        left: `${(viewOnceElapsed / getEffectiveVoiceDuration(msg)) * 100}%`,
                                                                                                         width: '10px',
                                                                                                         height: '10px',
                                                                                                         backgroundColor: '#0EA5BE',
@@ -16083,7 +16159,7 @@ export default function Chat() {
                                                                                         position: 'relative'
                                                                                     }}>
                                                                                         {String(playingAudioId) === String(msg._id || msg.id) ? (
-                                                                                            <div className="wa-playback-speed-badge" onClick={togglePlaybackSpeed}>
+                                                                                            <div className="wa-playback-speed-badge" onClick={(e) => togglePlaybackSpeed(e, msg)}>
                                                                                                 {viewOncePlaybackSpeed}x
                                                                                             </div>
                                                                                         ) : (
@@ -19954,7 +20030,7 @@ export default function Chat() {
                                     </span>
                                     <div
                                         className="wa-playback-speed-badge"
-                                        onClick={togglePlaybackSpeed}
+                                        onClick={(e) => togglePlaybackSpeed(e, activeViewOnceMsg)}
                                         style={{
                                             position: 'static',
                                             width: '38px',

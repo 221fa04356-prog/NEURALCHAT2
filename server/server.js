@@ -57,7 +57,10 @@ app.use((req, res, next) => {
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/admin', require('./routes/admin'));
-app.use('/api/chat', require('./routes/chat'));
+const chatRoutes = require('./routes/chat');
+app.use('/api/chat', chatRoutes);
+// Backward-compatible alias: some clients may hit /chat/* directly.
+app.use('/chat', chatRoutes);
 app.use('/api/groups', require('./routes/groups'));
 app.use('/api/communities', require('./routes/communities'));
 
@@ -228,62 +231,74 @@ io.on('connection', async (socket) => {
     });
 
     socket.on('typing', async (data) => {
-        const { receiverId, isGroup } = data;
-        // Notify Admins
-        io.to('admins').emit('user_typing', { userId, receiverId, isGroup });
-        
-        if (isGroup) {
-            const Group = require('./models/Group');
-            const group = await Group.findById(receiverId);
-            if (group) {
-                group.members.forEach(memberId => {
-                    if (memberId.toString() !== userId) {
-                        io.to(memberId.toString()).emit('user_typing', { userId, groupId: receiverId });
-                    }
-                });
+        try {
+            const { receiverId, isGroup } = data;
+            // Notify Admins
+            io.to('admins').emit('user_typing', { userId, receiverId, isGroup });
+
+            if (isGroup) {
+                const Group = require('./models/Group');
+                const group = await Group.findById(receiverId);
+                if (group) {
+                    group.members.forEach(memberId => {
+                        if (memberId.toString() !== userId) {
+                            io.to(memberId.toString()).emit('user_typing', { userId, groupId: receiverId });
+                        }
+                    });
+                }
+            } else {
+                io.to(receiverId).emit('user_typing', { userId });
             }
-        } else {
-            io.to(receiverId).emit('user_typing', { userId });
+        } catch (err) {
+            console.error('[SOCKET typing ERROR]', err);
         }
     });
 
     socket.on('stop_typing', async (data) => {
-        const { receiverId, isGroup } = data;
-        // Notify Admins
-        io.to('admins').emit('user_stop_typing', { userId, receiverId, isGroup });
+        try {
+            const { receiverId, isGroup } = data;
+            // Notify Admins
+            io.to('admins').emit('user_stop_typing', { userId, receiverId, isGroup });
 
-        if (isGroup) {
-            const Group = require('./models/Group');
-            const group = await Group.findById(receiverId);
-            if (group) {
-                group.members.forEach(memberId => {
-                    if (memberId.toString() !== userId) {
-                        io.to(memberId.toString()).emit('user_stop_typing', { userId, groupId: receiverId });
-                    }
-                });
+            if (isGroup) {
+                const Group = require('./models/Group');
+                const group = await Group.findById(receiverId);
+                if (group) {
+                    group.members.forEach(memberId => {
+                        if (memberId.toString() !== userId) {
+                            io.to(memberId.toString()).emit('user_stop_typing', { userId, groupId: receiverId });
+                        }
+                    });
+                }
+            } else {
+                io.to(receiverId).emit('user_stop_typing', { userId });
             }
-        } else {
-            io.to(receiverId).emit('user_stop_typing', { userId });
+        } catch (err) {
+            console.error('[SOCKET stop_typing ERROR]', err);
         }
     });
 
     socket.on('disconnect', async (reason) => {
-        console.log(`[SOCKET] User disconnected: ${userId} (Reason: ${reason})`);
+        try {
+            console.log(`[SOCKET] User disconnected: ${userId} (Reason: ${reason})`);
 
-        // Decrement connection count
-        const newCount = (userSocketCount.get(userId) || 1) - 1;
-        console.log(`[SOCKET] User ${userId} remaining connections: ${newCount}`);
+            // Decrement connection count
+            const newCount = (userSocketCount.get(userId) || 1) - 1;
+            console.log(`[SOCKET] User ${userId} remaining connections: ${newCount}`);
 
-        if (newCount <= 0) {
-            userSocketCount.delete(userId);
-            const lastSeen = new Date();
-            try {
-                await User.findByIdAndUpdate(userId, { isOnline: false, lastSeen });
-                console.log(`[STATUS] User ${userId} is now OFFLINE. Last seen: ${lastSeen}`);
-                io.emit('user_status_change', { userId: userId, isOnline: false, lastSeen });
-            } catch (err) { console.error("Error updating offline status:", err); }
-        } else {
-            userSocketCount.set(userId, newCount);
+            if (newCount <= 0) {
+                userSocketCount.delete(userId);
+                const lastSeen = new Date();
+                try {
+                    await User.findByIdAndUpdate(userId, { isOnline: false, lastSeen });
+                    console.log(`[STATUS] User ${userId} is now OFFLINE. Last seen: ${lastSeen}`);
+                    io.emit('user_status_change', { userId: userId, isOnline: false, lastSeen });
+                } catch (err) { console.error("Error updating offline status:", err); }
+            } else {
+                userSocketCount.set(userId, newCount);
+            }
+        } catch (err) {
+            console.error('[SOCKET disconnect ERROR]', err);
         }
     });
 });
@@ -296,4 +311,12 @@ server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`> Local:   http://localhost:${PORT}`);
     console.log(`> Network: http://${localIp}:${PORT}`);
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error('[UNHANDLED REJECTION]', reason);
+});
+
+process.on('uncaughtException', (err) => {
+    console.error('[UNCAUGHT EXCEPTION]', err);
 });

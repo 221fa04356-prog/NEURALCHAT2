@@ -6,7 +6,7 @@ const PasswordReset = require('../models/PasswordReset');
 const sendEmail = require('../utils/emailService');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const getLocalIp = require('../utils/getLocalIp');
+const getClientBaseUrl = require('../utils/getClientBaseUrl');
 
 const generateSignature = (password) => {
     return crypto.createHmac('sha256', process.env.JWT_SECRET || 'neural_secret_77')
@@ -364,7 +364,7 @@ router.post('/reset-password-temp', async (req, res) => {
 
         // Send email to user with new credentials
         const subject = 'Password Reset Successful';
-        const baseUrl = process.env.CLIENT_URL || `https://${getLocalIp()}:5173`;
+        const baseUrl = getClientBaseUrl();
         const html = `
             <h3>Password Reset Successful</h3>
             <p>Dear ${user.name},</p>

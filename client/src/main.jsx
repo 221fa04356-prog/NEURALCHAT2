@@ -4,7 +4,12 @@ import './index.css'
 import App from './App.jsx'
 import axios from 'axios';
 
-axios.defaults.baseURL = import.meta.env.VITE_API_URL || '';
+// In local dev, prefer Vite proxy (/api -> localhost:3000) so frontend always
+// talks to the latest local backend routes (including Cloudinary upload).
+// In production builds, use explicit VITE_API_URL when provided.
+axios.defaults.baseURL = import.meta.env.DEV
+  ? ''
+  : (import.meta.env.VITE_API_URL || '');
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
