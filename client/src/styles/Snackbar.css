@@ -1,0 +1,309 @@
+/* Main Container */
+.snackbar-container {
+    position: fixed;
+    bottom: 92px;
+    right: 24px;
+    z-index: 100000;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 15px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Base Card Style */
+.snackbar-card {
+    background: rgba(240, 242, 245, 0.85);
+    /* Semi-transparent background */
+    backdrop-filter: blur(12px);
+    /* Blur effect */
+    -webkit-backdrop-filter: blur(12px);
+    width: 360px;
+    border-radius: 18px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+    /* Deeper shadow */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: slideInFromRight 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    color: #111b21;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    /* Subtle border */
+}
+
+/* Header - Branded */
+.snackbar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 18px 4px 18px;
+}
+
+.snackbar-app-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.snackbar-app-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+}
+
+.snackbar-app-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #54656f;
+}
+
+.snackbar-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #8696a0;
+    position: relative;
+    z-index: 100;
+}
+
+.snackbar-close-icon,
+.snackbar-more-icon {
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.snackbar-close-icon:hover {
+    color: #111b21;
+    transform: scale(1.1);
+}
+
+/* Body Layout */
+.snackbar-body {
+    display: flex;
+    align-items: flex-start;
+    /* Align to top for multi-line */
+    padding: 8px 18px 20px 18px;
+    gap: 14px;
+}
+
+/* Avatar */
+.snackbar-avatar {
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+}
+
+.snackbar-avatar img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.snackbar-initial-avatar {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: #dfe5e7;
+    color: #54656f;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Content Text */
+.snackbar-content-text {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    padding-top: 2px;
+}
+
+.snackbar-sender-name {
+    font-weight: 750;
+    font-size: 16px;
+    color: #111b21;
+    margin-bottom: 2px;
+}
+
+.snackbar-message-preview {
+    font-size: 14px;
+    color: #54656f;
+    line-height: 1.5;
+}
+
+/* Action Button (Undo/Action) */
+.snackbar-action-btn {
+    color: #0EA5BE;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    margin-left: auto;
+    white-space: nowrap;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: background 0.2s;
+}
+
+.snackbar-action-btn:hover {
+    background: rgba(14, 165, 190, 0.1);
+    text-decoration: none;
+}
+
+/* Status Icons */
+.snackbar-status-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 4px;
+}
+
+.snackbar-status-icon.error {
+    color: #ef4444;
+}
+
+.snackbar-status-icon.success {
+    color: #00a884;
+}
+
+.snackbar-status-icon.info {
+    color: #0EA5BE;
+}
+
+/* System Variant Overrides */
+.snackbar-card.system .snackbar-body {
+    padding-top: 15px;
+    padding-bottom: 15px;
+    align-items: center;
+    gap: 16px;
+}
+
+.snackbar-card.system .snackbar-message-preview {
+    color: #111b21;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.snackbar-message-preview.error {
+    color: #ef4444 !important;
+}
+
+.snackbar-message-preview.success {
+    color: #00a884 !important;
+}
+
+/* Simple/Dark Toast */
+.snackbar-card.dark-toast {
+    background: rgba(17, 27, 33, 0.9);
+    backdrop-filter: blur(8px);
+    color: white;
+    width: auto;
+    min-width: 280px;
+    border-radius: 12px;
+}
+
+.snackbar-card.dark-toast .snackbar-message-preview {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* Footer (Reply Input) */
+.snackbar-footer {
+    padding: 0 12px 12px 12px;
+}
+
+.snackbar-reply-wrapper {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    /* Align bottom to handle growing text area */
+}
+
+.snackbar-reply-input {
+    flex: 1;
+    /* Take up all available space */
+    width: 100%;
+    /* Force width */
+    min-width: 0;
+    /* consistent flex sizing */
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 13px;
+    outline: none;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    transition: box-shadow 0.2s;
+    font-family: inherit;
+    resize: none;
+    /* Disable manual resize */
+    min-height: 34px;
+    max-height: 80px;
+    overflow-y: auto;
+}
+
+.snackbar-reply-input:focus {
+    box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.2);
+    border-color: rgba(0, 120, 212, 0.6);
+}
+
+.snackbar-send-btn {
+    flex: 0 0 auto;
+    /* Do not grow */
+    width: auto;
+    background: #f3f3f3;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    padding: 8px 16px;
+    /* slightly more padding for visible click area */
+    height: 36px;
+    /* Match minimal input height */
+    font-size: 13px;
+    color: #444;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.snackbar-send-btn:hover:not(:disabled) {
+    background: #ebebeb;
+}
+
+.snackbar-send-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+    .snackbar-container {
+        bottom: 88px;
+        left: 20px;
+        right: 20px;
+        align-items: center;
+    }
+
+    .snackbar-card {
+        width: 100%;
+        max-width: 100%;
+    }
+}
+
+@keyframes slideInFromRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}

@@ -1,0 +1,247 @@
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color: #213547;
+  background-color: #ffffff;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+
+a:hover {
+  color: #535bf2;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: #f3f4f6;
+  /* Global light bg for auth pages */
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+/* Ensure images and videos are responsive by default */
+img,
+video {
+  max-width: 100%;
+  height: auto;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.25s;
+}
+
+button:hover {
+  border-color: #646cff;
+}
+
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+
+  a:hover {
+    color: #747bff;
+  }
+
+  button {
+    background-color: #f9f9f9;
+  }
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Send Button Styling (Base and Hover) */
+.wa-send-btn-inner {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.wa-send-btn-inner:hover {
+  transform: scale(1.1) !important;
+  background-color: #0EA5BE !important;
+  /* Updated brand shade */
+  box-shadow: 0 3px 10px rgba(14, 165, 190, 0.3) !important;
+}
+
+/* Apply similar premium styles to voice controls */
+.wa-voice-btn {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: #8696a0 !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  cursor: pointer !important;
+  outline: none !important;
+  border-radius: 50% !important;
+  box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+  appearance: none !important;
+}
+
+.wa-voice-btn:hover {
+  background: rgba(0, 0, 0, 0.05) !important;
+  transform: scale(1.1) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+}
+
+.wa-voice-btn.delete:hover {
+  color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.08) !important;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.15) !important;
+}
+
+.wa-voice-btn.play:hover {
+  color: #3b4a54 !important;
+}
+
+/* View Once Button - Matching Style */
+.wa-view-once-btn {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  border-radius: 50% !important;
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+  appearance: none !important;
+}
+
+.wa-view-once-btn:hover {
+  background: rgba(0, 0, 0, 0.05) !important;
+  transform: scale(1.1) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+}
+
+.wa-view-once-btn.active .wa-view-once-circle {
+  border-color: #0EA5BE !important;
+  background: rgba(14, 165, 190, 0.1);
+}
+
+.wa-view-once-circle {
+  border: 1.5px solid #54656f;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+/* Voice Recording Pulsing Dot Animation */
+@keyframes wa-pulse {
+  0% {
+    transform: scale(0.95);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.15);
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: scale(0.95);
+    opacity: 1;
+  }
+}
+
+.wa-recording-dot {
+  box-shadow: 0 0 10px rgba(14, 165, 190, 0.4);
+}
+
+@keyframes wa-slide-from-left {
+  0% {
+    transform: translateX(-400px);
+    opacity: 0;
+  }
+
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Typing Indicator Dots Bounce Animation */
+.wa-msg-typing-indicator {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  height: 12px !important;
+}
+
+.wa-msg-typing-indicator span {
+  width: 7px !important;
+  height: 7px !important;
+  background-color: #8696a0 !important;
+  border-radius: 50% !important;
+  display: inline-block !important;
+  animation: wa-typing-bounce 1.3s infinite ease-in-out !important;
+}
+
+.wa-msg-typing-indicator span:nth-child(2) {
+  animation-delay: 0.2s !important;
+}
+
+.wa-msg-typing-indicator span:nth-child(3) {
+  animation-delay: 0.4s !important;
+}
+
+@keyframes wa-typing-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-5px);
+  }
+}

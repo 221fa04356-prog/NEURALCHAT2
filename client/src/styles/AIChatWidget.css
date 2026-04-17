@@ -1,0 +1,308 @@
+.ai-widget-container {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    z-index: 1000;
+}
+
+.ai-toggle-btn {
+    background: var(--primary, #6366f1);
+    color: white;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    cursor: pointer;
+    transition: transform 0.2s;
+    border: none;
+}
+
+.ai-toggle-btn:hover {
+    transform: scale(1.1);
+}
+
+.ai-chat-window {
+    width: 400px;
+    height: 600px;
+    background: white;
+    border-radius: 1rem;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid #e5e7eb;
+    position: absolute;
+    bottom: 80px;
+    /* Position above toggle */
+    right: 0;
+}
+
+@media (max-width: 768px) {
+    .ai-widget-container {
+        bottom: 1rem;
+        right: 1rem;
+        transform: none !important;
+        /* Disable dragging offset on mobile */
+    }
+
+    .ai-chat-window {
+        position: fixed;
+        width: 100vw;
+        height: 100vh;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        border-radius: 0;
+        z-index: 2000;
+        /* Ensure on top */
+    }
+
+    .ai-toggle-btn {
+        width: 50px;
+        height: 50px;
+    }
+
+    .close-icon-btn {
+        right: 1rem !important;
+        left: auto !important;
+    }
+}
+
+.ai-header {
+    padding: 1rem;
+    background: var(--primary, #6366f1);
+    color: white;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    cursor: move;
+}
+
+.ai-header h3 {
+    margin: 0;
+    font-size: 1.2rem;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.close-icon-btn {
+    background: transparent;
+    border: none;
+    color: white;
+    padding: 0;
+    position: absolute;
+    right: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s;
+    z-index: 10;
+}
+
+.close-icon-btn:hover {
+    transform: translateY(-50%) scale(1.1);
+}
+
+.ai-messages {
+    flex: 1;
+    padding: 1rem;
+    overflow-y: auto;
+    background: #f9fafb;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+
+.ai-message {
+    padding: 0.8rem;
+    border-radius: 0.8rem;
+    max-width: 85%;
+    font-size: 0.9rem;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+}
+
+.ai-message.user {
+    align-self: flex-end;
+    background: var(--primary, #6366f1);
+    color: white;
+    border-bottom-right-radius: 0;
+}
+
+.ai-message.model {
+    align-self: flex-start;
+    background: white;
+    color: #374151;
+    border: 1px solid #e5e7eb;
+    border-bottom-left-radius: 0;
+}
+
+.ai-input-area {
+    padding: 0.8rem;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    background: white;
+}
+
+.ai-input-area input {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 1.5rem;
+    font-size: 0.9rem;
+}
+
+.icon-btn,
+.send-btn {
+    padding: 0.5rem;
+    background: #f3f4f6;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    cursor: pointer;
+}
+
+.date-badge-container {
+    display: flex;
+    justify-content: center;
+    margin: 1rem 0;
+}
+
+.date-badge {
+    background: #e5e7eb;
+    color: #4b5563;
+    font-size: 0.75rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 1rem;
+    font-weight: 500;
+}
+
+.floating-date-badge {
+    position: absolute;
+    top: 4.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255, 255, 255, 0.95);
+    color: #4b5563;
+    font-size: 0.75rem;
+    padding: 0.3rem 0.8rem;
+    border-radius: 1rem;
+    font-weight: 600;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    z-index: 100;
+    margin: 0 auto;
+    width: fit-content;
+    pointer-events: none;
+    animation: fadeIn 0.3s ease-in-out;
+    border: 1px solid #e5e7eb;
+}
+
+.msg-timestamp {
+    font-size: 0.65rem;
+    color: #9ca3af;
+    display: block;
+    text-align: right;
+    margin-top: 0.2rem;
+    line-height: 1;
+}
+
+.ai-message.user .msg-timestamp {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.send-btn {
+    background: var(--primary, #6366f1);
+    color: white;
+}
+
+.msg-img {
+    max-width: 100%;
+    border-radius: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.file-attachment {
+    background: rgba(0, 0, 0, 0.1);
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.file-attachment a {
+    color: inherit;
+    text-decoration: underline;
+}
+
+.file-badge {
+    background: #e0e7ff;
+    padding: 0.2rem 0.6rem;
+    border-radius: 1rem;
+    font-size: 0.8rem;
+    color: #4338ca;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    max-width: 200px;
+    /* Increased width */
+}
+
+.loading {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.loader {
+    width: 14px;
+    height: 14px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid var(--primary, #6366f1);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.ai-error-banner {
+    position: absolute;
+    bottom: 4.5rem;
+    left: 1rem;
+    right: 1rem;
+    background: #fee2e2;
+    color: #ef4444;
+    padding: 0.6rem 1rem;
+    border-radius: 0.8rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    border: 1px solid #fecaca;
+    animation: slideUp 0.3s ease-out;
+    z-index: 50;
+    text-align: center;
+}
+
+@keyframes slideUp {
+    from { transform: translateY(10px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}

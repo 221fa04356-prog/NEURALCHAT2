@@ -1,0 +1,135 @@
+.dashboard-layout {
+    display: flex;
+    height: 100vh;
+    width: 100vw;
+    background-color: #F2FDFF;
+    overflow: hidden;
+}
+
+.main-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2rem;
+    position: relative;
+    width: 100%;
+}
+
+/* Sidebar default is handled by inline styles in JS for Desktop hover effect */
+/* But we need basic styles here */
+.sidebar {
+    background: rgba(255, 255, 255, 0.4);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-right: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    z-index: 50;
+    box-shadow: 2px 0 5px rgba(0, 0, 0, 0.05);
+}
+
+.mobile-menu-btn {
+    display: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.5rem;
+    margin-right: 1rem;
+    color: #374151;
+}
+
+.mobile-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 40;
+}
+
+.admin-header-search::placeholder {
+    color: #94a3b8;
+    opacity: 1;
+}
+
+@media (max-width: 768px) {
+    .dashboard-layout {
+        flex-direction: row;
+        /* Keep sidebar as a side panel */
+    }
+
+    .main-content {
+        padding: 1rem;
+    }
+
+    .mobile-menu-btn {
+        display: block;
+    }
+
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100%;
+        transform: translateX(-100%);
+        transition: transform 0.3s ease-in-out;
+        width: 280px !important;
+        z-index: 1000;
+    }
+
+    .sidebar.mobile-open {
+        transform: translateX(0);
+    }
+
+    .mobile-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 999;
+        display: none;
+    }
+
+    .mobile-overlay.visible {
+        display: block;
+    }
+
+    .admin-search-container {
+        display: none;
+    }
+
+    header {
+        padding: 0 10px !important;
+    }
+    
+    .date-search-input {
+        width: 120px !important;
+    }
+
+    .dashboard-overview-grid {
+        grid-template-columns: 1fr !important;
+        gap: 15px !important;
+    }
+
+    .stat-card {
+        margin-bottom: 0 !important;
+    }
+}
+
+/* Animations for mobile sidebar */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Ensure horizontal scrolling is visible if needed but clean */
+.table-responsive::-webkit-scrollbar {
+    height: 4px;
+}
+.table-responsive::-webkit-scrollbar-thumb {
+    background: #e9ecef;
+    border-radius: 2px;
+}
