@@ -2987,7 +2987,7 @@ export default function AdminDashboard() {
                         <div style={{ display: 'flex', gap: isMobile ? '0.6rem' : '1.2rem', color: '#cbd5e1', alignItems: 'center', marginRight: isMobile ? '0.3rem' : '0' }}>
                             <div
                                 style={{ cursor: 'pointer', display: 'flex', position: 'relative' }}
-                                onClick={() => { localStorage.clear(); sessionStorage.clear(); navigate('/admin/login'); }}
+                                onClick={() => { localStorage.clear(); sessionStorage.clear(); navigate('/'); }}
                                 onMouseEnter={() => setShowLogoutTooltip(true)}
                                 onMouseLeave={() => setShowLogoutTooltip(false)}
                             >
