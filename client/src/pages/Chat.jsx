@@ -19922,7 +19922,7 @@ export default function Chat() {
                             <button className="wa-settings-terminate-btn" onClick={() => {
                                 localStorage.removeItem('token');
                                 localStorage.removeItem('user');
-                                navigate('/login');
+                                navigate('/');
                             }}>
                                 <LogOut size={16} />
                                 {t('settings.terminate_session')}
