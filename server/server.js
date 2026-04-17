@@ -119,7 +119,7 @@ io.on('connection', async (socket) => {
         try {
             await User.findByIdAndUpdate(userId, { isOnline: true });
             console.log(`[STATUS] User ${userId} is now ONLINE. Emitting status change.`);
-            io.emit('user_status_change', { userId: userId, isOnline: true });
+            io.emit('user_status_change', { userId: userId, isOnline: true, status: 'online' });
         } catch (err) { console.error("Error updating online status:", err); }
     }
 
@@ -281,7 +281,7 @@ io.on('connection', async (socket) => {
             try {
                 await User.findByIdAndUpdate(userId, { isOnline: false, lastSeen });
                 console.log(`[STATUS] User ${userId} is now OFFLINE. Last seen: ${lastSeen}`);
-                io.emit('user_status_change', { userId: userId, isOnline: false, lastSeen });
+                io.emit('user_status_change', { userId: userId, isOnline: false, status: 'offline', lastSeen });
             } catch (err) { console.error("Error updating offline status:", err); }
         } else {
             userSocketCount.set(userId, newCount);

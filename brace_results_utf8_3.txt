@@ -1,0 +1,151 @@
+﻿L1250 [Level 6]: // Optimistic update if we are forwarding to the user we are currently viewing
+L1251 [Level 7]: if (selectedUser && contact._id === selectedUser._id) {
+L1252 [Level 8]: setMessages(prev => [...prev, {
+L1253 [Level 8]: ...sentMsg,
+L1254 [Level 8]: sender_id: user.id || user._id, // Explicitly ensure sender_id is set for alignment
+L1255 [Level 8]: user_id: user.id || user._id
+L1256 [Level 7]: }]);
+L1257 [Level 6]: }
+L1258 [Level 6]: 
+L1259 [Level 6]: // Emit socket event with the REAL message from DB
+L1260 [Level 7]: socket.emit('send_message', {
+L1261 [Level 7]: _id: sentMsg._id,
+L1262 [Level 7]: sender_id: user.id,
+L1263 [Level 7]: receiverId: contact._id,
+L1264 [Level 7]: content: sentMsg.content,
+L1265 [Level 7]: type: sentMsg.type,
+L1266 [Level 7]: file_path: sentMsg.file_path,
+L1267 [Level 7]: fileName: sentMsg.fileName,
+L1268 [Level 7]: fileSize: sentMsg.fileSize,
+L1269 [Level 7]: isForwarded: true,
+L1270 [Level 7]: forward_count: sentMsg.forward_count,
+L1271 [Level 7]: created_at: sentMsg.created_at
+L1272 [Level 6]: });
+L1273 [Level 6]: 
+L1274 [Level 6]: } catch (err) {
+L1275 [Level 6]: console.error("Forwarding failed for msg", msg._id, "to", contact._id, err);
+L1276 [Level 5]: }
+L1277 [Level 4]: }
+L1278 [Level 3]: }
+L1279 [Level 3]: // Refresh contact list to show forwarded messages as last message
+L1280 [Level 3]: fetchUsers();
+L1281 [Level 3]: setSnackbar({ message: 'Messages forwarded!', type: 'success' });
+L1282 [Level 2]: };
+L1283 [Level 2]: 
+L1284 [Level 2]: const renderForwardModal = () => (
+L1285 [Level 2]: <div className="wa-forward-modal-overlay">
+L1286 [Level 2]: <div className="wa-forward-modal">
+L1287 [Level 2]: <div className="wa-forward-modal-header">
+L1288 [Level 2]: <button className="wa-forward-modal-close-btn" onClick={() => { setIsForwardModalOpen(false); setSelectedForwardContacts([]); setShowForwardLimitWarning(false); }}>
+L1289 [Level 2]: <X size={24} />
+L1290 [Level 2]: </button>
+L1291 [Level 2]: <div className="wa-forward-modal-title">Forward message to...</div>
+L1292 [Level 2]: </div>
+L1293 [Level 2]: 
+L1294 [Level 3]: {showForwardLimitWarning && (
+L1295 [Level 3]: <div className="wa-forward-limit-banner">
+L1296 [Level 3]: <span>You can only share with up to 5 chats.</span>
+L1297 [Level 3]: <X size={16} onClick={() => setShowForwardLimitWarning(false)} style={{ cursor: 'pointer' }} />
+L1298 [Level 3]: </div>
+L1299 [Level 2]: )}
+L1300 [Level 2]: 
+L1301 [Level 2]: <div className="wa-forward-search">
+L1302 [Level 2]: <Search size={20} color="#54656f" />
+L1303 [Level 2]: <input
+L1304 [Level 2]: type="text"
+L1305 [Level 2]: placeholder="Search name or number"
+L1306 [Level 2]: value={forwardSearchQuery}
+L1307 [Level 2]: onChange={(e) => setForwardSearchQuery(e.target.value)}
+L1308 [Level 2]: autoFocus
+L1309 [Level 2]: />
+L1310 [Level 2]: </div>
+L1311 [Level 2]: 
+L1312 [Level 2]: <div className="wa-forward-contact-list">
+L1313 [Level 2]: <div className="wa-forward-section-title">Recent chats</div>
+L1314 [Level 3]: {users
+L1315 [Level 3]: .filter(u => u._id !== user.id && u.name.toLowerCase().includes(forwardSearchQuery.toLowerCase()))
+L1316 [Level 4]: .map(u => {
+L1317 [Level 4]: const isSelected = !!selectedForwardContacts.find(c => c._id === u._id);
+L1318 [Level 4]: return (
+L1319 [Level 4]: <div key={u._id} className="wa-forward-contact-item" onClick={() => toggleForwardContact(u)}>
+L1320 [Level 4]: <div className="wa-avatar">
+L1321 [Level 4]: <span>{u.name?.charAt(0).toUpperCase()}</span>
+L1322 [Level 4]: </div>
+L1323 [Level 4]: <div className="wa-forward-contact-info">
+L1324 [Level 4]: <div className="wa-contact-name">{u.name}</div>
+L1325 [Level 4]: <div className="wa-contact-status">{u.mobile || 'Available'}</div>
+L1326 [Level 4]: </div>
+L1327 [Level 4]: <div className={`wa-forward-checkbox ${isSelected ? 'selected' : ''}`}>
+L1328 [Level 4]: {isSelected && <CheckCheck size={16} color="white" />}
+L1329 [Level 4]: </div>
+L1330 [Level 4]: </div>
+L1331 [Level 4]: );
+L1332 [Level 3]: })
+L1333 [Level 2]: }
+L1334 [Level 2]: </div>
+L1335 [Level 2]: 
+L1336 [Level 3]: {selectedForwardContacts.length > 0 && (
+L1337 [Level 3]: <div className="wa-forward-fab-container">
+L1338 [Level 3]: <div className="wa-forward-names-preview">
+L1339 [Level 3]: {selectedForwardContacts.map(c => c.name).join(', ')}
+L1340 [Level 3]: </div>
+L1341 [Level 3]: <button className="wa-forward-fab" onClick={handleForwardSend}>
+L1342 [Level 3]: <Send size={24} color="white" />
+L1343 [Level 3]: </button>
+L1344 [Level 3]: </div>
+L1345 [Level 2]: )}
+L1346 [Level 2]: </div>
+L1347 [Level 2]: </div>
+L1348 [Level 2]: );
+L1349 [Level 2]: 
+L1350 [Level 2]: const renderMainChat = () => (
+L1351 [Level 2]: <div style={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden' }}>
+L1352 [Level 2]: <div
+L1353 [Level 2]: className="wa-main-chat"
+L1354 [Level 2]: onDragOver={handleDragOver}
+L1355 [Level 2]: onDrop={handleDrop}
+L1356 [Level 2]: style={{ flex: 1, borderRight: isMessageSearchOpen ? '1px solid #d1d7db' : 'none' }}
+L1357 [Level 2]: >
+L1358 [Level 3]: {selectedUser ? (
+L1359 [Level 3]: <>
+L1360 [Level 3]: {/* Header */}
+L1361 [Level 3]: <div className="wa-chat-header">
+L1362 [Level 3]: <div className="wa-chat-header-user">
+L1363 [Level 3]: {/* Mobile Back Button */}
+L1364 [Level 3]: <button
+L1365 [Level 3]: className="wa-nav-icon-btn mobile-back-btn"
+L1366 [Level 3]: onClick={handleBackToChatList}
+L1367 [Level 3]: style={{ marginRight: '8px', display: 'none' }} // Hidden by default, shown via CSS on mobile
+L1368 [Level 3]: >
+L1369 [Level 3]: <ArrowLeft size={24} />
+L1370 [Level 3]: </button>
+L1371 [Level 3]: 
+L1372 [Level 3]: <div className="wa-avatar" style={{ width: 40, height: 40, marginRight: 10 }}>
+L1373 [Level 3]: <span style={{ fontSize: 16 }}>{selectedUser.name?.charAt(0).toUpperCase()}</span>
+L1374 [Level 3]: </div>
+L1375 [Level 3]: <div style={{ display: 'flex', flexDirection: 'column' }}>
+L1376 [Level 3]: <span style={{ fontWeight: 'bold', fontSize: 16 }}>{selectedUser.name}</span>
+L1377 [Level 3]: <span style={{ fontSize: 12, color: '#667781' }}>{renderUserStatus(selectedUser)}</span>
+L1378 [Level 3]: </div>
+L1379 [Level 3]: </div>
+L1380 [Level 3]: <div className="wa-header-icons">
+L1381 [Level 3]: <button className="wa-nav-icon-btn"><Video size={20} /></button>
+L1382 [Level 3]: <button className="wa-nav-icon-btn"><Phone size={20} /></button>
+L1383 [Level 3]: <button
+L1384 [Level 3]: className={`wa-nav-icon-btn ${isMessageSearchOpen ? 'active' : ''}`}
+L1385 [Level 3]: onClick={() => setIsMessageSearchOpen(!isMessageSearchOpen)}
+L1386 [Level 3]: >
+L1387 [Level 3]: <Search size={20} />
+L1388 [Level 3]: </button>
+L1389 [Level 3]: </div>
+L1390 [Level 3]: </div>
+L1391 [Level 3]: 
+L1392 [Level 3]: {/* Pinned Header */}
+L1393 [Level 4]: {pinnedMessage && (
+L1394 [Level 4]: <div className="wa-pinned-header" onClick={() => scrollToMessage(pinnedMessage._id)}>
+L1395 [Level 4]: <div className="wa-pinned-content">
+L1396 [Level 4]: <div className="wa-pinned-icon">
+L1397 [Level 4]: <Pin size={20} fill="#008069" color="#008069" />
+L1398 [Level 4]: </div>
+L1399 [Level 4]: <div className="wa-pinned-text-container">
+L1400 [Level 4]: <span className="wa-pinned-label">Pinned Message</span>

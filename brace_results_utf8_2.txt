@@ -1,0 +1,8 @@
+﻿Starting brace analysis...
+[ALERT] Level 0 at L1: import React, { useEffect, useState, useRef } from 'react';
+[ALERT] Level 0 at L3: import { useNavigate } from 'react-router-dom';
+[ALERT] Level 0 at L9: } from 'lucide-react';
+[ALERT] Level 0 at L12: import { formatDateForSeparator } from '../utils/dateUtils';
+[ALERT] Level 0 at L19: });
+[INFO] Level at Line 1840: 2
+Final Level: 1

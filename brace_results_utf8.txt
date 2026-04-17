@@ -1,0 +1,99 @@
+﻿Starting brace analysis...
+[ALERT] Level 0 at L1: import React, { useEffect, useState, useRef } from 'react';
+[ALERT] Level 0 at L3: import { useNavigate } from 'react-router-dom';
+[ALERT] Level 0 at L9: } from 'lucide-react';
+[ALERT] Level 0 at L12: import { formatDateForSeparator } from '../utils/dateUtils';
+[ALERT] Level 0 at L19: });
+[ALERT] Level 0 at L510: };
+[ALERT] Level 0 at L524: };
+[ALERT] Level 0 at L557: };
+[ALERT] Level 0 at L574: };
+[ALERT] Level 0 at L585: };
+[ALERT] Level 0 at L595: className={`wa-nav-icon-btn ${!isProfileOpen ? 'active' : ''}`}
+[ALERT] Level 0 at L596: onClick={() => setIsProfileOpen(false)}
+[ALERT] Level 0 at L599: <MessageSquare size={24} />
+[ALERT] Level 0 at L600: {/* Optional: Add red dot for total unread */}
+[ALERT] Level 0 at L602: <button className="wa-nav-icon-btn" title="Status"><CircleDashed size={24} /></button>
+[ALERT] Level 0 at L603: <button className="wa-nav-icon-btn" title="Channels"><Users size={24} /></button>
+[ALERT] Level 0 at L604: <button className="wa-nav-icon-btn" title="Communities"><Users size={24} /></button>
+[ALERT] Level 0 at L607: <button className="wa-nav-icon-btn" title="Settings"><Settings size={24} /></button>
+[ALERT] Level 0 at L609: className={`wa-nav-icon-btn wa-profile-btn ${isProfileOpen ? 'active' : ''}`}
+[ALERT] Level 0 at L610: onClick={() => setIsProfileOpen(true)}
+[ALERT] Level 0 at L613: {/* User Profile Image as Icon */}
+[ALERT] Level 0 at L618: )}
+[ALERT] Level 0 at L627: <button onClick={() => setIsProfileOpen(false)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+[ALERT] Level 0 at L627: <button onClick={() => setIsProfileOpen(false)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+[ALERT] Level 0 at L628: <ArrowLeft size={24} style={{ marginRight: 10 }} />
+[ALERT] Level 0 at L628: <ArrowLeft size={24} style={{ marginRight: 10 }} />
+[ALERT] Level 0 at L640: )}
+[ALERT] Level 0 at L646: <span className="wa-section-value">{userData.name || 'Your Name'}</span>
+[ALERT] Level 0 at L647: <Smile size={20} color="#8696a0" style={{ cursor: 'pointer' }} />
+[ALERT] Level 0 at L647: <Smile size={20} color="#8696a0" style={{ cursor: 'pointer' }} />
+[ALERT] Level 0 at L656: <Smile size={20} color="#8696a0" style={{ cursor: 'pointer' }} />
+[ALERT] Level 0 at L656: <Smile size={20} color="#8696a0" style={{ cursor: 'pointer' }} />
+[ALERT] Level 0 at L663: <span className="wa-section-value">{userData.phone || '+91 94924 63918'}</span>
+[ALERT] Level 0 at L676: <div className="wa-file-preview-overlay" style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#e9edef', position: 'relative' }}>
+[ALERT] Level 0 at L677: {/* Header */}
+[ALERT] Level 0 at L678: <div style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#3b6e9e', color: 'white' }}>
+[ALERT] Level 0 at L679: <button onClick={() => setFile(null)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex' }}>
+[ALERT] Level 0 at L679: <button onClick={() => setFile(null)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex' }}>
+[ALERT] Level 0 at L680: <ArrowLeft size={24} />
+[ALERT] Level 0 at L684: {/* Content */}
+[ALERT] Level 0 at L685: <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', padding: 20 }}>
+[ALERT] Level 0 at L696: )}
+[ALERT] Level 0 at L699: {/* Footer / Caption Input */}
+[ALERT] Level 0 at L700: <div style={{ padding: '10px 15px', background: '#f0f2f5', display: 'flex', alignItems: 'center', gap: 10 }}>
+[ALERT] Level 0 at L701: <div className="wa-input-pill" style={{ flex: 1, background: 'white' }}>
+[ALERT] Level 0 at L706: value={input}
+[ALERT] Level 0 at L707: onChange={e => setInput(e.target.value)}
+[ALERT] Level 0 at L710: }}
+[ALERT] Level 0 at L714: <button onClick={handleSend} className="wa-nav-icon-btn wa-send-btn">
+[ALERT] Level 0 at L715: <Send size={20} color="white" />
+[ALERT] Level 0 at L722: <div className="wa-search-sidebar" style={{ width: 400, background: 'white', borderLeft: '1px solid #d1d7db', display: 'flex', flexDirection: 'column' }}>
+[ALERT] Level 0 at L723: <div className="wa-header" style={{ height: 60, padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f2f5', borderBottom: '1px solid #d1d7db', position: 'relative' }}>
+[ALERT] Level 0 at L725: onClick={() => { setIsMessageSearchOpen(false); setMessageSearchQuery(''); }}
+[ALERT] Level 0 at L726: style={{ border: 'none', background: 'transparent', cursor: 'pointer', position: 'absolute', left: 16, display: 'flex', alignItems: 'center' }}
+[ALERT] Level 0 at L728: <X size={24} color="#54656f" />
+[ALERT] Level 0 at L730: <span style={{ fontSize: 16, fontWeight: 500, color: '#111b21', whiteSpace: 'nowrap' }}>Search messages</span>
+[ALERT] Level 0 at L733: <div style={{ padding: '20px 15px', background: 'white', flex: 1, overflowY: 'auto' }}>
+[ALERT] Level 0 at L735: <div style={{ background: '#f0f2f5', borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center' }}>
+[ALERT] Level 0 at L736: <Search size={20} color="#54656f" style={{ marginRight: 12 }} />
+[ALERT] Level 0 at L736: <Search size={20} color="#54656f" style={{ marginRight: 12 }} />
+[ALERT] Level 0 at L740: value={messageSearchQuery}
+[ALERT] Level 0 at L741: onChange={(e) => setMessageSearchQuery(e.target.value)}
+[ALERT] Level 0 at L742: style={{ border: 'none', background: 'transparent', color: 'black', fontSize: 14, outline: 'none', width: '100%' }}
+[ALERT] Level 0 at L747: <div style={{ marginTop: 20 }}>
+[ALERT] Level 0 at L784: )}
+[ALERT] Level 0 at L799: };
+[ALERT] Level 0 at L878: };
+[ALERT] Level 0 at L889: };
+[ALERT] Level 0 at L970: };
+[ALERT] Level 0 at L976: */}
+[ALERT] Level 0 at L977: {isProfileOpen && renderProfileDrawer()}
+[ALERT] Level 0 at L979: {/* Chat List Header */}
+[ALERT] Level 0 at L983: <button className="wa-nav-icon-btn" title="New Chat"><Plus size={20} /></button>
+[ALERT] Level 0 at L987: onClick={() => setShowMenu(!showMenu)}
+[ALERT] Level 0 at L989: <MoreVertical size={20} />
+[ALERT] Level 0 at L991: {/* Simple Menu Dropdown */}
+[ALERT] Level 0 at L999: )}
+[ALERT] Level 0 at L1004: {/* Search */}
+[ALERT] Level 0 at L1007: <Search size={18} color="#54656f" />
+[ALERT] Level 0 at L1012: value={searchQuery}
+[ALERT] Level 0 at L1013: onChange={(e) => setSearchQuery(e.target.value)}
+[ALERT] Level 0 at L1018: {/* Filters */}
+[ALERT] Level 0 at L1021: className={`wa-filter-pill ${filterType === 'all' ? 'active' : ''}`}
+[ALERT] Level 0 at L1022: onClick={() => setFilterType('all')}
+[ALERT] Level 0 at L1027: className={`wa-filter-pill ${filterType === 'unread' ? 'active' : ''}`}
+[ALERT] Level 0 at L1028: onClick={() => setFilterType('unread')}
+[ALERT] Level 0 at L1033: className={`wa-filter-pill ${filterType === 'favorites' ? 'active' : ''}`}
+[ALERT] Level 0 at L1034: onClick={() => setFilterType('favorites')}
+[ALERT] Level 0 at L1041: {/* Users List */}
+[ALERT] Level 0 at L1102: })}
+[ALERT] Level 0 at L1136: };
+[ALERT] Level 0 at L1151: };
+[ALERT] Level 0 at L1156: };
+[ALERT] Level 0 at L1173: };
+[ALERT] Level 0 at L1178: };
+[INFO] Level at Line 1840: 1
+[ALERT] Level 0 at L1916: }
+Final Level: 0

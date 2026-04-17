@@ -1,0 +1,56 @@
+﻿[dotenv@17.2.3] injecting env (11) from .env -- tip: ≡ƒöÉ prevent building .env in docker: https://dotenvx.com/prebuild
+Connected to DB
+Total Resets in DB: 29
+
+--- ALL RESETS ---
+ID: 697af2a468c8f0c809a42f82, Status: resolved, Created: 2026-01-29T05:39:48.609Z, User: 697ae9690b608d07d262d913
+ID: 697af47aa55c88b8d294e497, Status: resolved, Created: 2026-01-29T05:47:38.725Z, User: 697ae9690b608d07d262d913
+ID: 697b1b34b008e816488431da, Status: resolved, Created: 2026-01-29T08:32:52.962Z, User: 697a36c86a24bf240c7fad4c
+ID: 697b1c51b008e81648843208, Status: resolved, Created: 2026-01-29T08:37:37.199Z, User: 697ae9690b608d07d262d913
+ID: 697b28f5f2ceebb952263f73, Status: resolved, Created: 2026-01-29T09:31:33.092Z, User: 697ae9690b608d07d262d913
+ID: 697c03308d717d4ac4b5e2b9, Status: resolved, Created: 2026-01-30T01:02:40.757Z, User: 697a36c86a24bf240c7fad4c
+ID: 697c3ae84a4b0e9d0cd07ab7, Status: resolved, Created: 2026-01-30T05:00:24.034Z, User: 697a36c86a24bf240c7fad4c
+ID: 697c47d44a4b0e9d0cd07b49, Status: resolved, Created: 2026-01-30T05:55:32.473Z, User: 697ae9690b608d07d262d913
+ID: 697cae3ace1a672e4667754d, Status: resolved, Created: 2026-01-30T13:12:26.613Z, User: 697a36c86a24bf240c7fad4c
+ID: 697cafc7ce1a672e46677644, Status: resolved, Created: 2026-01-30T13:19:03.532Z, User: 697a36c86a24bf240c7fad4c
+ID: 697cdf4a30a84480ac1b9eb2, Status: resolved, Created: 2026-01-30T16:41:46.514Z, User: 697a36c86a24bf240c7fad4c
+ID: 697ce1fa011b01196c5733a0, Status: resolved, Created: 2026-01-30T16:53:14.808Z, User: 697a36c86a24bf240c7fad4c
+ID: 69803b5b5e0de843ea33f7d8, Status: resolved, Created: 2026-02-02T05:51:23.568Z, User: 697a36c86a24bf240c7fad4c
+ID: 6980732a1731f6cb8b8522ef, Status: resolved, Created: 2026-02-02T09:49:30.716Z, User: 697e153008ca8dd1f3504e5a
+ID: 698073531731f6cb8b8522f2, Status: resolved, Created: 2026-02-02T09:50:11.895Z, User: 697e153008ca8dd1f3504e5a
+ID: 698074b21731f6cb8b8522f5, Status: resolved, Created: 2026-02-02T09:56:02.731Z, User: 697e153008ca8dd1f3504e5a
+ID: 698075291731f6cb8b85230d, Status: resolved, Created: 2026-02-02T09:58:01.542Z, User: 697e153008ca8dd1f3504e5a
+ID: 6980756a1731f6cb8b852310, Status: resolved, Created: 2026-02-02T09:59:06.399Z, User: 697e153008ca8dd1f3504e5a
+ID: 698075991731f6cb8b852313, Status: resolved, Created: 2026-02-02T09:59:53.295Z, User: 697e153008ca8dd1f3504e5a
+ID: 6980bdbfb779f8a84d9b74f7, Status: resolved, Created: 2026-02-02T15:07:43.664Z, User: 697db7c3ef49a6af40c9d7e9
+ID: 69822fb8fd8a80b860841bec, Status: pending, Created: 2026-02-03T17:26:16.096Z, User: 697db7c3ef49a6af40c9d7e9
+ID: 69823081fd8a80b860841cad, Status: pending, Created: 2026-02-03T17:29:37.245Z, User: 697db7c3ef49a6af40c9d7e9
+ID: 69823081fd8a80b860841cb6, Status: pending, Created: 2026-02-03T17:29:37.536Z, User: 697db7c3ef49a6af40c9d7e9
+ID: 69823081fd8a80b860841cbd, Status: pending, Created: 2026-02-03T17:29:37.752Z, User: 697db7c3ef49a6af40c9d7e9
+ID: 69823082fd8a80b860841ccc, Status: pending, Created: 2026-02-03T17:29:38.126Z, User: 697db7c3ef49a6af40c9d7e9
+ID: 6982c52b85221a6168115c77, Status: pending, Created: 2026-02-04T04:03:55.893Z, User: 697a36c86a24bf240c7fad4c
+ID: 6982e8072ba3f20251dca1a3, Status: pending, Created: 2026-02-04T06:32:39.005Z, User: 697ae9690b608d07d262d913
+ID: 69898488a7c8122d31801222, Status: pending, Created: 2026-02-09T06:54:00.262Z, User: 697a36c86a24bf240c7fad4c
+ID: 6989a69dbabf4d946e3d1d14, Status: resolved, Created: 2026-02-09T09:19:25.601Z, User: 697e153008ca8dd1f3504e5a
+
+Querying from: 2026-02-03T18:30:00.000Z (Wed Feb 04 2026 00:00:00 GMT+0530 (India Standard Time))
+
+--- AGGREGATION RESULTS ---
+[
+  {
+    "_id": "2026-02-04",
+    "count": 2,
+    "ids": [
+      "6982c52b85221a6168115c77",
+      "6982e8072ba3f20251dca1a3"
+    ]
+  },
+  {
+    "_id": "2026-02-09",
+    "count": 2,
+    "ids": [
+      "69898488a7c8122d31801222",
+      "6989a69dbabf4d946e3d1d14"
+    ]
+  }
+]

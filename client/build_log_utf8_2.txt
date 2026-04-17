@@ -1,0 +1,102 @@
+﻿
+> client@0.0.0 build
+> vite build
+
+[36mvite v7.3.1 [32mbuilding client environment for production...[36m[39m
+transforming...
+[32mΓ£ô[39m 19 modules transformed.
+node.exe : [31mΓ£ù[39m 
+Build failed in 273ms
+At line:1 char:1
++ & "C:\Program 
+Files\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
+    + CategoryInfo         
+     : NotSpecified: ([3  
+  1mΓ£ù[39m Build faile   
+ d in 273ms:String) [],    
+ RemoteException
+    + FullyQualifiedErrorI 
+   d : NativeCommandError
+ 
+[31merror during build:
+[31m[vite:esbuild] 
+Transform failed with 1 
+error:
+C:/Users/chimr/OneDrive/Des
+ktop/NEUCHAT5/chatApplicati
+onNeuralTrix/client/src/pag
+es/Chat.jsx:1840:0: ERROR: 
+Top-level return cannot be 
+used inside an ECMAScript 
+module[31m
+file: [36mC:/Users/chimr/O
+neDrive/Desktop/NEUCHAT5/ch
+atApplicationNeuralTrix/cli
+ent/src/pages/Chat.jsx:1840
+:0[31m
+[33m
+[33mTop-level return 
+cannot be used inside an 
+ECMAScript module[33m
+1838 |  );
+1839 |  
+1840 |  return (
+     |  ^
+1841 |      <div className=
+{`wa-app-container 
+${selectedUser ? 
+'chat-active' : 
+'list-active'}`}>
+1842 |          
+{renderLeftSidebar()}
+[31m
+    at failureErrorWithLog 
+(C:\Users\chimr\OneDrive\De
+sktop\NEUCHAT5\chatApplicat
+ionNeuralTrix\client\node_m
+odules\esbuild\lib\main.js:
+1467:15)
+    at C:\Users\chimr\OneDr
+ive\Desktop\NEUCHAT5\chatAp
+plicationNeuralTrix\client\
+node_modules\esbuild\lib\ma
+in.js:736:50
+    at responseCallbacks.<c
+omputed> (C:\Users\chimr\On
+eDrive\Desktop\NEUCHAT5\cha
+tApplicationNeuralTrix\clie
+nt\node_modules\esbuild\lib
+\main.js:603:9)
+    at 
+handleIncomingPacket (C:\Us
+ers\chimr\OneDrive\Desktop\
+NEUCHAT5\chatApplicationNeu
+ralTrix\client\node_modules
+\esbuild\lib\main.js:658:12
+)
+    at 
+Socket.readFromStdout (C:\U
+sers\chimr\OneDrive\Desktop
+\NEUCHAT5\chatApplicationNe
+uralTrix\client\node_module
+s\esbuild\lib\main.js:581:7
+)
+    at Socket.emit 
+(node:events:508:28)
+    at addChunk (node:inter
+nal/streams/readable:559:12
+)
+    at readableAddChunkPush
+ByteMode (node:internal/str
+eams/readable:510:3)
+    at Readable.push (node:
+internal/streams/readable:3
+90:5)
+    at Pipe.onStreamRead (n
+ode:internal/stream_base_co
+mmons:189:23)[39m

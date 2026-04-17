@@ -3413,18 +3413,31 @@ export default function Chat() {
         };
 
         const onStatusChange = (data) => {
+            const isOnline = data.status === 'online' || data.isOnline === true;
+            
             setUsers(prev => {
                 let changed = false;
                 const newUsers = prev.map(u => {
                     const isMatch = (u._id === data.userId || u.id === data.userId);
-                    if (isMatch && (u.online !== (data.status === 'online') || u.lastSeen !== data.lastSeen)) {
-                        changed = true;
-                        return { ...u, online: data.status === 'online', lastSeen: data.lastSeen };
+                    if (isMatch) {
+                        const hasStateChanged = (u.isOnline !== isOnline || u.online !== isOnline || u.lastSeen !== data.lastSeen);
+                        if (hasStateChanged) {
+                            changed = true;
+                            return { ...u, isOnline, online: isOnline, lastSeen: data.lastSeen };
+                        }
                     }
                     return u;
                 });
                 return changed ? newUsers : prev;
             });
+
+            // Also sync selectedUser state if it's the one that changed
+            if (selectedUserRef.current && (selectedUserRef.current._id === data.userId || selectedUserRef.current.id === data.userId)) {
+                setSelectedUser(prev => {
+                    if (!prev) return null;
+                    return { ...prev, isOnline, online: isOnline, lastSeen: data.lastSeen };
+                });
+            }
         };
 
         const onMessagePinned = (data) => {

@@ -1,0 +1,15 @@
+                                <div className="wa-reactions-row">
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>👍</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>❤️</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>😂</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>😮</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>😢</span>
+                                    <span onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }}>🙏</span>
+                                    <Plus size={18} onClick={(e) => { e.stopPropagation(); setOpenDropdown(null); }} />
+                                </div>
+                                <div className="wa-dropdown-divider"></div>
+                            </>
+                        )}
+
+                        {!isDeleted && (
+                            <>

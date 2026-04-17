@@ -1,0 +1,21 @@
+﻿L1200 [Level 4]: 
+L1201 [Level 4]: setSelectedForwardContacts(prev => [...prev, contact]);
+L1202 [Level 4]: setShowForwardLimitWarning(false);
+L1203 [Level 3]: }
+L1204 [Level 2]: };
+L1205 [Level 2]: 
+L1206 [Level 3]: const handleForwardSend = async () => {
+L1207 [Level 3]: if (selectedForwardContacts.length === 0 || forwardSelectedMsgs.length === 0) return;
+L1208 [Level 3]: 
+L1209 [Level 3]: // Optimistically close modal
+L1210 [Level 3]: setIsForwardModalOpen(false);
+L1211 [Level 3]: setIsForwardingMode(false);
+L1212 [Level 3]: setForwardSelectedMsgs([]);
+L1213 [Level 3]: setSelectedForwardContacts([]);
+L1214 [Level 3]: 
+L1215 [Level 3]: const token = localStorage.getItem('token');
+L1216 [Level 3]: 
+L1217 [Level 3]: // Send logic
+L1218 [Level 4]: for (const contact of selectedForwardContacts) {
+L1219 [Level 5]: for (const msg of forwardSelectedMsgs) {
+L1220 [Level 6]: try {

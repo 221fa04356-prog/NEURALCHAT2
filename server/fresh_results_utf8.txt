@@ -1,0 +1,33 @@
+﻿[dotenv@17.2.3] injecting env (11) from .env -- tip: ≡ƒôí add observability to secrets: https://dotenvx.com/ops
+Connected to MongoDB
+Total Users: 28
+User List:
+- 697a36c86a24bf240c7fad4c | john (johnklauss@gmail.com) | Role: user | Status: approved
+- 697ae9690b608d07d262d913 | sravya vajja (sravyavajja3@gmail.com) | Role: user | Status: approved
+- 697b1bbcb008e816488431dd | Percy Jyo (percykondaveeti@gmail.com) | Role: admin | Status: approved
+- 697caf1dce1a672e466775c0 | chinni (231la04005@gmail.com) | Role: user | Status: approved
+- 697cdfc030a84480ac1b9eb6 | Poojitha (poojitha.chimata0613@gmail.com) | Role: admin | Status: approved
+- 697db7c3ef49a6af40c9d7e9 | Georie (pinkyrosia52@gmail.com) | Role: user | Status: approved
+- 697e153008ca8dd1f3504e5a | jyotsna (jyotsnajyotsna24@gmail.com) | Role: user | Status: approved
+- 6980c371d321a2fc54e62332 | GAS (supervfast4@gmail.com) | Role: user | Status: approved
+- 6980c5bfd321a2fc54e62413 | Test Admin (admin_test_kdaeo9@gmail.com) | Role: admin | Status: approved
+- 6980c5d8d321a2fc54e62417 | Test Admin (admin_test_gvgr1k@gmail.com) | Role: admin | Status: approved
+- 6980c96fd321a2fc54e624a8 | Test Admin (admin_test_reset_1ih5nm@gmail.com) | Role: admin | Status: approved
+- 6980c9ddd321a2fc54e624c6 | Test Admin (admin_test_reset_vo1l1@gmail.com) | Role: admin | Status: approved
+- 6980c9fcd321a2fc54e624cb | Test Admin (admin_test_reset_3etiu@gmail.com) | Role: admin | Status: approved
+- 6980ca1fd321a2fc54e624d1 | Test Admin (admin_test_reset_lfst4c@gmail.com) | Role: admin | Status: approved
+- 6980ca51d321a2fc54e624d6 | Test Admin (admin_test_reset_onsfoi@gmail.com) | Role: admin | Status: approved
+- 6980ca7cd321a2fc54e624e0 | Test Admin (admin_test_reset_zimk7u@gmail.com) | Role: admin | Status: approved
+- 6980cab9d321a2fc54e624ea | Test Admin (admin_test_reset_zdrhg@gmail.com) | Role: admin | Status: approved
+- 6980cb05d321a2fc54e624f4 | Test Admin (admin_test_reset_bplt1q@gmail.com) | Role: admin | Status: approved
+- 6980cb33d321a2fc54e624fe | Test Admin (admin_test_reset_wsij08@gmail.com) | Role: admin | Status: approved
+- 6981905bd05b664c5f9a896b | LAST (232@gmail.com) | Role: admin | Status: approved
+- 6981c23bd7b55d99a88ab520 | Admin (admin@chat.com) | Role: admin | Status: approved
+- 6982e3f4b7995fb740c9303a | bvgf (bvgf@gmail.com) | Role: user | Status: pending
+- 6982e5fab96d3d810dbe3556 | gfds (hmnf@gmail.com) | Role: user | Status: pending
+- 6982e7102ba3f20251dca087 | sdffds (sdfds@gmail.com) | Role: user | Status: pending
+- 6982e79f2ba3f20251dca13e | ijhbvc (oijhgvc@gmail.com) | Role: user | Status: pending
+- 69899047f0e8c5abf42d7c90 | oikjhbv (fdggbfd@gmail.com) | Role: user | Status: approved
+- 698990eff0e8c5abf42d7cca | ramleel (ramleel@gmail.com) | Role: user | Status: approved
+- 698acb21993d695ba0bf1753 | shaik javed ali (shaikjavedali19@gmail.com) | Role: user | Status: approved
+Approved Non-Admin Users: 9

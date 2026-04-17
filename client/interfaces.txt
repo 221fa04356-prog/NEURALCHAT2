@@ -1,0 +1,16 @@
+Available Network Interfaces:
+Interface: Wi-Fi
+  Address: 10.10.21.239
+  Netmask: 255.255.224.0
+  Mac: 28:0c:50:b9:a1:09
+-------------------
+Interface: VMware Network Adapter VMnet1
+  Address: 192.168.190.1
+  Netmask: 255.255.255.0
+  Mac: 00:50:56:c0:00:01
+-------------------
+Interface: VMware Network Adapter VMnet8
+  Address: 192.168.71.1
+  Netmask: 255.255.255.0
+  Mac: 00:50:56:c0:00:08
+-------------------

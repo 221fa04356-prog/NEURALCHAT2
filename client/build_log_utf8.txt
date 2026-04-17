@@ -1,0 +1,109 @@
+﻿
+> client@0.0.0 build
+> vite build
+
+[36mvite v7.3.1 [32mbuilding client environment for production...[36m[39m
+transforming...
+[32mΓ£ô[39m 21 modules transformed.
+node.exe : 
+[31mΓ£ù[39m Build 
+failed in 261ms
+At line:1 char:1
++ & "C:\Program Files\
+nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo 
+...
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: ([31mΓ£ù[   
+ 39m Build failed     
+in 261ms:String)     
+[], RemoteExcepti    
+on
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+[31merror during 
+build:
+[31m[vite:esbuild] 
+Transform failed with 
+1 error:
+C:/Users/chimr/OneDriv
+e/Desktop/NEUCHAT5/cha
+tApplicationNeuralTrix
+/client/src/pages/Chat
+.jsx:1917:0: ERROR: 
+Unexpected "}"[31m
+file: [36mC:/Users/ch
+imr/OneDrive/Desktop/N
+EUCHAT5/chatApplicatio
+nNeuralTrix/client/src
+/pages/Chat.jsx:1917:0
+[31m
+[33m
+[33mUnexpected 
+"}"[33m
+1915 |      </div>
+1916 |  );
+1917 |  }
+     |  ^
+[31m
+    at 
+failureErrorWithLog (C
+:\Users\chimr\OneDrive
+\Desktop\NEUCHAT5\chat
+ApplicationNeuralTrix\
+client\node_modules\es
+build\lib\main.js:1467
+:15)
+    at C:\Users\chimr\
+OneDrive\Desktop\NEUCH
+AT5\chatApplicationNeu
+ralTrix\client\node_mo
+dules\esbuild\lib\main
+.js:736:50
+    at responseCallbac
+ks.<computed> (C:\User
+s\chimr\OneDrive\Deskt
+op\NEUCHAT5\chatApplic
+ationNeuralTrix\client
+\node_modules\esbuild\
+lib\main.js:603:9)
+    at 
+handleIncomingPacket (
+C:\Users\chimr\OneDriv
+e\Desktop\NEUCHAT5\cha
+tApplicationNeuralTrix
+\client\node_modules\e
+sbuild\lib\main.js:658
+:12)
+    at 
+Socket.readFromStdout 
+(C:\Users\chimr\OneDri
+ve\Desktop\NEUCHAT5\ch
+atApplicationNeuralTri
+x\client\node_modules\
+esbuild\lib\main.js:58
+1:7)
+    at Socket.emit 
+(node:events:508:28)
+    at addChunk (node:
+internal/streams/reada
+ble:559:12)
+    at readableAddChun
+kPushByteMode (node:in
+ternal/streams/readabl
+e:510:3)
+    at Readable.push (
+node:internal/streams/
+readable:390:5)
+    at 
+Pipe.onStreamRead (nod
+e:internal/stream_base
+_commons:189:23)[39m
