@@ -13,7 +13,7 @@ const ReactionLog = require('../models/ReactionLog'); // Import ReactionLog mode
 const { sendEmail } = require('../utils/emailService');
 const sendBrevoMail = require('../brevoMailer');
 const crypto = require('crypto');
-const getLocalIp = require('../utils/getLocalIp');
+const getClientBaseUrl = require('../utils/getClientBaseUrl');
 
 const generateSignature = (password) => {
     // HMAC SHA256 with Global Secret (Pepper)
@@ -86,7 +86,7 @@ router.post('/approve', async (req, res) => {
         const user = await User.findById(userId);
         if (user && user.email) {
             const subject = 'Account Approved - Login Details';
-            const baseUrl = process.env.CLIENT_URL || `https://${getLocalIp()}:5173`;
+            const baseUrl = getClientBaseUrl();
             const html = `
                 <h3>Welcome to NeuralChat</h3>
                 <p>Your account has been approved.</p>
@@ -185,7 +185,7 @@ router.post('/reset-password', async (req, res) => {
         if (user && user.email) {
             const subject = 'Temporary Password Allocated';
             // Use configured CLIENT_URL or auto-detect local IP
-            const baseUrl = process.env.CLIENT_URL || `https://${getLocalIp()}:5173`;
+            const baseUrl = getClientBaseUrl();
 
             const html = `
                 <h3>Temporary Password</h3>

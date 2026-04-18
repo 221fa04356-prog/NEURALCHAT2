@@ -15,7 +15,11 @@ const UnethicalLog = require('../models/UnethicalLog');
 const pdfParse = require('pdf-parse'); // Renamed to avoid confusion
 const mammoth = require('mammoth');
 const fs = require('fs');
+const crypto = require('crypto');
 const axios = require('axios'); // For link preview
+const { uploadLocalFileToGridFS, streamGridFSFileWithRange } = require('../utils/gridfsMedia');
+const cloudinaryUpload = require('../middleware/multer');
+const { isCloudinaryConfigured } = require('../config/cloudinary');
 
 const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole']; // Precise bad words without substring issues
 
@@ -23,6 +27,24 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET;
+const MIN_VALID_AUDIO_BYTES = 1024; // Only flag extremely tiny blobs as suspicious
+
+const isTransientDbError = (err) => {
+    const name = String(err?.name || '');
+    const code = String(err?.code || '');
+    const msg = String(err?.message || '').toLowerCase();
+    return (
+        name.includes('MongoNetworkError') ||
+        name.includes('MongoServerSelectionError') ||
+        name.includes('MongooseServerSelectionError') ||
+        code === 'ETIMEDOUT' ||
+        code === 'ECONNRESET' ||
+        code === 'ECONNREFUSED' ||
+        msg.includes('topology was destroyed') ||
+        msg.includes('server selection timed out') ||
+        msg.includes('connection') && msg.includes('timed out')
+    );
+};
 
 // --- Link Preview Helper ---
 const fetchLinkPreview = async (url) => {
@@ -115,6 +137,244 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
+const verifyTokenFromRequest = (req) => {
+    const authHeader = req.headers['authorization'];
+    const bearer = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+    const token = bearer || req.query.token;
+    if (!token) return null;
+    try {
+        return jwt.verify(token, JWT_SECRET);
+    } catch (_) {
+        return null;
+    }
+};
+
+const safeResolveMediaPath = (rawPath) => {
+    if (!rawPath || typeof rawPath !== 'string') return null;
+    const uploadsRoot = path.resolve(__dirname, '../uploads');
+    const normalized = rawPath
+        .replace(/^https?:\/\/[^/]+/i, '')
+        .replace(/^\/+uploads\/?/i, '')
+        .replace(/^\/+/, '');
+    const resolved = path.resolve(uploadsRoot, normalized);
+    if (!resolved.startsWith(uploadsRoot)) return null;
+    return resolved;
+};
+
+const findByFilenameRecursive = (dir, filename) => {
+    if (!fs.existsSync(dir)) return null;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isFile() && entry.name === filename) return full;
+        if (entry.isDirectory()) {
+            const found = findByFilenameRecursive(full, filename);
+            if (found) return found;
+        }
+    }
+    return null;
+};
+
+const streamFileWithRange = (req, res, absPath) => {
+    const stat = fs.statSync(absPath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+
+    const ext = path.extname(absPath).toLowerCase();
+    const typeMap = {
+        '.ogg': 'audio/ogg',
+        '.opus': 'audio/ogg',
+        '.webm': 'audio/webm',
+        '.mp3': 'audio/mpeg',
+        '.m4a': 'audio/mp4',
+        '.mp4': 'audio/mp4',
+        '.wav': 'audio/wav'
+    };
+    const contentType = typeMap[ext] || 'application/octet-stream';
+
+    if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        const chunkSize = (end - start) + 1;
+        const file = fs.createReadStream(absPath, { start, end });
+        res.writeHead(206, {
+            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': chunkSize,
+            'Content-Type': contentType,
+            'Cache-Control': 'private, max-age=86400'
+        });
+        file.pipe(res);
+        return;
+    }
+
+    res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Content-Type': contentType,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'private, max-age=86400'
+    });
+    fs.createReadStream(absPath).pipe(res);
+};
+
+const inferTypeFromUrl = (rawUrl = '') => {
+    const url = String(rawUrl || '').toLowerCase();
+    if (!url) return 'text';
+    if (/\.(mp3|m4a|wav|ogg|opus|webm)(\?|$)/.test(url) || url.includes('/voice_messages/')) return 'audio';
+    if (/\.(mp4|mov|avi|mkv)(\?|$)/.test(url) || url.includes('/video/upload/')) return 'video';
+    if (/\.(jpg|jpeg|png|gif|webp)(\?|$)/.test(url) || url.includes('/image/upload/')) return 'image';
+    return 'file';
+};
+
+// Authenticated media endpoint with path recovery for legacy files.
+router.get('/media', (req, res) => {
+    const decoded = verifyTokenFromRequest(req);
+    if (!decoded) return res.status(401).json({ error: 'Unauthorized media access' });
+
+    const requestedPath = req.query.path || '';
+    const requestedName = req.query.name || '';
+    const uploadsRoot = path.resolve(__dirname, '../uploads');
+
+    let candidate = safeResolveMediaPath(requestedPath);
+    if (!candidate && requestedName) {
+        candidate = safeResolveMediaPath(`/uploads/${requestedName}`);
+    }
+
+    if (!candidate || !fs.existsSync(candidate)) {
+        const fallbackName = requestedName || path.basename(String(requestedPath || ''));
+        if (!fallbackName) {
+            return res.status(404).json({ error: 'Media not found' });
+        }
+        const found = findByFilenameRecursive(uploadsRoot, fallbackName);
+        if (!found) return res.status(404).json({ error: 'Media not found' });
+        candidate = found;
+    }
+
+    try {
+        streamFileWithRange(req, res, candidate);
+    } catch (err) {
+        console.error('[MEDIA STREAM ERROR]', err);
+        return res.status(500).json({ error: 'Media stream failed' });
+    }
+});
+
+router.get('/media/file/:id', (req, res) => {
+    const decoded = verifyTokenFromRequest(req);
+    if (!decoded) return res.status(401).json({ error: 'Unauthorized media access' });
+    return streamGridFSFileWithRange(req, res, req.params.id).catch((err) => {
+        console.error('[GRIDFS MEDIA STREAM ERROR]', err);
+        return res.status(500).json({ error: 'Media stream failed' });
+    });
+});
+
+// Upload voice note to Cloudinary and return permanent URL.
+router.post('/upload-audio', authenticateToken, (req, res, next) => {
+    if (!isCloudinaryConfigured) {
+        return res.status(503).json({ error: 'Cloudinary is not configured on server' });
+    }
+    cloudinaryUpload.single('audio')(req, res, (err) => {
+        if (err) {
+            console.error('[CLOUDINARY UPLOAD ERROR]', err);
+            const status = err?.http_code || err?.statusCode || err?.status || 502;
+            return res.status(status >= 400 && status < 600 ? status : 502).json({
+                error: err.message || 'Audio upload failed'
+            });
+        }
+        next();
+    });
+}, (req, res) => {
+    if (!req.file || !req.file.path) {
+        return res.status(400).json({ error: 'No audio file uploaded' });
+    }
+    const mimeType = String(req.file.mimetype || '');
+    if (!mimeType.startsWith('audio/')) {
+        return res.status(400).json({ error: 'Invalid upload type. Only audio is allowed.' });
+    }
+
+    return res.json({
+        audioUrl: req.file.path,
+        publicId: req.file.filename || req.file.public_id || null,
+        mimeType
+    });
+});
+
+// Resolve media by message id (robust fallback for stale/broken file URLs).
+router.get('/media/message/:messageId', authenticateToken, async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const wantsGroup = req.query.isGroup === 'true';
+        const currentUserId = String(req.user.id);
+
+        let msg = null;
+        let isGroupMsg = false;
+
+        if (wantsGroup) {
+            msg = await GroupMessage.findById(messageId).select('type file_path fileName group_id sender_id');
+            isGroupMsg = !!msg;
+        } else {
+            msg = await Message.findById(messageId).select('type file_path fileName user_id receiver_id');
+            if (!msg) {
+                msg = await GroupMessage.findById(messageId).select('type file_path fileName group_id sender_id');
+                isGroupMsg = !!msg;
+            }
+        }
+
+        if (!msg) return res.status(404).json({ error: 'Message not found' });
+
+        if (isGroupMsg) {
+            const group = await Group.findById(msg.group_id).select('members admin admins removedMembers');
+            if (!group) return res.status(404).json({ error: 'Group not found' });
+            const isMember = (group.members || []).some((m) => String(m) === currentUserId);
+            const isOwner = String(group.admin) === currentUserId;
+            const isAdmin = (group.admins || []).some((a) => String(a) === currentUserId);
+            const wasMember = (group.removedMembers || []).some((m) => String(m) === currentUserId);
+            if (!isMember && !isOwner && !isAdmin && !wasMember) {
+                return res.status(403).json({ error: 'Not authorized for group media' });
+            }
+        } else {
+            const isSender = String(msg.user_id) === currentUserId;
+            const isReceiver = String(msg.receiver_id) === currentUserId;
+            if (!isSender && !isReceiver) {
+                return res.status(403).json({ error: 'Not authorized for media' });
+            }
+        }
+
+        const rawPath = String(msg.file_path || '');
+        const fileName = String(msg.fileName || '');
+        if (!rawPath && !fileName) return res.status(404).json({ error: 'Media path not found' });
+
+        // GridFS-backed route path
+        if (/\/api\/chat\/media\/file\//i.test(rawPath)) {
+            const idMatch = rawPath.match(/\/api\/chat\/media\/file\/([^/?#]+)/i);
+            if (idMatch?.[1]) {
+                req.query.name = req.query.name || fileName;
+                req.query.legacyPath = req.query.legacyPath || rawPath;
+                return streamGridFSFileWithRange(req, res, idMatch[1]).catch((err) => {
+                    console.error('[MESSAGE MEDIA GRIDFS ERROR]', err);
+                    return res.status(500).json({ error: 'Media stream failed' });
+                });
+            }
+        }
+
+        // Legacy uploads path fallback
+        let candidate = safeResolveMediaPath(rawPath);
+        if (!candidate && fileName) {
+            candidate = safeResolveMediaPath(`/uploads/${fileName}`);
+        }
+        if (!candidate || !fs.existsSync(candidate)) {
+            const found = findByFilenameRecursive(path.resolve(__dirname, '../uploads'), fileName || path.basename(rawPath));
+            if (!found) return res.status(404).json({ error: 'Media not found' });
+            candidate = found;
+        }
+
+        return streamFileWithRange(req, res, candidate);
+    } catch (err) {
+        console.error('[MESSAGE MEDIA ERROR]', err);
+        return res.status(500).json({ error: 'Media stream failed' });
+    }
+});
+
 // Configure Multer
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -132,24 +392,41 @@ const upload = multer({
     storage,
     fileFilter: (req, file, cb) => {
         const allowedTypes = [
-            'image/jpeg', 'image/png', // Images
-            'application/pdf',         // PDF
-            'application/msword',      // .doc
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
-            'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/webm', 'audio/wav', 'audio/x-m4a' // Audio
+            'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.ms-powerpoint',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'text/plain', 'text/csv',
+            'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/webm', 'audio/wav', 'audio/x-m4a', 'audio/opus'
         ];
         const ext = path.extname(file.originalname).toLowerCase();
-        const allowedExts = ['.jpg', '.jpeg', '.png', '.doc', '.docx', '.pdf', '.mp3', '.m4a', '.ogg', '.wav', '.webm'];
+        const allowedExts = [
+            '.jpg', '.jpeg', '.png', '.gif', '.webp',
+            '.doc', '.docx', '.docm', '.dot', '.dotx', '.rtf', '.odt',
+            '.pdf', '.txt', '.csv',
+            '.xls', '.xlsx', '.xlsm', '.xlsb', '.xlt', '.xltx', '.ods',
+            '.ppt', '.pptx', '.pptm', '.pot', '.potx', '.pps', '.ppsx', '.odp',
+            '.mp3', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.flac',
+            '.mp4', '.avi', '.mkv', '.mov', '.webm', '.m4v'
+        ];
 
-        const isAllowedType = allowedTypes.includes(file.mimetype) ||
+        const mime = (file.mimetype || '').toLowerCase();
+        const isAllowedType = allowedTypes.includes(mime) ||
             file.mimetype.startsWith('audio/') ||
             file.mimetype.startsWith('video/') ||
-            file.mimetype.startsWith('image/');
+            file.mimetype.startsWith('image/') ||
+            mime === 'application/octet-stream';
 
-        if (isAllowedType && allowedExts.includes(ext)) {
+        const isAllowedExt = allowedExts.includes(ext);
+        // Allow by extension (source of truth list), and tolerate generic/octet-stream MIME.
+        if (isAllowedExt || isAllowedType) {
             cb(null, true);
         } else {
-            cb(new Error(`Invalid file type (${file.mimetype}, ext: ${ext}). Only JPG, PNG, PDF, and Word/Audio files are allowed.`));
+            cb(new Error(`Invalid file type (${file.mimetype}, ext: ${ext}). This file type is not supported.`));
         }
     }
 });
@@ -401,6 +678,9 @@ router.get('/custom-lists', authenticateToken, async (req, res) => {
         res.json(user.customLists || []);
     } catch (err) {
         console.error('[GET CUSTOM LISTS ERROR]', err);
+        if (isTransientDbError(err)) {
+            return res.status(200).json([]);
+        }
         res.status(500).json({ error: 'Failed to fetch custom lists' });
     }
 });
@@ -420,6 +700,12 @@ router.post('/custom-lists/sync', authenticateToken, async (req, res) => {
         res.json({ status: 'success', customLists: user.customLists });
     } catch (err) {
         console.error('[SYNC CUSTOM LISTS ERROR]', err);
+        if (isTransientDbError(err)) {
+            return res.status(200).json({
+                status: 'degraded',
+                customLists: Array.isArray(req.body?.customLists) ? req.body.customLists : []
+            });
+        }
         res.status(500).json({ error: 'Failed to sync custom lists' });
     }
 });
@@ -465,6 +751,79 @@ router.get('/signal/keys/:userId', authenticateToken, async (req, res) => {
         }
 
         res.json(bundle);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Fetch only Signal identity public key (non-destructive, does not consume prekeys)
+router.get('/signal/identity/:userId', authenticateToken, async (req, res) => {
+    try {
+        const user = await User.findById(req.params.userId).select('signal_keys.identityKey');
+        if (!user || !user.signal_keys || !user.signal_keys.identityKey) {
+            return res.status(404).json({ error: 'User does not have E2EE identity key' });
+        }
+        res.json({
+            userId: String(user._id),
+            identityKey: user.signal_keys.identityKey
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Build deterministic safety number from both users' identity public keys
+router.get('/signal/verification/:userId', authenticateToken, async (req, res) => {
+    try {
+        const localId = String(req.user.id);
+        const remoteId = String(req.params.userId);
+        const requestedSet = Number.parseInt(String(req.query.set || '1'), 10);
+        const setIndex = Number.isFinite(requestedSet) ? Math.max(1, Math.min(3, requestedSet)) : 1;
+
+        if (!remoteId || localId === remoteId) {
+            return res.status(400).json({ error: 'Invalid verification target' });
+        }
+
+        const [localUser, remoteUser] = await Promise.all([
+            User.findById(localId).select('signal_keys.identityKey'),
+            User.findById(remoteId).select('signal_keys.identityKey')
+        ]);
+
+        if (!localUser?.signal_keys?.identityKey) {
+            return res.status(404).json({ error: 'Your identity key is not available. Re-register E2EE.' });
+        }
+        if (!remoteUser?.signal_keys?.identityKey) {
+            return res.status(404).json({ error: 'Contact identity key is not available yet.' });
+        }
+
+        const canonical = [
+            { id: localId, key: localUser.signal_keys.identityKey },
+            { id: remoteId, key: remoteUser.signal_keys.identityKey }
+        ].sort((a, b) => a.id.localeCompare(b.id));
+
+        const material = `neuralchat-safety-v1|${canonical[0].id}|${canonical[0].key}|${canonical[1].id}|${canonical[1].key}`;
+        const baseDigest = crypto.createHash('sha256').update(material, 'utf8').digest();
+        const setSalt = ['alpha', 'bravo', 'charlie'][setIndex - 1] || 'alpha';
+        const codeDigest = crypto
+            .createHash('sha256')
+            .update(`neuralchat-safety-v2|${setSalt}|${material}`, 'utf8')
+            .digest();
+
+        const groups = [];
+        for (let i = 0; i < 6; i++) {
+            const high = codeDigest[i * 2] || 0;
+            const low = codeDigest[(i * 2) + 1] || 0;
+            const num = ((high << 8) | low) % 100000;
+            groups.push(String(num).padStart(5, '0'));
+        }
+
+        res.json({
+            securityCode: groups.join(' '),
+            fingerprint: baseDigest.toString('hex'),
+            algorithm: 'sha256',
+            version: 1,
+            setIndex
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -681,25 +1040,47 @@ router.get('/events/reminders', authenticateToken, async (req, res) => {
         const p2pEvents = await Message.find({
             type: 'event',
             $or: [{ user_id: userId }, { receiver_id: userId }]
-        }).populate('user_id', 'name image').populate('receiver_id', 'name image');
+        })
+            .populate('user_id', 'name image')
+            .populate('receiver_id', 'name image');
 
         // All Group events where user is a member
-        const Group = require('../models/Group');
         const userGroups = await Group.find({ members: userId }).select('_id');
         const userGroupIds = userGroups.map(g => g._id);
 
         const groupEvents = await GroupMessage.find({
             type: 'event',
             group_id: { $in: userGroupIds }
-        }).populate('sender_id', 'name image').populate('group_id', 'name icon');
+        })
+            .populate('sender_id', 'name image')
+            .populate('group_id', 'name icon');
 
-        const combined = [
+        const toSortableTs = (msg) => {
+            const start = msg?.event?.startDate;
+            const created = msg?.created_at;
+            const startTs = start ? new Date(start).getTime() : NaN;
+            if (Number.isFinite(startTs)) return startTs;
+            const createdTs = created ? new Date(created).getTime() : NaN;
+            if (Number.isFinite(createdTs)) return createdTs;
+            return Number.MAX_SAFE_INTEGER;
+        };
+
+        const normalized = [
             ...p2pEvents.map(m => ({ ...m.toObject(), isGroup: false })),
             ...groupEvents.map(m => ({ ...m.toObject(), isGroup: true }))
-        ].sort((a, b) => new Date(a.event.startDate) - new Date(b.event.startDate));
+        ];
+
+        // Keep response resilient even when legacy/malformed event payloads exist.
+        const combined = normalized
+            .filter((m) => m && m.type === 'event')
+            .sort((a, b) => toSortableTs(a) - toSortableTs(b));
 
         res.json({ status: 'success', events: combined });
     } catch (err) {
+        console.error('[REMINDERS FETCH ERROR]', err);
+        if (isTransientDbError(err)) {
+            return res.status(200).json({ status: 'degraded', events: [] });
+        }
         res.status(500).json({ error: err.message });
     }
 });
@@ -1027,6 +1408,27 @@ router.post('/send', authenticateToken, (req, res, next) => {
         fileName = file.originalname;
         fileSize = file.size;
 
+        // Guardrail: tiny audio blobs are suspicious, but do not block sending.
+        if (type === 'audio' && fileSize < MIN_VALID_AUDIO_BYTES) {
+            console.warn(`[AUDIO WARN] Very small audio blob received (${fileSize} bytes): ${file.originalname}`);
+        }
+
+        // Permanent durability: persist audio bytes in Mongo GridFS.
+        if (type === 'audio') {
+            try {
+                const absPath = path.join(__dirname, '../uploads', file.filename);
+                const { fileId } = await uploadLocalFileToGridFS(absPath, file.originalname || file.filename, {
+                    senderId: userId,
+                    receiverId: toUserId || null,
+                    legacyPath: filePath
+                });
+                filePath = `/api/chat/media/file/${String(fileId)}`;
+            } catch (gridErr) {
+                console.error('[GRIDFS UPLOAD ERROR]', gridErr);
+                return res.status(500).json({ error: 'Failed to store audio permanently' });
+            }
+        }
+
         // Try to get page count for PDFs (wrapped in try-catch to prevent crashing)
         if (file.mimetype === 'application/pdf') {
             try {
@@ -1045,7 +1447,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
     } else if (req.body.file_path) {
         // Handle Forwarding (Existing File)
         filePath = req.body.file_path;
-        type = req.body.type || 'text';
+        type = req.body.type || inferTypeFromUrl(filePath);
         fileName = req.body.fileName;
         fileSize = req.body.fileSize;
         pageCount = req.body.pageCount || 0;
@@ -1215,6 +1617,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
                 content: content || '',
                 type,
                 file_path: filePath,
+                fileName,
                 fileSize: fileSize || 0,
                 pageCount: req.body.pageCount || 0,
                 thumbnail_path: req.body.thumbnail_path || null,

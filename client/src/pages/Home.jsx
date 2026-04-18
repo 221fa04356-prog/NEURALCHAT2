@@ -90,14 +90,20 @@ export default function Home() {
             const res = await axios.post('/api/auth/login', payload);
             const user = res.data.user;
             const token = res.data.token;
+            const normalizedUser = user ? {
+                ...user,
+                id: user.id || user._id,
+                _id: user._id || user.id
+            } : user;
 
-            localStorage.setItem('user', JSON.stringify(user));
+            localStorage.setItem('user', JSON.stringify(normalizedUser));
             localStorage.setItem('token', token);
 
             // Force reload to ensure socket and state are clean
             localStorage.removeItem('lastActiveChat');
             sessionStorage.clear();
-            window.location.href = isAdmin && user.role === 'admin' ? '/admin' : '/chat';
+            window.dispatchEvent(new Event('authChange'));
+            window.location.href = isAdmin && normalizedUser?.role === 'admin' ? '/admin' : '/chat';
         } catch (err) {
             if (err.response?.status === 409 && err.response?.data?.needsForce) {
                 setShowForceLogout(true);

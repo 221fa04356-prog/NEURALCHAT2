@@ -12,12 +12,23 @@ const UnethicalLog = require('../models/UnethicalLog');
 
 
 const JWT_SECRET = process.env.JWT_SECRET;
+const MIN_VALID_AUDIO_BYTES = 1024; // Only flag extremely tiny blobs as suspicious
 const { handleMembershipJoin, handleMembershipExit } = require('../utils/membership');
 const axios = require('axios');
+const { uploadLocalFileToGridFS } = require('../utils/gridfsMedia');
 const Groq = require('groq-sdk');
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole']; // Precise bad words
+
+const inferTypeFromUrl = (rawUrl = '') => {
+    const url = String(rawUrl || '').toLowerCase();
+    if (!url) return 'text';
+    if (/\.(mp3|m4a|wav|ogg|webm)(\?|$)/.test(url) || url.includes('/voice_messages/')) return 'audio';
+    if (/\.(mp4|mov|avi|mkv)(\?|$)/.test(url) || url.includes('/video/upload/')) return 'video';
+    if (/\.(jpg|jpeg|png|gif|webp)(\?|$)/.test(url) || url.includes('/image/upload/')) return 'image';
+    return 'file';
+};
 
 const checkUnethicalWithAI = async (text) => {
     if (!text) return { isUnethical: false };
@@ -744,6 +755,27 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
                 type = 'file';
             }
 
+            // Guardrail: tiny audio blobs are suspicious, but do not block sending.
+            if (type === 'audio' && fileSize < MIN_VALID_AUDIO_BYTES) {
+                console.warn(`[GROUP AUDIO WARN] Very small audio blob received (${fileSize} bytes): ${file.originalname}`);
+            }
+
+            // Permanent durability: persist audio bytes in Mongo GridFS.
+            if (type === 'audio') {
+                try {
+                    const absPath = path.join(__dirname, '../uploads', file.filename);
+                    const { fileId } = await uploadLocalFileToGridFS(absPath, file.originalname || file.filename, {
+                        senderId,
+                        groupId,
+                        legacyPath: file_path
+                    });
+                    file_path = `/api/chat/media/file/${String(fileId)}`;
+                } catch (gridErr) {
+                    console.error('[GROUP GRIDFS UPLOAD ERROR]', gridErr);
+                    return res.status(500).json({ error: 'Failed to store audio permanently' });
+                }
+            }
+
             // Extract page count for PDF
             if (file.mimetype === 'application/pdf') {
                 try {
@@ -760,6 +792,7 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
         } else if (req.body.file_path) {
             // Forwarded file
             file_path = req.body.file_path;
+            type = type || inferTypeFromUrl(file_path);
             fileName = req.body.fileName;
             fileSize = req.body.fileSize;
             req.body.pageCount = req.body.pageCount || 0;

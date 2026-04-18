@@ -8,7 +8,9 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "kill": "npx kill-port 3000",
-    "kill:all": "taskkill /F /IM node.exe"
+    "kill:all": "taskkill /F /IM node.exe",
+    "migrate:voice:legacy": "node scripts/migrate-legacy-voice.js",
+    "backfill:audio:gridfs": "node scripts/backfill-audio-to-gridfs.js"
   },
   "keywords": [],
   "author": "",
@@ -17,6 +19,7 @@
   "dependencies": {
     "bad-words": "^4.0.0",
     "bcrypt": "^6.0.0",
+    "cloudinary": "^2.9.0",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
@@ -25,14 +28,15 @@
     "mammoth": "^1.11.0",
     "mongoose": "^9.1.5",
     "mongoose-field-encryption": "^7.0.1",
-    "multer": "^2.0.2",
-    "nodemailer": "^7.0.13",
+    "multer": "^2.1.1",
+    "multer-storage-cloudinary": "^2.2.1",
+    "nodemailer": "^8.0.5",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^1.1.1",
     "pngjs": "^7.0.0",
     "sib-api-v3-sdk": "^8.5.0",
     "socket.io": "^4.8.3",
-    "sqlite3": "^5.1.7",
+    "sqlite3": "^6.0.1",
     "twilio": "^5.12.2",
     "utif": "^3.1.0"
   },

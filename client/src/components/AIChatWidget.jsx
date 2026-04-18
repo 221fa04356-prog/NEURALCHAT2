@@ -44,10 +44,6 @@ export default function AIChatWidget() {
     const scrollTimeout = useRef(null);
 
     // Ensure widget is hidden on login/register pages regardless of local storage state
-    if (!user.id || ['/', '/register', '/admin-register', '/admin-reset', '/admin'].includes(window.location.pathname)) {
-        return null;
-    }
-
     // HIDDEN: Chatbot is currently disabled via CSS.
 
     // Drag Effects
@@ -316,6 +312,10 @@ export default function AIChatWidget() {
             return `${d}/${m}/${y}`;
         }
     };
+
+    if (!user.id || ['/', '/register', '/admin-register', '/admin-reset', '/admin'].includes(window.location.pathname)) {
+        return null;
+    }
 
     return (
         <div
