@@ -1,20 +1,19 @@
-﻿:root {
-    --wa-header-bg: #f0f2f5;
-    --wa-sidebar-bg: #ffffff;
-    --wa-panel-header-bg: #f0f2f5;
-    --wa-chat-bg: #efeae2;
-    --wa-incoming-msg-bg: #ffffff;
-    --wa-outgoing-msg-bg: #e1f5fe;
-    /* Pale Light Blue */
-    /* Indigo 100 */
-    --wa-primary: #6366f1;
-    /* Indigo 500 */
-    --wa-text-primary: #111b21;
-    --wa-text-secondary: #54656f;
-    --wa-icon: #54656f;
-    --wa-border: #e9edef;
-    --wa-active-icon: #0EA5BE;
-    /* Indigo 600 */
+:root {
+    --wa-header-bg: rgba(30, 41, 59, 0.6); /* Glassmorphism header */
+    --wa-sidebar-bg: rgba(15, 23, 42, 0.75); /* Glassmorphism sidebar */
+    --wa-panel-header-bg: rgba(30, 41, 59, 0.8);
+    --wa-chat-bg: transparent;
+    --wa-incoming-msg-bg: rgba(30, 41, 59, 0.7); /* Dark msg bubbles */
+    --wa-outgoing-msg-bg: rgba(56, 189, 248, 0.2); /* Sky blue tint msg bubbles */
+    /* Sky Blue 400 */
+    --wa-primary: #38bdf8;
+    /* Sky Blue 400 */
+    --wa-text-primary: #f8fafc; /* Slate 50 */
+    --wa-text-secondary: #94a3b8; /* Slate 400 */
+    --wa-icon: #94a3b8;
+    --wa-border: rgba(255, 255, 255, 0.1);
+    --wa-active-icon: #38bdf8;
+    /* Sky Blue 400 */
     --wa-sidebar-width: 450px;
 }
 
@@ -38,13 +37,14 @@ html {
 /* --- Far Left Navigation Sidebar --- */
 .wa-nav-sidebar {
     width: 64px;
-    background-color: rgba(240, 242, 245, 0.8);
+    background-color: rgba(15, 23, 42, 0.8) !important;
+    backdrop-filter: blur(20px) !important;
     display: flex;
     flex-direction: column;
     align-items: center;
     padding-top: 12px;
     padding-bottom: 20px;
-    border-right: 1px solid var(--wa-border);
+    border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
     justify-content: space-between;
     z-index: 20;
 }
@@ -90,12 +90,13 @@ html {
 }
 
 .wa-nav-icon-btn:hover {
-    background-color: rgba(0, 0, 0, 0.05);
+    background-color: rgba(255, 255, 255, 0.05) !important;
 }
 
 .wa-nav-icon-btn.active {
-    background-color: #dbeafe;
-    color: var(--wa-active-icon);
+    background-color: rgba(56, 189, 248, 0.15) !important;
+    color: #38bdf8 !important;
+    box-shadow: inset 0 0 10px rgba(56, 189, 248, 0.1) !important;
 }
 
 /* --- Unread Messages Banner Field --- */
@@ -3176,12 +3177,13 @@ html {
     right: -100%;
     width: var(--wa-sidebar-width);
     height: 100%;
-    background: white;
+    background: rgba(13, 22, 29, 0.95);
+    backdrop-filter: blur(20px);
     z-index: 1200;
-    transition: right 0.3s cubic-bezier(0.1, 0.7, 0.1, 1);
+    transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     flex-direction: column;
-    border-left: 1px solid var(--wa-border);
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 @media (max-width: 768px) {
@@ -3267,25 +3269,21 @@ html {
 
 /* --- Contact Info Panel Specifics --- */
 .wa-contact-info-panel {
-    background: white;
+    background: transparent;
     z-index: 1200;
-    /* Higher than message search (1050) */
     display: flex;
     flex-direction: column;
 }
 
 .wa-contact-info-header {
     height: 60px;
-    background: white;
+    background: transparent;
     display: flex;
     align-items: center;
-    /* ADD */
     justify-content: space-between;
-    /* ADD THIS */
     padding: 0 8px;
-    /* ADD */
     flex-shrink: 0;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .wa-contact-info-close-btn {
@@ -3341,7 +3339,7 @@ html {
 }
 
 .wa-contact-profile-section {
-    background: white;
+    background: transparent;
     padding: 40px 0 30px;
     display: flex;
     flex-direction: column;
@@ -3371,14 +3369,14 @@ html {
 
 .wa-contact-name-large {
     font-size: 22px;
-    color: #111b21;
+    color: #f8fafc;
     font-weight: 400;
     margin-bottom: 4px;
 }
 
 .wa-contact-phone-large {
     font-size: 16px;
-    color: #667781;
+    color: #94a3b8;
     margin-bottom: 20px;
 }
 
@@ -3407,16 +3405,17 @@ html {
     width: 44px;
     height: 44px;
     border-radius: 50%;
-    border: 1px solid #e9edef;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     display: flex;
     align-items: center;
     justify-content: center;
-    background: white;
-    transition: background 0.2s;
+    background: rgba(255, 255, 255, 0.03);
+    transition: all 0.2s;
 }
 
 .wa-contact-action-btn:hover .wa-action-icon-box {
-    background: #f0f2f5;
+    background: rgba(56, 189, 248, 0.18);
+    border-color: rgba(56, 189, 248, 0.45);
 }
 
 .wa-contact-section-divider {
@@ -3426,7 +3425,7 @@ html {
 }
 
 .wa-contact-info-item {
-    background: white;
+    background: transparent;
     padding: 14px 30px;
 }
 
@@ -3436,7 +3435,7 @@ html {
 }
 
 .wa-contact-info-item.clickable:hover {
-    background: #f5f6f6;
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .wa-info-item-label {
@@ -3447,7 +3446,7 @@ html {
 
 .wa-info-item-value {
     font-size: 16px;
-    color: #111b21;
+    color: #f8fafc;
 }
 
 .wa-info-item-row {
@@ -3464,7 +3463,7 @@ html {
 
 .wa-info-item-count {
     font-size: 14px;
-    color: #667781;
+    color: #94a3b8;
     margin-left: auto;
     margin-right: 10px;
 }
@@ -3493,9 +3492,9 @@ html {
 }
 
 .wa-contact-settings-list {
-    background: white;
+    background: transparent;
     padding: 8px 0;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .wa-setting-item {
@@ -3507,7 +3506,7 @@ html {
 }
 
 .wa-setting-item:hover {
-    background: #f5f6f6;
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .wa-setting-icon {
@@ -3515,25 +3514,25 @@ html {
     display: flex;
     justify-content: center;
     margin-right: 24px;
-    color: #54656f;
+    color: #38bdf8;
 }
 
 .wa-setting-text {
     flex: 1;
     font-size: 16px;
-    color: #111b21;
+    color: #f8fafc;
 }
 
 .wa-setting-subtext {
     font-size: 13px;
-    color: #667781;
+    color: #94a3b8;
     margin-top: 2px;
 }
 
 .wa-contact-danger-zone {
-    background: white;
+    background: transparent;
     padding: 8px 0;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .wa-setting-item.danger .wa-setting-text {
@@ -3573,12 +3572,12 @@ html {
 
 .wa-group-name {
     font-size: 16px;
-    color: #111b21;
+    color: #f8fafc;
 }
 
 .wa-group-members {
     font-size: 13px;
-    color: #667781;
+    color: #94a3b8;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3587,15 +3586,15 @@ html {
 
 .wa-info-header {
     height: 64px;
-    background: white;
+    background: transparent;
     display: flex;
     align-items: center;
     justify-content: center;
     position: relative;
     padding: 0 20px;
-    color: var(--wa-text-primary);
+    color: #f8fafc;
     font-size: 19px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     z-index: 10;
 }
 
@@ -3625,7 +3624,7 @@ html {
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    background-color: #f0f2f5;
+    background-color: transparent;
 }
 
 .wa-info-message-preview {
@@ -3687,9 +3686,9 @@ html {
 }
 
 .wa-info-stat-card {
-    background: white;
+    background: rgba(255, 255, 255, 0.03);
     border-radius: 12px;
-    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     overflow: hidden;
 }
 
@@ -3713,7 +3712,7 @@ html {
 
 .wa-info-stat-label {
     font-size: 16px;
-    color: #111b21;
+    color: #f8fafc;
     margin-bottom: 2px;
 }
 
@@ -4031,8 +4030,8 @@ html {
 /* --- Shared Media Panel Styles --- */
 .wa-media-tabs {
     display: flex;
-    background: white;
-    border-bottom: 1px solid #e9edef;
+    background: transparent;
+    border-bottom: 1px solid var(--wa-border);
 }
 
 .wa-media-tab {
@@ -4041,7 +4040,7 @@ html {
     text-align: center;
     font-size: 14px;
     font-weight: 500;
-    color: #667781;
+    color: var(--wa-text-secondary);
     cursor: pointer;
     position: relative;
     text-transform: uppercase;
@@ -4049,7 +4048,7 @@ html {
 }
 
 .wa-media-tab:hover:not(.active) {
-    color: #3b4a54;
+    color: var(--wa-text-primary);
 }
 
 .wa-media-tab:hover:not(.active)::after {
@@ -4059,11 +4058,11 @@ html {
     left: 0;
     right: 0;
     height: 3px;
-    background: #d1d7db;
+    background: rgba(255, 255, 255, 0.1);
 }
 
 .wa-media-tab.active {
-    color: #027EB5;
+    color: var(--wa-primary);
 }
 
 .wa-media-tab.active::after {
@@ -4073,7 +4072,7 @@ html {
     left: 0;
     right: 0;
     height: 3px;
-    background: #027EB5;
+    background: var(--wa-primary);
 }
 
 .wa-media-grid {
@@ -4138,26 +4137,26 @@ html {
     align-items: flex-start;
     /* Align contents to top */
     padding: 12px 10px;
-    border-bottom: 1px solid #f0f2f5;
+    border-bottom: 1px solid var(--wa-border);
     cursor: pointer;
     gap: 12px;
 }
 
 .wa-doc-list-item:hover,
 .wa-link-list-item:hover {
-    background: #f5f6f6;
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .wa-doc-select-box {
     width: 24px;
     height: 24px;
-    border: 2px solid #adb5bd;
+    border: 2px solid var(--wa-border);
     border-radius: 20%;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    background: white;
+    background: transparent;
     opacity: 0;
     transition: opacity 0.2s;
     margin-top: 4px;
@@ -4171,8 +4170,8 @@ html {
 }
 
 .wa-doc-select-box.active {
-    background: #027EB5;
-    border-color: #027EB5;
+    background: var(--wa-primary);
+    border-color: var(--wa-primary);
 }
 
 .wa-doc-icon-small {
@@ -4186,7 +4185,7 @@ html {
 
 .wa-doc-name-small {
     font-size: 14.5px;
-    color: #111b21;
+    color: var(--wa-text-primary);;
     white-space: normal;
     overflow: visible;
     text-overflow: unset;
@@ -4197,7 +4196,7 @@ html {
 
 .wa-doc-meta-small {
     font-size: 13px;
-    color: #667781;
+    color: var(--wa-text-secondary);
     margin-top: 2px;
     white-space: normal;
     overflow-wrap: anywhere;
@@ -4207,7 +4206,7 @@ html {
 .wa-link-card-small {
     flex: 1;
     min-width: 0;
-    background: #f0f2f5;
+    background: rgba(255, 255, 255, 0.03);
     padding: 8px;
     border-radius: 8px;
     text-decoration: none;
@@ -4222,12 +4221,12 @@ html {
 }
 
 .wa-link-author {
-    color: #027EB5;
+    color: var(--wa-primary);
     font-weight: 600;
 }
 
 .wa-link-time-small {
-    color: #8696a0;
+    color: var(--wa-text-secondary);
 }
 
 .wa-link-thumb-small {
@@ -4246,7 +4245,7 @@ html {
 .wa-link-title-small {
     font-size: 13px;
     font-weight: 600;
-    color: #111b21;
+    color: var(--wa-text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -4254,7 +4253,7 @@ html {
 
 .wa-link-url-small {
     font-size: 12px;
-    color: #027eb5;
+    color: var(--wa-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -4272,12 +4271,13 @@ html {
     right: -100%;
     width: var(--wa-sidebar-width);
     height: 100%;
-    background-color: #f0f2f5;
+    background-color: rgba(13, 22, 29, 0.95);
+    backdrop-filter: blur(20px);
     z-index: 1050;
     display: flex;
     flex-direction: column;
     transition: right 0.3s cubic-bezier(0.1, 0.7, 0.1, 1);
-    border-left: 1px solid var(--wa-border);
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .wa-starred-messages-panel.active {
@@ -4294,12 +4294,12 @@ html {
 }
 
 .wa-panel-header.starred {
-    background-color: #f0f2f5;
-    border-bottom: 1px solid var(--wa-border);
+    background-color: transparent;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .wa-panel-header.starred .wa-panel-title {
-    color: #3b4a54;
+    color: #f8fafc;
 }
 
 .wa-panel-back-btn {
@@ -4327,18 +4327,18 @@ html {
     flex: 1;
     overflow-y: auto;
     padding: 20px 0;
-    background-color: #fff;
+    background-color: transparent;
 }
 
 .wa-starred-item {
     padding: 12px 16px;
-    border-bottom: 1px solid #f0f2f5;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     cursor: pointer;
     transition: background-color 0.2s;
 }
 
 .wa-starred-item:hover {
-    background-color: #f5f6f6;
+    background-color: rgba(255, 255, 255, 0.03);
 }
 
 .wa-starred-item-header {
@@ -4365,11 +4365,11 @@ html {
 .wa-avatar-placeholder {
     width: 100%;
     height: 100%;
-    background-color: #dfe1e5;
+    background-color: rgba(255, 255, 255, 0.05);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #fff;
+    color: #38bdf8;
     font-size: 16px;
     font-weight: 500;
 }
@@ -4380,7 +4380,7 @@ html {
     align-items: center;
     gap: 4px;
     font-size: 14px;
-    color: #111b21;
+    color: #f8fafc;
 }
 
 .wa-starred-sender,
@@ -4421,12 +4421,46 @@ html {
 }
 
 .wa-starred-bubble.sent {
-    background-color: #e1f5fe;
+    background-color: rgba(56, 189, 248, 0.1);
+    border: 1px solid rgba(56, 189, 248, 0.15);
+    color: #f8fafc;
 }
 
 .wa-starred-bubble.received {
-    background-color: #fff;
-    border: 1px solid #f0f2f5;
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #f8fafc;
+}
+
+.wa-starred-list .wa-link-preview-card,
+.wa-starred-list .wa-event-card,
+.wa-starred-list .wa-poll-card,
+.wa-starred-list .wa-youtube-card,
+.wa-starred-list .wa-message-lp-card {
+    background-color: rgba(255, 255, 255, 0.03) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: none !important;
+    color: #f8fafc !important;
+}
+
+.wa-starred-list .wa-link-preview-card *,
+.wa-starred-list .wa-event-card *,
+.wa-starred-list .wa-poll-card *,
+.wa-starred-list .wa-message-lp-card *,
+.wa-starred-list .wa-youtube-card * {
+    color: inherit !important;
+}
+
+.wa-starred-list .wa-link-preview-title,
+.wa-starred-list .wa-event-name,
+.wa-starred-list .wa-youtube-title {
+    color: #38bdf8 !important;
+}
+
+.wa-starred-list .wa-link-preview-domain,
+.wa-starred-list .wa-event-details,
+.wa-starred-list .wa-youtube-channel {
+    color: #94a3b8 !important;
 }
 
 .wa-starred-content {
@@ -4450,10 +4484,11 @@ html {
 }
 
 .wa-starred-file-item {
-    background: #f0f2f5;
-    padding: 8px;
-    border-radius: 4px;
-    margin-bottom: 8px;
+    background: rgba(255, 255, 255, 0.05); /* Darker background for neural theme */
+    padding: 10px;
+    border-radius: 8px;
+    margin-bottom: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .wa-starred-meta {
@@ -7685,10 +7720,11 @@ html {
 /* Community Info Styles */
 .wa-community-row-item {
     transition: background-color 0.2s;
+    background: transparent;
 }
 
 .wa-community-row-item:hover {
-    background-color: #f5f6f6;
+    background-color: rgba(56, 189, 248, 0.14) !important;
 }
 
 .wa-manage-community-text:hover {
@@ -7709,13 +7745,13 @@ html {
 }
 
 .wa-community-info-action:hover {
-    background-color: #f8f9fa;
-    border-color: #d1d7db;
+    background-color: rgba(56, 189, 248, 0.14);
+    border-color: rgba(56, 189, 248, 0.45);
 }
 
 /* Exit Community Modal */
 .wa-exit-option:hover {
-    background: #f5f6f6 !important;
+    background: rgba(56, 189, 248, 0.14) !important;
 }
 
 .assign-owner-link:hover {
@@ -8361,6 +8397,486 @@ html {
     z-index: -1;
     background: transparent;
 }
+
+/* =========================================================================
+   STUNNING DARK NEURAL THEME INTEGRATION
+   ========================================================================= */
+
+/* Main Theme Overrides */
+.wa-nav-sidebar {
+    background: #0f172a !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.wa-left-panel {
+    background: #111b32 !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 5px 0 25px rgba(0, 0, 0, 0.2);
+}
+
+.wa-chat-header {
+    background: rgba(15, 23, 42, 0.55) !important;
+    backdrop-filter: blur(28px) !important;
+    -webkit-backdrop-filter: blur(28px) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+    color: #f8fafc !important;
+}
+
+.wa-header-title {
+    color: #f8fafc !important;
+}
+
+.wa-header, .wa-panel-header {
+    background: rgba(15, 23, 42, 0.55) !important;
+    backdrop-filter: blur(28px) !important;
+    -webkit-backdrop-filter: blur(28px) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+    color: #f8fafc !important;
+}
+
+/* Base resets for transparency */
+.wa-user-list, .wa-app-container {
+    background-color: transparent !important;
+}
+
+/* Keep all left-panel drawers solid (no glass transparency). */
+.wa-left-panel .wa-drawer,
+.wa-left-panel .wa-profile-drawer,
+.wa-left-panel .wa-drawer-header,
+.wa-left-panel .wa-drawer-content {
+    background-color: #111b32 !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+/* Hover/Active states */
+.wa-user-item {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
+    background-color: transparent !important;
+    transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.wa-user-item:hover {
+    background-color: rgba(56, 189, 248, 0.1) !important;
+}
+.wa-user-item.active {
+    background: rgba(56, 189, 248, 0.15) !important;
+    border-left: 3px solid #38bdf8 !important;
+}
+.wa-chat-name {
+    color: #f8fafc !important;
+}
+.wa-chat-time, .wa-chat-last-msg {
+    color: #94a3b8 !important;
+}
+
+/* Messages */
+.wa-message-bubble {
+    color: #f8fafc !important;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 4px 6px -2px rgba(0, 0, 0, 0.1) !important;
+}
+
+.wa-msg-rec {
+    background: rgba(30, 41, 59, 0.6) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+}
+
+.wa-msg-sent {
+    background: linear-gradient(135deg, rgba(8, 145, 178, 0.5) 0%, rgba(30, 64, 175, 0.5) 100%) !important;
+    border: 1px solid rgba(56, 189, 248, 0.2) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+}
+
+.wa-msg-meta, .wa-msg-document-meta, .wa-forwarded-tag {
+    color: rgba(255, 255, 255, 0.6) !important;
+}
+
+/* Document cards */
+.wa-msg-document {
+    background: rgba(15, 23, 42, 0.4) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+.wa-msg-document-preview, .wa-msg-document-details, .wa-msg-document-actions {
+    background: transparent !important;
+}
+.wa-msg-document-name {
+    color: #f8fafc !important;
+}
+.wa-msg-document-action-btn, .wa-msg-document-action-btn:first-child {
+    background: transparent !important;
+    color: #38bdf8 !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+}
+.wa-msg-document-action-btn:hover {
+    background: rgba(56, 189, 248, 0.1) !important;
+}
+
+/* Alerts / Banners */
+.wa-unread-banner-field {
+    background: rgba(15, 23, 42, 0.6) !important;
+    border: 1px solid rgba(56, 189, 248, 0.3) !important;
+    backdrop-filter: blur(20px) !important;
+}
+.wa-unread-banner-header {
+    background: rgba(56, 189, 248, 0.15) !important;
+    color: #f8fafc !important;
+    border-bottom: 1px solid rgba(56, 189, 248, 0.2) !important;
+}
+.wa-unread-banner-list {
+    background: transparent !important;
+}
+.wa-unread-banner-item {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+.wa-unread-banner-item:hover {
+    background: rgba(56, 189, 248, 0.1) !important;
+}
+.wa-unread-item-name {
+    color: #f8fafc !important;
+}
+.wa-unread-item-count {
+    color: #38bdf8 !important;
+}
+
+/* Filters & Search */
+.wa-search-bar {
+    background: rgba(15, 23, 42, 0.5) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    backdrop-filter: blur(10px) !important;
+}
+.wa-search-input {
+    color: #f8fafc !important;
+}
+.wa-filter-pill {
+    background: rgba(15, 23, 42, 0.5) !important;
+    color: #cbd5e1 !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    backdrop-filter: blur(10px) !important;
+}
+.wa-filter-pill:hover {
+    background: rgba(56, 189, 248, 0.15) !important;
+    color: #f8fafc !important;
+}
+.wa-filter-pill.active {
+    background: linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%) !important;
+    color: white !important;
+    border: none !important;
+    box-shadow: 0 4px 15px rgba(14, 165, 233, 0.4);
+}
+.wa-filter-plus-btn {
+    background: rgba(15, 23, 42, 0.5) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Inputs & Footer */
+.wa-input-pill {
+    background: rgba(15, 23, 42, 0.6) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    backdrop-filter: blur(28px) !important;
+    -webkit-backdrop-filter: blur(28px) !important;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3) !important;
+}
+
+.wa-input-box {
+    color: #f8fafc !important;
+}
+.wa-input-box::placeholder {
+    color: #64748b !important;
+}
+
+/* Text primary everywhere */
+body {
+    color: #f8fafc !important;
+}
+
+/* Icons */
+.wa-header-icons svg,
+.wa-footer-left-icons svg,
+.wa-nav-icon-btn svg,
+svg.wa-back-icon,
+.wa-mic-btn-idle svg {
+    color: #cbd5e1 !important;
+}
+
+.wa-nav-icon-btn.active {
+    background: rgba(56, 189, 248, 0.2) !important;
+}
+
+.wa-send-btn-inner, .wa-send-btn-circle-inner {
+    background: linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%) !important;
+    box-shadow: 0 4px 15px rgba(14, 165, 233, 0.4) !important;
+    border: none !important;
+}
+.wa-mic-btn-idle:hover {
+    background: rgba(56, 189, 248, 0.2) !important;
+}
+
+/* Sidebar / Drawer Panels */
+.wa-profile-drawer,
+.wa-info-panel,
+.wa-contact-info-panel,
+.wa-search-sidebar,
+.wa-community-home-drawer,
+.wa-group-info,
+.wa-new-community-drawer,
+.wa-contact-info-content {
+    background: rgba(15, 23, 42, 0.85) !important;
+    backdrop-filter: blur(40px) !important;
+    -webkit-backdrop-filter: blur(40px) !important;
+    border-right: 1px solid rgba(56, 189, 248, 0.2) !important;
+    box-shadow: 20px 0 50px rgba(0, 0, 0, 0.4) !important;
+    color: #f8fafc !important;
+}
+
+.wa-profile-section, .wa-chat-item, .wa-setting-item {
+    background: rgba(30, 41, 59, 0.4) !important;
+    backdrop-filter: blur(20px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+.wa-chat-item:hover, .wa-setting-item:hover {
+    background: rgba(56, 189, 248, 0.1) !important;
+}
+
+.wa-section-value, .wa-contact-name-large, .wa-info-item-value, .wa-contact-phone-large {
+    color: #f8fafc !important;
+}
+.wa-info-item-label, .wa-section-label {
+    color: #38bdf8 !important;
+}
+
+.wa-contact-info-header, .wa-drawer-header {
+    background: rgba(15, 23, 42, 0.8) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+    color: #f8fafc !important;
+}
+
+/* New chat action rows: keep selection clearly visible in dark theme. */
+.wa-new-chat-action-item {
+    background: transparent !important;
+    border-radius: 12px !important;
+}
+
+.wa-new-chat-action-item:hover,
+.wa-new-chat-action-item:active,
+.wa-new-chat-action-item:focus-within {
+    background: rgba(56, 189, 248, 0.14) !important;
+}
+
+.wa-new-chat-action-item span {
+    color: #f8fafc !important;
+}
+
+/* New community form readability in dark panel */
+.wa-new-community-drawer input::placeholder,
+.wa-new-community-drawer textarea::placeholder {
+    color: #94a3b8 !important;
+    opacity: 1;
+}
+.wa-contact-info-bg {
+    background: transparent !important;
+}
+.wa-contact-section-divider {
+    background: rgba(255,255,255,0.05) !important;
+}
+
+/* Floating Actions */
+.wa-scroll-to-bottom-btn {
+    background: rgba(30, 41, 59, 0.8) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    color: #cbd5e1 !important;
+    backdrop-filter: blur(10px) !important;
+}
+.wa-scroll-to-bottom-btn:hover {
+    background: rgba(51, 65, 85, 0.9) !important;
+    color: #f8fafc !important;
+}
+
+/* Badges */
+.wa-unread-badge, .wa-bell-badge, .wa-scroll-btn-badge {
+    background: linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%) !important;
+    box-shadow: 0 2px 8px rgba(14, 165, 233, 0.5) !important;
+    border: none !important;
+}
+
+/* Tooltips */
+[data-tooltip]::after {
+    background: rgba(15, 23, 42, 0.9) !important;
+    color: #38bdf8 !important;
+    border: 1px solid rgba(56, 189, 248, 0.3) !important;
+    backdrop-filter: blur(8px) !important;
+}
+[data-tooltip]::before {
+    border-top-color: rgba(15, 23, 42, 0.9) !important;
+}
+[data-tooltip-pos="right"]::after {
+    background: rgba(15, 23, 42, 0.9) !important;
+    color: #38bdf8 !important;
+    border: 1px solid rgba(56, 189, 248, 0.3) !important;
+}
+
+/* Link Previews */
+.wa-link-preview-card, .wa-reply-preview-container {
+    background: rgba(15, 23, 42, 0.4) !important;
+    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+.wa-link-preview-title, .wa-reply-author {
+    color: #38bdf8 !important;
+}
+.wa-link-preview-description, .wa-reply-text {
+    color: #cbd5e1 !important;
+}
+
+/* Avatar overrides */
+.wa-avatar {
+    background-color: rgba(30, 41, 59, 0.8) !important;
+    border: 1px solid rgba(56, 189, 248, 0.3) !important;
+    box-shadow: 0 0 10px rgba(14, 165, 233, 0.2);
+}
+
+.wa-forward-bottom-bar {
+    background: rgba(15, 23, 42, 0.8) !important;
+    backdrop-filter: blur(20px) !important;
+    border-top: 1px solid rgba(56, 189, 248, 0.3) !important;
+}
+
+.wa-forward-next-btn {
+    background: linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%) !important;
+    box-shadow: 0 4px 15px rgba(14, 165, 233, 0.4) !important;
+    border: none !important;
+}
+
+.wa-forward-modal, .wa-confirm-modal {
+    background: rgba(15, 23, 42, 0.85) !important;
+    backdrop-filter: blur(28px) !important;
+    -webkit-backdrop-filter: blur(28px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6) !important;
+}
+.wa-forward-modal-header, .wa-confirm-header {
+    background: transparent !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+    color: #f8fafc !important;
+}
+.wa-forward-modal-title, .wa-confirm-title {
+    color: #f8fafc !important;
+}
+.wa-forward-search {
+    background: rgba(30, 41, 59, 0.5) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+.wa-forward-search input {
+    color: #f8fafc !important;
+}
+.wa-contact-name {
+    color: #f8fafc !important;
+}
+.wa-contact-status {
+    color: #94a3b8 !important;
+}
+
+/* Header title + online status contrast */
+.wa-chat-header .wa-header-name,
+.wa-chat-header .wa-chat-name {
+    color: #f8fafc !important;
+}
+
+.wa-chat-header .wa-header-status,
+.wa-chat-header .wa-contact-status,
+.wa-chat-header .wa-chat-last-msg {
+    color: #cbd5e1 !important;
+}
+
+/* Darken message/context/pin menus */
+.wa-dropdown-menu,
+.wa-chat-context-menu {
+    background: #0f172a !important;
+    border: 1px solid rgba(56, 189, 248, 0.25) !important;
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.45) !important;
+}
+
+.wa-dropdown-item {
+    color: #e2e8f0 !important;
+}
+
+.wa-dropdown-item svg {
+    color: #94a3b8 !important;
+}
+
+.wa-dropdown-item:hover,
+.wa-chat-context-menu .wa-dropdown-item:hover {
+    background: rgba(56, 189, 248, 0.16) !important;
+}
+
+.wa-dropdown-divider {
+    background: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Message info panel cards should stay dark */
+.wa-info-content {
+    background-color: rgba(15, 23, 42, 0.85) !important;
+}
+
+.wa-info-stat-card {
+    background: rgba(30, 41, 59, 0.85) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: none !important;
+}
+
+.wa-info-stat-label {
+    color: #f8fafc !important;
+}
+
+.wa-info-stat-time {
+    color: #cbd5e1 !important;
+}
+
+.wa-info-panel .wa-contact-msg-card,
+.wa-info-panel .wa-poll-card,
+.wa-info-panel .wa-event-card {
+    background: rgba(30, 41, 59, 0.9) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    box-shadow: none !important;
+}
+
+.wa-info-panel .wa-contact-msg-card *,
+.wa-info-panel .wa-poll-card *,
+.wa-info-panel .wa-event-card * {
+    color: #f8fafc !important;
+}
+
+.wa-info-panel .wa-poll-card [style*="background: #ffffff"],
+.wa-info-panel .wa-event-card [style*="background: white"],
+.wa-info-panel .wa-event-card [style*="background: #ffffff"] {
+    background: rgba(15, 23, 42, 0.7) !important;
+}
+
+.wa-pin-replace-card {
+    background: rgba(30, 41, 59, 0.85) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.wa-pin-replace-name {
+    color: #f8fafc !important;
+}
+.wa-forward-contact-item {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+.wa-forward-checkbox {
+    border-color: rgba(255, 255, 255, 0.2) !important;
+}
+.wa-forward-checkbox.selected {
+    background-color: #38bdf8 !important;
+    border-color: #38bdf8 !important;
+}
+
+
 /* --- Voice Message Restoration (Target UI) --- */
 .wa-message-bubble.wa-voice-type {
     min-width: 370px;

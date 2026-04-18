@@ -353,7 +353,7 @@ export default function UserReset() {
                         <form onSubmit={handleReset} className="login-form">
                             {/* Login ID Field */}
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: '700', color: '#475569', marginBottom: '0.6rem' }}>
+                                <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: '700', color: '#e2e8f0', marginBottom: '0.6rem' }}>
                                     Login ID
                                 </label>
                                 <div style={{ position: 'relative', width: '100%' }}>
@@ -379,7 +379,7 @@ export default function UserReset() {
 
                             {/* Temporary Password Field */}
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: '700', color: '#475569', marginBottom: '0.6rem' }}>
+                                <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: '700', color: '#e2e8f0', marginBottom: '0.6rem' }}>
                                     Temporary Password
                                 </label>
                                 <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: '10px' }}>
@@ -420,7 +420,7 @@ export default function UserReset() {
 
                             {/* New Password Field */}
                             <div className="form-group-custom" style={{ position: 'relative' }}>
-                                <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: '700', color: '#475569', marginBottom: '0.6rem' }}>
+                                <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: '700', color: '#e2e8f0', marginBottom: '0.6rem' }}>
                                     Create Password
                                 </label>
                                 <div
@@ -467,7 +467,7 @@ export default function UserReset() {
                                                     pointerEvents: 'none'
                                                 }}
                                             >
-                                                <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#475569', marginBottom: '0.5rem' }}>
+                                                <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#e2e8f0', marginBottom: '0.5rem' }}>
                                                     Password Requirements:
                                                 </div>
                                                 {[
@@ -516,7 +516,7 @@ export default function UserReset() {
 
                             {/* Confirm Password Field */}
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: '700', color: '#475569', marginBottom: '0.6rem' }}>
+                                <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: '700', color: '#e2e8f0', marginBottom: '0.6rem' }}>
                                     Confirm Password
                                 </label>
                                 <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: '10px' }}>

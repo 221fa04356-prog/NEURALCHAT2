@@ -28,7 +28,7 @@ export default function CountryCodeSelect({ value, onChange, className, style })
                 }}
                 onClick={() => setIsOpen(!isOpen)}
             >
-                <span style={{ fontSize: '0.9rem', color: '#475569', fontWeight: '500' }}>
+                <span style={{ fontSize: '0.9rem', color: '#f8fafc', fontWeight: '500' }}>
                     {selectedCountry.isoCode} ({selectedCountry.dialCode})
                 </span>
                 <span style={{ color: '#94A3B8', fontSize: '10px', marginLeft: '5px' }}>▼</span>
@@ -37,9 +37,9 @@ export default function CountryCodeSelect({ value, onChange, className, style })
             {isOpen && (
                 <div style={{
                     position: 'absolute', top: 'calc(100% + 5px)', left: 0, width: '280px',
-                    background: 'rgba(255, 255, 255, 0.98)', backdropFilter: 'blur(10px)',
-                    border: '1px solid rgba(0, 0, 0, 0.1)', borderRadius: '12px',
-                    boxShadow: '0 10px 40px rgba(31, 38, 135, 0.15)', maxHeight: '250px',
+                    background: 'rgba(15, 23, 42, 0.98)', backdropFilter: 'blur(10px)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '12px',
+                    boxShadow: '0 10px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(56, 189, 248, 0.1)', maxHeight: '250px',
                     overflowY: 'auto', zIndex: 1000, display: 'flex', flexDirection: 'column',
                     padding: '8px'
                 }}>
@@ -49,20 +49,20 @@ export default function CountryCodeSelect({ value, onChange, className, style })
                             onClick={() => { onChange(c.dialCode); setIsOpen(false); }}
                             style={{ 
                                 padding: '10px 14px', cursor: 'pointer', borderRadius: '8px', 
-                                transition: 'all 0.2s', fontSize: '14px', color: '#334155',
-                                background: c.dialCode === value ? 'rgba(14,165,233,0.1)' : 'transparent',
+                                transition: 'all 0.2s', fontSize: '14px', color: '#f8fafc',
+                                background: c.dialCode === value ? 'rgba(56,189,248,0.15)' : 'transparent',
                                 fontWeight: c.dialCode === value ? '600' : '400',
                                 display: 'flex', justifyContent: 'space-between', alignItems: 'center'
                             }}
                             onMouseOver={(e) => {
-                                if (c.dialCode !== value) e.currentTarget.style.background = 'rgba(14,165,233,0.05)';
+                                if (c.dialCode !== value) e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
                             }}
                             onMouseOut={(e) => {
                                 if (c.dialCode !== value) e.currentTarget.style.background = 'transparent';
                             }}
                         >
                             <span style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginRight: '10px' }}>{c.name} ({c.isoCode})</span>
-                            <span style={{ color: '#0ea5e9', fontWeight: '500', whiteSpace: 'nowrap', flexShrink: 0 }}>{c.dialCode}</span>
+                            <span style={{ color: '#38bdf8', fontWeight: '500', whiteSpace: 'nowrap', flexShrink: 0 }}>{c.dialCode}</span>
                         </div>
                     ))}
                 </div>

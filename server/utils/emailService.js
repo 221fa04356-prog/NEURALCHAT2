@@ -37,4 +37,4 @@ const sendEmail = async (to, subject, html) => {
     }
 };
 
-module.exports = sendEmail;
+module.exports = { sendEmail, transporter };

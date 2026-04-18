@@ -26,7 +26,7 @@ const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 's
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'neural_secret_77';
+const JWT_SECRET = process.env.JWT_SECRET;
 const MIN_VALID_AUDIO_BYTES = 1024; // Only flag extremely tiny blobs as suspicious
 
 const isTransientDbError = (err) => {
@@ -876,21 +876,45 @@ router.post('/messages/mark-read', authenticateToken, async (req, res) => {
 
     try {
         const readAt = new Date();
-        await Message.updateMany(
-            { user_id: senderId, receiver_id: userId, is_read: false },
-            { is_read: true, read_at: readAt }
+        const senderObjId = new mongoose.Types.ObjectId(senderId);
+        const readerObjId = new mongoose.Types.ObjectId(userId);
+
+        // Using $in with both ObjectId and String forms to be 100% sure we hit the records
+        const updateResult = await Message.updateMany(
+            { 
+                user_id: { $in: [senderObjId, senderId] }, 
+                receiver_id: { $in: [readerObjId, userId] }, 
+                is_read: false 
+            },
+            { $set: { is_read: true, read_at: readAt } }
         );
+
+        console.log(`[DEBUG] mark-read: Reader ${userId} (Object: ${readerObjId}) processed messages from ${senderId}. Updated: ${updateResult.modifiedCount}`);
 
         // Notify the sender that their messages were read
         if (req.io) {
+            console.log(`[DEBUG] mark-read: BROADCASTING messages_read for reader ${userId} to sender ${senderId}`);
+            // Target the specific sender room for efficiency
             req.io.to(senderId).emit('messages_read', {
                 reader_id: userId,
                 read_at: readAt
             });
+            // Also notify the reader's other sessions
+            req.io.to(userId).emit('messages_read', {
+                reader_id: userId,
+                read_at: readAt
+            });
+            // Broadcast as backup to ensure no session is missed due to room issues
+            req.io.emit('messages_read_broadcast', {
+                reader_id: userId,
+                sender_id: senderId,
+                read_at: readAt
+            });
         }
 
-        res.json({ status: 'success' });
+        res.json({ status: 'success', modifiedCount: updateResult.modifiedCount });
     } catch (err) {
+        console.error('[DEBUG] mark-read system error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1110,29 +1134,49 @@ router.get('/p2p/:userId/:otherUserId', authenticateToken, async (req, res) => {
             ]
         });
 
-        // If a request exists but is NOT accepted, check if real history exists before hiding.
+        // If a request exists but is NOT accepted, check if current viewer has visible history before hiding.
         if (request && request.status !== 'accepted') {
-            // Check if real messages already exist (not deleted-for-all)
-            const priorCount = await Message.countDocuments({
-                $or: [
-                    { user_id: currentId, receiver_id: otherId },
-                    { user_id: otherId, receiver_id: currentId }
-                ]
-            });
+            // Allow senders to see their own messages even with pending requests
+            // Only block receivers from seeing messages they haven't accepted yet
+            if (request.status === 'pending' && String(request.receiver_id) === String(currentId)) {
+                // Receiver trying to view pending request - only show if there's existing history
+                const priorCount = await Message.countDocuments({
+                    $or: [
+                        { user_id: currentId, receiver_id: otherId },
+                        { user_id: otherId, receiver_id: currentId }
+                    ],
+                    deleted_for: { $ne: new mongoose.Types.ObjectId(currentId) }
+                });
 
-            if (priorCount === 0) {
-                // No real history — apply the guard
-                const isReceiver = String(request.receiver_id) === String(currentId);
-                if (isReceiver || request.status === 'rejected') {
-                    console.log(`[P2P GUARD] Hiding history for ${currentId} from ${otherId} because status is ${request.status}`);
+                if (priorCount === 0) {
+                    console.log(`[P2P GUARD] Hiding pending request for receiver ${currentId} from ${otherId}`);
                     return res.json([]);
                 }
-            } else {
-                // Real history exists — auto-accept the stale request
-                request.status = 'accepted';
-                request.updated_at = new Date();
-                await request.save();
+            } else if (request.status === 'rejected') {
+                // For rejected requests, check if real messages are still visible
+                const priorCount = await Message.countDocuments({
+                    $or: [
+                        { user_id: currentId, receiver_id: otherId },
+                        { user_id: otherId, receiver_id: currentId }
+                    ],
+                    deleted_for: { $ne: new mongoose.Types.ObjectId(currentId) }
+                });
+
+                if (priorCount === 0) {
+                    // No real history - apply the guard
+                    const isReceiver = String(request.receiver_id) === String(currentId);
+                    if (isReceiver) {
+                        console.log(`[P2P GUARD] Hiding history for ${currentId} from ${otherId} because status is ${request.status}`);
+                        return res.json([]);
+                    }
+                } else {
+                    // Real history exists - auto-accept the stale request
+                    request.status = 'accepted';
+                    request.updated_at = new Date();
+                    await request.save();
+                }
             }
+            // Senders can always see their own messages (even with pending requests)
         }
         // --- END GUARD ---
 
@@ -1477,7 +1521,8 @@ router.post('/send', authenticateToken, (req, res, next) => {
                     $or: [
                         { user_id: new mongoose.Types.ObjectId(userId), receiver_id: new mongoose.Types.ObjectId(toUserId) },
                         { user_id: new mongoose.Types.ObjectId(toUserId), receiver_id: new mongoose.Types.ObjectId(userId) }
-                    ]
+                    ],
+                    deleted_for: { $ne: new mongoose.Types.ObjectId(userId) }
                 });
 
                 if (priorMessageCount > 0) {

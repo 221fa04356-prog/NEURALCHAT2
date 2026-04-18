@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import axios from 'axios';
 import { Check, Phone, Image as ImageIcon, RefreshCw, Volume2, X, RefreshCcw, Send, CheckCircle } from 'lucide-react';
+import CountryCodeSelect from './CountryCodeSelect';
 import '../styles/HumanVerification.css';
 
 const PUZZLE_IMAGES = [
@@ -34,6 +35,7 @@ export default function HumanVerification({ onVerified, context, identifier }) {
     const [puzzleError, setPuzzleError] = useState('');
     const [puzzleImageUrl, setPuzzleImageUrl] = useState(PUZZLE_IMAGES[0]);
     const [isSuccess, setIsSuccess] = useState(false);
+    const [hCountryCode, setHCountryCode] = useState('+91');
 
     // --- Helper to Generate Random Strings/Rotations ---
     const generateCaptcha = () => {
@@ -148,7 +150,8 @@ export default function HumanVerification({ onVerified, context, identifier }) {
             const payload = {
                 context,
                 identifier: isRegistering ? null : identifier,
-                mobile: isRegistering ? callPhoneInput.replace(/\s/g, '') : null
+                mobile: isRegistering ? callPhoneInput.replace(/\s/g, '') : null,
+                countryCode: isRegistering ? hCountryCode : null
             };
 
             const res = await axios.post('/api/auth/send-call-otp', payload);
@@ -290,7 +293,13 @@ export default function HumanVerification({ onVerified, context, identifier }) {
                                             {['register', 'admin_register'].includes(context) && !callSent && (
                                                 <div className="hv-phone-input-group mt-2">
                                                     <div className="hv-input-wrapper">
-                                                        <span className="hv-country-code">+91</span>
+                                                        <div className="hv-country-code-selector">
+                                                            <CountryCodeSelect
+                                                                value={hCountryCode}
+                                                                onChange={(code) => setHCountryCode(code)}
+                                                                className="hv-cc-select"
+                                                            />
+                                                        </div>
                                                         <input
                                                             type="text"
                                                             placeholder="Enter 10 digit mobile"
