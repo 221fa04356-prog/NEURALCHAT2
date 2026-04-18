@@ -2,29 +2,106 @@
     display: flex;
     height: 100vh;
     width: 100vw;
-    background-color: var(--app-bg, #f3f4f6);
+    background: radial-gradient(1200px 800px at 20% 10%, rgba(56, 189, 248, 0.12), transparent 55%),
+        radial-gradient(1000px 700px at 80% 20%, rgba(79, 70, 229, 0.10), transparent 60%),
+        linear-gradient(180deg, #0b1220 0%, #0f172a 100%) !important;
+    color: #e2e8f0;
     overflow: hidden;
 }
 
-.main-content {
+.admin-main-area {
     flex: 1;
     overflow-y: auto;
     padding: 2rem;
     position: relative;
     width: 100%;
+    background: transparent !important;
 }
 
 /* Sidebar default is handled by inline styles in JS for Desktop hover effect */
 /* But we need basic styles here */
 .sidebar {
-    background: rgba(255, 255, 255, 0.4);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border-right: 1px solid #e5e7eb;
+    background: rgba(15, 23, 42, 0.82) !important;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-right: 1px solid rgba(148, 163, 184, 0.18) !important;
     display: flex;
     flex-direction: column;
     z-index: 50;
-    box-shadow: 2px 0 5px rgba(0, 0, 0, 0.05);
+    box-shadow: 12px 0 40px rgba(0, 0, 0, 0.35);
+}
+
+.admin-top-header {
+    color: #e2e8f0;
+}
+
+.admin-top-header .admin-header-search {
+    background: rgba(15, 23, 42, 0.65) !important;
+    border: 1px solid rgba(56, 189, 248, 0.25) !important;
+    color: #f8fafc !important;
+}
+
+.admin-top-header .admin-header-search::placeholder {
+    color: #94a3b8 !important;
+}
+
+.admin-main-area .hover-card,
+.admin-main-area .no-hover-card,
+.admin-main-area .table-responsive {
+    background: rgba(30, 41, 59, 0.45) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    color: #e2e8f0 !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22) !important;
+}
+
+.admin-main-area .hover-row:hover {
+    background: rgba(56, 189, 248, 0.08) !important;
+}
+
+.admin-main-area table {
+    color: #e2e8f0;
+}
+
+.admin-main-area th {
+    color: #cbd5e1 !important;
+}
+
+.admin-main-area td {
+    color: #e2e8f0 !important;
+}
+
+.admin-main-area input,
+.admin-main-area select,
+.admin-main-area textarea {
+    background: rgba(15, 23, 42, 0.55) !important;
+    border: 1px solid rgba(148, 163, 184, 0.18) !important;
+    color: #f8fafc !important;
+}
+
+.admin-main-area input::placeholder,
+.admin-main-area textarea::placeholder {
+    color: #94a3b8 !important;
+}
+
+/* Recharts dark theme tweaks */
+.admin-main-area .recharts-text,
+.admin-main-area .recharts-cartesian-axis-tick-value {
+    fill: #cbd5e1 !important;
+}
+
+.admin-main-area .recharts-cartesian-grid line {
+    stroke: rgba(148, 163, 184, 0.18) !important;
+}
+
+.admin-main-area .recharts-default-tooltip {
+    background: rgba(15, 23, 42, 0.92) !important;
+    border: 1px solid rgba(56, 189, 248, 0.25) !important;
+    color: #e2e8f0 !important;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45) !important;
+}
+
+.admin-main-area .recharts-legend-item-text {
+    color: #cbd5e1 !important;
 }
 
 .mobile-menu-btn {
@@ -34,7 +111,7 @@
     cursor: pointer;
     padding: 0.5rem;
     margin-right: 1rem;
-    color: #374151;
+    color: #cbd5e1;
 }
 
 .mobile-overlay {
@@ -59,7 +136,7 @@
         /* Keep sidebar as a side panel */
     }
 
-    .main-content {
+    .admin-main-area {
         padding: 1rem;
     }
 

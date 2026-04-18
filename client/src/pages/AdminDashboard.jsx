@@ -2795,7 +2795,7 @@ export default function AdminDashboard() {
     // --------------------------------------------------------------------------------
 
     return (
-        <div style={{ display: 'flex', height: '100vh', width: '100vw', background: 'transparent', fontFamily: "'Open Sans', sans-serif", position: 'relative', overflow: 'hidden' }}>
+        <div className="dashboard-layout" style={{ display: 'flex', height: '100vh', width: '100vw', background: 'transparent', fontFamily: "'Open Sans', sans-serif", position: 'relative', overflow: 'hidden' }}>
             
             {/* Mobile Sidebar Overlay */}
             {isMobile && mobileSidebarOpen && (
@@ -2810,18 +2810,18 @@ export default function AdminDashboard() {
             )}
 
             {/* Sidebar */}
-            <div style={{
-                width: isMobile ? '280px' : (sidebarOpen ? '260px' : '60px'),
-                background: 'white',
-                transition: 'all 0.3s ease',
-                boxShadow: '0 0 2rem rgba(0,0,0,0.05)',
-                display: 'flex',
-                flexDirection: 'column',
-                zIndex: isMobile ? 1002 : 100,
-                position: isMobile ? 'fixed' : 'relative',
-                left: isMobile ? (mobileSidebarOpen ? 0 : '-280px') : 0,
-                height: '100vh'
-            }}>
+            <div className="sidebar" style={{
+                 width: isMobile ? '280px' : (sidebarOpen ? '260px' : '60px'),
+                 background: 'white',
+                 transition: 'all 0.3s ease',
+                 boxShadow: '0 0 2rem rgba(0,0,0,0.05)',
+                 display: 'flex',
+                 flexDirection: 'column',
+                 zIndex: isMobile ? 1002 : 100,
+                 position: isMobile ? 'fixed' : 'relative',
+                 left: isMobile ? (mobileSidebarOpen ? 0 : '-280px') : 0,
+                 height: '100vh'
+             }}>
                 <div
                     style={{ padding: '0', height: '60px', display: 'flex', alignItems: 'center', gap: '3px', borderBottom: 'none', boxShadow: 'none' }}
                 >
@@ -2905,18 +2905,18 @@ export default function AdminDashboard() {
             </div>
 
             {/* Main Content */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+            <div className="admin-main-area" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
 
                 {/* Top Header */}
-                <header style={{
-                    height: '60px',
-                    background: 'rgba(15, 23, 42, 0.58)',
-                    borderBottom: '1px solid rgba(148, 163, 184, 0.2)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: isMobile ? 'space-between' : 'flex-end',
-                    padding: isMobile ? '0 0.5rem' : '0 2rem'
-                }}>
+                <header className="admin-top-header" style={{
+                     height: '60px',
+                     background: 'rgba(15, 23, 42, 0.58)',
+                     borderBottom: '1px solid rgba(148, 163, 184, 0.2)',
+                     display: 'flex',
+                     alignItems: 'center',
+                     justifyContent: isMobile ? 'space-between' : 'flex-end',
+                     padding: isMobile ? '0 0.5rem' : '0 2rem'
+                 }}>
                     {isMobile && (
                         <div
                             onClick={() => setMobileSidebarOpen(true)}
