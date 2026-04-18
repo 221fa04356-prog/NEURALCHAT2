@@ -22,7 +22,7 @@ const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 's
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || 'neural_secret_77';
 
 // --- Link Preview Helper ---
 const fetchLinkPreview = async (url) => {
@@ -338,7 +338,7 @@ router.post('/grammar-check', authenticateToken, async (req, res) => {
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
             const parsed = JSON.parse(jsonMatch[0]);
-
+            
             // Check for AI Refusal strings
             const refusalKeywords = ['authorized', 'profanity', 'insult', 'offensive', 'policy', 'refuse', 'cannot assist'];
             let hasRefusal = false;
@@ -409,13 +409,13 @@ router.get('/custom-lists', authenticateToken, async (req, res) => {
 router.post('/custom-lists/sync', authenticateToken, async (req, res) => {
     try {
         const { customLists } = req.body;
-
+        
         const user = await User.findByIdAndUpdate(
             req.user.id,
             { $set: { customLists: customLists || [] } },
             { new: true }
         ).select('customLists');
-
+        
         if (!user) return res.status(404).json({ error: 'User not found' });
         res.json({ status: 'success', customLists: user.customLists });
     } catch (err) {
@@ -517,45 +517,21 @@ router.post('/messages/mark-read', authenticateToken, async (req, res) => {
 
     try {
         const readAt = new Date();
-        const senderObjId = new mongoose.Types.ObjectId(senderId);
-        const readerObjId = new mongoose.Types.ObjectId(userId);
-
-        // Using $in with both ObjectId and String forms to be 100% sure we hit the records
-        const updateResult = await Message.updateMany(
-            { 
-                user_id: { $in: [senderObjId, senderId] }, 
-                receiver_id: { $in: [readerObjId, userId] }, 
-                is_read: false 
-            },
-            { $set: { is_read: true, read_at: readAt } }
+        await Message.updateMany(
+            { user_id: senderId, receiver_id: userId, is_read: false },
+            { is_read: true, read_at: readAt }
         );
-
-        console.log(`[DEBUG] mark-read: Reader ${userId} (Object: ${readerObjId}) processed messages from ${senderId}. Updated: ${updateResult.modifiedCount}`);
 
         // Notify the sender that their messages were read
         if (req.io) {
-            console.log(`[DEBUG] mark-read: BROADCASTING messages_read for reader ${userId} to sender ${senderId}`);
-            // Target the specific sender room for efficiency
             req.io.to(senderId).emit('messages_read', {
                 reader_id: userId,
                 read_at: readAt
             });
-            // Also notify the reader's other sessions
-            req.io.to(userId).emit('messages_read', {
-                reader_id: userId,
-                read_at: readAt
-            });
-            // Broadcast as backup to ensure no session is missed due to room issues
-            req.io.emit('messages_read_broadcast', {
-                reader_id: userId,
-                sender_id: senderId,
-                read_at: readAt
-            });
         }
 
-        res.json({ status: 'success', modifiedCount: updateResult.modifiedCount });
+        res.json({ status: 'success' });
     } catch (err) {
-        console.error('[DEBUG] mark-read system error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -709,14 +685,14 @@ router.post('/request-unblock', authenticateToken, async (req, res) => {
     try {
         const { reason } = req.body;
         const userId = req.user.id;
-
+        
         const user = await User.findByIdAndUpdate(userId, {
             unblockRequested: true,
             unblockRequestReason: reason || 'Please unblock my messaging.'
         }, { new: true });
-
+        
         if (!user) return res.status(404).json({ error: 'User not found' });
-
+        
         // Notify admin via socket if needed
         if (req.io) {
             req.io.emit('new_unblock_request', {
@@ -725,7 +701,7 @@ router.post('/request-unblock', authenticateToken, async (req, res) => {
                 reason: user.unblockRequestReason
             });
         }
-
+        
         res.json({ status: 'requested', unblockRequested: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -753,49 +729,29 @@ router.get('/p2p/:userId/:otherUserId', authenticateToken, async (req, res) => {
             ]
         });
 
-        // If a request exists but is NOT accepted, check if current viewer has visible history before hiding.
+        // If a request exists but is NOT accepted, check if real history exists before hiding.
         if (request && request.status !== 'accepted') {
-            // Allow senders to see their own messages even with pending requests
-            // Only block receivers from seeing messages they haven't accepted yet
-            if (request.status === 'pending' && String(request.receiver_id) === String(currentId)) {
-                // Receiver trying to view pending request - only show if there's existing history
-                const priorCount = await Message.countDocuments({
-                    $or: [
-                        { user_id: currentId, receiver_id: otherId },
-                        { user_id: otherId, receiver_id: currentId }
-                    ],
-                    deleted_for: { $ne: new mongoose.Types.ObjectId(currentId) }
-                });
+            // Check if real messages already exist (not deleted-for-all)
+            const priorCount = await Message.countDocuments({
+                $or: [
+                    { user_id: currentId, receiver_id: otherId },
+                    { user_id: otherId, receiver_id: currentId }
+                ]
+            });
 
-                if (priorCount === 0) {
-                    console.log(`[P2P GUARD] Hiding pending request for receiver ${currentId} from ${otherId}`);
+            if (priorCount === 0) {
+                // No real history — apply the guard
+                const isReceiver = String(request.receiver_id) === String(currentId);
+                if (isReceiver || request.status === 'rejected') {
+                    console.log(`[P2P GUARD] Hiding history for ${currentId} from ${otherId} because status is ${request.status}`);
                     return res.json([]);
                 }
-            } else if (request.status === 'rejected') {
-                // For rejected requests, check if real messages are still visible
-                const priorCount = await Message.countDocuments({
-                    $or: [
-                        { user_id: currentId, receiver_id: otherId },
-                        { user_id: otherId, receiver_id: currentId }
-                    ],
-                    deleted_for: { $ne: new mongoose.Types.ObjectId(currentId) }
-                });
-
-                if (priorCount === 0) {
-                    // No real history - apply the guard
-                    const isReceiver = String(request.receiver_id) === String(currentId);
-                    if (isReceiver) {
-                        console.log(`[P2P GUARD] Hiding history for ${currentId} from ${otherId} because status is ${request.status}`);
-                        return res.json([]);
-                    }
-                } else {
-                    // Real history exists - auto-accept the stale request
-                    request.status = 'accepted';
-                    request.updated_at = new Date();
-                    await request.save();
-                }
+            } else {
+                // Real history exists — auto-accept the stale request
+                request.status = 'accepted';
+                request.updated_at = new Date();
+                await request.save();
             }
-            // Senders can always see their own messages (even with pending requests)
         }
         // --- END GUARD ---
 
@@ -949,7 +905,7 @@ router.post('/event/:messageId/respond', authenticateToken, async (req, res) => 
         // Maintain response history (avoid duplicates if same status)
         msg.event.response_history = msg.event.response_history || [];
         const lastUserResponse = [...msg.event.response_history].reverse().find(h => String(h.user_id) === String(userId));
-
+        
         if (!lastUserResponse || lastUserResponse.status !== status) {
             msg.event.response_history.push({
                 user_id: userObjId,
@@ -1055,17 +1011,17 @@ router.post('/send', authenticateToken, (req, res, next) => {
         // --- PRE-SEND BLOCK CHECK ---
         const currentUserProfile = await User.findById(userId);
         if (currentUserProfile.messagingBlocked) {
-            return res.status(403).json({
-                error: 'Messaging Blocked',
+            return res.status(403).json({ 
+                error: 'Messaging Blocked', 
                 blocked: true,
-                unblockRequested: currentUserProfile.unblockRequested
+                unblockRequested: currentUserProfile.unblockRequested 
             });
         }
 
         // === Global Safety & Ethics Check (AI-Driven) ===
         let isFlagged = false;
         let flagReason = "";
-
+        
         // Analyze globally for any type of bad words or unethical behavior
         if (content && content.length > 0) {
             const aiResult = await checkUnethicalWithAI(content);
@@ -1078,8 +1034,8 @@ router.post('/send', authenticateToken, (req, res, next) => {
 
         if (isFlagged) {
             // Log violation and increment count
-            const updatedUser = await User.findByIdAndUpdate(userId, {
-                $inc: { unethicalCount: 1 }
+            const updatedUser = await User.findByIdAndUpdate(userId, { 
+                $inc: { unethicalCount: 1 } 
             }, { new: true });
 
             // Create entry for admin dashboard
@@ -1093,7 +1049,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
             // Check if this violation pushes them over the limit
             if (updatedUser.unethicalCount > 5) {
                 await User.findByIdAndUpdate(userId, { messagingBlocked: true });
-
+                
                 // Emit socket event for real-time blocking
                 if (req.io) {
                     req.io.to(userId).emit('user_blocked', { blocked: true });
@@ -1119,8 +1075,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
                     $or: [
                         { user_id: new mongoose.Types.ObjectId(userId), receiver_id: new mongoose.Types.ObjectId(toUserId) },
                         { user_id: new mongoose.Types.ObjectId(toUserId), receiver_id: new mongoose.Types.ObjectId(userId) }
-                    ],
-                    deleted_for: { $ne: new mongoose.Types.ObjectId(userId) }
+                    ]
                 });
 
                 if (priorMessageCount > 0) {
@@ -2108,14 +2063,14 @@ router.get('/admin/unethical-messages', authenticateToken, async (req, res) => {
         for (const msg of messages) {
             let userDoc = msg.user_id;
             let name = 'Unknown';
-
+            
             if (userDoc) {
                 // Determine if it was populated or remains an ID
                 if (typeof userDoc.toObject === 'function') {
                     // Try to get name from populated document
                     const uObj = userDoc.toObject({ virtuals: true });
                     name = uObj.name || 'Unknown';
-
+                    
                     // FALLBACK: If name is still a hash (contains colon), perform a fresh fetch
                     if (name.includes(':') && name.length > 50) {
                         const directUser = await User.findById(userDoc._id);
@@ -2134,7 +2089,7 @@ router.get('/admin/unethical-messages', authenticateToken, async (req, res) => {
                     }
                 }
             }
-
+            
             alerts.push({
                 userId: userDoc?._id || userDoc,
                 userName: name,
@@ -2496,7 +2451,7 @@ router.post('/event/:messageId/join', authenticateToken, async (req, res) => {
         await msg.save();
 
         const msgObj = msg.toObject();
-
+        
         if (req.io) {
             [String(msg.user_id), String(msg.receiver_id)].forEach(pId => {
                 req.io.to(pId).emit('event_updated', {

@@ -84,7 +84,7 @@ export default function Register() {
 
 
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontWeight: '700', color: '#e2e8f0' }}>
+                                <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>
                                     Full Name
                                 </label>
                                 <div style={{ position: 'relative', width: '100%' }}>
@@ -106,7 +106,7 @@ export default function Register() {
                             </div>
 
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontWeight: '700', color: '#e2e8f0' }}>
+                                <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>
                                     Job Position
                                 </label>
                                 <div style={{ position: 'relative', width: '100%' }}>
@@ -128,7 +128,7 @@ export default function Register() {
                             </div>
 
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontWeight: '700', color: '#e2e8f0' }}>
+                                <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>
                                     Email Address
                                 </label>
                                 <div style={{ position: 'relative', width: '100%' }}>
@@ -145,7 +145,7 @@ export default function Register() {
                             </div>
 
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontWeight: '700', color: '#e2e8f0' }}>
+                                <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>
                                     Mobile Number
                                 </label>
                                 <div style={{ display: 'flex', gap: '8px', width: '100%' }}>

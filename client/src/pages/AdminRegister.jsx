@@ -103,7 +103,7 @@ export default function AdminRegister() {
 
                         <form onSubmit={handleSubmit} className="login-form">
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontWeight: '700', color: '#e2e8f0' }}>Full Name</label>
+                                <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>Full Name</label>
                                 <div style={{ position: 'relative', width: '100%' }}>
                                     <User size={16} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: '10px', color: '#94A3B8', zIndex: 10, pointerEvents: 'none' }} />
                                     <input
@@ -123,7 +123,7 @@ export default function AdminRegister() {
                             </div>
 
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontWeight: '700', color: '#e2e8f0' }}>Email Address</label>
+                                <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>Email Address</label>
                                 <div style={{ position: 'relative', width: '100%' }}>
                                     <Mail size={16} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: '10px', color: '#94A3B8', zIndex: 10, pointerEvents: 'none' }} />
                                     <input
@@ -138,7 +138,7 @@ export default function AdminRegister() {
                             </div>
 
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontWeight: '700', color: '#e2e8f0' }}>Mobile Number</label>
+                                <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>Mobile Number</label>
                                 <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
                                     <div style={{ position: 'relative', width: '140px', flexShrink: 0, zIndex: 100 }}>
                                         <CountryCodeSelect
@@ -169,7 +169,7 @@ export default function AdminRegister() {
                             </div>
 
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontWeight: '700', color: '#e2e8f0' }}>Password</label>
+                                <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>Password</label>
                                 <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: '5px' }}>
                                     <div style={{ position: 'relative', flex: 1 }}>
                                         <Lock size={16} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: '10px', color: '#94A3B8', zIndex: 10, pointerEvents: 'none' }} />
@@ -195,7 +195,7 @@ export default function AdminRegister() {
                             </div>
 
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontWeight: '700', color: '#e2e8f0' }}>Confirm Password</label>
+                                <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>Confirm Password</label>
                                 <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: '5px' }}>
                                     <div style={{ position: 'relative', flex: 1 }}>
                                         <Lock size={16} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: '10px', color: '#94A3B8', zIndex: 10, pointerEvents: 'none' }} />
@@ -221,7 +221,7 @@ export default function AdminRegister() {
                             </div>
 
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontWeight: '700', color: '#e2e8f0' }}>Secret Key</label>
+                                <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>Secret Key</label>
                                 <div style={{ position: 'relative', width: '100%' }}>
                                     <Key size={16} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: '10px', color: '#94A3B8', zIndex: 10, pointerEvents: 'none' }} />
                                     <input

@@ -2909,13 +2909,8 @@ export default function AdminDashboard() {
 
                 {/* Top Header */}
                 <header style={{
-                    height: '60px',
-                    background: 'rgba(15, 23, 42, 0.58)',
-                    borderBottom: '1px solid rgba(148, 163, 184, 0.2)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: isMobile ? 'space-between' : 'flex-end',
-                    padding: isMobile ? '0 0.5rem' : '0 2rem'
+                    height: '60px', background: 'transparent', display: 'flex', alignItems: 'center',
+                    justifyContent: isMobile ? 'space-between' : 'flex-end', padding: isMobile ? '0 0.5rem' : '0 2rem'
                 }}>
                     {isMobile && (
                         <div
@@ -2933,11 +2928,10 @@ export default function AdminDashboard() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.75rem' : '1.5rem' }}>
 
                         <div style={{ position: 'relative', width: isMobile ? '110px' : '300px', marginLeft: isMobile ? '4px' : '0' }}>
-                            <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                            <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#adb5bd' }} />
                             <input
                                 type="search"
                                 name="new-search-query"
-                                className="admin-header-search"
                                 autoComplete="new-password"
                                 data-lpignore="true"
                                 placeholder={isMobile ? "Search users" : "Search users by name, ID or email"}
@@ -2945,10 +2939,7 @@ export default function AdminDashboard() {
                                 onChange={e => setSearchQuery(e.target.value)}
                                 style={{
                                     width: '100%', padding: '10px 10px 10px 40px', borderRadius: '20px',
-                                    border: '1px solid rgba(148, 163, 184, 0.3)',
-                                    background: 'rgba(15, 23, 42, 0.65)',
-                                    fontSize: '0.85rem',
-                                    color: '#e2e8f0'
+                                    border: '1px solid rgba(0,0,0,0.05)', background: 'rgba(255, 255, 255, 0.4)', fontSize: '0.85rem', color: '#495057'
                                 }}
                             />
                         </div>
@@ -2984,10 +2975,10 @@ export default function AdminDashboard() {
                             </div>
                             {!isMobile && <div style={{ fontWeight: '600', color: '#32325d', fontSize: '0.875rem' }}>{adminUser.name}</div>}
                         </div>
-                        <div style={{ display: 'flex', gap: isMobile ? '0.6rem' : '1.2rem', color: '#cbd5e1', alignItems: 'center', marginRight: isMobile ? '0.3rem' : '0' }}>
+                        <div style={{ display: 'flex', gap: isMobile ? '0.6rem' : '1.2rem', color: '#3e4b5b', alignItems: 'center', marginRight: isMobile ? '0.3rem' : '0' }}>
                             <div
                                 style={{ cursor: 'pointer', display: 'flex', position: 'relative' }}
-                                onClick={() => { localStorage.clear(); sessionStorage.clear(); navigate('/'); }}
+                                onClick={() => { localStorage.clear(); sessionStorage.clear(); navigate('/admin/login'); }}
                                 onMouseEnter={() => setShowLogoutTooltip(true)}
                                 onMouseLeave={() => setShowLogoutTooltip(false)}
                             >
@@ -3036,7 +3027,7 @@ export default function AdminDashboard() {
                                     {activeTab === 'pending' && <UserCheck size={20} color="white" />}
                                     {activeTab === 'resets' && <Key size={20} color="white" />}
                                 </div>
-                                <h1 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#f8fafc', fontStyle: 'normal', margin: 0 }}>
+                                <h1 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#34334a', fontStyle: 'normal', margin: 0 }}>
                                     {activeTab === 'overview' && 'Dashboard'}
                                     {activeTab === 'management' && 'Total Users'}
                                     {activeTab === 'pending' && 'Pending Approvals'}

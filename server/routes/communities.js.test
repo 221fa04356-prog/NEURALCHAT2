@@ -7,7 +7,7 @@ const Community = require('../models/Community');
 const Group = require('../models/Group');
 const GroupMessage = require('../models/GroupMessage');
 
-const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || 'neural_secret_77';
 const { handleMembershipJoin, handleMembershipExit } = require('../utils/membership');
 
 const authenticateToken = (req, res, next) => {

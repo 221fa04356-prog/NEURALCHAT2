@@ -48,11 +48,6 @@
     z-index: 40;
 }
 
-.admin-header-search::placeholder {
-    color: #94a3b8;
-    opacity: 1;
-}
-
 @media (max-width: 768px) {
     .dashboard-layout {
         flex-direction: row;

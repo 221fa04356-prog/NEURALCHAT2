@@ -7,7 +7,7 @@ const Community = require('../models/Community');
 const Group = require('../models/Group');
 const GroupMessage = require('../models/GroupMessage');
 
-const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || 'neural_secret_77';
 const { handleMembershipJoin, handleMembershipExit } = require('../utils/membership');
 
 const authenticateToken = (req, res, next) => {
@@ -264,10 +264,6 @@ router.patch('/:communityId/members', authenticateToken, async (req, res) => {
             const User = require('../models/User');
             const adminUser = await User.findById(req.user.id);
             const addedUsers = await User.find({ _id: { $in: idsToAdd } }).select('name __enc_name');
-            
-            if (adminUser && adminUser.decryptFieldsSync) adminUser.decryptFieldsSync();
-            addedUsers.forEach(u => u.decryptFieldsSync && u.decryptFieldsSync());
-
             const names = addedUsers.map(u => u.name);
             const adminName = adminUser ? adminUser.name : 'Admin';
             
@@ -279,18 +275,13 @@ router.patch('/:communityId/members', authenticateToken, async (req, res) => {
                 content = `${adminName} added ${names.join(', ')} & ${last}`;
             }
 
-            const newSysMsg = await GroupMessage.create({
+            const sysMsg = await GroupMessage.create({
                 group_id: community.announcements,
                 sender_id: req.user.id,
                 type: 'system',
                 is_system: true,
                 content
             });
-
-            // Re-fetch for live emission
-            const sysMsg = await GroupMessage.findById(newSysMsg._id)
-                .populate('sender_id', 'name _id __enc_name');
-            if (sysMsg && sysMsg.decryptFieldsSync) sysMsg.decryptFieldsSync();
 
             if (req.io) {
                 // Emit to members so it shows up in their chat real-time
@@ -401,49 +392,42 @@ router.delete('/:communityId/members/:memberId', authenticateToken, async (req, 
             await comm.save();
         }
 
-            // 2. Add system message to announcements
-            if (community.announcements) {
-                // ... (system message logic continues below)
-                const User = require('../models/User');
-                const adminUser = await User.findById(req.user.id);
-                const targetUser = await User.findById(memberId);
-                
-                // Force decryption to avoid hashing in logs
-                if (adminUser && adminUser.decryptFieldsSync) adminUser.decryptFieldsSync();
-                if (targetUser && targetUser.decryptFieldsSync) targetUser.decryptFieldsSync();
+        // 2. Add system message to announcements
+        if (community.announcements) {
+            // ... (system message logic continues below)
+            const User = require('../models/User');
+            const adminUser = await User.findById(req.user.id);
+            const targetUser = await User.findById(memberId);
+            const userName = targetUser ? targetUser.name : 'User';
+            const adminName = adminUser ? adminUser.name : 'Admin';
 
-                const userName = targetUser ? targetUser.name : 'User';
-                const adminName = adminUser ? adminUser.name : 'Admin';
+            const sysMsg = await GroupMessage.create({
+                group_id: community.announcements,
+                sender_id: req.user.id,
+                type: 'system',
+                is_system: true,
+                content: `${adminName} removed ${userName}`
+            });
 
-                const newSysMsg = await GroupMessage.create({
-                    group_id: community.announcements,
-                    sender_id: req.user.id,
-                    type: 'system',
-                    is_system: true,
-                    content: `${adminName} removed ${userName}`
-                });
+            // Handle Announcements Group (removal)
+            const annGroup = await Group.findById(community.announcements);
+            if (annGroup) {
+                handleMembershipExit(annGroup, memberObjId);
+                await annGroup.save();
+            }
 
-                // Re-fetch with population and decryption for socket emission
-                const sysMsg = await GroupMessage.findById(newSysMsg._id)
-                    .populate('sender_id', 'name _id __enc_name');
-                if (sysMsg && sysMsg.decryptFieldsSync) sysMsg.decryptFieldsSync();
+            // Notify everyone in the group including the removed user (so they see the system msg)
+            if (req.io) {
+                // Fetch members to notify. We should also notify the removed user.
+                const group = await Group.findById(community.announcements);
+                const allToNotify = [...(group.members || []), memberObjId];
 
-                // Handle Announcements Group (removal)
-                const annGroup = await Group.findById(community.announcements);
-                if (annGroup) {
-                    handleMembershipExit(annGroup, memberObjId);
-                    await annGroup.save();
-                }
-
-                // Notify everyone in the group including the removed user (so they see the system msg)
-                if (req.io) {
-                    const allToNotify = [...(annGroup.members || []), memberObjId];
-                    allToNotify.forEach(uid => {
-                        req.io.to(String(uid)).emit('group_message', {
-                            groupId: community.announcements.toString(),
-                            message: sysMsg
-                        });
+                allToNotify.forEach(uid => {
+                    req.io.to(String(uid)).emit('group_message', {
+                        groupId: community.announcements.toString(),
+                        message: sysMsg
                     });
+                });
 
                 // Also emit a specific removal event to trigger UI refresh for the removed user
                 req.io.to(memberId).emit('community_member_removed', {
@@ -859,25 +843,16 @@ router.post('/:communityId/transfer-ownership', authenticateToken, async (req, r
             const User = require('../models/User');
             const adminUser = await User.findById(currentUserId);
             const newOwnerUser = await User.findById(newOwnerId).select('name __enc_name');
-
-            if (adminUser && adminUser.decryptFieldsSync) adminUser.decryptFieldsSync();
-            if (newOwnerUser && newOwnerUser.decryptFieldsSync) newOwnerUser.decryptFieldsSync();
-
             const adminName = adminUser ? adminUser.name : 'Owner';
             const newOwnerName = newOwnerUser ? newOwnerUser.name : 'User';
 
-            const newSysMsg = await GroupMessage.create({
+            const sysMsg = await GroupMessage.create({
                 group_id: community.announcements,
                 sender_id: currentUserId,
                 type: 'system',
                 is_system: true,
                 content: `${adminName} assigned ${newOwnerName} as the new owner`
             });
-
-            // Re-fetch for live emission
-            const sysMsg = await GroupMessage.findById(newSysMsg._id)
-                .populate('sender_id', 'name _id __enc_name');
-            if (sysMsg && sysMsg.decryptFieldsSync) sysMsg.decryptFieldsSync();
 
             // Notify everyone in the group
             if (req.io) {

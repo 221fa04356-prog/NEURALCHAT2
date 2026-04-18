@@ -3,28 +3,18 @@ const router = express.Router();
 const bcrypt = require('bcrypt');
 const User = require('../models/User');
 const PasswordReset = require('../models/PasswordReset');
-const { sendEmail } = require('../utils/emailService'); // Keeping one reference if needed for other routes, but mostly using brevoMailer
+const sendEmail = require('../utils/emailService');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const getLocalIp = require('../utils/getLocalIp');
-const sendBrevoMail = require('../brevoMailer');
-
 
 const generateSignature = (password) => {
-    return crypto.createHmac('sha256', process.env.JWT_SECRET)
+    return crypto.createHmac('sha256', process.env.JWT_SECRET || 'neural_secret_77')
         .update(password)
         .digest('hex');
 };
 
-const maskEmail = (email) => {
-    if (!email || !email.includes('@')) return '';
-    const [name, domain] = email.split('@');
-    if (!name) return `***@${domain}`;
-    if (name.length <= 2) return `${name[0]}*@${domain}`;
-    return `${name.slice(0, 2)}***@${domain}`;
-};
-
-const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || 'neural_secret_77';
 
 // Register
 router.post('/register', async (req, res) => {
@@ -89,20 +79,8 @@ router.post('/register', async (req, res) => {
                 <p><strong>Mobile:</strong> ${countryCode} ${mobile}</p>
                 <p>Please login to the admin dashboard to approve this user.</p>
             `;
-            sendBrevoMail(adminEmail, subject, html, true).catch(err => console.error('Failed to send admin email:', err));
-        }
-
-        // Email User
-        if (email) {
-            const userSubject = 'Registration Request Received';
-            const userHtml = `
-                <h3>Registration Successful</h3>
-                <p>Hi ${name},</p>
-                <p>Your registration request has been submitted successfully to the admin team.</p>
-                <p>We will notify you once your account has been approved and your login details are generated.</p>
-                <p>Thank you for choosing NeuralChat.</p>
-            `;
-            sendBrevoMail(email, userSubject, userHtml, true).catch(err => console.error('Failed to send user registration email:', err));
+            // Fire and forget email to not block response
+            sendEmail(adminEmail, subject, html).catch(err => console.error('Failed to send admin email:', err));
         }
 
         res.json({ message: 'Registration requested. Wait for admin approval.' });
@@ -200,10 +178,8 @@ router.post('/forgot-password', async (req, res) => {
             console.error('Server: req.io is undefined in /forgot-password');
         }
 
-        // Email Admin + User (track status explicitly)
+        // Email Admin
         const adminEmail = process.env.ADMIN_EMAIL;
-        const jobs = [];
-
         if (adminEmail) {
             const subject = 'Password Reset Request';
             const html = `
@@ -213,46 +189,11 @@ router.post('/forgot-password', async (req, res) => {
                 <p><strong>Login ID:</strong> ${user.login_id}</p>
                 <p>Please login to the admin dashboard to resolve this request.</p>
             `;
-            jobs.push(
-                sendBrevoMail(adminEmail, subject, html, true).then(() => ({ type: 'admin', ok: true })).catch((err) => ({ type: 'admin', ok: false, error: err?.message || 'Failed to send admin email' }))
-            );
-        }
-
-        if (user.email) {
-            const userSubject = 'Password Reset Request Received';
-            const userHtml = `
-                <h3>We received your password reset request</h3>
-                <p>Hi ${user.name},</p>
-                <p>Your request has been submitted to the admin team for approval.</p>
-                <p><strong>Login ID:</strong> ${user.login_id}</p>
-                <p>You will receive updated login details once your request is processed.</p>
-            `;
-            
-            jobs.push(
-                sendBrevoMail(user.email, userSubject, userHtml, true).then(() => ({ type: 'user', ok: true })).catch((err) => ({ type: 'user', ok: false, error: err?.message || 'Failed to send user email' }))
-            );
-        }
-
-        const results = await Promise.all(jobs);
-        const adminResult = results.find(r => r.type === 'admin');
-        const userResult = results.find(r => r.type === 'user');
-
-        if (results.length > 0 && results.every(r => !r.ok)) {
-            return res.status(502).json({
-                error: 'Reset request was created, but email delivery failed',
-                adminEmailSent: false,
-                userEmailSent: false
-            });
+            sendEmail(adminEmail, subject, html).catch(err => console.error('Failed to send admin email:', err));
         }
 
         console.log(`[DEBUG] Forgot Password for: ${user.name} (ID: ${user.login_id})`);
-        res.json({
-            message: 'Reset request sent to admin',
-            name: user.name,
-            destination: maskEmail(user.email),
-            adminEmailSent: !!adminResult?.ok,
-            userEmailSent: !!userResult?.ok
-        });
+        res.json({ message: 'Reset request sent to admin', name: user.name });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -262,7 +203,7 @@ router.post('/forgot-password', async (req, res) => {
 router.post('/admin/register', async (req, res) => {
     const { name, email, mobile, countryCode, password, secretKey } = req.body;
 
-    const MASTER_KEY = process.env.ADMIN_SECRET;
+    const MASTER_KEY = process.env.ADMIN_SECRET || 'neural_master_key';
     if (secretKey !== MASTER_KEY) {
         return res.status(403).json({ error: 'Invalid Admin Secret Key' });
     }
@@ -313,7 +254,7 @@ router.post('/admin/reset', async (req, res) => {
         console.log("Error looking up admin name", e);
     }
 
-    const MASTER_KEY = process.env.ADMIN_SECRET;
+    const MASTER_KEY = process.env.ADMIN_SECRET || 'neural_master_key';
     if (secretKey !== MASTER_KEY) {
         return res.status(403).json({ error: 'Invalid Admin Secret Key', senderName: adminName });
     }
@@ -438,7 +379,7 @@ router.post('/reset-password-temp', async (req, res) => {
 
         console.log(`Attempting to send reset confirmation email to: ${user.email}`);
         // Non-blocking call to show popup immediately
-        sendBrevoMail(user.email, subject, html, true).catch(err => {
+        sendEmail(user.email, subject, html).catch(err => {
             console.error('Failed to send reset confirmation email:', err);
         });
 
@@ -504,7 +445,7 @@ const twilio = require('twilio');
 const VerificationLog = require('../models/VerificationLog');
 
 router.post('/send-call-otp', async (req, res) => {
-    const { context, identifier, mobile, countryCode } = req.body;
+    const { context, identifier, mobile } = req.body;
     let user = null; // Declare user here to make it accessible later
     try {
         let finalMobile = mobile;
@@ -553,16 +494,14 @@ router.post('/send-call-otp', async (req, res) => {
             const spacedOtp = otp.split('').join(' ');
             const twiml = `<Response><Say>Welcome to Neural Chat. Your verification code is ${spacedOtp}. I repeat, ${spacedOtp}. Once again, ${spacedOtp}. Thank you for using the Call verification system.</Say></Response>`;
 
-            const finalCountryCode = countryCode || user?.countryCode || '+91';
             await client.calls.create({
                 twiml: twiml,
-                to: finalCountryCode + cleanMobile,
+                to: (user?.countryCode || '+91') + cleanMobile,
                 from: fromPhone
             });
         } else {
-            const finalCountryCode = countryCode || user?.countryCode || '+91';
             console.log('\n=============================================');
-            console.log(`[TWILIO MOCK] Call to ${finalCountryCode}${cleanMobile}`);
+            console.log(`[TWILIO MOCK] Call to ${(user?.countryCode || '+91')}${cleanMobile}`);
             console.log('[TWILIO MOCK] Body: Welcome... Your OTP is: ' + otp);
             console.log('=============================================\n');
         }
