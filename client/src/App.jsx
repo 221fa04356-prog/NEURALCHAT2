@@ -19,11 +19,17 @@ function AppContent() {
 
   return (
     <>
-      <style>{`
-        body { background-color: transparent !important; }
-        #root { background-color: transparent !important; }
-        .app-main-wrapper { position: relative; z-index: 1; height: 100vh; width: 100vw; overflow: hidden; background: transparent; }
-      `}</style>
+      {showNeural ? (
+        <style>{`
+          body { background-color: transparent !important; }
+          #root { background-color: transparent !important; }
+          .app-main-wrapper { position: relative; z-index: 1; height: 100vh; width: 100vw; overflow: hidden; background: transparent; }
+        `}</style>
+      ) : (
+        <style>{`
+          .app-main-wrapper { position: relative; z-index: 1; height: 100vh; width: 100vw; overflow: hidden; background: var(--app-bg); }
+        `}</style>
+      )}
       
       {showNeural && <NeuralBackground />}
       
