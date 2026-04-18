@@ -874,6 +874,7 @@ export default function Chat() {
 
     // --- File Upload State ---
     const [file, setFile] = useState(null);
+    const [selectedFiles, setSelectedFiles] = useState([]);
     const fileInputRef = useRef(null);
 
     const [showViewOnceModal, setShowViewOnceModal] = useState(false);
@@ -6866,6 +6867,7 @@ export default function Chat() {
                     setSnackbar({ message: 'File must be less than 1GB', type: 'error', variant: 'system' });
                     e.target.value = '';
                 } else {
+                    setSelectedFiles([selectedFile]);
                     setFile(selectedFile);
                 }
             } else {
@@ -9598,6 +9600,7 @@ export default function Chat() {
                     <button
                         onClick={() => {
                             setFile(null);
+                            setSelectedFiles([]);
                         }}
                         style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', padding: 4 }}
                         title="Close preview"
