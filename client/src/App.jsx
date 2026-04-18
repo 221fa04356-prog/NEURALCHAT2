@@ -13,7 +13,7 @@ import './styles/index.css';
 
 function AppContent() {
   const location = useLocation();
-  const showNeural = ['/chat', '/reset', '/admin-reset'].some(path => 
+  const showNeural = ['/chat', '/reset', '/admin-reset', '/admin'].some(path => 
     location.pathname === path || location.pathname.startsWith(path + '/')
   );
 
