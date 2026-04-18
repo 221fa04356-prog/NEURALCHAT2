@@ -5,6 +5,7 @@
 
   color: #213547;
   background-color: #ffffff;
+  --app-bg: #f3f4f6;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -32,7 +33,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background-color: #f3f4f6;
+  background-color: var(--app-bg);
   /* Global light bg for auth pages */
 }
 
