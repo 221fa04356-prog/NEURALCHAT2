@@ -10,13 +10,14 @@ const ChatDeletion = require('../models/ChatDeletion');
 const PasswordReset = require('../models/PasswordReset');
 const Community = require('../models/Community');
 const ReactionLog = require('../models/ReactionLog'); // Import ReactionLog model for audit
-const sendEmail = require('../utils/emailService');
+const { sendEmail } = require('../utils/emailService');
+const sendBrevoMail = require('../brevoMailer');
 const crypto = require('crypto');
 const getLocalIp = require('../utils/getLocalIp');
 
 const generateSignature = (password) => {
     // HMAC SHA256 with Global Secret (Pepper)
-    return crypto.createHmac('sha256', process.env.JWT_SECRET || 'neural_secret_77')
+    return crypto.createHmac('sha256', process.env.JWT_SECRET)
         .update(password)
         .digest('hex');
 };
@@ -95,7 +96,7 @@ router.post('/approve', async (req, res) => {
                 <p><a href="${baseUrl}/reset">Reset Here</a></p>
             `;
             console.log(`Attempting to send approval email to: ${user.email}`);
-            await sendEmail(user.email, subject, html).catch(err => {
+            await sendBrevoMail(user.email, subject, html, true).catch(err => {
                 console.error('Failed to send user approval email:', err);
             });
         }
@@ -194,7 +195,7 @@ router.post('/reset-password', async (req, res) => {
                 <p><a href="${baseUrl}/reset?token=${signature}&id=${user._id}">Reset Here</a></p>
             `;
             console.log(`Attempting to send temporary password email to: ${user.email}`);
-            await sendEmail(user.email, subject, html).catch(err => {
+            await sendBrevoMail(user.email, subject, html, true).catch(err => {
                 console.error('Failed to send user reset email:', err);
             });
         }

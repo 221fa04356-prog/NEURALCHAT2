@@ -8,7 +8,7 @@ const http = require('http');
 const { Server } = require("socket.io");
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'neural_secret_77';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const app = express();
 const server = http.createServer(app);
@@ -119,7 +119,7 @@ io.on('connection', async (socket) => {
         try {
             await User.findByIdAndUpdate(userId, { isOnline: true });
             console.log(`[STATUS] User ${userId} is now ONLINE. Emitting status change.`);
-            io.emit('user_status_change', { userId: userId, isOnline: true });
+            io.emit('user_status_change', { userId: userId, isOnline: true, status: 'online' });
         } catch (err) { console.error("Error updating online status:", err); }
     }
 
@@ -135,12 +135,16 @@ io.on('connection', async (socket) => {
     });
 
     socket.on('send_message', async (data) => {
-        console.log(`Socket: Message from ${userId} to ${data.receiverId}`);
+        const receiverId = data.receiverId;
+        console.log(`Socket: Message from ${userId} to ${receiverId}`);
         const secureData = {
             ...data,
             sender_id: userId,
             user_id: userId
         };
+
+        // Send to receiver instantly (CORE REAL-TIME CHAT FLOW)
+        io.to(receiverId).emit('receive_message', secureData);
 
         // Notify Admins for real-time review
         io.to('admins').emit('receive_message', secureData);
@@ -157,8 +161,7 @@ io.on('connection', async (socket) => {
             });
 
             if (acceptedRequest) {
-                // Accepted — relay message normally
-                io.to(receiverId).emit('receive_message', secureData);
+                // Accepted — relay message normally processed
                 return;
             }
 
@@ -222,8 +225,6 @@ io.on('connection', async (socket) => {
             // Do NOT relay message — receiver must accept first
         } catch (err) {
             console.error('[MSG_REQUEST] Error in send_message handler:', err);
-            // Fallback: relay message anyway to avoid breaking chat
-            io.to(data.receiverId).emit('receive_message', secureData);
         }
     });
 
@@ -280,7 +281,7 @@ io.on('connection', async (socket) => {
             try {
                 await User.findByIdAndUpdate(userId, { isOnline: false, lastSeen });
                 console.log(`[STATUS] User ${userId} is now OFFLINE. Last seen: ${lastSeen}`);
-                io.emit('user_status_change', { userId: userId, isOnline: false, lastSeen });
+                io.emit('user_status_change', { userId: userId, isOnline: false, status: 'offline', lastSeen });
             } catch (err) { console.error("Error updating offline status:", err); }
         } else {
             userSocketCount.set(userId, newCount);
