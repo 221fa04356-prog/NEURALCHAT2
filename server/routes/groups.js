@@ -11,7 +11,7 @@ const fs = require('fs');
 const UnethicalLog = require('../models/UnethicalLog');
 
 
-const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || 'neural_secret_77';
 const { handleMembershipJoin, handleMembershipExit } = require('../utils/membership');
 const axios = require('axios');
 const Groq = require('groq-sdk');
@@ -963,18 +963,15 @@ router.post('/message/:id/edit', authenticateToken, async (req, res) => {
         // Notify participants via socket
         if (req.io) {
             const updatedMsg = await GroupMessage.findById(msg._id);
-            const group = await Group.findById(msg.group_id);
-            if (group) {
-                group.members.forEach(mId => {
-                    req.io.to(mId.toString()).emit('group_message_edited', {
-                        groupId: msg.group_id,
-                        messageId: msg._id,
-                        content: updatedMsg.content,
-                        is_edited: true,
-                        edited_at: msg.edited_at
-                    });
+            group.members.forEach(mId => {
+                req.io.to(mId.toString()).emit('group_message_edited', {
+                    groupId: msg.group_id,
+                    messageId: msg._id,
+                    content: updatedMsg.content,
+                    is_edited: true,
+                    edited_at: msg.edited_at
                 });
-            }
+            });
         }
 
         res.json({
@@ -1067,80 +1064,6 @@ router.post('/:groupId/messages/mark-read', authenticateToken, async (req, res) 
 
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// Mark group messages as unread
-router.post('/:groupId/messages/mark-unread', authenticateToken, async (req, res) => {
-    try {
-        const { groupId } = req.params;
-        const userId = req.user.id;
-        const userIdObj = new mongoose.Types.ObjectId(userId);
-
-        const group = await Group.findById(groupId);
-        if (!group) return res.status(404).json({ error: 'Group not found' });
-
-        const isMem = (group.members || []).some(m => String(m) === String(userId));
-        const isRem = (group.removedMembers || []).some(m => String(m) === String(userId));
-
-        if (!isMem && !isRem) {
-            return res.status(403).json({ error: 'Not a group member' });
-        }
-
-        // Find messages in this group that WERE read by this user
-        // Usually we unread the most recent batch or just all of them to trigger grey ticks
-        const messagesToUnread = await GroupMessage.find({
-            group_id: groupId,
-            read_by: userIdObj
-        });
-
-        if (messagesToUnread.length > 0) {
-            const messageIds = messagesToUnread.map(m => m._id);
-
-            // 1. Remove user from reading lists
-            await GroupMessage.updateMany(
-                { _id: { $in: messageIds } },
-                {
-                    $pull: { 
-                        read_by: userIdObj,
-                        read_details: { user_id: userIdObj }
-                    }
-                }
-            );
-
-            // 2. Check each message to see if it should no longer be 'is_read: true'
-            // We do this by checking the new read_by counts
-            const requiredReads = (group.members || []).length - 1;
-            
-            // Recalculate is_read for these messages
-            const updatedMessages = await GroupMessage.find({ _id: { $in: messageIds } });
-            const noLongerFullyReadIds = updatedMessages
-                .filter(m => !m.read_by || m.read_by.length < requiredReads)
-                .map(m => m._id);
-
-            if (noLongerFullyReadIds.length > 0) {
-                await GroupMessage.updateMany(
-                    { _id: { $in: noLongerFullyReadIds } },
-                    { $set: { is_read: false } }
-                );
-
-                // Notify all members about the change back to grey ticks
-                if (req.io) {
-                    group.members.forEach(memberId => {
-                        req.io.to(memberId.toString()).emit('group_messages_unread', {
-                            groupId,
-                            messageIds: noLongerFullyReadIds,
-                            readerId: userId
-                        });
-                    });
-                }
-            }
-        }
-
-        res.json({ success: true, count: messagesToUnread.length });
-    } catch (err) {
-        console.error('[MARK_UNREAD_GROUP] Error:', err);
         res.status(500).json({ error: err.message });
     }
 });

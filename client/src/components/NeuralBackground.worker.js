@@ -4,10 +4,9 @@ let canvas, ctx, width, height;
 let particles = [];
 
 const config = {
-    baseColor: { r: 14, g: 165, b: 233 }, // Sky Blue for the main nodes
-    hubColor: { r: 99, g: 102, b: 241 },   // Indigo for hubs
-    baseConnectionDistance: 135,
-    baseSpeed: 0.7,
+    baseColor: { r: 13, g: 159, b: 183 }, // #0D9FB7
+    baseConnectionDistance: 135, // Increased slightly for better look with fewer particles
+    baseSpeed: 0.7, // Slightly slower background motion
 };
 
 // Spatial grid for performance
@@ -44,19 +43,15 @@ class Particle {
             ctx.beginPath();
             const pulse = Math.sin(now * 0.002 + this.x) * 0.5;
             ctx.arc(this.x, this.y, (this.size * 3) + pulse, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(${config.hubColor.r}, ${config.hubColor.g}, ${config.hubColor.b}, 0.15)`;
-            ctx.fill();
-            
-            ctx.beginPath();
-            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(${config.hubColor.r}, ${config.hubColor.g}, ${config.hubColor.b}, 0.9)`;
-            ctx.fill();
-        } else {
-            ctx.beginPath();
-            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, 0.6)`;
+            ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, 0.1)`;
             ctx.fill();
         }
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        const alpha = this.isHub ? 0.9 : 0.5;
+        ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${alpha})`;
+        ctx.fill();
     }
 }
 
@@ -128,14 +123,11 @@ function animate() {
     }
 
     for (let i = 0; i < 11; i++) {
-        const alpha = (i / 10) * 0.4;
+        const alpha = (i / 10) * 0.6;
         ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${alpha})`;
-        ctx.lineWidth = 0.8;
+        ctx.lineWidth = 0.5;
         ctx.stroke(normalBuckets[i]);
-        
-        const alphaHub = (i / 10) * 0.5;
-        ctx.strokeStyle = `rgba(${config.hubColor.r}, ${config.hubColor.g}, ${config.baseColor.b}, ${alphaHub})`;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 1.2;
         ctx.stroke(hubBuckets[i]);
     }
 }

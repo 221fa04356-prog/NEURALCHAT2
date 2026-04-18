@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import axios from 'axios';
-import { User, Shield, Lock, Mail, Eye, EyeOff, ArrowLeft, Zap, Globe, Cpu } from 'lucide-react';
+import { User, Shield, Lock, Mail, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import logo from '../assets/logo.png';
 import LandingBackground from '../components/LandingBackground';
 import Snackbar from '../components/Snackbar';
@@ -126,12 +126,9 @@ export default function Home() {
             const res = await axios.post('/api/auth/forgot-password', payload);
             const displayName = res.data.name || 'User';
             const userIdentifier = `${displayName} (${isAdmin ? adminEmail : userLoginId})`;
-            const destination = res.data.destination ? ` User alert sent to ${res.data.destination}.` : '';
-            const adminStatus = res.data.adminEmailSent === false ? ' Admin email failed.' : '';
-            const userStatus = res.data.userEmailSent === false ? ' User email failed.' : '';
             setSnackbar({
                 open: true,
-                message: `Password reset request sent to Admin.${destination}${adminStatus}${userStatus}`,
+                message: 'Password reset request sent to Admin.',
                 type: 'success',
                 senderName: userIdentifier
             });
@@ -211,60 +208,55 @@ export default function Home() {
             <div className="home-content-wrapper">
 
                 {!showLoginForm ? (
-                    /* Expansive Hero Landing View */
-                    <div className="hero-landing-expansive fade-in">
-                        <div className="hero-glass-panel">
-                            <div className="hero-top-section">
-                                <div className="hero-logo-wrapper">
-                                    <img src={logo} alt="Neural Chat Logo" className="hero-logo-img" />
-                                </div>
-                                <div className="hero-titles">
-                                    <h1 className="brand-title">Neural Chat</h1>
-                                    <p className="tagline">Enterprise-Grade Secure AI Communication</p>
-                                </div>
+                    /* Hero Landing View */
+                    <div className="hero-view fade-in">
+                        <div className="hero-left">
+                            <div className="logo-container">
+                                <img src={logo} alt="Neural Chat Logo" />
                             </div>
+                            <p className="tagline">
+                                Secure AI-Powered Communication
+                            </p>
+                        </div>
 
-                            <div className="hero-features-grid">
-                                <div className="feature-card">
-                                    <div className="feature-icon-wrapper"><Shield size={24} /></div>
-                                    <h3>End-to-End Security</h3>
-                                    <p>Military-grade encryption for all your conversations.</p>
-                                </div>
-                                <div className="feature-card">
-                                    <div className="feature-icon-wrapper"><Cpu size={24} /></div>
-                                    <h3>Neural AI Engine</h3>
-                                    <p>Smart workflows and automated intelligent assistance.</p>
-                                </div>
-                                <div className="feature-card">
-                                    <div className="feature-icon-wrapper"><Globe size={24} /></div>
-                                    <h3>Global Connectivity</h3>
-                                    <p>Connect seamlessly with communities and public forums.</p>
-                                </div>
-                                <div className="feature-card">
-                                    <div className="feature-icon-wrapper"><Zap size={24} /></div>
-                                    <h3>Lightning Fast</h3>
-                                    <p>Optimized real-time sync with absolutely zero latency.</p>
-                                </div>
-                            </div>
+                        <div className="hero-right">
+                            <h1 className="brand-title">
+                                Neural Chat
+                            </h1>
 
-                            <div className="hero-actions-container">
-                                <div className="action-divider">
-                                    <span>Access Your Portal</span>
-                                </div>
-                                <div className="button-group-expansive">
-                                    <button
-                                        onClick={() => { setIsAdmin(false); setShowLoginForm(true); }}
-                                        className="btn-primary-neural hero-btn"
-                                    >
-                                        <User size={20} /> User Login
-                                    </button>
-                                    <button
-                                        onClick={() => { setIsAdmin(true); setShowLoginForm(true); }}
-                                        className="btn-outline-neural hero-btn"
-                                    >
-                                        <Lock size={20} /> Admin Login
-                                    </button>
-                                </div>
+                            <div className="button-group">
+                                <button
+                                    onClick={() => { setIsAdmin(false); setShowLoginForm(true); }}
+                                    className="btn-primary-neural"
+                                    style={{
+                                        padding: '1.2rem 2rem',
+                                        borderRadius: '1rem',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '10px',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    <User size={20} /> User Login
+                                </button>
+                                <button
+                                    onClick={() => { setIsAdmin(true); setShowLoginForm(true); }}
+                                    className="btn-outline-neural"
+                                    style={{
+                                        padding: '1.2rem 2rem',
+                                        borderRadius: '1rem',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '10px',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    <Shield size={20} /> Admin Login
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -282,7 +274,7 @@ export default function Home() {
                                 </p>
                             </div>
 
-                            <p style={{ color: '#e2e8f0', fontSize: '0.95rem', marginBottom: '24px', textAlign: 'center', lineHeight: '1.6' }}>
+                            <p style={{ color: '#475569', fontSize: '0.95rem', marginBottom: '24px', textAlign: 'center', lineHeight: '1.6' }}>
                                 Logging in here will disconnect your other session. Do you want to sign out from the other device and continue?
                             </p>
 
@@ -326,7 +318,7 @@ export default function Home() {
                                 {/* Inline alerts removed to prevent layout shift */}
 
                                 <div className="form-group-custom">
-                                    <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: '700', color: '#e2e8f0', marginBottom: '0.6rem' }}>
+                                    <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: '700', color: '#475569', marginBottom: '0.6rem' }}>
                                         {isAdmin ? 'Email' : 'Login ID'}
                                     </label>
                                     <div style={{ position: 'relative', width: '100%' }}>
@@ -353,7 +345,7 @@ export default function Home() {
                                 </div>
 
                                 <div className="form-group-custom">
-                                    <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: '700', color: '#e2e8f0', marginBottom: '0.6rem' }}>Password</label>
+                                    <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: '700', color: '#475569', marginBottom: '0.6rem' }}>Password</label>
                                     <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: '10px' }}>
                                         <div style={{ position: 'relative', flex: 1 }}>
                                             <Lock size={18} style={{ position: 'absolute', top: '50%', left: '14px', transform: 'translateY(-50%)', color: '#94A3B8', zIndex: 10, pointerEvents: 'none' }} />

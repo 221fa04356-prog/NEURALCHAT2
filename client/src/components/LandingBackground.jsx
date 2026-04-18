@@ -13,13 +13,12 @@ const LandingBackground = React.memo(() => {
         let mouse = { x: null, y: null };
         let animationFrameId;
 
-        // Configuration for a stunning dark theme (Neon Cyan / Purplish)
+        // Configuration matching NeuralBackground
         const config = {
-            baseColor: { r: 14, g: 165, b: 233 }, // Sky Blue for the main nodes
-            hubColor: { r: 99, g: 102, b: 241 },   // Indigo for hubs
-            baseConnectionDistance: 130,
-            mouseDistance: 220,
-            baseSpeed: 0.8
+            baseColor: { r: 13, g: 159, b: 183 }, // #0D9FB7
+            baseConnectionDistance: 110,
+            mouseDistance: 200,
+            baseSpeed: 1.0
         };
 
         const resize = () => {
@@ -30,8 +29,8 @@ const LandingBackground = React.memo(() => {
             canvas.height = height;
 
             const area = width * height;
-            const density = 12000;
-            const targetCount = Math.min(Math.floor(area / density), 120);
+            const density = 14000; // Significantly reduced particle count
+            const targetCount = Math.min(Math.floor(area / density), 100);
 
             initParticles(targetCount);
         }
@@ -41,25 +40,48 @@ const LandingBackground = React.memo(() => {
                 this.x = Math.random() * width;
                 this.y = Math.random() * height;
                 this.angle = Math.random() * Math.PI * 2;
-                this.baseSpeed = (Math.random() * 0.5 + 0.2) * config.baseSpeed;
+                this.baseSpeed = (Math.random() * 0.6 + 0.2) * config.baseSpeed;
                 this.speed = this.baseSpeed;
-                this.turnSpeed = (Math.random() - 0.5) * 0.01;
+                this.turnSpeed = (Math.random() - 0.5) * 0.015;
 
-                this.isHub = Math.random() > 0.85;
-                this.baseSize = this.isHub ? Math.random() * 2.5 + 2.5 : Math.random() * 1.5 + 1;
+                // 12% chance to be a larger central node (Hub)
+                this.isHub = Math.random() > 0.88;
+                this.baseSize = this.isHub ? Math.random() * 2 + 2.5 : Math.random() * 1.2 + 0.8;
                 this.size = this.baseSize;
             }
 
             update() {
+                // Organic wandering behavior (curved paths)
                 this.angle += this.turnSpeed;
 
+                // Move
                 this.x += Math.cos(this.angle) * this.speed;
                 this.y += Math.sin(this.angle) * this.speed;
 
+                // Seamless Infinite Wrap
                 if (this.x < -100) this.x = width + 100;
                 if (this.x > width + 100) this.x = -100;
                 if (this.y < -100) this.y = height + 100;
                 if (this.y > height + 100) this.y = -100;
+            }
+
+            draw() {
+                // Hub Aura Effect
+                if (this.isHub) {
+                    ctx.beginPath();
+                    // Subtle breathing pulse for hub auras
+                    const pulse = Math.sin(Date.now() * 0.002 + this.x) * 0.5;
+                    ctx.arc(this.x, this.y, (this.size * 3) + pulse, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, 0.1)`;
+                    ctx.fill();
+                }
+
+                // Core Node
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                const alpha = this.isHub ? 0.9 : 0.5;
+                ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${alpha})`;
+                ctx.fill();
             }
         }
 
@@ -73,16 +95,18 @@ const LandingBackground = React.memo(() => {
         const animate = (currentTime) => {
             animationFrameId = requestAnimationFrame(animate);
             
+            // Use currentTime for consistent animations
             const now = currentTime || Date.now();
             
             ctx.clearRect(0, 0, width, height);
 
-            const dynamicConnectionDistance = config.baseConnectionDistance + Math.sin(now * 0.001) * 20;
+            const dynamicConnectionDistance = config.baseConnectionDistance + Math.sin(now * 0.001) * 25;
             const n = particles.length;
 
             const normalBuckets = Array.from({ length: 10 }, () => new Path2D());
             const hubBuckets = Array.from({ length: 10 }, () => new Path2D());
             
+            // Paths for batched particle drawing
             const hubAuraPath = new Path2D();
             const hubPath = new Path2D();
             const normalPath = new Path2D();
@@ -90,10 +114,11 @@ const LandingBackground = React.memo(() => {
             for (let i = 0; i < n; i++) {
                 particles[i].update();
                 
+                // Batch particle paths
                 if (particles[i].isHub) {
-                    const pulse = Math.sin(now * 0.002 + particles[i].x) * 1.0;
-                    hubAuraPath.moveTo(particles[i].x + (particles[i].size * 3.5) + pulse, particles[i].y);
-                    hubAuraPath.arc(particles[i].x, particles[i].y, (particles[i].size * 3.5) + pulse, 0, Math.PI * 2);
+                    const pulse = Math.sin(now * 0.002 + particles[i].x) * 0.5;
+                    hubAuraPath.moveTo(particles[i].x + (particles[i].size * 3) + pulse, particles[i].y);
+                    hubAuraPath.arc(particles[i].x, particles[i].y, (particles[i].size * 3) + pulse, 0, Math.PI * 2);
                     
                     hubPath.moveTo(particles[i].x + particles[i].size, particles[i].y);
                     hubPath.arc(particles[i].x, particles[i].y, particles[i].size, 0, Math.PI * 2);
@@ -106,6 +131,7 @@ const LandingBackground = React.memo(() => {
                     const dx = particles[i].x - particles[j].x;
                     const dy = particles[i].y - particles[j].y;
                     
+                    // COARSE CHECK
                     const maxDistVal = dynamicConnectionDistance * 1.4;
                     if (Math.abs(dx) > maxDistVal || Math.abs(dy) > maxDistVal) continue;
 
@@ -113,7 +139,7 @@ const LandingBackground = React.memo(() => {
 
                     let maxDist = dynamicConnectionDistance;
                     const isHubPair = particles[i].isHub || particles[j].isHub;
-                    if (isHubPair) maxDist *= 1.5;
+                    if (isHubPair) maxDist *= 1.4;
                     
                     const maxDist2 = maxDist * maxDist;
 
@@ -145,46 +171,42 @@ const LandingBackground = React.memo(() => {
                         const distance = Math.sqrt(dist2);
                         ctx.beginPath();
                         const opacity = 1 - (distance / config.mouseDistance);
-                        // Mouse connection line
-                        ctx.strokeStyle = `rgba(56, 189, 248, ${opacity * 0.9})`; 
-                        ctx.lineWidth = 1.8;
+                        ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${opacity * 0.8})`;
+                        ctx.lineWidth = 1.5;
                         ctx.moveTo(particles[i].x, particles[i].y);
                         ctx.lineTo(mouse.x, mouse.y);
                         ctx.stroke();
 
-                        if (dist2 < 4000) {
-                            particles[i].x += dx * 0.03;
-                            particles[i].y += dy * 0.03;
+                        if (dist2 < 2500) {
+                            particles[i].x += dx * 0.02;
+                            particles[i].y += dy * 0.02;
                         }
                     }
                 }
             }
 
-            // Draw hub auras
-            ctx.fillStyle = `rgba(${config.hubColor.r}, ${config.hubColor.g}, ${config.hubColor.b}, 0.15)`;
+            // Draw batched particles
+            ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, 0.1)`;
             ctx.fill(hubAuraPath);
 
-            // Draw hubs
-            ctx.fillStyle = `rgba(${config.hubColor.r}, ${config.hubColor.g}, ${config.hubColor.b}, 0.9)`;
+            ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, 0.9)`;
             ctx.fill(hubPath);
 
-            // Draw normal nodes
-            ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, 0.6)`;
+            ctx.fillStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, 0.5)`;
             ctx.fill(normalPath);
 
-            // Draw connections
+            // Draw batched connections
+            ctx.lineWidth = 0.5;
             for (let i = 0; i < 10; i++) {
-                const alpha = (i / 10) * 0.4;
-                ctx.lineWidth = 0.8;
+                const alpha = (i / 10) * 0.6;
                 ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${alpha})`;
                 ctx.stroke(normalBuckets[i]);
             }
 
+            ctx.lineWidth = 1.2;
             for (let i = 0; i < 10; i++) {
-                const alpha = (i / 10) * 0.5;
-                ctx.lineWidth = 1.5;
-                // Add gradient-like feel by mixing hub and base color for hub connections
-                ctx.strokeStyle = `rgba(${config.hubColor.r}, ${config.hubColor.g}, ${config.baseColor.b}, ${alpha})`;
+                const alpha = (i / 10) * 0.6;
+                ctx.strokeStyle = `rgba(${config.baseColor.r}, ${config.baseColor.g}, ${config.baseColor.b}, ${alpha})`;
                 ctx.stroke(hubBuckets[i]);
             }
         }
@@ -192,6 +214,8 @@ const LandingBackground = React.memo(() => {
         const handleMouseMove = (e) => {
             if (!containerRef.current) return;
             const rect = containerRef.current.getBoundingClientRect();
+            
+            // Normalize device screen pixels to unzoomed canvas CSS pixels
             mouse.x = e.clientX - rect.left;
             mouse.y = e.clientY - rect.top;
         };
@@ -205,6 +229,7 @@ const LandingBackground = React.memo(() => {
         window.addEventListener('mousemove', handleMouseMove);
         window.addEventListener('mouseout', handleMouseOut);
 
+        // Start Application
         resize();
         animate();
 
@@ -227,7 +252,7 @@ const LandingBackground = React.memo(() => {
                 height: '100%',
                 zIndex: 1,
                 overflow: 'hidden',
-                background: 'radial-gradient(ellipse at center, #0f172a 0%, #020617 100%)',
+                backgroundColor: '#f5f5f5',
                 pointerEvents: 'none',
                 transform: 'translateZ(0)',
                 willChange: 'transform'

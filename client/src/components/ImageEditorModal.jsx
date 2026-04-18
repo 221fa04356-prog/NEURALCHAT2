@@ -9,7 +9,7 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
 
     const [activeColor, setActiveColor] = useState('#ffffff');
     const [activeFont, setActiveFont] = useState('sans-serif');
-
+    
     // Custom Text Modal State
     const [showTextPrompt, setShowTextPrompt] = useState(false);
     const [tempTextInput, setTempTextInput] = useState("");
@@ -22,7 +22,7 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
 
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
-
+    
     // Original image data caching to support cropping and undoing
     const [baseImg, setBaseImg] = useState(null);
 
@@ -31,12 +31,12 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
 
     const themeColor = '#0084ff'; // Application color instead of green
 
-    // Theme Variables (Neural Dark Theme)
-    const containerBg = 'rgba(13, 22, 29, 0.95)';
-    const canvasBg = 'rgba(0, 0, 0, 0.4)';
-    const textColor = '#f8fafc';
-    const iconColor = '#94a3b8';
-    const borderColor = 'rgba(255, 255, 255, 0.08)';
+    // Theme Variables (Light Application Theme)
+    const containerBg = '#ffffff';
+    const canvasBg = '#f0f2f5';
+    const textColor = '#111b21';
+    const iconColor = '#54656f';
+    const borderColor = '#e9edef';
 
     useEffect(() => {
         const img = new Image();
@@ -48,7 +48,7 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
         if (!baseImg || !canvasRef.current) return;
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
-
+        
         let width = baseImg.width;
         let height = baseImg.height;
 
@@ -60,7 +60,7 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
 
         const maxW = 800 * 0.9;
         const maxH = window.innerHeight * 0.5;
-
+        
         let drawW = width;
         let drawH = height;
         if (drawW > maxW || drawH > maxH) {
@@ -68,7 +68,7 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
             drawW *= ratio;
             drawH *= ratio;
         }
-
+        
         canvas.width = drawW;
         canvas.height = drawH;
 
@@ -90,10 +90,10 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
 
     const confirmAddText = () => {
         if (tempTextInput.trim()) {
-            setTexts([...texts, {
-                id: Date.now(),
-                text: tempTextInput,
-                x: 50,
+            setTexts([...texts, { 
+                id: Date.now(), 
+                text: tempTextInput, 
+                x: 50, 
                 y: 50,
                 color: activeColor,
                 font: activeFont
@@ -130,13 +130,13 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
         canvas.width = canvasRef.current.width;
         canvas.height = canvasRef.current.height;
         const ctx = canvas.getContext('2d');
-
+        
         ctx.drawImage(canvasRef.current, 0, 0);
-
+        
         texts.forEach(item => {
             ctx.font = `bold 24px ${item.font || 'sans-serif'}`;
             ctx.textBaseline = "top";
-
+            
             ctx.fillStyle = item.color || "#ffffff";
             ctx.fillText(item.text, item.x, item.y);
         });
@@ -163,7 +163,7 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
         const rect = containerRef.current.getBoundingClientRect();
-
+        
         const textItem = texts[index];
         setOffset({
             x: (clientX - rect.left) - textItem.x,
@@ -202,7 +202,7 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
         const rect = containerRef.current.getBoundingClientRect();
         const x = (clientX - rect.left) - offset.x;
         const y = (clientY - rect.top) - offset.y;
-
+        
         setTexts(prev => {
             const newTexts = [...prev];
             newTexts[draggingText].x = x;
@@ -264,7 +264,7 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
         const y1 = Math.min(cropStart.y, cropCurrent.y);
         const w = Math.abs(cropCurrent.x - cropStart.x);
         const h = Math.abs(cropCurrent.y - cropStart.y);
-
+        
         return (
             <div style={{
                 position: 'absolute',
@@ -285,7 +285,7 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
                 width: '100%', maxWidth: 800, height: window.innerWidth <= 768 ? '100%' : '80vh', maxHeight: window.innerWidth <= 768 ? 'none' : 800,
                 background: containerBg, borderRadius: window.innerWidth <= 768 ? 0 : 16, overflow: 'hidden',
                 display: 'flex', flexDirection: 'column', margin: window.innerWidth <= 768 ? 0 : '0 20px',
-                boxShadow: '0 17px 50px 0 rgba(0,0,0,0.19), 0 12px 15px 0 rgba(0,0,0,0.24)'
+                boxShadow: '0 17px 50px 0 rgba(0,0,0,0.19), 0 12px 15px 0 rgba(0,0,0,0.24)' 
             }}>
                 {/* Custom Prompt Modal */}
                 {showTextPrompt && (
@@ -300,13 +300,13 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
                             boxShadow: '0 17px 50px 0 rgba(0,0,0,0.19)'
                         }}>
                             <div style={{ fontSize: 18, fontWeight: '500' }}>Enter text to add:</div>
-                            <input
+                            <input 
                                 autoFocus
-                                type="text"
+                                type="text" 
                                 style={{ padding: '10px 15px', borderRadius: 8, border: `2px solid ${themeColor}`, background: '#f0f2f5', color: textColor, fontSize: 16, outline: 'none' }}
-                                value={tempTextInput}
+                                value={tempTextInput} 
                                 onChange={(e) => setTempTextInput(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') confirmAddText(); }}
+                                onKeyDown={(e) => { if(e.key === 'Enter') confirmAddText(); }}
                             />
                             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                                 <button onClick={() => setShowTextPrompt(false)} style={{ background: '#f0f2f5', color: iconColor, border: 'none', padding: '8px 16px', borderRadius: 20, cursor: 'pointer', fontWeight: 500 }}>Cancel</button>
@@ -325,30 +325,30 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
                         <X size={24} />
                         <span style={{ fontSize: 16, display: window.innerWidth <= 768 ? 'none' : 'block', color: textColor, fontWeight: 500 }}>Take photo</span>
                     </div>
-
+                    
                     <div style={{ display: 'flex', alignItems: 'center', gap: 25 }}>
                         <div style={{ display: 'flex', gap: 20, alignItems: 'center', color: iconColor }}>
                             <Undo size={22} style={{ cursor: 'pointer', hover: { color: themeColor } }} onClick={onRetake} title="Retake Image" />
-                            <Crop
-                                size={22}
-                                style={{ cursor: 'pointer', color: isCropping ? themeColor : iconColor }}
-                                onClick={() => setIsCropping(!isCropping)}
-                                title="Crop"
+                            <Crop 
+                                size={22} 
+                                style={{ cursor: 'pointer', color: isCropping ? themeColor : iconColor }} 
+                                onClick={() => setIsCropping(!isCropping)} 
+                                title="Crop" 
                             />
                             <Type size={22} style={{ cursor: 'pointer' }} onClick={handleAddTextPrompt} title="Add Text" />
                         </div>
                     </div>
-
+                    
                     <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-                        <button onClick={handleDone} style={{
-                            background: 'none', border: 'none', color: themeColor, fontSize: 16, cursor: 'pointer', fontWeight: 600
+                        <button onClick={handleDone} style={{ 
+                            background: 'none', border: 'none', color: themeColor, fontSize: 16, cursor: 'pointer', fontWeight: 600 
                         }}>Done</button>
                         <Download size={22} style={{ cursor: 'pointer' }} onClick={handleDownload} title="Download" />
                     </div>
                 </div>
 
                 {/* Main Canvas Area */}
-                <div
+                <div 
                     ref={containerRef}
                     style={{
                         flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -361,18 +361,18 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
                     onTouchEnd={handlePointerUp}
                 >
                     <div style={{ position: 'relative' }}>
-                        <canvas
-                            ref={canvasRef}
-                            style={{ background: '#000', borderRadius: 4, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', cursor: isCropping ? 'crosshair' : 'default', maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain' }}
+                        <canvas 
+                            ref={canvasRef} 
+                            style={{ background: '#000', borderRadius: 4, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', cursor: isCropping ? 'crosshair' : 'default', maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain' }} 
                             onMouseDown={handleCanvasPointerDown}
                             onTouchStart={handleCanvasPointerDown}
                         />
-
+                        
                         {renderCropOverlay()}
 
                         {/* Draggable Texts overlay */}
                         {!isCropping && texts.map((item, index) => (
-                            <div
+                            <div 
                                 key={item.id}
                                 onMouseDown={(e) => handlePointerDown(e, index)}
                                 onTouchStart={(e) => handlePointerDown(e, index)}
@@ -399,27 +399,27 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
                 </div>
 
                 {/* Bottom Toolbar */}
-                <div style={{
-                    height: window.innerWidth <= 768 ? 120 : 80,
-                    display: 'flex', flexDirection: window.innerWidth <= 768 ? 'column' : 'row',
+                <div style={{ 
+                    height: window.innerWidth <= 768 ? 120 : 80, 
+                    display: 'flex', flexDirection: window.innerWidth <= 768 ? 'column' : 'row', 
                     alignItems: 'center', justifyContent: 'center', gap: 15, padding: '10px 20px', flexShrink: 0, borderTop: `1px solid ${borderColor}`, background: containerBg
                 }}>
                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
                         {colors.map(c => (
-                            <div
+                            <div 
                                 key={c}
                                 onClick={() => handleColorChange(c)}
-                                style={{
+                                style={{ 
                                     width: 22, height: 22, borderRadius: '50%', background: c, cursor: 'pointer',
                                     border: activeColor === c ? `3px solid ${themeColor}` : '1px solid #d1d7db'
-                                }}
+                                }} 
                             />
                         ))}
                     </div>
-
+                    
                     <div style={{ marginLeft: window.innerWidth <= 768 ? 0 : 30, display: 'flex', alignItems: 'center', gap: 10, color: iconColor, fontSize: 14 }}>
                         <div style={{ width: 28, height: 28, color: iconColor, display: 'flex', alignItems: 'center', justifyContent: 'center', background: borderColor, borderRadius: '50%', fontWeight: 'bold' }}>A</div>
-                        <select
+                        <select 
                             style={{ background: 'transparent', color: textColor, border: 'none', fontSize: 14, outline: 'none', cursor: 'pointer', fontWeight: 500 }}
                             value={activeFont}
                             onChange={(e) => handleFontChange(e.target.value)}
