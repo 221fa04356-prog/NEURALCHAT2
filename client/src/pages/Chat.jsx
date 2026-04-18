@@ -876,6 +876,7 @@ export default function Chat() {
     const [file, setFile] = useState(null);
     const [selectedFiles, setSelectedFiles] = useState([]);
     const fileInputRef = useRef(null);
+    const filePreviewUrlCacheRef = useRef(new Map());
 
     const [showViewOnceModal, setShowViewOnceModal] = useState(false);
     const [viewOnceMsg, setViewOnceMsg] = useState(null);
@@ -1397,7 +1398,10 @@ export default function Chat() {
                 setEventTick(prev => prev + 1);
             }
         }, 60000);
-        return () => clearInterval(interval);
+        return () => {
+            clearInterval(refreshInterval);
+            clearInterval(reminderTickInterval);
+        };
     }, [user, isAppAsleep, remindersList, eventTick]);
 
     const isAccountBanned = () => {
