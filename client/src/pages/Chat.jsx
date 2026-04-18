@@ -63,7 +63,6 @@ import Snackbar from '../components/Snackbar';
 import { getTranslator, getLangCode } from '../utils/translations';
 import { countryCodes } from '../utils/countryCodes';
 
-import VoiceRecordingUI from '../components/chat/VoiceRecordingUI';
 import MessageList from '../components/chat/MessageList';
 
 import NeuralBackground from '../components/NeuralBackground';
