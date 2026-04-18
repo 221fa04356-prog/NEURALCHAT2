@@ -101,7 +101,7 @@ const NeuralBackground = React.memo(() => {
                 height: '100vh',
                 zIndex: -1,
                 overflow: 'hidden',
-                backgroundColor: '#f5f5f5', // Light Theme Background
+                background: 'radial-gradient(ellipse at center, #0f172a 0%, #020617 100%)',
                 pointerEvents: 'none',
                 transform: 'translateZ(0)',
                 willChange: 'transform'

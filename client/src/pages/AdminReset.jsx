@@ -74,7 +74,7 @@ export default function AdminReset() {
 
                         <form onSubmit={handleSubmit} className="login-form">
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>Admin Email</label>
+                                <label style={{ display: 'block', fontWeight: '700', color: '#e2e8f0' }}>Admin Email</label>
                                 <div style={{ position: 'relative', width: '100%' }}>
                                     <Mail size={16} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: '10px', color: '#94A3B8', zIndex: 10, pointerEvents: 'none' }} />
                                     <input
@@ -91,7 +91,7 @@ export default function AdminReset() {
 
                             {/* New Password */}
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>New Password</label>
+                                <label style={{ display: 'block', fontWeight: '700', color: '#e2e8f0' }}>New Password</label>
                                 <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: '10px' }}>
                                     <div style={{ position: 'relative', flex: 1 }}>
                                         <Lock size={16} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: '10px', color: '#94A3B8', zIndex: 10, pointerEvents: 'none' }} />
@@ -118,7 +118,7 @@ export default function AdminReset() {
 
                             {/* Confirm Password */}
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>Confirm Password</label>
+                                <label style={{ display: 'block', fontWeight: '700', color: '#e2e8f0' }}>Confirm Password</label>
                                 <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: '10px' }}>
                                     <div style={{ position: 'relative', flex: 1 }}>
                                         <Lock size={16} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: '10px', color: '#94A3B8', zIndex: 10, pointerEvents: 'none' }} />
@@ -145,7 +145,7 @@ export default function AdminReset() {
 
                             {/* Secret Key */}
                             <div className="form-group-custom">
-                                <label style={{ display: 'block', fontWeight: '700', color: '#475569' }}>Secret Key</label>
+                                <label style={{ display: 'block', fontWeight: '700', color: '#e2e8f0' }}>Secret Key</label>
                                 <div style={{ position: 'relative', width: '100%' }}>
                                     <Key size={16} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: '10px', color: '#94A3B8', zIndex: 10, pointerEvents: 'none' }} />
                                     <input

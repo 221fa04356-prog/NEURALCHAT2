@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Dependency directories
 node_modules/
 jspm_packages/
@@ -42,10 +41,3 @@ Thumbs.db
 # Database files
 *.sqlite
 *.db
-=======
-
-# Security
-server/.env
-# Dependencies
-node_modules/
->>>>>>> origin/WINN1
