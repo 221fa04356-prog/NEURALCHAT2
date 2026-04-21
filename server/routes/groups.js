@@ -228,9 +228,10 @@ router.post('/create', authenticateToken, async (req, res) => {
 router.get('/my-groups', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
-        // 0. Get current user's favorites once
-        const currentUserObj = await User.findById(userId).select('favorites');
+        // 0. Get current user's favorites and name overrides once
+        const currentUserObj = await User.findById(userId).select('favorites nameOverrides');
         const userFavorites = currentUserObj?.favorites || [];
+        const nameOverrides = currentUserObj?.nameOverrides || new Map();
 
         const groups = await Group.find({
             $or: [{ members: userId }, { removedMembers: userId }],
@@ -242,13 +243,31 @@ router.get('/my-groups', authenticateToken, async (req, res) => {
 
         // Enrich each group with last message and unread count
         const enriched = await Promise.all(groups.map(async (g) => {
+            // Apply overrides to members
+            if (g.members) {
+                g.members.forEach(m => {
+                    const customName = nameOverrides instanceof Map ? nameOverrides.get(String(m._id)) : nameOverrides[String(m._id)];
+                    if (customName) m.name = customName;
+                });
+            }
+            if (g.admin) {
+                const customAdminName = nameOverrides instanceof Map ? nameOverrides.get(String(g.admin._id)) : nameOverrides[String(g.admin._id)];
+                if (customAdminName) g.admin.name = customAdminName;
+            }
+
             const lastMsg = await GroupMessage.findOne({
                 group_id: g._id,
                 deleted_for: { $ne: userId }
             })
                 .sort({ created_at: -1 })
                 .populate('sender_id', 'name __enc_name')
-                .then(r => r ? r.toObject() : null);
+                .then(r => {
+                    if (r && r.sender_id) {
+                        const customSenderName = nameOverrides instanceof Map ? nameOverrides.get(String(r.sender_id._id)) : nameOverrides[String(r.sender_id._id)];
+                        if (customSenderName) r.sender_id.name = customSenderName;
+                    }
+                    return r ? r.toObject() : null;
+                });
 
             const userIdObj = new mongoose.Types.ObjectId(userId);
             
@@ -338,6 +357,9 @@ router.get('/:groupId/messages', authenticateToken, async (req, res) => {
         const history = (group.userHistory || []).find(h => String(h.user) === String(userId));
         const visibleFrom = history?.visibleFrom || new Date(0);
 
+        const currentUserObj = await User.findById(userId).select('nameOverrides');
+        const nameOverrides = currentUserObj?.nameOverrides || new Map();
+
         const messages = await GroupMessage.find({
             group_id: groupId,
             deleted_for: { $ne: userId },
@@ -350,6 +372,10 @@ router.get('/:groupId/messages', authenticateToken, async (req, res) => {
 
         const enriched = messages.map(msg => {
             const m = msg.toObject();
+            if (m.sender_id) {
+                const customName = nameOverrides instanceof Map ? nameOverrides.get(String(m.sender_id._id)) : nameOverrides[String(m.sender_id._id)];
+                if (customName) m.sender_id.name = customName;
+            }
             m.is_starred = (msg.starred_by || []).some(id => String(id) === String(userId));
             m.is_edited = msg.is_edited || false;
             return m;
@@ -730,12 +756,17 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
         const isMem = (group.members || []).some(m => String(m) === String(senderId));
         const isRemoved = (group.removedMembers || []).some(m => String(m) === String(senderId));
         const isOwner = String(group.admin) === String(senderId);
+        const isAdmin = (group.admins || []).some(a => String(a) === String(senderId));
 
-        if (isRemoved && !isMem && !isOwner) {
+        if (isRemoved && !isMem && !isOwner && !isAdmin) {
             return res.status(403).json({ error: 'You have been removed from this group and cannot send messages.' });
         }
 
-        if (!(group.members || []).some(m => String(m) === String(senderId))) {
+        if (group.isAnnouncementGroup && !isOwner && !isAdmin) {
+            return res.status(403).json({ error: 'Only admins can send messages to this announcement group.' });
+        }
+
+        if (!isMem && !isOwner && !isAdmin) {
             return res.status(403).json({ error: 'Not a group member' });
         }
 

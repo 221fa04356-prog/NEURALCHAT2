@@ -159,9 +159,17 @@ router.post('/login', async (req, res) => {
             { expiresIn: '7d' }
         );
 
+        const myId = user.id.toString();
+        let userDisplayName = user.name;
+        if (user.nameOverrides) {
+            const overrides = user.nameOverrides;
+            const customName = (overrides instanceof Map) ? overrides.get(myId) : (overrides[myId] || overrides[myId.toString()]);
+            if (customName) userDisplayName = customName;
+        }
+
         res.json({
             token,
-            user: { id: user.id, name: user.name, role: user.role, email: user.email, login_id: user.login_id }
+            user: { id: user.id, name: userDisplayName, role: user.role, email: user.email, login_id: user.login_id }
         });
     } catch (err) {
         res.status(500).json({ error: err.message });

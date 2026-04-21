@@ -231,6 +231,30 @@ io.on('connection', async (socket) => {
         }
     });
 
+    socket.on('group_message', async (data) => {
+        try {
+            const { groupId, message } = data;
+            const Group = require('./models/Group');
+            const group = await Group.findById(groupId);
+            if (group) {
+                // Relay to all members
+                group.members.forEach(memberId => {
+                    io.to(memberId.toString()).emit('receive_group_message', {
+                        groupId: groupId,
+                        message: message
+                    });
+                });
+                // Notify admins
+                io.to('admins').emit('receive_group_message', {
+                    groupId: groupId,
+                    message: message
+                });
+            }
+        } catch (err) {
+            console.error('[SOCKET group_message ERROR]', err);
+        }
+    });
+
     socket.on('typing', async (data) => {
         try {
             const { receiverId, isGroup } = data;

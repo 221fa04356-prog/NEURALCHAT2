@@ -449,10 +449,35 @@ router.get('/history/:userId', async (req, res) => {
 // GET Current User Profile - Secured with Auth
 router.get('/me', authenticateToken, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).select('name email mobile designation about role isOnline lastSeen bannedUntil rejectionCount adminLock messagingBlocked unblockRequested __enc_name __enc_email __enc_mobile __enc_designation __enc_about');
+        const user = await User.findById(req.user.id).select('name email mobile designation about role isOnline lastSeen bannedUntil rejectionCount adminLock messagingBlocked unblockRequested nameOverrides __enc_name __enc_email __enc_mobile __enc_designation __enc_about');
         if (!user) return res.status(404).json({ error: 'User not found' });
-        res.json(user);
+        
+        // Convert to plain object to modify response without affecting DB
+        const userObj = user.toObject();
+        
+        // Apply self-override if it exists
+        if (userObj.nameOverrides) {
+            const myId = req.user.id.toString();
+            const overrides = userObj.nameOverrides;
+            
+            // Mongoose Maps can be retrieved via .get() or via direct key access on plain objects
+            let customName = null;
+            if (overrides instanceof Map) {
+                customName = overrides.get(myId);
+            } else if (overrides && typeof overrides === 'object') {
+                // Try both direct access and string key access
+                customName = overrides[myId] || overrides[myId.toString()];
+            }
+            
+            if (customName) {
+                console.log(`[DEBUG] /me: Applying self-override for ${myId}: ${userObj.name} -> ${customName}`);
+                userObj.name = customName;
+            }
+        }
+        
+        res.json(userObj);
     } catch (err) {
+        console.error('[DEBUG] /me error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -479,14 +504,22 @@ router.get('/users', authenticateToken, async (req, res) => {
             return res.json(users);
         }
 
-        // 0. Get current user's favorites once
-        const currentUserObj = await User.findById(currentUserId).select('favorites');
+        // 0. Get current user's favorites and name overrides once
+        const currentUserObj = await User.findById(currentUserId).select('favorites nameOverrides');
         const userFavorites = currentUserObj?.favorites || [];
+        const nameOverrides = currentUserObj?.nameOverrides || new Map();
 
         const enhancedUsers = await Promise.all(users.map(async (u) => {
             if (u._id.toString() === currentUserId) return null;
 
             try {
+                // Apply name override if exists
+                const userObj = u.toObject();
+                const customName = nameOverrides instanceof Map ? nameOverrides.get(String(u._id)) : nameOverrides[String(u._id)];
+                if (customName) {
+                    userObj.name = customName;
+                }
+                
                 // 1. Get Last Message
                 const lastMsg = await Message.findOne({
                     $or: [
@@ -544,7 +577,7 @@ router.get('/users', authenticateToken, async (req, res) => {
                 }
 
                 return {
-                    ...u.toObject(),
+                    ...userObj,
                     lastMessage: effectiveLastMsg,
                     unreadCount: isAccepted ? unreadCount : (isPendingForMe ? 1 : 0),
                     mediaCount: isAccepted ? mediaCount : 0,
@@ -559,8 +592,12 @@ router.get('/users', authenticateToken, async (req, res) => {
             } catch (userErr) {
                 console.error(`[DEBUG] /users: Error processing user ${u._id}:`, userErr.message);
                 // Return basic user object so the list doesn't break
+                const userObj = u.toObject();
+                const customName = nameOverrides instanceof Map ? nameOverrides.get(String(u._id)) : nameOverrides[String(u._id)];
+                if (customName) userObj.name = customName;
+
                 return {
-                    ...u.toObject(),
+                    ...userObj,
                     lastMessage: null,
                     unreadCount: 0,
                     error: true
@@ -832,36 +869,59 @@ router.get('/signal/verification/:userId', authenticateToken, async (req, res) =
 // Update User info (from Edit Contact panel) - Secured with Auth
 router.post('/user/update', authenticateToken, async (req, res) => {
     const { targetUserId, name, mobile, countryCode } = req.body;
+    const currentUserId = req.user.id;
 
     if (!targetUserId) return res.status(400).json({ error: 'Target User ID required' });
 
     try {
-        const updateData = {};
-        if (name !== undefined) updateData.name = name;
-        if (mobile !== undefined) updateData.mobile = mobile;
-        if (countryCode !== undefined) updateData.countryCode = countryCode;
-        if (req.body.designation !== undefined) updateData.designation = req.body.designation;
-        if (req.body.about !== undefined) updateData.about = req.body.about;
+        // 1. Handle Name Overrides (Private to the current user)
+        if (name !== undefined) {
+            const requester = await User.findById(currentUserId);
+            if (requester) {
+                if (!requester.nameOverrides) requester.nameOverrides = new Map();
+                requester.nameOverrides.set(targetUserId.toString(), name);
+                await requester.save();
+                console.log(`[DEBUG] Saved name override: ${targetUserId} -> ${name} for user ${currentUserId}`);
+            }
+        }
 
-        const updatedUser = await User.findByIdAndUpdate(
-            targetUserId,
-            updateData,
-            { new: true } // Return the updated document
-        );
+        // 2. Handle Global Field Updates (Only if updating own profile)
+        let updatedUser = null;
+        if (String(targetUserId) === String(currentUserId)) {
+            const updateData = {};
+            if (mobile !== undefined) updateData.mobile = mobile;
+            if (countryCode !== undefined) updateData.countryCode = countryCode;
+            if (req.body.designation !== undefined) updateData.designation = req.body.designation;
+            if (req.body.about !== undefined) updateData.about = req.body.about;
+
+            if (Object.keys(updateData).length > 0) {
+                updatedUser = await User.findByIdAndUpdate(
+                    targetUserId,
+                    updateData,
+                    { new: true }
+                );
+
+                if (req.io && updatedUser) {
+                    req.io.emit('user_profile_updated', {
+                        userId: updatedUser._id,
+                        name: updatedUser.name, // Global name stays the same
+                        mobile: updatedUser.mobile,
+                        about: updatedUser.about
+                    });
+                }
+            }
+        }
+
+        // If we didn't update global fields, still need to return the target user object
+        if (!updatedUser) {
+            updatedUser = await User.findById(targetUserId);
+        }
 
         if (!updatedUser) return res.status(404).json({ error: 'User not found' });
 
-        if (req.io) {
-            req.io.emit('user_profile_updated', {
-                userId: updatedUser._id,
-                name: updatedUser.name,
-                mobile: updatedUser.mobile,
-                about: updatedUser.about
-            });
-        }
-
         res.json({ status: 'success', user: updatedUser });
     } catch (err) {
+        console.error('[BACKEND ERROR] /user/update failed:', err);
         res.status(500).json({ error: err.message });
     }
 });
