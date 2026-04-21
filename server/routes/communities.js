@@ -9,6 +9,7 @@ const GroupMessage = require('../models/GroupMessage');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const { handleMembershipJoin, handleMembershipExit } = require('../utils/membership');
+const { applyNameOverrides } = require('../utils/nameOverrides');
 
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
@@ -63,6 +64,17 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
             .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
         const enriched = await Promise.all((communities || []).map(async (c) => {
+            // Apply overrides to community metadata
+            if (c.creator) await applyNameOverrides(c.creator, userId);
+            if (c.members) await applyNameOverrides(c.members, userId);
+            if (c.admins) await applyNameOverrides(c.admins, userId);
+            if (c.announcements && c.announcements.members) await applyNameOverrides(c.announcements.members, userId);
+            if (c.groups) {
+                for (const g of c.groups) {
+                    if (g.members) await applyNameOverrides(g.members, userId);
+                }
+            }
+
             let lastMsg = null;
             let unreadCount = 0;
 

@@ -70,6 +70,12 @@ html {
     position: relative;
 }
 
+@media (max-width: 480px) {
+    .wa-nav-icon-btn {
+        padding: 6px;
+    }
+}
+
 .wa-bell-badge {
     position: absolute;
     top: 2px;
@@ -869,7 +875,7 @@ html {
     }
 
     .wa-message-list-footer-spacer {
-        height: 36px;
+        height: 4px;
     }
 
     .wa-link-preview-card {
@@ -1598,7 +1604,7 @@ html {
 }
 
 .wa-message-list-footer-spacer {
-    height: 20px;
+    height: 4px;
     flex-shrink: 0;
 }
 
@@ -2586,6 +2592,22 @@ html {
     background: #f8f9fa;
 }
 
+@media (max-width: 480px) {
+    .wa-call-dropdown-btn {
+        padding: 6px 8px;
+        margin-right: 4px;
+    }
+    .wa-call-dropdown-btn span {
+        display: none;
+    }
+    .wa-call-dropdown-btn svg:last-child {
+        display: none;
+    }
+    .wa-call-dropdown-btn svg:first-child {
+        margin-right: 0 !important;
+    }
+}
+
 .wa-group-welcome-card {
     background: white;
     border-radius: 12px;
@@ -2840,21 +2862,48 @@ html {
 .wa-msg-doc-bubble {
     background: #d9edf7;
     border-radius: 12px;
-    padding: 10px 10px 10px;
-    min-width: 260px;
-    max-width: 360px;
+    padding: 8px;
+    width: 280px;
+    max-width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+}
+
+@media (max-width: 480px) {
+    .wa-msg-doc-bubble {
+        width: 210px;
+        min-width: unset;
+    }
+}
+
+.wa-doc-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    flex-shrink: 0;
 }
 
 .wa-doc-title {
-    font-size: 14px;
+    font-size: 12px;
     line-height: 1.2;
     color: #2c4f63;
     margin-bottom: 2px;
+    text-transform: uppercase;
+    font-weight: 600;
+    opacity: 0.8;
 }
 
 .wa-doc-filename {
-    font-size: 16px;
-    line-height: 1.2;
+    font-size: 14px;
+    line-height: 1.3;
     font-weight: 700;
     color: #1b2f3a;
     letter-spacing: 0.2px;
@@ -2863,10 +2912,47 @@ html {
     text-overflow: ellipsis;
 }
 
+@media (max-width: 480px) {
+    .wa-doc-filename {
+        font-size: 13px;
+    }
+}
+
 .wa-doc-meta {
-    font-size: 13px;
+    font-size: 12px;
     color: #41596a;
     margin-top: 2px;
+    opacity: 0.9;
+}
+
+.wa-doc-footer {
+    display: flex;
+    border-top: 1px solid rgba(17, 27, 33, 0.08);
+    margin: 6px -8px -8px;
+}
+
+.wa-doc-btn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #0EA5BE;
+    font-weight: 600;
+    padding: 8px 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.2s;
+    outline: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.wa-doc-btn:hover {
+    background: rgba(17, 27, 33, 0.04);
+}
+
+.wa-doc-btn-open {
+    border-right: 1px solid rgba(17, 27, 33, 0.08);
 }
 
 /* Date Separator */
@@ -3929,19 +4015,19 @@ html {
 
 .wa-edit-field-group {
     position: relative;
-    border-bottom: 2px solid #e9edef;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     transition: border-color 0.2s;
     box-sizing: border-box;
 }
 
 .wa-edit-field-group:focus-within {
-    border-color: #027EB5;
+    border-color: #0EA5BE;
 }
 
 .wa-edit-label {
     display: block;
     font-size: 13px;
-    color: #027EB5;
+    color: #0EA5BE;
     margin-bottom: 4px;
     font-weight: 500;
     box-sizing: border-box;
@@ -3953,9 +4039,13 @@ html {
     background: transparent;
     outline: none;
     font-size: 16px;
-    color: #111b21;
+    color: #f8fafc;
     padding: 8px 0;
     box-sizing: border-box;
+}
+
+.wa-edit-input::placeholder {
+    color: rgba(248, 250, 252, 0.3);
 }
 
 .wa-country-select {
@@ -9165,3 +9255,86 @@ svg.wa-back-icon,
 }
 
 
+
+/* --- Final Theme Overrides for Side Panels --- */
+.wa-contact-info-panel,
+.wa-manage-groups-drawer,
+.wa-add-existing-groups-drawer,
+.wa-confirm-add-groups-drawer,
+.wa-community-info,
+.wa-community-home-drawer,
+.wa-search-sidebar,
+.wa-starred-messages-panel,
+.wa-edit-contact-panel,
+.wa-notification-settings-panel,
+.wa-community-settings-panel,
+.wa-who-can-add-groups-panel,
+.wa-assign-owner-panel,
+.wa-event-details-panel,
+.wa-shared-media-panel,
+.wa-poll-details-panel {
+    background: #0b141a !important;
+    color: #f8fafc !important;
+    border-left: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.wa-drawer-header,
+.wa-contact-info-header,
+.wa-search-sidebar-header {
+    background: #0b141a !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+    color: #f8fafc !important;
+}
+
+.wa-drawer-content,
+.wa-contact-info-content,
+.wa-search-sidebar-content {
+    background: #0b141a !important;
+}
+
+/* Ensure mobile responsiveness for all panels */
+@media (max-width: 768px) {
+    .wa-contact-info-panel,
+    .wa-manage-groups-drawer,
+    .wa-add-existing-groups-drawer,
+    .wa-confirm-add-groups-drawer,
+    .wa-community-info,
+    .wa-community-home-drawer,
+    .wa-search-sidebar,
+    .wa-starred-messages-panel {
+        width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
+        right: -100%;
+        transition: right 0.3s ease;
+    }
+    .wa-contact-info-panel.active,
+    .wa-manage-groups-drawer.active,
+    .wa-add-existing-groups-drawer.active,
+    .wa-confirm-add-groups-drawer.active,
+    .wa-community-info.active,
+    .wa-community-home-drawer.active,
+    .wa-search-sidebar.active,
+    .wa-starred-messages-panel.active {
+        right: 0 !important;
+    }
+}
+
+/* View Once Spent Styles */
+.wa-spent-view-once-media,
+.wa-spent-view-once-file {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    color: #8696a0;
+    font-size: 14px;
+}
+
+.wa-message-bubble.is-poll {
+    padding: 4px !important;
+    border-radius: 12px !important;
+}
+
+.wa-message-bubble.is-poll.wa-msg-sent {
+}

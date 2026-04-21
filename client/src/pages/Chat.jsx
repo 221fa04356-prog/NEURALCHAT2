@@ -16,6 +16,8 @@ import {
     AlertCircle, UserCheck, Loader2, Ban, ChevronUp, Headphones
 } from 'lucide-react';
 
+
+
 const searchSlideStyles = `
 @keyframes wa-slide-left {
     from { transform: translateX(20px); opacity: 0; }
@@ -880,6 +882,7 @@ export default function Chat() {
 
     const [showViewOnceModal, setShowViewOnceModal] = useState(false);
     const [viewOnceMsg, setViewOnceMsg] = useState(null);
+    const [isViewOnceVoice, setIsViewOnceVoice] = useState(false);
 
     const [selfPlayedMsgs, setSelfPlayedMsgs] = useState(() => {
         const saved = localStorage.getItem(`selfPlayedMsgs_${user.id || user._id}`);
@@ -2346,6 +2349,7 @@ export default function Chat() {
     const [addGroupsSearchQuery, setAddGroupsSearchQuery] = useState('');
     const [showAddGroupsSearch, setShowAddGroupsSearch] = useState(false);
     const [groupInput, setGroupInput] = useState('');
+    const [cloudAudio, setCloudAudio] = useState(null); // { audioUrl, fileName, fileSize }
     const [groupToRemove, setGroupToRemove] = useState(null);
     const [communityForRemoval, setCommunityForRemoval] = useState(null);
     const [isRemoveGroupConfirmOpen, setIsRemoveGroupConfirmOpen] = useState(false);
@@ -3209,8 +3213,8 @@ export default function Chat() {
             return;
         }
 
-        // Only block send if we aren't already blocked and not currently loading a previous check
-        if (suggestionApplied) setSuggestionApplied(false);
+        // We only set it to false if we are actually going to show the bar with suggestions.
+        // Don't block the send button while we are just loading.
 
         const timer = setTimeout(async () => {
             const hasVowels = /[aeiouy]/i.test(trimmedInput);
@@ -3265,6 +3269,7 @@ export default function Chat() {
                     setSuggestionApplied(true);
                     setShowGrammarBar(false);
                 } else {
+                    setSuggestionApplied(false); // NOW we block because suggestions are visible
                     setShowGrammarBar(true);
                 }
             } catch (err) {
@@ -4690,12 +4695,13 @@ export default function Chat() {
                     return;
                 }
 
-                if (selectedUser || selectedGroup || selectedCommunity) {
-                    if (showUnblockModal) {
-                        setShowUnblockModal(false);
-                        return;
-                    }
+                const isAnyRightPanelOpen = !!infoMessage || isMessageSearchOpen || isContactInfoOpen || 
+                                          isCommunityInfoOpen || isCommunityGroupsListOpen || 
+                                          isStarredMessagesOpen || isSharedMediaOpen || 
+                                          isEditContactOpen || isNotificationSettingsOpen || 
+                                          isEventDetailsOpen;
 
+                if (selectedUser || selectedGroup || selectedCommunity || isAnyRightPanelOpen) {
                     // Reset all panels and selection modes
                     handleBackToChatList();
                     setSelectedGroup(null);
@@ -4704,10 +4710,6 @@ export default function Chat() {
                     setIsProfileOpen(false);
                     setIsArchivedChatsOpen(false);
                     setIsGlobalStarredOpen(false);
-                    setIsGroupInfoOpen(false);
-                    setIsCommunityInfoOpen(false);
-                    setIsNotificationSettingsOpen(false);
-                    setIsCommunitySettingsOpen(false);
                     setIsWhoCanAddGroupsModalOpen(false);
                     setShowNotificationDetails(false);
                     setIsAttachmentMenuOpen(false);
@@ -6853,37 +6855,50 @@ export default function Chat() {
     };
 
     const handleFileSelect = (e) => {
-        if (e.target.files && e.target.files[0]) {
-            const selectedFile = e.target.files[0];
-            const extension = selectedFile.name.split('.').pop().toLowerCase();
-
+        if (e.target.files && e.target.files.length > 0) {
+            const newFiles = Array.from(e.target.files);
+            const validFiles = [];
+            
             let allowedExtensions;
             if (attachmentTypeRef.current === 'document') {
-                allowedExtensions = ['doc', 'docx', 'pdf', 'xls', 'xlsx'];
+                allowedExtensions = ['doc', 'docx', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv'];
             } else if (attachmentTypeRef.current === 'media') {
-                allowedExtensions = ['jpg', 'jpeg', 'png', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
+                allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
             } else {
-                allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
+                allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
             }
 
-            if (allowedExtensions.includes(extension)) {
-                if (selectedFile.size > 1073741824) { // 1GB
-                    setSnackbar({ message: 'File must be less than 1GB', type: 'error', variant: 'system' });
-                    e.target.value = '';
+            newFiles.forEach(selectedFile => {
+                const extension = selectedFile.name.split('.').pop().toLowerCase();
+                if (allowedExtensions.includes(extension)) {
+                    if (selectedFile.size > 1073741824) { // 1GB
+                        setSnackbar({ message: `${selectedFile.name} is too large (>1GB)`, type: 'error', variant: 'system' });
+                    } else {
+                        validFiles.push(selectedFile);
+                    }
                 } else {
-                    setSelectedFiles([selectedFile]);
-                    setFile(selectedFile);
+                    setSnackbar({ message: `${selectedFile.name} is an unsupported format.`, type: 'error', variant: 'system' });
                 }
-            } else {
-                setSnackbar({ message: 'Unsupported file format.', type: 'error', variant: 'system' });
-                e.target.value = ''; // Reset input
-            }
+            });
 
-            // reset to all after selection attempt
-            attachmentTypeRef.current = 'all';
-            if (fileInputRef.current) {
-                fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*,*/*";
+            if (validFiles.length > 0) {
+                // If it's the first time selection or tray is empty, replace.
+                // Otherwise, append (for the "+" button in tray)
+                setSelectedFiles(prev => {
+                    const updated = [...prev, ...validFiles];
+                    // Also set current file if it was null
+                    if (!file) setFile(validFiles[0]);
+                    return updated;
+                });
+                
+                // If the tray was empty, set the first file as active preview
+                if (!file && !selectedFiles.length) {
+                    setFile(validFiles[0]);
+                }
             }
+            
+            e.target.value = ''; // Reset input
+            attachmentTypeRef.current = 'all';
         }
     };
 
@@ -7365,6 +7380,7 @@ export default function Chat() {
 
         const textToSend = contentOverride !== null ? contentOverride : input;
         const queuedFiles = selectedFiles.length ? selectedFiles : (file ? [file] : []);
+        const currentViewOnce = (voiceIsViewOnce !== null) ? voiceIsViewOnce : isViewOnceVoice;
         if (!voiceFile && !fileOverride && queuedFiles.length > 1) {
             const filesBatch = [...queuedFiles];
             const firstCaption = textToSend;
@@ -7374,23 +7390,25 @@ export default function Chat() {
             setSuggestionApplied(false);
             setSelectedFiles([]);
             setFile(null);
+            setIsViewOnceVoice(false);
             for (let i = 0; i < filesBatch.length; i++) {
-                await handleSend(null, i === 0 ? firstCaption : '', null, null, null, filesBatch[i], true);
+                await handleSend(null, i === 0 ? firstCaption : '', null, null, currentViewOnce, filesBatch[i], true);
             }
             return;
         }
-        const targetFile = fileOverride || voiceFile || file;
+        const targetFile = fileOverride || voiceFile || file || (selectedFiles.length > 0 ? selectedFiles[0] : null);
         const isVoiceMessage = !!voiceFile && !fileOverride;
+        const isCloudAudioMessage = !!cloudAudio;
 
         // 1. Basic empty check
         if ((!textToSend.trim() && !targetFile && !isCloudAudioMessage) || (!selectedUser && !selectedGroup)) return;
 
         // 2. Grammar & AI Validation Gate (ONLY for text messages)
         if (!targetFile && textToSend.trim().length > 0) {
-            // Strict check: Must have applied an AI suggestion or be marked as "proper grammar" by the earlier effect
-            if (showGrammarBar || !suggestionApplied) {
+            // Only block if the grammar bar is actually showing suggestions that the user HASN'T picked yet.
+            if (showGrammarBar && !suggestionApplied && !isGrammarLoading && grammarSuggestions) {
                 setSnackbar({
-                    message: "Please write a meaningful word or sentence to start the chat",
+                    message: "Please select a grammar level to continue",
                     type: 'error',
                     variant: 'system'
                 });
@@ -7408,15 +7426,15 @@ export default function Chat() {
             group_id: selectedGroup ? selectedGroup._id : null,
             role: 'user',
             content: textToSend,
-            type: isVoiceMessage ? 'audio' : (targetFile ? (targetFile.type.startsWith('image/') ? 'image' : (targetFile.type.startsWith('video/') ? 'video' : (targetFile.type.startsWith('audio/') ? 'audio' : 'file'))) : 'text'),
-            file_path: targetFile ? URL.createObjectURL(targetFile) : null, // Local preview
+            type: isVoiceMessage ? 'audio' : (targetFile ? (targetFile.type?.startsWith('image/') ? 'image' : (targetFile.type?.startsWith('video/') ? 'video' : (targetFile.type?.startsWith('audio/') ? 'audio' : 'file'))) : 'text'),
+            file_path: (targetFile && (targetFile instanceof Blob || targetFile instanceof File)) ? URL.createObjectURL(targetFile) : null, // Local preview
             fileName: targetFile ? targetFile.name : null,
             fileSize: targetFile ? targetFile.size : null,
             duration: voiceDuration || null,
             pageCount: 1, // Default for optimistic UI
             created_at: new Date(),
             is_read: false,
-            is_view_once: (voiceFile || cloudAudio) ? (voiceIsViewOnce !== null ? voiceIsViewOnce : false) : false,
+            is_view_once: (targetFile || voiceFile || cloudAudio) ? (voiceIsViewOnce !== null ? voiceIsViewOnce : isViewOnceVoice) : false,
             reply_to: replyingTo // Store full object for rendering preview
         };
 
@@ -7432,9 +7450,11 @@ export default function Chat() {
             setInput('');
         }
         setFile(null); // Clear file immediately from UI
+        setSelectedFiles([]); // Clear selected files immediately from UI
         setReplyingTo(null); // Clear reply context immediately
         setTypingLinkPreview(null); // Clear typing preview immediately
         setSuggestionApplied(false); // Reset correction state for next message
+        setIsViewOnceVoice(false); // Reset view-once state for next message
 
         try {
             const formData = new FormData();
@@ -8334,9 +8354,6 @@ export default function Chat() {
                     <MessageSquare size={24} />
                     {/* Optional: Add red dot for total unread */}
                 </button>
-                <button className="wa-nav-icon-btn" title={t('sidebar.status')}><CircleDashed size={24} /></button>
-                <button className="wa-nav-icon-btn" title={t('sidebar.channels')}><Users size={24} /></button>
-                <button className="wa-nav-icon-btn" title={t('sidebar.communities')}><Users size={24} /></button>
             </div>
             <div className="wa-nav-bottom">
                 <button
@@ -9379,11 +9396,7 @@ export default function Chat() {
                                 title="Add other members"
                                 permKey="addMembers"
                             />
-                            <PermissionItem
-                                icon={LinkIcon}
-                                title="Invite via link"
-                                permKey="inviteLink"
-                            />
+
 
                             <div className="wa-perms-section-label" style={{ marginTop: 20 }}>Admins can:</div>
                             <PermissionItem
@@ -9579,150 +9592,161 @@ export default function Chat() {
         });
     };
 
-    const renderFilePreview = () => (
+    const renderFilePreview = () => {
+        const filesInTray = (selectedFiles.length ? selectedFiles : (file ? [file] : []));
+        const isSingleImageOnly = filesInTray.length === 1 && !!file && file.type?.startsWith('image/');
+
+        return (
         <div className="wa-file-preview-overlay" style={{
             height: '100%',
             display: 'flex',
             flexDirection: 'column',
-            background: 'rgba(15, 23, 42, 0.98)', 
-            backdropFilter: 'blur(20px)',
+            background: '#0b141a',
             position: 'relative',
             zIndex: 1000
         }}>
             {/* Header */}
             <div style={{
-                padding: '16px 20px',
+                padding: '16px 24px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                background: 'rgba(30, 41, 59, 0.5)',
+                background: '#0b141a',
                 color: '#f8fafc',
                 flexShrink: 0,
                 borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
             }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                    <button
-                        onClick={() => {
-                            setFile(null);
-                            setSelectedFiles([]);
-                        }}
-                        style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', padding: 4 }}
-                        title="Close preview"
-                    >
-                        <X size={24} />
-                    </button>
-                    <span style={{ fontSize: 16, fontWeight: 500, color: '#f8fafc' }}>Preview</span>
-                </div>
+                <button
+                    onClick={() => {
+                        setFile(null);
+                        setSelectedFiles([]);
+                    }}
+                    style={{ background: 'none', border: 'none', color: '#aebac1', cursor: 'pointer', display: 'flex', padding: 4 }}
+                    title="Close preview"
+                >
+                    <X size={24} />
+                </button>
+                
+                {isSingleImageOnly && (
+                    <div style={{ display: 'flex', gap: 24, color: '#aebac1', alignItems: 'center' }}>
+                        <Crop size={22} style={{ cursor: 'pointer' }} onClick={() => { setCapturedImage(getFilePreviewUrl(file)); setCameraModal('editor'); }} />
+                        <Sticker size={22} style={{ cursor: 'pointer' }} />
+                        <span style={{ fontSize: 20, fontWeight: 600, cursor: 'pointer', fontFamily: 'serif' }}>T</span>
+                        <Pencil size={22} style={{ cursor: 'pointer' }} onClick={() => { setCapturedImage(getFilePreviewUrl(file)); setCameraModal('editor'); }} />
+                        <Download size={22} style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDownload(getFilePreviewUrl(file), file.name || 'download'); }} />
+                    </div>
+                )}
             </div>
 
-                        {/* Content Area */}
+            {/* Content Area */}
+            <div style={{
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                overflow: 'hidden',
+                padding: '20px 40px',
+                position: 'relative',
+                background: '#0b141a'
+            }}>
+                {file && file.type?.startsWith('image/') ? (
+                    <img
+                        src={getFilePreviewUrl(file)}
+                        alt="Preview"
+                        style={{
+                            maxWidth: '100%',
+                            maxHeight: '100%',
+                            objectFit: 'contain'
+                        }}
+                    />
+                ) : file && file.type?.startsWith('video/') ? (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                        <video
+                            src={getFilePreviewUrl(file)}
+                            controls
+                            autoPlay
+                            muted
+                            controlsList="nodownload"
+                            style={{
+                                maxWidth: '100%',
+                                maxHeight: '100%',
+                                borderRadius: 8,
+                                boxShadow: '0 8px 12px rgba(0,0,0,0.1)',
+                                background: '#111b21'
+                            }}
+                        />
+                    </div>
+                ) : file && file.type?.startsWith('audio/') ? (
+                    <div style={{ width: '100%', maxWidth: 700, textAlign: 'center' }}>
+                        <div style={{ marginBottom: 14, fontSize: 18, fontWeight: 500, color: '#e9edef' }}>{file?.name}</div>
+                        <audio src={getFilePreviewUrl(file)} controls style={{ width: '100%' }} />
+                    </div>
+                ) : (
+                    <div style={{
+                        textAlign: 'center',
+                        padding: '40px 32px',
+                        background: '#1f2c34',
+                        borderRadius: 12,
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                        color: '#e9edef',
+                        border: '1px solid #2a3942',
+                        minWidth: 340,
+                        maxWidth: 640
+                    }}>
                         <div style={{
-                            flex: 1,
-                            minHeight: 0,
+                            width: 96,
+                            height: 96,
+                            margin: '0 auto 16px',
+                            borderRadius: 12,
+                            background: '#2a3942',
                             display: 'flex',
-                            justifyContent: 'center',
                             alignItems: 'center',
-                            overflow: 'hidden',
-                            padding: isSingleImageOnly ? '12px 24px' : '20px 40px',
-                            position: 'relative',
-                            background: '#f2f2f2'
+                            justifyContent: 'center'
                         }}>
-                            {file && file.type.startsWith('image/') ? (
-                                <img
-                                    src={getFilePreviewUrl(file)}
-                                    alt="Preview"
-                                    style={{
-                                        maxWidth: '100%',
-                                        maxHeight: '100%',
-                                        objectFit: 'contain',
-                                        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                                        borderRadius: 4
-                                    }}
-                                />
-                            ) : file && file.type.startsWith('video/') ? (
-                                <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                                    <video
-                                        src={getFilePreviewUrl(file)}
-                                        controls
-                                        autoPlay
-                                        muted
-                                        controlsList="nodownload"
-                                        style={{
-                                            maxWidth: '100%',
-                                            maxHeight: '100%',
-                                            borderRadius: 8,
-                                            boxShadow: '0 8px 12px rgba(0,0,0,0.1)',
-                                            background: '#111b21'
-                                        }}
-                                    />
-                                </div>
-                            ) : file && file.type.startsWith('audio/') ? (
-                                <div style={{ width: '100%', maxWidth: 700, textAlign: 'center' }}>
-                                    <div style={{ marginBottom: 14, fontSize: 18, fontWeight: 500, color: '#111b21' }}>{file?.name}</div>
-                                    <audio src={getFilePreviewUrl(file)} controls style={{ width: '100%' }} />
-                                </div>
-                            ) : (
-                                <div style={{
-                                    textAlign: 'center',
-                                    padding: '40px 32px',
-                                    background: '#ffffff',
-                                    borderRadius: 12,
-                                    boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-                                    color: '#111b21',
-                                    border: '1px solid #d1d7db',
-                                    minWidth: 340,
-                                    maxWidth: 640
-                                }}>
-                                    <div style={{
-                                        width: 96,
-                                        height: 96,
-                                        margin: '0 auto 16px',
-                                        borderRadius: 12,
-                                        background: '#f0f2f5',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center'
-                                    }}>
-                                        <FileText size={44} color="#8696a0" />
-                                    </div>
-                                    <div style={{ fontSize: 14, color: '#8696a0', marginBottom: 8 }}>No preview available</div>
-                                    <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8, color: '#111b21', wordBreak: 'break-word' }}>{file?.name}</div>
-                                    <div style={{ fontSize: 14, color: '#54656f' }}>
-                                        {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} - {getDisplayFileType(file)}
-                                    </div>
-                                </div>
-                            )}
+                            <FileText size={44} color="#8696a0" />
                         </div>
+                        <div style={{ fontSize: 14, color: '#8696a0', marginBottom: 8 }}>No preview available</div>
+                        <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8, color: '#e9edef', wordBreak: 'break-word' }}>{file?.name || 'File'}</div>
+                        <div style={{ fontSize: 14, color: '#8696a0' }}>
+                            {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} - {getDisplayFileType(file)}
+                        </div>
+                    </div>
+                )}
+            </div>
 
             {/* Footer / Caption Input */}
             <div style={{
-                padding: '12px 24px 32px',
-                background: 'rgba(15, 23, 42, 0.9)',
+                padding: '16px 24px 32px',
+                background: '#0b141a',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 12,
+                gap: 16,
                 borderTop: '1px solid rgba(255, 255, 255, 0.1)'
             }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div className="wa-input-pill" style={{
-                        flex: 1,
-                        background: 'rgba(255, 255, 255, 0.05)',
-                        borderRadius: 12,
-                        padding: '4px 16px',
-                        border: '1px solid rgba(255, 255, 255, 0.1)'
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                    <div style={{
+                        background: '#2a3942',
+                        borderRadius: 8,
+                        padding: '12px 16px',
+                        width: '100%',
+                        maxWidth: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 16
                     }}>
+                        <Smile size={24} color="#8696a0" />
                         <input
                             type="text"
                             id="caption-input"
                             name="caption"
                             aria-label="Add a caption"
                             style={{
-                                width: '100%',
+                                flex: 1,
                                 background: 'transparent',
                                 border: 'none',
                                 outline: 'none',
-                                color: '#f8fafc',
-                                padding: '12px 0',
+                                color: '#e9edef',
                                 fontSize: 15
                             }}
                             placeholder="Add a caption..."
@@ -9733,30 +9757,85 @@ export default function Chat() {
                             }}
                             autoFocus
                         />
+                        <div style={{ cursor: 'pointer' }} onClick={() => setIsViewOnceVoice(!isViewOnceVoice)} title="View once">
+                            <ViewOnceBadge size={22} color={isViewOnceVoice ? "#0EA5BE" : "#8696a0"} />
+                        </div>
                     </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', marginTop: 12 }}>
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', overflowX: 'auto', maxWidth: 'calc(100% - 100px)', padding: '4px 0' }}>
+                        {filesInTray.map((f, idx) => (
+                            <div key={idx} style={{
+                                width: 50, height: 50, borderRadius: 8,
+                                border: f === file ? '2px solid #38bdf8' : '2px solid rgba(255, 255, 255, 0.1)',
+                                overflow: 'hidden', cursor: 'pointer',
+                                background: '#1e293b', display: 'flex', justifyContent: 'center', alignItems: 'center',
+                                flexShrink: 0,
+                                position: 'relative'
+                            }} onClick={() => setFile(f)}>
+                                {f.type?.startsWith('image/') ? (
+                                    <img src={getFilePreviewUrl(f)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={`thumb-${idx}`} />
+                                ) : (
+                                    <FileText color="#94a3b8" size={24} />
+                                )}
+                                <div 
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const updated = filesInTray.filter((_, i) => i !== idx);
+                                        setSelectedFiles(updated);
+                                        if (f === file) {
+                                            setFile(updated.length ? updated[0] : null);
+                                        }
+                                    }}
+                                    style={{
+                                        position: 'absolute', top: -4, right: -4, background: '#ef4444', 
+                                        borderRadius: '50%', width: 16, height: 16, display: 'flex', 
+                                        alignItems: 'center', justifyContent: 'center', color: 'white'
+                                    }}
+                                >
+                                    <X size={10} />
+                                </div>
+                            </div>
+                        ))}
+
+                        <div style={{
+                            width: 50, height: 50, borderRadius: 8, border: '2px dashed rgba(255, 255, 255, 0.2)',
+                            display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer',
+                            flexShrink: 0, color: '#94a3b8', transition: 'all 0.2s'
+                        }} 
+                        onMouseOver={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.4)'}
+                        onMouseOut={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)'}
+                        onClick={() => document.getElementById('add-more-preview-files')?.click()}>
+                            <Plus size={24} />
+                            <input type="file" id="add-more-preview-files" multiple onChange={(e) => { handleFileSelect(e); }} style={{ display: 'none' }} />
+                        </div>
+                    </div>
+
                     <button
                         onClick={handleSend}
                         style={{
-                            width: 44,
-                            height: 44,
+                            position: 'absolute',
+                            right: 0,
+                            width: 50,
+                            height: 50,
                             borderRadius: '50%',
-                            background: '#0EA5BE',
+                            background: '#00a884',
                             border: 'none',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             cursor: 'pointer',
-                            boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
-                            flexShrink: 0
+                            boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
                         }}
                     >
-                        <Send size={22} color="white" />
+                        <Send size={24} color="#111b21" />
                     </button>
                 </div>
             </div>
         </div>
-    );
-
+        );
+    };
     const renderSearchSidebar = () => (
         <div className={`wa-search-sidebar ${isMessageSearchOpen ? 'active' : ''}`}>
             <div className="wa-header" style={{ height: 60, padding: '5px 10px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', background: 'transparent', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
@@ -10076,8 +10155,8 @@ export default function Chat() {
 
         return (
             <div className={`wa-profile-drawer wa-community-home-drawer ${isCommunityHomeOpen ? 'active' : ''}`}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef' }}>
-                    <button onClick={() => setIsCommunityHomeOpen(false)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: '#0b141a', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                    <button onClick={() => setIsCommunityHomeOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
                         <ArrowLeft size={24} />
                     </button>
                     <div style={{ display: 'flex', alignItems: 'center', flex: 1, gap: 12 }}>
@@ -10091,7 +10170,7 @@ export default function Chat() {
                         <span style={{ fontSize: 19, fontWeight: 500, color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedCommunity.name}</span>
                     </div>
                     <button
-                        style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', padding: 8 }}
+                        style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 8 }}
                         onClick={(e) => {
                             e.stopPropagation();
                             const rect = e.currentTarget.getBoundingClientRect();
@@ -10317,7 +10396,7 @@ export default function Chat() {
                                 )}
                             </div>
                             <div style={{ fontSize: 16, color: subTextColor, marginTop: 8 }}>
-                                {activeTarget.isCommunityAnnouncements ? 'Announcements' : 'Group'} Â· <span style={{ color: '#0EA5BE' }}>{membersCount} members</span>
+                                {activeTarget.isCommunityAnnouncements ? 'Announcements' : 'Group'} · <span style={{ color: '#0EA5BE' }}>{membersCount} members</span>
                             </div>
 
                             <div style={{ display: 'flex', gap: 12, marginTop: 24, width: '100%', justifyContent: 'center' }}>
@@ -10437,12 +10516,7 @@ export default function Chat() {
                                 </div>
                                 <span style={{ color: textColor, fontSize: 16, fontWeight: 400 }}>Add member</span>
                             </div>
-                            <div style={{ padding: '0 30px', display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, cursor: 'pointer' }}>
-                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#0EA5BE', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
-                                    <LinkIcon size={20} color="#ffffff" />
-                                </div>
-                                <span style={{ color: textColor, fontSize: 16, fontWeight: 400 }}>Invite to group via link</span>
-                            </div>
+
 
                             <div className="wa-member-list">
                                 {activeTarget.members?.map(m => {
@@ -12592,8 +12666,8 @@ export default function Chat() {
         const subTextColor = '#94a3b8';
 
         return (
-            <div className={`wa-contact-info-panel wa-manage-groups-drawer ${isCommunityGroupsListOpen ? 'active' : ''}`} style={{ background: 'rgba(13, 22, 29, 0.95)', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', background: 'transparent', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <div className={`wa-contact-info-panel wa-manage-groups-drawer ${isCommunityGroupsListOpen ? 'active' : ''}`} style={{ background: '#0b141a', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', background: '#0b141a', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
                     <button onClick={() => setIsCommunityGroupsListOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0, width: 24 }}>
                         <X size={24} />
                     </button>
@@ -12699,8 +12773,8 @@ export default function Chat() {
         const subTextColor = '#94a3b8';
 
         return (
-            <div className={`wa-contact-info-panel wa-manage-groups-drawer ${isManageGroupsOpen ? 'active' : ''}`} style={{ background: 'rgba(15, 23, 42, 0.95)', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'rgba(15, 23, 42, 0.95)', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
+            <div className={`wa-contact-info-panel wa-manage-groups-drawer ${isManageGroupsOpen ? 'active' : ''}`} style={{ background: '#0b141a', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: '#0b141a', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
                     <button onClick={() => { setIsManageGroupsOpen(false); if (!selectedCommunity && community) setSelectedCommunity(community); }} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
                         <ArrowLeft size={24} />
                     </button>
@@ -12709,8 +12783,8 @@ export default function Chat() {
                     </div>
                 </div>
 
-                <div className="wa-drawer-content" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ background: 'rgba(15, 23, 42, 0.9)', marginBottom: 12 }}>
+                <div className="wa-drawer-content custom-scrollbar" style={{ padding: 0, display: 'flex', flexDirection: 'column', flex: 1, background: '#0b141a' }}>
+                    <div style={{ background: 'rgba(255, 255, 255, 0.03)', marginBottom: 12 }}>
                         <div
                             className="wa-manage-groups-item"
                             style={{ padding: '15px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}
@@ -12764,7 +12838,7 @@ export default function Chat() {
                                 const g = fullGroup || (typeof gItem === 'object' ? gItem : null);
                                 if (!g) return null;
                                 return (
-                                    <div key={String(gId)} style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', background: 'rgba(15, 23, 42, 0.9)' }}>
+                                    <div key={String(gId)} style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', background: 'rgba(255, 255, 255, 0.02)' }}>
                                         <div style={{ width: 44, height: 44, borderRadius: '12px', background: 'rgba(255, 255, 255, 0.06)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                             {g.icon ? <img src={g.icon} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Users size={22} color="#8696a0" />}
                                         </div>
@@ -12821,8 +12895,8 @@ export default function Chat() {
     const renderAddExistingGroupsPanel = () => {
         const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
         if (!community) return null;
-        const textColor = '#3b4a54';
-        const subTextColor = '#667781';
+        const textColor = '#f8fafc';
+        const subTextColor = '#94a3b8';
 
         const communityGroupIds = (community.groups || []).map(g => typeof g === 'object' ? String(g._id) : String(g));
         const availableGroups = groups.filter(g => !communityGroupIds.includes(String(g._id)) && !g.isAnnouncement);
@@ -12832,45 +12906,45 @@ export default function Chat() {
         );
 
         return (
-            <div className={`wa-contact-info-panel wa-add-existing-groups-drawer ${isAddExistingGroupsOpen ? 'active' : ''}`} style={{ background: 'white', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef' }}>
-                    <button onClick={() => { if (showAddGroupsSearch) { setShowAddGroupsSearch(false); setAddGroupsSearchQuery(''); } else { setIsAddExistingGroupsOpen(false); setShowAddGroupsSearch(false); } }} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
+            <div className={`wa-contact-info-panel wa-add-existing-groups-drawer ${isAddExistingGroupsOpen ? 'active' : ''}`} style={{ background: '#0b141a', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: '#0b141a', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                    <button onClick={() => { if (showAddGroupsSearch) { setShowAddGroupsSearch(false); setAddGroupsSearchQuery(''); } else { setIsAddExistingGroupsOpen(false); setShowAddGroupsSearch(false); } }} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
                         <ArrowLeft size={24} />
                     </button>
                     {!showAddGroupsSearch ? (
                         <>
                             <div style={{ flex: 1, display: 'flex' }}>
-                                <span style={{ fontSize: 19, fontWeight: 500, color: '#3b4a54', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Add existing groups</span>
+                                <span style={{ fontSize: 19, fontWeight: 500, color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Add existing groups</span>
                             </div>
                             <button onClick={() => setShowAddGroupsSearch(true)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }}>
                                 <Search size={22} />
                             </button>
                         </>
                     ) : (
-                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: '#f0f2f5', borderRadius: '8px', padding: '6px 12px', marginRight: 8 }}>
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '8px', padding: '6px 12px', marginRight: 8, border: '1px solid rgba(255, 255, 255, 0.1)' }}>
                             <input
                                 autoFocus
                                 type="text"
                                 placeholder="Search groups"
                                 value={addGroupsSearchQuery}
                                 onChange={(e) => setAddGroupsSearchQuery(e.target.value)}
-                                style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: 14, color: '#111b21' }}
+                                style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: 14, color: '#f8fafc' }}
                             />
-                            <button onClick={() => { setShowAddGroupsSearch(false); setAddGroupsSearchQuery(''); }} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginLeft: 8, padding: 0, display: 'flex', alignItems: 'center' }}>
+                            <button onClick={() => { setShowAddGroupsSearch(false); setAddGroupsSearchQuery(''); }} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', marginLeft: 8, padding: 0, display: 'flex', alignItems: 'center' }}>
                                 <X size={18} />
                             </button>
                         </div>
                     )}
                 </div>
 
-                <div className="wa-drawer-content" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
+                <div className="wa-drawer-content custom-scrollbar" style={{ padding: 0, display: 'flex', flexDirection: 'column', flex: 1, background: '#0b141a' }}>
                     <div style={{ flex: 1, overflowY: 'auto' }}>
                         {filteredGroups.length > 0 ? (
                             filteredGroups.map(g => (
                                 <div
                                     key={g._id}
                                     className="wa-chat-item"
-                                    style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid #f0f2f5' }}
+                                    style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}
                                     onClick={() => {
                                         if (selectedGroupsToAdd.find(item => item._id === g._id)) {
                                             setSelectedGroupsToAdd(selectedGroupsToAdd.filter(item => item._id !== g._id));
@@ -12879,8 +12953,8 @@ export default function Chat() {
                                         }
                                     }}
                                 >
-                                    <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#f0f2f5', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                        {g.icon ? <img src={g.icon} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Users size={24} color="#8696a0" />}
+                                    <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255, 255, 255, 0.05)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                                        {g.icon ? <img src={g.icon} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Users size={24} color="#38bdf8" />}
                                     </div>
                                     <div style={{ flex: 1 }}>
                                         <div style={{ fontSize: 16, color: textColor, fontWeight: 400 }}>{g.name}</div>
@@ -12925,19 +12999,19 @@ export default function Chat() {
     const renderConfirmAddGroupsPanel = () => {
         const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
         if (!community) return null;
-        const textColor = '#3b4a54';
-        const subTextColor = '#667781';
+        const textColor = '#f8fafc';
+        const subTextColor = '#94a3b8';
 
         return (
-            <div className={`wa-contact-info-panel wa-confirm-add-groups-drawer ${isConfirmAddGroupsOpen ? 'active' : ''}`} style={{ background: 'transparent', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
+            <div className={`wa-contact-info-panel wa-confirm-add-groups-drawer ${isConfirmAddGroupsOpen ? 'active' : ''}`} style={{ background: '#0b141a', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: '#0b141a', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
                     <button onClick={() => setIsConfirmAddGroupsOpen(false)} style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
                         <ArrowLeft size={24} />
                     </button>
                     <span style={{ fontSize: 19, fontWeight: 600, color: '#f8fafc' }}>Add groups</span>
                 </div>
 
-                <div className="wa-drawer-content" style={{ padding: 0, display: 'flex', flexDirection: 'column', background: 'transparent' }}>
+                <div className="wa-drawer-content custom-scrollbar" style={{ padding: 0, display: 'flex', flexDirection: 'column', background: '#0b141a', flex: 1 }}>
                     <div style={{ padding: '40px 30px', textAlign: 'center' }}>
                         <h2 style={{ fontSize: 24, fontWeight: 600, color: '#f8fafc', marginBottom: 20 }}>Add these groups to your community?</h2>
                         <p style={{ fontSize: 14, color: '#94a3b8', lineHeight: '1.6', marginBottom: 20 }}>
@@ -13432,7 +13506,7 @@ export default function Chat() {
 
                             return (
                                 <div style={{ fontSize: 16, color: subTextColor, marginTop: 8 }}>
-                                    {`Community Â· ${uniqueCount} member${uniqueCount !== 1 ? 's' : ''} Â· ${groupCount} group${groupCount !== 1 ? 's' : ''}`}
+                                    {`Community · ${uniqueCount} member${uniqueCount !== 1 ? 's' : ''} · ${groupCount} group${groupCount !== 1 ? 's' : ''}`}
                                 </div>
                             );
                         })()}
@@ -13440,10 +13514,7 @@ export default function Chat() {
                         <div style={{ display: 'flex', gap: 12, marginTop: 24, width: '100%', justifyContent: 'center' }}>
                             {canIManage && (
                                 <>
-                                    <div className="wa-community-info-action" onClick={() => { /* invite handler */ }}>
-                                        <div className="wa-action-icon-box" style={{ background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.2)' }}><LinkIcon size={24} color="#38bdf8" /></div>
-                                        <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Invite</span>
-                                    </div>
+
                                     <div className="wa-community-info-action" onClick={() => setIsCommunityAddMemberOpen(true)}>
                                         <div className="wa-action-icon-box" style={{ background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.2)' }}><UserPlus size={24} color="#38bdf8" /></div>
                                         <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Add members</span>
@@ -13738,7 +13809,7 @@ export default function Chat() {
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                             <span style={{ color: textColor, fontWeight: 500 }}>{communityOwner.name}</span>
                                             <span style={{ color: '#667781', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                                {isCurrentUserOwner ? 'You ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Community owner' : 'Community owner'}
+                                                {isCurrentUserOwner ? 'You · Community owner' : 'Community owner'}
                                                 {!isCurrentUserOwner && <ChevronRight size={18} color="#8696a0" />}
                                             </span>
                                         </div>
@@ -14039,7 +14110,7 @@ export default function Chat() {
                                         onChange={() => setIsSyncEnabled(!isSyncEnabled)}
                                     />
                                     <div>
-                                        <label htmlFor="sync-toggle-input" style={{ fontSize: 16, color: '#111b21', cursor: 'pointer' }}>Sync contact to phone</label>
+                                        <label htmlFor="sync-toggle-input" style={{ fontSize: 16, color: '#f8fafc', cursor: 'pointer' }}>Sync contact to phone</label>
                                         <div style={{ fontSize: 13, color: '#667781', marginTop: 4, lineHeight: 1.4 }}>
                                             This contact will be added to your phone's address book.
                                         </div>
@@ -14070,28 +14141,64 @@ export default function Chat() {
                                 const contactId = String(selectedUser?._id || selectedUser?.id || '');
                                 if (!contactId) return;
                                 const newAlias = `${editFirstName} ${editLastName}`.trim();
-                                setContactAliases(prev => {
-                                    const next = { ...(prev || {}) };
-                                    const idKeys = [selectedUser?._id, selectedUser?.id]
-                                        .map(v => String(v || '').trim())
-                                        .filter(Boolean);
-                                    for (const idKey of idKeys) {
-                                        const lower = idKey.toLowerCase();
-                                        if (newAlias) {
-                                            next[idKey] = newAlias;
-                                            next[lower] = newAlias;
-                                        } else {
-                                            delete next[idKey];
-                                            delete next[lower];
-                                        }
+
+                                try {
+                                    // 1. Call Backend API for Persistence
+                                    const response = await fetch(`${window.location.origin}/api/chat/user/update`, {
+                                        method: 'POST',
+                                        headers: {
+                                            'Content-Type': 'application/json',
+                                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                                        },
+                                        body: JSON.stringify({
+                                            targetUserId: contactId,
+                                            name: newAlias,
+                                            mobile: editPhone,
+                                            countryCode: editCountry.dial
+                                        })
+                                    });
+
+                                    if (!response.ok) {
+                                        const errData = await response.json();
+                                        throw new Error(errData.error || 'Failed to update contact');
                                     }
-                                    try {
-                                        localStorage.setItem(contactAliasStorageKey, JSON.stringify(next));
-                                    } catch (_) { }
-                                    return next;
-                                });
-                                setIsEditContactOpen(false);
-                                setSnackbar({ message: 'Contact name updated for this account', type: 'success', variant: 'system' });
+
+                                    // 2. Update Local State for Immediate UI Feedback
+                                    setContactAliases(prev => {
+                                        const next = { ...(prev || {}) };
+                                        const idKeys = [selectedUser?._id, selectedUser?.id]
+                                            .map(v => String(v || '').trim())
+                                            .filter(Boolean);
+                                        for (const idKey of idKeys) {
+                                            const lower = idKey.toLowerCase();
+                                            if (newAlias) {
+                                                next[idKey] = newAlias;
+                                                next[lower] = newAlias;
+                                            } else {
+                                                delete next[idKey];
+                                                delete next[lower];
+                                            }
+                                        }
+                                        try {
+                                            localStorage.setItem(contactAliasStorageKey, JSON.stringify(next));
+                                        } catch (_) { }
+                                        return next;
+                                    });
+
+                                    // Update the users list locally
+                                    setUsers(prev => prev.map(u => {
+                                        if (String(u._id || u.id) === contactId) {
+                                            return { ...u, name: newAlias || u.name, mobile: editPhone, countryCode: editCountry.dial };
+                                        }
+                                        return u;
+                                    }));
+
+                                    setIsEditContactOpen(false);
+                                    setSnackbar({ message: 'Contact name updated for this account', type: 'success', variant: 'system' });
+                                } catch (err) {
+                                    console.error('[UPDATE CONTACT ERROR]', err);
+                                    setSnackbar({ message: err.message || 'Error updating contact', type: 'error' });
+                                }
                             }}
                         >
                             <CheckCheck size={32} color="white" />
@@ -15963,6 +16070,16 @@ export default function Chat() {
         setIsStarredMessagesOpen(false);
         setIsSharedMediaOpen(false);
         setIsEditContactOpen(false);
+        setIsCommunityInfoOpen(false);
+        setIsCommunityGroupsListOpen(false);
+        setIsNotificationSettingsOpen(false);
+        setIsEventDetailsOpen(false);
+        setIsCommunitySettingsOpen(false);
+        setIsManageGroupsOpen(false);
+        setIsAddExistingGroupsOpen(false);
+        setIsCommunityAddMemberOpen(false);
+        setIsGroupAddMemberOpen(false);
+        setIsGroupInfoOpen(false);
     };
 
     const toggleForwardContact = (contact) => {
@@ -16453,19 +16570,19 @@ export default function Chat() {
             }}
         >
             <div
-                className={`wa-main-chat ${(!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? 'wa-main-chat-with-panel' : ''}`}
+                className={`wa-main-chat ${(!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? 'wa-main-chat-with-panel' : ''}`}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 style={{
                     flex: 1,
-                    borderRight: (!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? '1px solid #d1d7db' : 'none'
+                    borderRight: (!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? '1px solid #d1d7db' : 'none'
                 }}
             >
 
                 {selectedUser ? (
                     <>
                         {/* Header */}
-                        <div className="wa-chat-header" style={{ background: 'white' }}>
+                        <div className="wa-chat-header" style={{ background: '#0b141a' }}>
                             <div className="wa-chat-header-user">
                                 {/* Mobile Back Button */}
                                 <button
@@ -16780,8 +16897,10 @@ export default function Chat() {
                                 setShowScrollBtn={setShowScrollBtn}
                                 clearPendingUnread={clearPendingUnread}
                                 markAsRead={markAsRead}
+                                markMessageViewed={markMessageViewed}
                                 scrollerRef={chatMessagesRef}
                                 jumpToMessageTarget={jumpToMessageTarget}
+                                isMobile={isMobile}
                             />
                         </div>
 
@@ -17256,74 +17375,73 @@ export default function Chat() {
                         })()}
 
                         <div
-                            ref={chatMessagesRef}
-                            className="wa-chat-messages-area"
-                            onScroll={() => {
-                                setOpenDropdown(null);
-                                const el = chatMessagesRef.current;
-                                if (!el) return;
-                                const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-                                setShowScrollBtn(distFromBottom > 80);
-                                if (distFromBottom <= 80 && pendingNewMsgCount > 0) {
-                                    clearPendingUnread();
-                                    const token = localStorage.getItem('token');
-                                    if (token && selectedGroup?._id) {
-                                        axios.post(`/api/groups/${selectedGroup._id}/messages/mark-read`, {}, {
-                                            headers: { 'Authorization': `Bearer ${token}` }
-                                        }).catch(() => { });
-                                    }
-                                }
-                            }}
+                            className="wa-chat-messages-area" style={{ overflow: "hidden" }}
                             onContextMenu={(e) => {
                                 e.preventDefault();
                                 setChatContextMenu({ x: e.clientX, y: e.clientY });
                             }}
                         >
-                            <div style={{ flex: '1 1 auto' }}></div>
-
-                            {/* Welcome Card */}
-                            {selectedGroup.isCommunityAnnouncements ? (
-                                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-                                    <div style={{ background: 'white', borderRadius: '12px', padding: '24px', maxWidth: '300px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                                        <div style={{ width: 48, height: 48, background: '#f0f2f5', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-                                            <Users size={24} color="#54656f" />
-                                        </div>
-                                        <div style={{ fontSize: 16, fontWeight: 500, color: '#111b21', marginBottom: 8 }}>Welcome to your community!</div>
-                                        <div style={{ fontSize: 14, color: '#667781', lineHeight: '1.5', marginBottom: 16 }}>Send important admin updates to all your members at once.</div>
-                                        <div style={{ fontSize: 14, fontWeight: 600, color: '#0EA5BE', cursor: 'pointer' }}>Manage community</div>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="wa-group-welcome-card">
-                                    <div className="wa-group-welcome-avatar">
-                                        {selectedGroup.icon ? (
-                                            <img src={selectedGroup.icon} alt="group" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                                        ) : (
-                                            <Camera size={44} color="#8696a0" />
-                                        )}
-                                        <div className="wa-welcome-camera-badge"><Camera size={14} color="white" /></div>
-                                    </div>
-                                    <div className="wa-group-welcome-title">
-                                        {String(selectedGroup.admin?._id || selectedGroup.admin) === String(user.id || user._id) ? 'You created this group' : `${selectedGroup.admin?.name || 'Admin'} created this group`}
-                                    </div>
-                                    <div className="wa-group-welcome-subtitle">
-                                        {selectedGroup.members?.length} members â€¢ {selectedGroup.members?.length} contacts â€¢ Created {formatDateForSeparator(selectedGroup.created_at)}
-                                    </div>
-                                    <div className="wa-group-welcome-action">Add description...</div>
-                                    <div className="wa-group-welcome-buttons">
-                                        <button className="wa-welcome-btn"><Pencil size={14} style={{ marginRight: 8 }} /> Name this group</button>
-                                        <button className="wa-welcome-btn"><UserPlus size={14} style={{ marginRight: 8 }} /> Add members</button>
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="wa-group-welcome-info" style={{ margin: '10px auto 20px', maxWidth: '85%' }}>
-                                <Lock size={12} style={{ marginRight: 6 }} />
-                                Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them. Click to learn more
-                            </div>
-
                             {/* Render Group Messages with Date Grouping */}
                             <MessageList
+                                onScroll={() => {
+                                    setOpenDropdown(null);
+                                    const el = chatMessagesRef.current;
+                                    if (!el) return;
+                                    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+                                    setShowScrollBtn(distFromBottom > 80);
+                                    if (distFromBottom <= 80 && pendingNewMsgCount > 0) {
+                                        clearPendingUnread();
+                                        const token = localStorage.getItem('token');
+                                        if (token && selectedGroup?._id) {
+                                            axios.post(`/api/groups/${selectedGroup._id}/messages/mark-read`, {}, {
+                                                headers: { 'Authorization': `Bearer ${token}` }
+                                            }).catch(() => { });
+                                        }
+                                    }
+                                }}
+                                headerContent={
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', paddingTop: '20px' }}>
+                                        {selectedGroup.isCommunityAnnouncements ? (
+                                            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+                                                <div style={{ background: 'white', borderRadius: '12px', padding: '24px', maxWidth: '300px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                                                    <div style={{ width: 48, height: 48, background: '#f0f2f5', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                                                        <Users size={24} color="#54656f" />
+                                                    </div>
+                                                    <div style={{ fontSize: 16, fontWeight: 500, color: '#111b21', marginBottom: 8 }}>Welcome to your community!</div>
+                                                    <div style={{ fontSize: 14, color: '#667781', lineHeight: '1.5', marginBottom: 16 }}>Send important admin updates to all your members at once.</div>
+                                                    <div style={{ fontSize: 14, fontWeight: 600, color: '#0EA5BE', cursor: 'pointer' }}>Manage community</div>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="wa-group-welcome-card" style={{ marginBottom: 20 }}>
+                                                <div className="wa-group-welcome-avatar">
+                                                    {selectedGroup.icon ? (
+                                                        <img src={selectedGroup.icon} alt="group" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                                                    ) : (
+                                                        <Camera size={44} color="#8696a0" />
+                                                    )}
+                                                    <div className="wa-welcome-camera-badge"><Camera size={14} color="white" /></div>
+                                                </div>
+                                                <div className="wa-group-welcome-title">
+                                                    {String(selectedGroup.admin?._id || selectedGroup.admin) === String(user.id || user._id) ? 'You created this group' : `${selectedGroup.admin?.name || 'Admin'} created this group`}
+                                                </div>
+                                                <div className="wa-group-welcome-subtitle">
+                                                    {selectedGroup.members?.length} members • {selectedGroup.members?.length} contacts • Created {formatDateForSeparator(selectedGroup.created_at)}
+                                                </div>
+                                                <div className="wa-group-welcome-action">Add description...</div>
+                                                <div className="wa-group-welcome-buttons">
+                                                    <button className="wa-welcome-btn"><Pencil size={14} style={{ marginRight: 8 }} /> Name this group</button>
+                                                    <button className="wa-welcome-btn"><UserPlus size={14} style={{ marginRight: 8 }} /> Add members</button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div className="wa-group-welcome-info" style={{ margin: '10px auto 20px', maxWidth: '85%' }}>
+                                            <Lock size={12} style={{ marginRight: 6 }} />
+                                            Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them. Click to learn more
+                                        </div>
+                                    </div>
+                                }
                                 messages={groupMessages}
                                 messageSearchQuery={messageSearchQuery}
                                 formatDateForSeparator={formatDateForSeparator}
@@ -17378,8 +17496,10 @@ export default function Chat() {
                                 setShowScrollBtn={setShowScrollBtn}
                                 clearPendingUnread={clearPendingUnread}
                                 markAsRead={markAsRead}
+                                markMessageViewed={markMessageViewed}
                                 scrollerRef={chatMessagesRef}
                                 jumpToMessageTarget={jumpToMessageTarget}
+                                isMobile={isMobile}
                             />
 
                             {/* Aligned Typing Indicator Bubble - Enhanced for visibility */}
@@ -17623,7 +17743,8 @@ export default function Chat() {
                                                     isMeMsg={isMeMsg}
                                                 />
                                             ) : (
-                                                <div className="wa-input-pill" style={{ background: 'white', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: replyingTo ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                                                <div className="wa-input-pill" style={{ background: 'white', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: (replyingTo || showGrammarBar) ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                                                    {renderGrammarBar()}
                                                     {replyingTo && (
                                                         <div className="wa-reply-preview-container">
                                                             <div style={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
@@ -17789,11 +17910,11 @@ export default function Chat() {
                                                                 <button
                                                                     onClick={handleSend}
                                                                     className="wa-send-btn-inner"
-                                                                    data-tooltip={(!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? (isGarbageMessage ? "Please write a meaningful message" : "Please select a grammar level") : "Send"}
-                                                                    disabled={!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))}
+                                                                    data-tooltip={(!file && (showGrammarBar && !suggestionApplied && !isGrammarLoading && grammarSuggestions)) ? (isGarbageMessage ? "Please write a meaningful message" : "Please select a grammar level") : "Send"}
+                                                                    disabled={!file && (showGrammarBar && !suggestionApplied && !isGrammarLoading && grammarSuggestions)}
                                                                     style={{
-                                                                        opacity: (!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? 0.5 : 1,
-                                                                        cursor: (!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? 'not-allowed' : 'pointer'
+                                                                        opacity: (!file && (showGrammarBar && !suggestionApplied && !isGrammarLoading && grammarSuggestions)) ? 0.5 : 1,
+                                                                        cursor: (!file && (showGrammarBar && !suggestionApplied && !isGrammarLoading && grammarSuggestions)) ? 'not-allowed' : 'pointer'
                                                                     }}
                                                                 >
                                                                     <Send size={30} color="white" strokeWidth={2.5} />
@@ -17821,7 +17942,7 @@ export default function Chat() {
                 )}
 
                 {/* Shared Scroll-to-bottom Button positioned in wa-main-chat parent */}
-                {showScrollBtn && (selectedUser || selectedGroup) && (window.innerWidth > 768 || !(isMessageSearchOpen || isContactInfoOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen)) && (
+                {showScrollBtn && (selectedUser || selectedGroup) && (window.innerWidth > 768 || !(isMessageSearchOpen || isContactInfoOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen)) && (
                     <button
                         className="wa-scroll-to-bottom-btn"
                         onClick={() => {
@@ -17838,7 +17959,7 @@ export default function Chat() {
                     </button>
                 )}
             </div>
-            {(!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) && !isMobile && (
+            {(!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) && !isMobile && (
                 <div
                     className="wa-chat-right-panel-resize-handle"
                     onMouseDown={handleMouseDownRightPanelResize}
@@ -18043,72 +18164,86 @@ export default function Chat() {
     const renderPollModal = () => {
         if (!isPollModalOpen) return null;
         return (
-            <div className="wa-mute-modal-overlay" onClick={() => setIsPollModalOpen(false)} style={{ zIndex: 3000 }}>
-                <div className="wa-mute-modal" onClick={e => e.stopPropagation()} style={{ width: '400px', maxWidth: '90%', padding: '0', background: '#f0f2f5', borderRadius: '12px', display: 'flex', flexDirection: 'column', height: '80vh', maxHeight: '600px' }}>
-                    <div style={{ padding: '15px 20px', background: '#0EA5BE', color: '#fff', borderTopLeftRadius: '12px', borderTopRightRadius: '12px', display: 'flex', alignItems: 'center', position: 'relative', flexShrink: 0 }}>
-                        <button onClick={() => setIsPollModalOpen(false)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', display: 'flex', padding: 0, position: 'absolute', left: '20px' }}><X size={24} /></button>
+            <div className="wa-mute-modal-overlay" onClick={() => setIsPollModalOpen(false)} style={{ zIndex: 3000, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}>
+                <div className="wa-mute-modal" onClick={e => e.stopPropagation()} style={{ width: '420px', maxWidth: '95%', padding: '0', background: '#111b21', borderRadius: '16px', display: 'flex', flexDirection: 'column', height: '85vh', maxHeight: '650px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+                    <div style={{ padding: '20px 24px', background: '#202c33', color: '#e9edef', display: 'flex', alignItems: 'center', position: 'relative', flexShrink: 0, borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                        <button onClick={() => setIsPollModalOpen(false)} style={{ background: 'none', border: 'none', color: '#aebac1', cursor: 'pointer', display: 'flex', padding: 0, position: 'absolute', left: '20px' }}><X size={24} /></button>
                         <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
-                            <span style={{ fontSize: '19px', fontWeight: '500', whiteSpace: 'nowrap' }}>Create Poll</span>
+                            <span style={{ fontSize: '20px', fontWeight: '600' }}>Create Poll</span>
                         </div>
                     </div>
-                    <div style={{ padding: '20px', flex: 1, overflowY: 'auto' }}>
-                        <div style={{ marginBottom: '20px' }}>
-                            <div style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: '500', marginBottom: '8px' }}>Question</div>
+                    <div style={{ padding: '24px', flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '28px' }}>
+                        <div>
+                            <div style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: '600', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Question</div>
                             <input
                                 autoFocus
                                 value={pollQuestion}
                                 onChange={e => setPollQuestion(e.target.value)}
-                                placeholder="Ask question"
-                                style={{ width: '100%', border: 'none', borderBottom: '2px solid #0EA5BE', padding: '8px 0', fontSize: '16px', outline: 'none', background: 'transparent' }}
+                                placeholder="Ask a question"
+                                style={{ width: '100%', border: 'none', borderBottom: '2px solid #0EA5BE', padding: '10px 0', fontSize: '17px', outline: 'none', background: 'transparent', color: '#e9edef' }}
                             />
                         </div>
-                        <div style={{ marginBottom: '20px' }}>
-                            <div style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: '500', marginBottom: '8px' }}>Options</div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                        <div>
+                            <div style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: '600', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Options</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                                 {pollOptions.map((opt, idx) => (
-                                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                                        <div style={{ marginTop: '5px' }}>
-                                            <List size={20} color="#8696a0" />
-                                        </div>
+                                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                        <List size={22} color="#8696a0" style={{ flexShrink: 0 }} />
                                         <div style={{ flex: 1 }}>
                                             <input
                                                 value={opt}
                                                 onChange={e => handlePollOptionChange(idx, e.target.value)}
-                                                placeholder={idx === pollOptions.length - 1 && idx > 1 ? "+ Add" : "Option"}
-                                                style={{ width: '100%', border: 'none', borderBottom: pollErrors[idx] ? '2px solid #ef0b33' : '1px solid #d1d7db', padding: '8px 0', fontSize: '16px', outline: 'none', background: 'transparent', transition: 'border-color 0.2s' }}
-                                                onFocus={(e) => { e.target.style.borderBottom = pollErrors[idx] ? '2px solid #ef0b33' : '2px solid #0EA5BE'; }}
-                                                onBlur={(e) => { e.target.style.borderBottom = pollErrors[idx] ? '2px solid #ef0b33' : '1px solid #d1d7db'; }}
+                                                placeholder={idx === pollOptions.length - 1 && idx > 1 ? "+ Add option" : `Option ${idx + 1}`}
+                                                style={{ width: '100%', border: 'none', borderBottom: pollErrors[idx] ? '2px solid #ef4444' : '1px solid rgba(255,255,255,0.1)', padding: '8px 0', fontSize: '16px', outline: 'none', background: 'transparent', color: '#e9edef', transition: 'all 0.2s' }}
+                                                onFocus={(e) => { e.target.style.borderBottom = pollErrors[idx] ? '2px solid #ef4444' : '2px solid #0EA5BE'; }}
+                                                onBlur={(e) => { e.target.style.borderBottom = pollErrors[idx] ? '2px solid #ef4444' : '1px solid rgba(255,255,255,0.1)'; }}
                                             />
-                                            {pollErrors[idx] && <div style={{ color: '#ef0b33', fontSize: '12px', marginTop: '4px' }}>Same options are twice</div>}
+                                            {pollErrors[idx] && <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '6px', fontWeight: '500' }}>Duplicate options are not allowed</div>}
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         </div>
-                        <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <div style={{ fontSize: '15px', color: '#111b21' }}>Allow multiple answers</div>
+                        <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                            <div style={{ fontSize: '15px', color: '#e9edef', fontWeight: '500' }}>Allow multiple answers</div>
                             <div
                                 onClick={() => setAllowMultipleAnswers(!allowMultipleAnswers)}
                                 style={{
-                                    width: '40px', height: '24px', borderRadius: '12px',
-                                    background: allowMultipleAnswers ? '#0EA5BE' : '#8696a0',
-                                    position: 'relative', cursor: 'pointer', transition: 'background 0.3s'
+                                    width: '44px', height: '26px', borderRadius: '13px',
+                                    background: allowMultipleAnswers ? '#0EA5BE' : '#3b4a54',
+                                    position: 'relative', cursor: 'pointer', transition: 'all 0.3s'
                                 }}
                             >
                                 <div style={{
                                     width: '20px', height: '20px', borderRadius: '50%', background: '#fff',
-                                    position: 'absolute', top: '2px', left: allowMultipleAnswers ? '18px' : '2px',
-                                    transition: 'left 0.3s'
+                                    position: 'absolute', top: '3px', left: allowMultipleAnswers ? '21px' : '3px',
+                                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
                                 }} />
                             </div>
                         </div>
                     </div>
-                    <div style={{ padding: '15px', display: 'flex', justifyContent: 'flex-end', background: '#f0f2f5', borderBottomLeftRadius: '12px', borderBottomRightRadius: '12px' }}>
+                    <div style={{ padding: '20px 24px', display: 'flex', justifyContent: 'flex-end', background: '#202c33', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
                         <button
                             onClick={handleSendPoll}
-                            style={{ background: '#0EA5BE', width: '50px', height: '50px', borderRadius: '50%', border: 'none', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}
+                            style={{ 
+                                background: '#0EA5BE', 
+                                width: '56px', 
+                                height: '56px', 
+                                borderRadius: '50%', 
+                                border: 'none', 
+                                color: '#fff', 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                justifyContent: 'center', 
+                                cursor: 'pointer', 
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                                transition: 'transform 0.2s, background 0.2s'
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.05)'; e.currentTarget.style.background = '#0d94ab'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.background = '#0EA5BE'; }}
                         >
-                            <Send size={24} />
+                            <Send size={26} />
                         </button>
                     </div>
                 </div>
@@ -18120,20 +18255,33 @@ export default function Chat() {
         if (!isPollDetailsOpen || !pollDetails) return null;
 
         return (
-            <div className={`wa-contact-info-panel active`} style={{ background: '#ffffff', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', borderLeft: '1px solid #e9edef', width: isMobile ? '100%' : '400px', position: 'absolute', right: 0, top: 0, zIndex: 100 }}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: '#ffffff', borderBottom: '1px solid #e9edef', position: 'relative' }}>
-                    <button onClick={() => setIsPollDetailsOpen(false)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0, position: 'absolute', left: '12px' }}>
+            <div className={`wa-contact-info-panel active`} style={{ 
+                background: 'rgba(15, 23, 42, 0.95)', 
+                display: 'flex', 
+                flexDirection: 'column', 
+                height: '100%', 
+                overflow: 'hidden', 
+                borderLeft: '1px solid rgba(255, 255, 255, 0.1)', 
+                width: isMobile ? '100%' : '400px', 
+                position: 'absolute', 
+                right: 0, 
+                top: 0, 
+                zIndex: 100,
+                backdropFilter: 'blur(15px)'
+            }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'rgba(15, 23, 42, 0.8)', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', position: 'relative' }}>
+                    <button onClick={() => setIsPollDetailsOpen(false)} style={{ background: 'none', border: 'none', color: '#aebac1', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0, position: 'absolute', left: '12px' }}>
                         <ArrowLeft size={24} />
                     </button>
                     <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
-                        <span style={{ fontSize: '19px', fontWeight: '500', color: '#111b21', whiteSpace: 'nowrap' }}>Poll details</span>
+                        <span style={{ fontSize: '18px', fontWeight: '600', color: '#ffffff', whiteSpace: 'nowrap' }}>Poll details</span>
                     </div>
                 </div>
-                <div style={{ padding: '20px', overflowY: 'auto', flex: 1, background: '#f0f2f5' }}>
-                    <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#111b21', margin: '10px 0 20px 0', background: '#fff', padding: '15px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <div style={{ padding: '16px', overflowY: 'auto', flex: 1 }}>
+                    <div style={{ fontSize: '17px', fontWeight: '700', color: '#ffffff', marginBottom: '20px', background: 'rgba(255, 255, 255, 0.05)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
                         {pollDetails.question}
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                         {pollDetails.options.filter(o => o.voters && o.voters.length > 0).map((opt, idx) => {
                             const voters = opt.voters.map(v => {
                                 const idStr = String(v._id || v);
@@ -18142,19 +18290,19 @@ export default function Chat() {
                             });
 
                             return (
-                                <div key={idx} style={{ display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: '8px', padding: '15px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#8696a0', fontSize: '14px', fontWeight: '600', marginBottom: '15px', textTransform: 'uppercase' }}>
+                                <div key={idx} style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '12px', padding: '14px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0EA5BE', fontSize: '13px', fontWeight: '800', marginBottom: '14px', textTransform: 'uppercase', letterSpacing: '1px' }}>
                                         <span>{opt.text}</span>
-                                        <span>{voters.length}</span>
+                                        <span style={{ opacity: 0.8 }}>{voters.length} {voters.length === 1 ? 'vote' : 'votes'}</span>
                                     </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                                         {voters.map((voter, vIdx) => (
                                             <div key={vIdx} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                                <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#e9edef', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                                                    {voter.image ? <img src={voter.image} alt={voter.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                                <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(255, 255, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                                                    {voter.image ? <img src={voter.image} alt={voter.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={20} color="#8696a0" />}
                                                 </div>
-                                                <div style={{ flex: 1, display: 'flex', alignItems: 'center', borderBottom: vIdx < voters.length - 1 ? '1px solid #e9edef' : 'none', paddingBottom: vIdx < voters.length - 1 ? '15px' : '0' }}>
-                                                    <span style={{ color: '#111b21', fontSize: '16px' }}>{voter.name || voter.mobile || 'User'}</span>
+                                                <div style={{ flex: 1, display: 'flex', alignItems: 'center', borderBottom: vIdx < voters.length - 1 ? '1px solid rgba(255, 255, 255, 0.03)' : 'none', paddingBottom: vIdx < voters.length - 1 ? '10px' : '0' }}>
+                                                    <span style={{ color: '#ffffff', fontSize: '15px', fontWeight: '500' }}>{voter.name || voter.mobile || 'User'}</span>
                                                 </div>
                                             </div>
                                         ))}
@@ -19069,14 +19217,10 @@ export default function Chat() {
         const settingsTabs = [
             { id: 'profile', label: t('settings.tabs.profile.label'), icon: User, description: t('settings.tabs.profile.description') },
             { id: 'general', label: t('settings.tabs.general.label'), icon: Settings2, description: t('settings.tabs.general.description') },
-            { id: 'security', label: t('settings.tabs.security.label'), icon: ShieldCheck, description: t('settings.tabs.security.description') },
             { id: 'privacy', label: t('settings.tabs.privacy.label'), icon: Lock, description: t('settings.tabs.privacy.description') },
             { id: 'chats', label: t('settings.tabs.chats.label'), icon: MessageSquare, description: t('settings.tabs.chats.description') },
-            { id: 'media', label: t('settings.tabs.media.label'), icon: Video, description: t('settings.tabs.media.description') },
             { id: 'notifications', label: t('settings.tabs.notifications.label'), icon: BellRing, description: t('settings.tabs.notifications.description') },
             { id: 'devices', label: t('settings.tabs.devices.label'), icon: Laptop, description: t('settings.tabs.devices.description') },
-            { id: 'shortcuts', label: t('settings.tabs.shortcuts.label'), icon: Keyboard, description: t('settings.tabs.shortcuts.description') },
-            { id: 'support', label: t('settings.tabs.support.label'), icon: HelpCircle, description: t('settings.tabs.support.description') },
         ];
 
         const renderTabContent = () => {
@@ -19965,7 +20109,7 @@ export default function Chat() {
                                     style={{
                                         position: 'absolute',
                                         inset: 0,
-                                        background: '#ffffff',
+                                        background: '#0f172a',
                                         backdropFilter: 'none',
                                         WebkitBackdropFilter: 'none',
                                         border: 'none',
@@ -19980,9 +20124,9 @@ export default function Chat() {
                                 >
                                     <div
                                         style={{
-                                            background: 'linear-gradient(180deg, #ffffff 0%, #f7fafc 100%)',
-                                            border: '1px solid #e6edf3',
-                                            boxShadow: '0 14px 34px rgba(15, 23, 42, 0.12)',
+                                            background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)',
+                                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                                            boxShadow: '0 25px 50px rgba(0, 0, 0, 0.5)',
                                             borderRadius: 22,
                                             padding: '28px 26px',
                                             maxWidth: 520,
@@ -19997,14 +20141,14 @@ export default function Chat() {
                                                     <img
                                                         src={selectedUser.avatar || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png'}
                                                         alt="User"
-                                                        style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid #ffffff', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.14)' }}
+                                                        style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid #1e293b', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.24)', margin: '0 auto', display: 'block' }}
                                                     />
                                                 ) : (
-                                                    <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#0EA5BE', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #ffffff', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.14)' }}>
+                                                    <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#0EA5BE', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #1e293b', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.24)', margin: '0 auto' }}>
                                                         <Users size={50} color="white" />
                                                     </div>
                                                 )}
-                                                <h2 style={{ color: '#0b1f2a', marginTop: '16px', fontSize: '22px', fontWeight: '700' }}>
+                                                <h2 style={{ color: '#f8fafc', marginTop: '16px', fontSize: '22px', fontWeight: '700' }}>
                                                     {selectedUser ? selectedUser.name : (() => {
                                                         if (selectedGroup?.name === 'Announcements' && selectedGroup?.community_id) {
                                                             const comm = communities.find(c => String(c._id || c.id) === String(selectedGroup.community_id));
@@ -20017,22 +20161,22 @@ export default function Chat() {
                                         )}
 
                                         {/* Neural Chat logo Branding */}
-                                        <div style={{ marginBottom: '28px', animation: 'wa-popover-in 0.4s ease-out' }}>
+                                        <div style={{ marginBottom: '28px', display: 'flex', justifyContent: 'center', animation: 'wa-popover-in 0.4s ease-out' }}>
                                             <img src={logo} alt="Neural Chat" style={{ width: '80px', height: '80px' }} />
                                         </div>
 
-                                        <div style={{ textAlign: 'center', color: '#334155', maxWidth: '420px', margin: '0 auto' }}>
+                                        <div style={{ textAlign: 'center', color: '#f8fafc', maxWidth: '420px', margin: '0 auto' }}>
                                             <div style={{ color: '#0EA5BE', fontSize: '19px', fontWeight: '700', marginBottom: '10px', lineHeight: '1.4' }}>
                                                 You are diverted out of focus from the screen.
                                             </div>
-                                            <div style={{ fontSize: '15px', color: '#475569' }}>
+                                            <div style={{ fontSize: '15px', color: '#94a3b8' }}>
                                                 Please return to the screen to start the conversation
                                             </div>
                                         </div>
                                     </div>
 
                                     {/* Visual indicator of "sleep" */}
-                                    <div style={{ position: 'absolute', bottom: '40px', color: 'rgba(11, 31, 42, 0.55)', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '2px' }}>
+                                    <div style={{ position: 'absolute', bottom: '40px', color: 'rgba(248, 250, 252, 0.45)', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '2px' }}>
                                         Encrypted Session Asleep
                                     </div>
                                 </div>
@@ -20619,10 +20763,10 @@ export default function Chat() {
                         {!adminContextMenu.isAdmin && (
                             <div style={{ margin: '0 20px 14px', background: '#f0f2f5', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#54656f' }}>
                                 <div style={{ fontWeight: 600, color: '#3b4a54', marginBottom: 5 }}>Admin permissions include:</div>
-                                <div style={{ marginBottom: 2 }}>ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Add &amp; remove members</div>
-                                <div style={{ marginBottom: 2 }}>ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Add &amp; delete groups</div>
-                                <div style={{ marginBottom: 2 }}>ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Manage community settings</div>
-                                <div>ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Deactivate the community</div>
+                                <div style={{ marginBottom: 2 }}>• Add &amp; remove members</div>
+                                <div style={{ marginBottom: 2 }}>• Add &amp; delete groups</div>
+                                <div style={{ marginBottom: 2 }}>• Manage community settings</div>
+                                <div>• Deactivate the community</div>
                             </div>
                         )}
 

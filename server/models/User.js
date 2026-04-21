@@ -46,6 +46,13 @@ const userSchema = new mongoose.Schema({
             id: { type: Number },
             publicKey: { type: String }
         }]
+    },
+    // Per-account name overrides (aliases)
+    // Key: targetUserId (string), Value: custom name
+    nameOverrides: {
+        type: Map,
+        of: String,
+        default: () => new Map()
     }
 }, {
     toJSON: { virtuals: true },

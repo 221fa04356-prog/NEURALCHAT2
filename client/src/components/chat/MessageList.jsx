@@ -2,7 +2,7 @@ import React, { memo, Fragment, useRef, useEffect, useState } from 'react';
 import { 
     Trash2, XCircle, Forward, ChevronDown, Camera, FileText, 
     Pause, Play, Mic, User as UserIcon, CheckSquare, 
-    Check, CheckCheck, Star, Pin, List, Calendar, X 
+    Check, CheckCheck, Star, Pin, List, Calendar, X, CheckCircle
 } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import ViewOnceBadge from './ViewOnceBadge';
@@ -70,9 +70,13 @@ const MessageList = memo(({
     setShowScrollBtn,
     clearPendingUnread,
     markAsRead,
+    markMessageViewed,
     scrollerRef,
     jumpToMessageTarget,
-    isGroup
+    isGroup,
+    headerContent,
+    onScroll,
+    isMobile
 }) => {
     const [isAtBottom, setIsAtBottom] = useState(true);
     const virtuosoRef = useRef(null);
@@ -445,7 +449,7 @@ const MessageList = memo(({
                         </div>
                     )}
                     <div
-                        className={`wa-message-bubble ${isMe ? 'wa-msg-sent' : 'wa-msg-rec'} ${msg.type === 'audio' ? 'wa-voice-type' : ''} ${msg.link_preview ? 'has-link-preview' : ''}`}
+                        className={`wa-message-bubble ${isMe ? 'wa-msg-sent' : 'wa-msg-rec'} ${msg.type === 'audio' ? 'wa-voice-type' : ''} ${msg.type === 'poll' ? 'is-poll' : ''} ${msg.link_preview ? 'has-link-preview' : ''}`}
                         onContextMenu={(e) => {
                             if (!isForwardingMode) {
                                 e.preventDefault();
@@ -547,88 +551,108 @@ const MessageList = memo(({
                             </div>
                         ) : (
                             <>
-                                {msg.type === 'image' && (
-                                    <div className="wa-msg-image-container" onClick={(e) => {
-                                        if (isForwardingMode) return;
-                                        e.stopPropagation();
-                                        setViewingContact(null); // Clear contact view if any
-                                        handleDownload(msg.file_path, msg.fileName); // Using handleDownload as placeholder for viewing or actual view logic
-                                    }}>
-                                        <img src={msg.file_path} alt="Sent" className="wa-msg-image" />
+                                {msg.is_view_once && msg.is_viewed && !isMeMsg(msg) ? (
+                                    <div className="wa-spent-view-once-media" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', color: '#8696a0', fontSize: 14 }}>
+                                        <ViewOnceBadge size={20} />
+                                        <span>{msg.type === 'image' ? 'Photo' : 'Video'}</span>
                                     </div>
-                                )}
-                                {(msg.type === 'video' || (msg.type === 'file' && isVideoByExt)) && (
-                                    <div className="wa-msg-image-container" style={{ borderRadius: 10, overflow: 'hidden', background: '#111b21' }}>
-                                        <video
-                                            src={msg.file_path}
-                                            controls
-                                            playsInline
-                                            preload="metadata"
-                                            style={{ width: '100%', maxWidth: 340, display: 'block', background: '#111b21' }}
-                                        />
-                                    </div>
-                                )}
-                                {msg.type === 'file' && !isVideoByExt && (
-                                    <div
-                                        className="wa-msg-doc-bubble"
-                                        style={{ overflow: 'hidden', borderRadius: 12 }}
-                                    >
-                                        {false && !isPdfDoc && isOfficePreviewDoc && msg.file_path && (
-                                            <div style={{ height: 140, overflow: 'hidden', borderRadius: '10px 10px 0 0', marginBottom: 8, background: '#f5f6f7' }}>
-                                                {canRemoteOfficePreview ? (
-                                                    <iframe
-                                                        title={`preview-${msg._id || msg.id}`}
-                                                        src={officePreviewUrl}
-                                                        scrolling="no"
-                                                        style={{ width: 'calc(100% + 18px)', height: 140, marginRight: -18, border: 'none', pointerEvents: 'none', overflow: 'hidden', display: 'block' }}
-                                                    />
-                                                ) : (
-                                                    <div style={{ height: '100%', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: '#667781', gap: 6 }}>
-                                                        <FileText size={34} color="#9aa5ad" />
-                                                        <span style={{ fontSize: 12 }}>{docTypeName} preview unavailable</span>
-                                                    </div>
-                                                )}
+                                ) : (
+                                    <>
+                                        {msg.type === 'image' && (
+                                            <div className="wa-msg-image-container" onClick={(e) => {
+                                                if (isForwardingMode) return;
+                                                e.stopPropagation();
+                                                if (msg.is_view_once && !isMe) {
+                                                    markMessageViewed(msg._id);
+                                                }
+                                                setViewingContact(null);
+                                                handleDownload(msg.file_path, msg.fileName, msg);
+                                            }}>
+                                                <img src={msg.file_path} alt="Sent" className="wa-msg-image" />
                                             </div>
                                         )}
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '2px 2px 8px' }}>
-                                            <div style={{ width: 36, height: 36, borderRadius: 7, background: docAccent, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
-                                                {fileBadgeLabel}
-                                            </div>
-                                            <div style={{ minWidth: 0 }}>
-                                                <div className="wa-doc-title">{docTypeName}</div>
-                                                <div className="wa-doc-filename" title={displayFileName}>
-                                                    {displayFileName}
-                                                </div>
-                                                <div className="wa-doc-meta">
-                                                    {fileBadgeLabel}{fileSizeLabel ? ` | ${fileSizeLabel}` : ''}
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div style={{ display: 'flex', borderTop: '1px solid rgba(17,27,33,0.09)', margin: '0 -10px -10px' }}>
-                                            <button
-                                                type="button"
+                                        {(msg.type === 'video' || (msg.type === 'file' && isVideoByExt)) && (
+                                            <div className="wa-msg-image-container" 
+                                                style={{ borderRadius: 10, overflow: 'hidden', background: '#111b21', cursor: 'pointer' }}
                                                 onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    if (shouldUseSystemOpen && typeof handleOpenFile === 'function') {
-                                                        handleOpenFile(msg.file_path, displayFileName);
-                                                        return;
+                                                    if (msg.is_view_once && !isMe) {
+                                                        markAsRead(msg);
                                                     }
-                                                    window.open(msg.file_path, '_blank', 'noopener,noreferrer');
                                                 }}
-                                                style={{ flex: 1, background: 'transparent', border: 'none', borderRight: '1px solid rgba(17,27,33,0.09)', color: '#0EA5BE', fontWeight: 600, padding: '10px 8px', cursor: 'pointer' }}
                                             >
-                                                Open
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={(e) => { e.stopPropagation(); handleDownload(msg.file_path, displayFileName); }}
-                                                style={{ flex: 1, background: 'transparent', border: 'none', color: '#0EA5BE', fontWeight: 600, padding: '10px 8px', cursor: 'pointer' }}
+                                                <video
+                                                    src={msg.file_path}
+                                                    controls
+                                                    playsInline
+                                                    preload="metadata"
+                                                    style={{ width: '100%', maxWidth: 340, display: 'block', background: '#111b21' }}
+                                                />
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                                {msg.type === 'file' && !isVideoByExt && (
+                                    <>
+                                        {msg.is_view_once && msg.is_viewed && !isMeMsg(msg) ? (
+                                            <div className="wa-spent-view-once-file" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', color: '#8696a0', fontSize: 14 }}>
+                                                <ViewOnceBadge size={20} />
+                                                <span>File</span>
+                                            </div>
+                                        ) : (
+                                            <div
+                                                className="wa-msg-doc-bubble"
+                                                style={{ overflow: 'hidden', borderRadius: 12 }}
                                             >
-                                                Save as...
-                                            </button>
-                                        </div>
-                                    </div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '2px 2px 4px' }}>
+                                                    <div className="wa-doc-icon" style={{ background: docAccent }}>
+                                                        {fileBadgeLabel}
+                                                    </div>
+                                                    <div style={{ minWidth: 0 }}>
+                                                        <div className="wa-doc-title">{docTypeName}</div>
+                                                        <div className="wa-doc-filename" title={displayFileName}>
+                                                            {displayFileName}
+                                                        </div>
+                                                        <div className="wa-doc-meta">
+                                                            {fileBadgeLabel}{fileSizeLabel ? ` | ${fileSizeLabel}` : ''}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="wa-doc-footer">
+                                                    <button
+                                                        type="button"
+                                                        className="wa-doc-btn wa-doc-btn-open"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            if (msg.is_view_once && !isMe) {
+                                                                markMessageViewed(msg._id);
+                                                            }
+                                                            if (shouldUseSystemOpen && typeof handleOpenFile === 'function') {
+                                                                handleOpenFile(msg.file_path, displayFileName, msg);
+                                                                return;
+                                                            }
+                                                            window.open(msg.file_path, '_blank', 'noopener,noreferrer');
+                                                        }}
+                                                    >
+                                                        Open
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className="wa-doc-btn"
+                                                        onClick={(e) => { 
+                                                            e.stopPropagation(); 
+                                                            if (msg.is_view_once && !isMe) {
+                                                                markMessageViewed(msg._id);
+                                                            }
+                                                            handleDownload(msg.file_path, displayFileName, msg); 
+                                                        }}
+                                                    >
+                                                        Save as...
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </>
                                 )}
                                 {msg.type === 'audio' && (
                                     <div id={`voice-${msg._id}`} className="wa-voice-card-container">
@@ -749,12 +773,99 @@ const MessageList = memo(({
                                         <UserIcon size={24} color="#0EA5BE" />
                                         <span>Contact Message</span>
                                     </div>
-                                )}
-
-                                {msg.type === 'poll' && msg.poll && (
-                                    <div className="wa-poll-card" style={{ padding: 12, background: 'white', borderRadius: 12, border: '1px solid #e9edef' }}>
-                                        <div style={{ fontWeight: 'bold' }}>{msg.poll.question}</div>
-                                        {/* Simplified poll display */}
+                                )}                                {msg.type === 'poll' && msg.poll && (
+                                    <div className="wa-poll-card-v3" style={{
+                                        background: 'rgba(2, 132, 199, 0.15)',
+                                        borderRadius: '12px',
+                                        padding: isMobile ? '12px' : '16px',
+                                        width: '100%',
+                                        maxWidth: isMobile ? '280px' : '360px',
+                                        boxSizing: 'border-box',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '14px',
+                                        border: '1px solid rgba(56, 189, 248, 0.2)',
+                                        backdropFilter: 'blur(8px)',
+                                        margin: '4px 0',
+                                        overflow: 'hidden'
+                                    }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <List size={isMobile ? 20 : 24} color="#0EA5BE" style={{ flexShrink: 0 }} />
+                                            <div style={{ fontSize: isMobile ? '16px' : '18px', fontWeight: '700', color: '#ffffff', wordBreak: 'break-word' }}>{msg.poll.question}</div>
+                                        </div>
+                                        
+                                        <div style={{ fontSize: '13px', color: 'rgba(255, 255, 255, 0.7)', marginLeft: (typeof isMobile !== 'undefined' && isMobile) ? '30px' : '34px', marginBottom: '4px' }}>
+                                            {msg.poll.allowMultipleAnswers ? 'Select one or more' : 'Select one'}
+                                        </div>
+                                        
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                            {(msg.poll.options || []).map((opt, idx) => {
+                                                const voters = opt.voters || [];
+                                                const myId = user.id || user._id;
+                                                const isVoted = voters.some(v => String(v) === String(myId) || String(v?._id || v) === String(myId));
+                                                
+                                                return (
+                                                    <div 
+                                                        key={idx} 
+                                                        onClick={() => handleVotePoll(msg, idx)} 
+                                                        style={{ 
+                                                            cursor: 'pointer', 
+                                                            background: isVoted ? 'rgba(14, 165, 190, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                                                            border: `1px solid ${isVoted ? '#0EA5BE' : 'rgba(255, 255, 255, 0.1)'}`,
+                                                            borderRadius: '10px',
+                                                            padding: isMobile ? '10px 12px' : '12px 16px',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '10px',
+                                                            transition: 'all 0.2s ease',
+                                                            width: '100%',
+                                                            boxSizing: 'border-box'
+                                                        }}
+                                                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
+                                                        onMouseLeave={(e) => e.currentTarget.style.background = isVoted ? 'rgba(14, 165, 190, 0.2)' : 'rgba(255, 255, 255, 0.05)'}
+                                                    >
+                                                        <div style={{
+                                                            width: '18px',
+                                                            height: '18px',
+                                                            borderRadius: '5px',
+                                                            border: `2px solid ${isVoted ? '#0EA5BE' : 'rgba(255, 255, 255, 0.4)'}`,
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            background: isVoted ? '#0EA5BE' : 'transparent',
+                                                            flexShrink: 0
+                                                        }}>
+                                                            {isVoted && <Check size={12} color="white" strokeWidth={3} />}
+                                                        </div>
+                                                        <span style={{ fontSize: isMobile ? '14px' : '16px', color: '#ffffff', fontWeight: '500', flex: 1, wordBreak: 'break-word' }}>{opt.text}</span>
+                                                        <span style={{ fontSize: '13px', color: isVoted ? '#0EA5BE' : 'rgba(255, 255, 255, 0.6)', flexShrink: 0 }}>{voters.length}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                        
+                                        <div style={{ height: '1px', background: 'rgba(255, 255, 255, 0.15)', width: '100%', marginTop: '4px' }} />
+                                        
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); setPollDetails(msg.poll); setIsPollDetailsOpen(true); }}
+                                            style={{
+                                                width: '100%',
+                                                padding: '8px',
+                                                border: 'none',
+                                                background: 'transparent',
+                                                color: '#0EA5BE',
+                                                fontWeight: '600',
+                                                fontSize: isMobile ? '14px' : '15px',
+                                                cursor: 'pointer',
+                                                textAlign: 'center',
+                                                opacity: 0.9,
+                                                letterSpacing: '0.5px'
+                                            }}
+                                            onMouseOver={(e) => e.currentTarget.style.opacity = 1}
+                                            onMouseOut={(e) => e.currentTarget.style.opacity = 0.9}
+                                        >
+                                            View votes
+                                        </button>
                                     </div>
                                 )}
 
@@ -817,9 +928,12 @@ const MessageList = memo(({
                 initialTopMostItemIndex={flattenedItems.length - 1}
                 itemContent={renderItem}
                 followOutput="auto"
+                alignToBottom={true}
+                onScroll={onScroll}
                 increaseViewportBy={300}
                 components={{
                     Scroller: MessageScroller,
+                    Header: headerContent ? () => headerContent : undefined,
                     Footer: () => <div ref={bottomRef} className="wa-message-list-footer-spacer" aria-hidden="true" />
                 }}
                 atBottomStateChange={(atBottom) => {
