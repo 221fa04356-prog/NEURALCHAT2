@@ -4628,7 +4628,8 @@ html {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background-color: #ffffff;
+    background-color: #0f172a; /* Solid Slate 900 for full immersion */
+    backdrop-filter: blur(10px);
     z-index: 9999;
     display: flex;
     flex-direction: column;
@@ -4636,37 +4637,36 @@ html {
 
 .wa-viewer-header {
     height: 64px;
-    background-color: #ffffff;
+    background-color: #1e293b; /* Match application dark theme */
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 0 20px;
     z-index: 10;
-    /* border-bottom removed */
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .wa-viewer-nav-btn {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
-    background-color: rgba(255, 255, 255, 0.9);
-    border: 1px solid rgba(0, 0, 0, 0.1);
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    color: #54656f;
+    color: #f8fafc;
     z-index: 20;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-    transition: background-color 0.2s;
+    transition: all 0.2s;
 }
 
 .wa-viewer-nav-btn:hover {
-    background-color: #ffffff;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    background-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-50%) scale(1.1);
 }
 
 .wa-viewer-nav-btn.prev {
@@ -4680,7 +4680,7 @@ html {
 .wa-viewer-user-info {
     display: flex;
     align-items: center;
-    color: #111b21;
+    color: #f8fafc;
 }
 
 .wa-viewer-actions {
@@ -4692,7 +4692,7 @@ html {
     background: none;
     border: none;
     cursor: pointer;
-    color: #54656f;
+    color: #f8fafc;
     opacity: 0.8;
     transition: opacity 0.2s;
     display: flex;
@@ -4704,12 +4704,12 @@ html {
 
 .wa-viewer-btn:hover {
     opacity: 1;
-    background-color: rgba(0, 0, 0, 0.05);
+    background-color: rgba(255, 255, 255, 0.15);
 }
 
 .wa-viewer-thumbnails {
     height: 80px;
-    background-color: #ffffff;
+    background-color: rgba(15, 23, 42, 0.9);
     display: flex;
     align-items: center;
     gap: 8px;
@@ -4794,7 +4794,7 @@ html {
 
 .wa-viewer-thumb.active {
     opacity: 1;
-    border-color: #027EB5;
+    border-color: #38bdf8;
     /* Changed from green to theme blue */
     transform: scale(1.1);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
@@ -4823,9 +4823,9 @@ html {
 
 .wa-viewer-footer {
     padding: 10px 20px;
-    color: #111b21;
+    color: #f8fafc;
     text-align: center;
-    background: rgba(255, 255, 255, 0.8);
+    background: rgba(15, 23, 42, 0.9);
     position: absolute;
     bottom: 80px;
     /* Space for thumbnails */
@@ -9321,6 +9321,8 @@ svg.wa-back-icon,
 }
 
 /* View Once Spent Styles */
+
+
 .wa-spent-view-once-media,
 .wa-spent-view-once-file {
     display: flex;
@@ -9329,6 +9331,28 @@ svg.wa-back-icon,
     padding: 12px 16px;
     color: #8696a0;
     font-size: 14px;
+}
+
+
+
+/* File Tray Preview Styles */
+.wa-file-tray-item .wa-file-remove-btn {
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    visibility: hidden;
+    filter: drop-shadow(0 0 1px white); /* Better visibility on dark images */
+}
+
+.wa-file-tray-item:hover .wa-file-remove-btn {
+    opacity: 1;
+    visibility: visible;
+}
+
+@media (max-width: 768px) {
+    .wa-file-tray-item .wa-file-remove-btn {
+        opacity: 1; /* Always visible on mobile as hover doesn't exist */
+        visibility: visible;
+    }
 }
 
 .wa-message-bubble.is-poll {
