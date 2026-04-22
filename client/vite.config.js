@@ -6,8 +6,12 @@ import basicSsl from '@vitejs/plugin-basic-ssl'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   
-  // Use VITE_API_URL from env, fallback to localhost for dev
-  const backendTarget = env.VITE_API_URL || 'http://localhost:3000';
+  // In local development, proxy to the local backend by default.
+  // VITE_API_URL is still used for non-dev builds / deployments.
+  const backendTarget =
+    mode === 'development'
+      ? (env.VITE_DEV_API_URL || 'http://localhost:3000')
+      : (env.VITE_API_URL || 'http://localhost:3000');
 
   return {
     plugins: [react(), basicSsl()],
@@ -21,6 +25,7 @@ export default defineConfig(({ mode }) => {
         },
         '/socket.io': {
           target: backendTarget,
+          changeOrigin: true,
           ws: true,
           secure: false,
         },
