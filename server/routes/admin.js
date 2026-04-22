@@ -424,21 +424,16 @@ router.get('/chat/dates/:userId/:otherUserId', async (req, res) => {
 // Get statistics for the dashboard overview
 router.get('/stats', async (req, res) => {
     try {
-        const totalUsers = await User.countDocuments({
-            role: { $ne: 'admin' },
-            status: 'approved',
-            login_id: { $exists: true, $ne: null }
-        });
-        const pendingApprovals = await User.countDocuments({ status: 'pending', role: 'user' });
-        const activeResets = await PasswordReset.countDocuments({ status: 'pending' });
-        const unblockRequests = await User.countDocuments({ unblockRequested: true });
-
-        // Status Distribution for Pie Chart
-        const statusDistribution = await User.aggregate([
-            { $match: { role: { $ne: 'admin' } } },
-            { $group: { _id: "$status", value: { $sum: 1 } } },
-            { $project: { name: "$_id", value: 1, _id: 0 } }
-        ]);
+        const metrics = {
+            totalUsers: await User.countDocuments({
+                role: { $ne: 'admin' },
+                status: 'approved',
+                login_id: { $exists: true, $ne: null }
+            }),
+            pendingApprovals: await User.countDocuments({ status: 'pending', role: 'user' }),
+            activeResets: await PasswordReset.countDocuments({ status: 'pending' }),
+            unblockRequests: await User.countDocuments({ unblockRequested: true })
+        };
 
         // Registration Trends (Day/Month/Year)
         const now = new Date();
@@ -471,56 +466,10 @@ router.get('/stats', async (req, res) => {
         const thirtyDaysAgo = new Date(now);
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
 
-        const dailyTrends = await User.aggregate([
-            { $match: { created_at: { $gte: thirtyDaysAgo }, role: { $ne: 'admin' } } },
-            {
-                $group: {
-                    _id: {
-                        date: { $dateToString: { format: "%Y-%m-%d", date: "$created_at", timezone: "+05:30" } },
-                        status: "$status"
-                    },
-                    count: { $sum: 1 }
-                }
-            }
-        ]);
-
-        const dailyResets = await PasswordReset.aggregate([
-            { $match: { created_at: { $gte: thirtyDaysAgo }, status: 'pending' } },
-            {
-                $group: {
-                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$created_at", timezone: "+05:30" } },
-                    count: { $sum: 1 }
-                }
-            }
-        ]);
-
         // 2. Month View (Last 7 months)
         const twelveMonthsAgo = new Date(now);
         twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
         twelveMonthsAgo.setDate(1);
-
-        const monthlyTrends = await User.aggregate([
-            { $match: { created_at: { $gte: twelveMonthsAgo }, role: { $ne: 'admin' } } },
-            {
-                $group: {
-                    _id: {
-                        date: { $dateToString: { format: "%Y-%m", date: "$created_at", timezone: "+05:30" } },
-                        status: "$status"
-                    },
-                    count: { $sum: 1 }
-                }
-            }
-        ]);
-
-        const monthlyResets = await PasswordReset.aggregate([
-            { $match: { created_at: { $gte: twelveMonthsAgo }, status: 'pending' } },
-            {
-                $group: {
-                    _id: { $dateToString: { format: "%Y-%m", date: "$created_at", timezone: "+05:30" } },
-                    count: { $sum: 1 }
-                }
-            }
-        ]);
 
         // 3. Year View (Last 7 years)
         const tenYearsAgo = new Date(now);
@@ -528,43 +477,63 @@ router.get('/stats', async (req, res) => {
         tenYearsAgo.setMonth(0);
         tenYearsAgo.setDate(1);
 
-        const yearlyTrends = await User.aggregate([
-            { $match: { created_at: { $gte: tenYearsAgo }, role: { $ne: 'admin' } } },
-            {
-                $group: {
-                    _id: {
-                        date: { $dateToString: { format: "%Y", date: "$created_at", timezone: "+05:30" } },
-                        status: "$status"
-                    },
-                    count: { $sum: 1 }
+        const aggregateByPeriod = async (Model, match, format) => (
+            Model.aggregate([
+                { $match: match },
+                {
+                    $group: {
+                        _id: { $dateToString: { format, date: "$created_at", timezone: "+05:30" } },
+                        count: { $sum: 1 }
+                    }
                 }
-            }
-        ]);
+            ])
+        );
 
-        const yearlyResets = await PasswordReset.aggregate([
-            { $match: { created_at: { $gte: tenYearsAgo }, status: 'pending' } },
-            {
-                $group: {
-                    _id: { $dateToString: { format: "%Y", date: "$created_at", timezone: "+05:30" } },
-                    count: { $sum: 1 }
+        const aggregateUsersByStatus = async (startDate, format, status) => (
+            User.aggregate([
+                { $match: { created_at: { $gte: startDate }, role: { $ne: 'admin' }, status } },
+                {
+                    $group: {
+                        _id: { $dateToString: { format, date: "$created_at", timezone: "+05:30" } },
+                        count: { $sum: 1 }
+                    }
                 }
-            }
+            ])
+        );
+
+        const [
+            dailyApproved,
+            dailyPending,
+            dailyResets,
+            dailyUnblocks,
+            monthlyApproved,
+            monthlyPending,
+            monthlyResets,
+            monthlyUnblocks,
+            yearlyApproved,
+            yearlyPending,
+            yearlyResets,
+            yearlyUnblocks
+        ] = await Promise.all([
+            aggregateUsersByStatus(thirtyDaysAgo, "%Y-%m-%d", 'approved'),
+            aggregateUsersByStatus(thirtyDaysAgo, "%Y-%m-%d", 'pending'),
+            aggregateByPeriod(PasswordReset, { created_at: { $gte: thirtyDaysAgo }, status: 'pending' }, "%Y-%m-%d"),
+            aggregateByPeriod(User, { created_at: { $gte: thirtyDaysAgo }, role: { $ne: 'admin' }, unblockRequested: true }, "%Y-%m-%d"),
+            aggregateUsersByStatus(twelveMonthsAgo, "%Y-%m", 'approved'),
+            aggregateUsersByStatus(twelveMonthsAgo, "%Y-%m", 'pending'),
+            aggregateByPeriod(PasswordReset, { created_at: { $gte: twelveMonthsAgo }, status: 'pending' }, "%Y-%m"),
+            aggregateByPeriod(User, { created_at: { $gte: twelveMonthsAgo }, role: { $ne: 'admin' }, unblockRequested: true }, "%Y-%m"),
+            aggregateUsersByStatus(tenYearsAgo, "%Y", 'approved'),
+            aggregateUsersByStatus(tenYearsAgo, "%Y", 'pending'),
+            aggregateByPeriod(PasswordReset, { created_at: { $gte: tenYearsAgo }, status: 'pending' }, "%Y"),
+            aggregateByPeriod(User, { created_at: { $gte: tenYearsAgo }, role: { $ne: 'admin' }, unblockRequested: true }, "%Y")
         ]);
 
         // Helper to fill missing data points
-        const fillMissing = (baseDate, count, type, userRaw, resetRaw) => {
+        const fillMissing = (baseDate, count, type, seriesSources) => {
             const result = [];
-            // Create a working copy to avoid mutating the original passed date reference in loop
-            const d = new Date(baseDate);
 
             for (let i = 0; i < count; i++) {
-                // We advance the date *loop logic* carefully
-                // Reset from base each time or increment? Incrementing matches the 'd' object state.
-
-                // Note: baseDate is already set to start point.
-                // In loop i=0, we use baseDate. i=1, add 1 unit.
-
-                // For day view, we want exact sequence.
                 const currentD = new Date(baseDate);
                 if (type === 'day') currentD.setDate(currentD.getDate() + i);
                 if (type === 'month') currentD.setMonth(currentD.getMonth() + i);
@@ -584,31 +553,41 @@ router.get('/stats', async (req, res) => {
                     displayLabel = dateStr;
                 }
 
-                const approved = userRaw.find(r => r._id.date === dateStr && r._id.status === 'approved')?.count || 0;
-                const pending = userRaw.find(r => r._id.date === dateStr && r._id.status === 'pending')?.count || 0;
-                const resets = resetRaw.find(r => r._id === dateStr)?.count || 0;
-
                 result.push({
                     name: displayLabel,
-                    approved,
-                    pending,
-                    resets
+                    ...Object.fromEntries(
+                        Object.entries(seriesSources).map(([seriesKey, rows]) => [
+                            seriesKey,
+                            rows.find(r => r._id === dateStr)?.count || 0
+                        ])
+                    )
                 });
             }
             return result;
         };
 
-        console.log('Sending Stats:', { totalUsers, pendingApprovals, activeResets, unblockRequests });
+        console.log('Sending Stats:', metrics);
         res.json({
-            totalUsers,
-            pendingApprovals,
-            activeResets,
-            unblockRequests,
-            statusDistribution,
+            ...metrics,
             chartData: {
-                day: fillMissing(thirtyDaysAgo, 30, 'day', dailyTrends, dailyResets),
-                month: fillMissing(twelveMonthsAgo, 12, 'month', monthlyTrends, monthlyResets),
-                year: fillMissing(tenYearsAgo, 10, 'year', yearlyTrends, yearlyResets)
+                day: fillMissing(thirtyDaysAgo, 30, 'day', {
+                    approved: dailyApproved,
+                    pending: dailyPending,
+                    resets: dailyResets,
+                    unblocks: dailyUnblocks
+                }),
+                month: fillMissing(twelveMonthsAgo, 12, 'month', {
+                    approved: monthlyApproved,
+                    pending: monthlyPending,
+                    resets: monthlyResets,
+                    unblocks: monthlyUnblocks
+                }),
+                year: fillMissing(tenYearsAgo, 10, 'year', {
+                    approved: yearlyApproved,
+                    pending: yearlyPending,
+                    resets: yearlyResets,
+                    unblocks: yearlyUnblocks
+                })
             }
         });
     } catch (err) {

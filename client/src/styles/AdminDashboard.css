@@ -1,4 +1,15 @@
 .dashboard-layout {
+    --admin-panel-bg: linear-gradient(180deg, rgba(9, 16, 32, 0.88) 0%, rgba(13, 23, 42, 0.82) 100%);
+    --admin-panel-border: rgba(148, 163, 184, 0.16);
+    --admin-panel-shadow: 0 24px 60px rgba(2, 6, 23, 0.32);
+    --admin-text-strong: #f8fafc;
+    --admin-text-muted: #94a3b8;
+    --admin-accent: #1498ff;
+    --admin-accent-soft: #4e59ff;
+    --admin-pill-gradient: linear-gradient(135deg, #1498ff 0%, #2e7bff 48%, #4e59ff 100%);
+}
+
+.dashboard-layout {
     display: flex;
     height: 100vh;
     width: 100vw;
@@ -31,22 +42,39 @@
     z-index: 1;
 }
 
+.admin-main-area {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.admin-main-area::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
 /* Sidebar default is handled by inline styles in JS for Desktop hover effect */
 /* But we need basic styles here */
 .sidebar {
     background: rgba(15, 23, 42, 0.82) !important;
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
-    border-right: 1px solid rgba(148, 163, 184, 0.18) !important;
+    border-right: 1px solid rgba(148, 163, 184, 0.12) !important;
     display: flex;
     flex-direction: column;
     z-index: 50;
-    box-shadow: 12px 0 40px rgba(0, 0, 0, 0.35);
+    box-shadow: none;
     position: relative;
 }
 
 .admin-top-header {
     color: #e2e8f0;
+    border-left: none !important;
+    border-top: none !important;
+}
+
+.admin-top-header-glass {
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
 }
 
 .admin-top-header .admin-header-search {
@@ -68,6 +96,40 @@
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22) !important;
 }
 
+.admin-analytics-panel {
+    background: var(--admin-panel-bg);
+    border: 1px solid var(--admin-panel-border);
+    box-shadow: var(--admin-panel-shadow);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+}
+
+.admin-data-panel,
+.admin-empty-panel {
+    background: linear-gradient(180deg, rgba(10, 18, 36, 0.94) 0%, rgba(13, 23, 42, 0.9) 100%);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    box-shadow: 0 24px 60px rgba(2, 6, 23, 0.28);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+}
+
+.admin-period-toggle {
+    background: rgba(15, 23, 42, 0.82);
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    width: fit-content;
+    max-width: 100%;
+}
+
+.stat-card {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.dashboard-overview-grid {
+    align-items: stretch;
+}
+
 .admin-main-area .hover-row:hover {
     background: rgba(56, 189, 248, 0.08) !important;
 }
@@ -82,6 +144,20 @@
 
 .admin-main-area td {
     color: #e2e8f0 !important;
+}
+
+.admin-data-panel table {
+    color: #e2e8f0;
+}
+
+.admin-data-panel input {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border: 1px solid rgba(148, 163, 184, 0.16) !important;
+    color: #f8fafc !important;
+}
+
+.admin-data-panel input::placeholder {
+    color: #94a3b8 !important;
 }
 
 .admin-main-area input,
@@ -207,6 +283,27 @@
 
     .stat-card {
         margin-bottom: 0 !important;
+        min-width: 100% !important;
+        width: 100% !important;
+    }
+
+    .admin-analytics-panel {
+        padding: 1rem !important;
+        border-radius: 20px !important;
+    }
+
+    .admin-period-toggle {
+        width: 100%;
+    }
+}
+
+@media (max-width: 480px) {
+    .admin-main-area {
+        padding: 0.75rem;
+    }
+
+    .dashboard-overview-grid {
+        gap: 12px !important;
     }
 }
 
@@ -218,9 +315,13 @@
 
 /* Ensure horizontal scrolling is visible if needed but clean */
 .table-responsive::-webkit-scrollbar {
-    height: 4px;
+    height: 8px;
 }
 .table-responsive::-webkit-scrollbar-thumb {
-    background: #e9ecef;
-    border-radius: 2px;
+    background: linear-gradient(90deg, rgba(20, 152, 255, 0.6), rgba(78, 89, 255, 0.62));
+    border-radius: 999px;
+}
+.table-responsive::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.4);
+    border-radius: 999px;
 }

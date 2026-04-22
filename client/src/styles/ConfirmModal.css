@@ -5,7 +5,7 @@
     right: 0;
     bottom: 0;
     background-color: rgba(15, 23, 42, 0.45);
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(6px);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -14,14 +14,13 @@
 }
 
 .confirm-modal {
-    background: rgba(13, 22, 29, 0.95);
-    backdrop-filter: blur(30px) saturate(180%);
+    background: #0f172a;
     padding: 40px;
     border-radius: 32px;
     width: 92%;
     max-width: 440px;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 30px 80px rgba(2, 6, 23, 0.45);
+    border: 1px solid rgba(148, 163, 184, 0.12);
     animation: confirmScaleIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
     display: flex;
     flex-direction: column;
@@ -47,7 +46,7 @@
     height: 65px;
     background-color: rgba(14, 165, 190, 0.15);
     border-radius: 18px;
-    box-shadow: inset 0 0 10px rgba(14, 165, 190, 0.1);
+    box-shadow: inset 0 0 10px rgba(14, 165, 190, 0.08);
 }
 
 .confirm-modal-header h3 {
@@ -94,42 +93,42 @@
 }
 
 .btn-secondary {
-    background: rgba(255, 255, 255, 0.05);
-    color: #94a3b8 !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    background: #ffffff;
+    color: #8aa0bf !important;
+    border: none !important;
 }
 
 .btn-secondary:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #f8fafc !important;
+    background: #f8fafc;
+    color: #64748b !important;
 }
 
 .btn-primary {
-    background: #38bdf8 !important;
+    background: linear-gradient(135deg, #1498ff 0%, #2e7bff 48%, #4e59ff 100%) !important;
     color: #ffffff !important;
     border: none !important;
-    box-shadow: 0 4px 15px rgba(56, 189, 248, 0.3);
+    box-shadow: 0 10px 24px rgba(78, 89, 255, 0.28);
 }
 
 .btn-primary:hover {
-    background: #0EA5BE !important;
-    color: #ffffff !important;
-    transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(14, 165, 190, 0.4);
+    background: linear-gradient(135deg, #1498ff 0%, #2e7bff 48%, #4e59ff 100%) !important;
+    color: #eef6ff !important;
+    transform: none;
+    box-shadow: 0 10px 24px rgba(78, 89, 255, 0.28);
 }
 
 .btn-danger {
     background: #f5365c !important;
     color: #ffffff !important;
     border: none !important;
-    box-shadow: 0 4px 15px rgba(245, 54, 92, 0.3);
+    box-shadow: 0 10px 24px rgba(245, 54, 92, 0.3);
 }
 
 .btn-danger:hover {
-    background: #d93025 !important;
-    color: #ffffff !important;
-    transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(217, 48, 37, 0.4);
+    background: #f5365c !important;
+    color: #ffe2ea !important;
+    transform: none;
+    box-shadow: 0 10px 24px rgba(245, 54, 92, 0.3);
 }
 
 @keyframes confirmFadeIn {

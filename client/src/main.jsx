@@ -16,8 +16,8 @@ const isLanOrLocal =
 // For deployed environments, respect VITE_API_URL.
 axios.defaults.baseURL = isLanOrLocal ? '' : (import.meta.env.VITE_API_URL || '');
 
+const app = <App />;
+
 createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+  import.meta.env.DEV ? app : <StrictMode>{app}</StrictMode>,
 )

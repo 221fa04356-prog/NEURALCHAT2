@@ -14,7 +14,7 @@ import {
 import { io } from 'socket.io-client';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-    ResponsiveContainer, PieChart, Pie, Cell, Legend, Label
+    ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
 import logo from '../assets/logo.png';
 
@@ -52,31 +52,122 @@ const formatEventTimeString = (startDate, startTime, endDate, endTime) => {
     return startStr;
 };
 
-const CustomTooltip = ({ active, payload, label, coordinate, scrollRef }) => {
+const ADMIN_PILL_GRADIENT = 'linear-gradient(135deg, #1498ff 0%, #2e7bff 48%, #4e59ff 100%)';
+const THEME_SERIES_COLORS = ['#1a9cff', '#2e7bff', '#4e59ff', '#6e72ff', '#73a8ff', '#8ed2ff'];
+const OFFICIAL_PANEL_SURFACE = 'linear-gradient(180deg, rgba(10, 18, 36, 0.94) 0%, rgba(13, 23, 42, 0.9) 100%)';
+const OFFICIAL_PANEL_BORDER = '1px solid rgba(148, 163, 184, 0.14)';
+const OFFICIAL_PANEL_SHADOW = '0 24px 60px rgba(2, 6, 23, 0.28)';
+const OFFICIAL_TEXT_PRIMARY = '#f8fafc';
+const OFFICIAL_TEXT_SECONDARY = '#cbd5e1';
+const OFFICIAL_TEXT_MUTED = '#94a3b8';
+const ADMIN_ACTION_SURFACE = 'rgba(15, 23, 42, 0.68)';
+const ADMIN_ACTION_BORDER = '1px solid rgba(148, 163, 184, 0.16)';
+
+const ACTION_BUTTON_META = {
+    primary: {
+        color: '#8ed2ff',
+        hoverBackground: 'rgba(20, 152, 255, 0.12)',
+        hoverBorder: '1px solid rgba(20, 152, 255, 0.34)',
+        hoverColor: '#c8eeff'
+    },
+    danger: {
+        color: '#ff6b8a',
+        hoverBackground: 'rgba(245, 54, 92, 0.12)',
+        hoverBorder: '1px solid rgba(245, 54, 92, 0.32)',
+        hoverColor: '#ffd6df'
+    }
+};
+
+const METRIC_META = {
+    totalUsers: {
+        label: 'Total Users',
+        shortLabel: 'Users',
+        subtext: 'Total registered members',
+        icon: TrendingUp,
+        color: '#1a9cff',
+        gradient: ADMIN_PILL_GRADIENT,
+        onClickTab: 'management'
+    },
+    pendingApprovals: {
+        label: 'Pending Approvals',
+        shortLabel: 'Pending',
+        subtext: 'Waiting for your review',
+        icon: LayoutDashboard,
+        color: '#2e7bff',
+        gradient: ADMIN_PILL_GRADIENT,
+        onClickTab: 'pending'
+    },
+    activeResets: {
+        label: 'Reset Requests',
+        shortLabel: 'Resets',
+        subtext: 'Active password reset tasks',
+        icon: Key,
+        color: '#4e59ff',
+        gradient: ADMIN_PILL_GRADIENT,
+        onClickTab: 'resets'
+    },
+    unblockRequests: {
+        label: 'Unblock Requests',
+        shortLabel: 'Unblock',
+        subtext: 'Users requesting restoration',
+        icon: ShieldCheck,
+        color: '#6e72ff',
+        gradient: ADMIN_PILL_GRADIENT,
+        onClickTab: 'unblock'
+    }
+};
+
+const SERIES_META = {
+    approved: { label: 'Approved Users', shortLabel: 'Approved', color: '#1a9cff', totalKey: 'totalUsers' },
+    pending: { label: 'Pending Approvals', shortLabel: 'Pending', color: '#2e7bff', totalKey: 'pendingApprovals' },
+    resets: { label: 'Reset Requests', shortLabel: 'Resets', color: '#4e59ff', totalKey: 'activeResets' },
+    unblocks: { label: 'Unblock Requests', shortLabel: 'Unblock', color: '#6e72ff', totalKey: 'unblockRequests' }
+};
+
+const prettifyMetricKey = (key) => key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const getMetricMeta = (key, index = 0) => {
+    const known = METRIC_META[key];
+    if (known) return known;
+
+    const color = THEME_SERIES_COLORS[index % THEME_SERIES_COLORS.length];
+    return {
+        label: prettifyMetricKey(key),
+        shortLabel: prettifyMetricKey(key),
+        subtext: 'Live metric from admin statistics',
+        icon: Layers,
+        color,
+        gradient: ADMIN_PILL_GRADIENT
+    };
+};
+
+const getSeriesMeta = (key, index = 0) => {
+    const known = SERIES_META[key];
+    if (known) return known;
+
+    return {
+        label: prettifyMetricKey(key),
+        shortLabel: prettifyMetricKey(key),
+        color: THEME_SERIES_COLORS[index % THEME_SERIES_COLORS.length]
+    };
+};
+
+const getChartSeriesKeys = (data = []) => {
+    const keySet = new Set();
+    data.forEach((item) => {
+        Object.keys(item || {}).forEach((key) => {
+            if (key !== 'name') keySet.add(key);
+        });
+    });
+    return Array.from(keySet);
+};
+
+const CustomTooltip = ({ active, payload, label, seriesMetaMap }) => {
     const isMobile = window.innerWidth <= 768;
     if (active && payload && payload.length) {
-        const data = payload[0].payload;
-        let shiftStyle = {};
-        if (scrollRef && scrollRef.current && coordinate) {
-            const scrollLeft = scrollRef.current.scrollLeft;
-            const containerWidth = scrollRef.current.clientWidth;
-            const scrollWidth = scrollRef.current.scrollWidth;
-            const tooltipX = coordinate.x;
-
-            const TOOLTIP_ESTIMATED_WIDTH = 220;
-            const RECHARTS_FLIP_THRESHOLD = 300;
-
-            const isNearSvgRight = (scrollWidth - tooltipX) < RECHARTS_FLIP_THRESHOLD;
-            const isNearVisibleRight = (tooltipX - scrollLeft) > (containerWidth - TOOLTIP_ESTIMATED_WIDTH);
-            const isNearVisibleLeft = (tooltipX - scrollLeft) < 120;
-
-            if (isNearVisibleLeft) {
-                shiftStyle = { transform: 'translateX(60px)' };
-            } else if (isNearVisibleRight && !isNearSvgRight) {
-                shiftStyle = { transform: 'translateX(calc(-100% - 30px))' };
-            }
-        }
-
         const formattedLabel = (() => {
             if (!label || typeof label !== 'string' || !label.includes('-')) return label;
             const parts = label.split('-');
@@ -91,93 +182,94 @@ const CustomTooltip = ({ active, payload, label, coordinate, scrollRef }) => {
 
         return (
             <div style={{
-                background: '#fff',
+                background: 'rgba(8, 15, 32, 0.96)',
                 padding: isMobile ? '6px 10px' : '10px 15px',
-                borderRadius: '8px',
-                boxShadow: '0 8px 30px rgba(0,0,0,0.12)',
-                border: 'none',
+                borderRadius: '14px',
+                boxShadow: '0 16px 40px rgba(2, 6, 23, 0.45)',
+                border: '1px solid rgba(43, 201, 228, 0.2)',
                 position: 'relative',
                 zIndex: 1000,
-                whiteSpace: 'nowrap',
-                ...shiftStyle
+                whiteSpace: 'nowrap'
             }}>
-                <p style={{ margin: '0 0 5px', fontWeight: 'bold', color: '#525f7f', fontSize: isMobile ? '11px' : '14px' }}>{formattedLabel}</p>
-                <p style={{ margin: 0, color: '#0A7C8F', fontSize: isMobile ? '10px' : '13px', fontWeight: '600' }}>{isMobile ? 'Approved' : 'Approved Users'} : {data.approved || 0}</p>
-                <p style={{ margin: 0, color: '#0FB5D0', fontSize: isMobile ? '10px' : '13px', fontWeight: '600' }}>{isMobile ? 'Pending' : 'Pending Approvals'} : {data.pending || 0}</p>
-                <p style={{ margin: 0, color: '#2BC9E4', fontSize: isMobile ? '10px' : '13px', fontWeight: '600' }}>{isMobile ? 'Resets' : 'Reset Requests'} : {data.resets || 0}</p>
+                <p style={{ margin: '0 0 6px', fontWeight: '700', color: '#f8fafc', fontSize: isMobile ? '11px' : '14px' }}>{formattedLabel}</p>
+                {payload.map((entry) => {
+                    const meta = seriesMetaMap?.[entry.dataKey] || getSeriesMeta(entry.dataKey);
+                    return (
+                        <p key={entry.dataKey} style={{ margin: 0, color: meta.color, fontSize: isMobile ? '10px' : '13px', fontWeight: '600' }}>
+                            {isMobile ? meta.shortLabel : meta.label} : {entry.value || 0}
+                        </p>
+                    );
+                })}
             </div>
         );
     }
     return null;
 };
 
-const processChartData = (data) => {
-    if (!data) return [];
-    return data.map(item => {
-        // Define priority/order: Approved, Pending, Resets
-        const activeItems = [
-            { val: item.approved || 0, color: '#0A7C8F', name: 'Approved Users' },
-            { val: item.pending || 0, color: '#0FB5D0', name: 'Pending Approvals' },
-            { val: item.resets || 0, color: '#2BC9E4', name: 'Reset Requests' }
-        ].filter(i => i.val > 0);
+const PieTooltip = ({ active, payload }) => {
+    if (!active || !payload || !payload.length) return null;
 
-        const maxVal = Math.max(...activeItems.map(i => i.val), 0);
-
-        return { ...item, activeItems, maxVal };
-    });
-};
-
-const CustomBar = (props) => {
-    const { x, y, width, height, payload } = props;
-    const { activeItems, maxVal } = payload;
-    const isMobile = window.innerWidth <= 768;
-    const barWidth = isMobile ? 12 : 20;
-    const gap = isMobile ? 2 : 4;
-
-    if (!activeItems || activeItems.length === 0 || maxVal === 0) return null;
-
-    const scale = height / maxVal;
-    const cx = x + width / 2;
+    const entry = payload[0]?.payload;
+    if (!entry) return null;
 
     return (
-        <g>
-            {activeItems.map((item, index) => {
-                const itemHeight = item.val * scale;
-                const itemY = y + height - itemHeight;
-                let itemX = 0;
-
-                if (activeItems.length === 1) {
-                    itemX = cx - barWidth / 2;
-                } else if (activeItems.length === 2) {
-                    if (index === 0) itemX = cx - barWidth - gap / 2; // Left
-                    if (index === 1) itemX = cx + gap / 2; // Right
-                } else if (activeItems.length === 3) {
-                    if (index === 0) itemX = cx - 1.5 * barWidth - gap; // Left
-                    if (index === 1) itemX = cx - 0.5 * barWidth; // Center
-                    if (index === 2) itemX = cx + 0.5 * barWidth + gap; // Right
-                }
-
-                // Radius logic (top-left, top-right)
-                const radius = 4;
-                // Generate path for rounded top corners
-                const path = `
-                    M ${itemX},${itemY + itemHeight}
-                    L ${itemX},${itemY + radius}
-                    Q ${itemX},${itemY} ${itemX + radius},${itemY}
-                    L ${itemX + barWidth - radius},${itemY}
-                    Q ${itemX + barWidth},${itemY} ${itemX + barWidth},${itemY + radius}
-                    L ${itemX + barWidth},${itemY + itemHeight}
-                    Z
-                `;
-
-                return <path key={index} d={path} fill={item.color} style={{ outline: 'none' }} />;
-            })}
-        </g>
+        <div style={{
+            background: 'rgba(8, 15, 32, 0.96)',
+            padding: '10px 14px',
+            borderRadius: '14px',
+            border: '1px solid rgba(78, 89, 255, 0.24)',
+            boxShadow: '0 16px 40px rgba(2, 6, 23, 0.45)',
+            color: OFFICIAL_TEXT_PRIMARY
+        }}>
+            <div style={{ fontSize: '0.9rem', fontWeight: '700', color: OFFICIAL_TEXT_PRIMARY }}>{entry.label}</div>
+            <div style={{ fontSize: '0.82rem', fontWeight: '600', color: entry.color }}>{entry.value}</div>
+        </div>
     );
+};
+
+const getActionButtonStyle = (variant = 'primary') => {
+    const meta = ACTION_BUTTON_META[variant] || ACTION_BUTTON_META.primary;
+    return {
+        background: ADMIN_ACTION_SURFACE,
+        color: meta.color,
+        padding: '8px 12px',
+        width: '110px',
+        minWidth: '110px',
+        borderRadius: '10px',
+        cursor: 'pointer',
+        fontSize: '0.85rem',
+        fontWeight: '700',
+        transition: 'all 0.2s ease',
+        boxShadow: 'none',
+        border: ADMIN_ACTION_BORDER,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '6px',
+        whiteSpace: 'nowrap',
+        outline: 'none'
+    };
+};
+
+const applyActionButtonHover = (element, variant = 'primary', hovered = true) => {
+    const meta = ACTION_BUTTON_META[variant] || ACTION_BUTTON_META.primary;
+    element.style.background = hovered ? meta.hoverBackground : ADMIN_ACTION_SURFACE;
+    element.style.border = hovered ? meta.hoverBorder : ADMIN_ACTION_BORDER;
+    element.style.color = hovered ? meta.hoverColor : meta.color;
+    element.style.transform = hovered ? 'translateY(-1px)' : 'translateY(0)';
+    element.style.boxShadow = 'none';
+    element.style.outline = 'none';
 };
 
 export default function AdminDashboard() {
     const navigate = useNavigate();
+    const hostname = window.location.hostname || '';
+    const isLanOrLocal =
+        hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        hostname.startsWith('192.168.') ||
+        hostname.startsWith('10.') ||
+        /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
 
     // 1. State Declarations
     const [activeTab, setActiveTab] = useState(sessionStorage.getItem('adminActiveTab') || 'overview');
@@ -263,6 +355,7 @@ export default function AdminDashboard() {
 
     const chatEndRef = useRef(null);
     const chartScrollRef = useRef(null);
+    const mainScrollRef = useRef(null);
 
     // Sidebar & UI State
     const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 1024);
@@ -270,6 +363,80 @@ export default function AdminDashboard() {
     const [windowWidth, setWindowWidth] = useState(window.innerWidth);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [canScrollUp, setCanScrollUp] = useState(false);
+    const [canScrollDown, setCanScrollDown] = useState(false);
+    const [showScrollControl, setShowScrollControl] = useState(false);
+    const [scrollControlTop, setScrollControlTop] = useState(50);
+    const [isDraggingScrollControl, setIsDraggingScrollControl] = useState(false);
+    const scrollHideTimerRef = useRef(null);
+
+    const normalizedStats = useMemo(() => {
+        if (!stats) return null;
+
+        return {
+            ...stats,
+            unblockRequests: typeof stats.unblockRequests === 'number'
+                ? stats.unblockRequests
+                : users.filter((user) => user.unblockRequested).length
+        };
+    }, [stats, users]);
+
+    const overviewMetrics = useMemo(() => {
+        if (!normalizedStats) return [];
+
+        return Object.entries(normalizedStats)
+            .filter(([_, value]) => typeof value === 'number' && Number.isFinite(value))
+            .map(([key, value], index) => ({
+                key,
+                value,
+                ...getMetricMeta(key, index)
+            }));
+    }, [normalizedStats]);
+
+    const activeChartData = useMemo(() => {
+        const source = normalizedStats?.chartData?.[chartPeriod] || [];
+        return source.map((item) => ({
+            ...item,
+            approved: Number(item?.approved) || 0,
+            pending: Number(item?.pending) || 0,
+            resets: Number(item?.resets) || 0,
+            unblocks: Number(item?.unblocks ?? item?.unblockRequests) || 0
+        }));
+    }, [normalizedStats, chartPeriod]);
+
+    const chartSeriesKeys = useMemo(() => getChartSeriesKeys(activeChartData), [activeChartData]);
+
+    const chartSeries = useMemo(() => (
+        chartSeriesKeys.map((key, index) => ({
+            key,
+            ...getSeriesMeta(key, index)
+        }))
+    ), [chartSeriesKeys]);
+
+    const chartSeriesMetaMap = useMemo(() => (
+        chartSeries.reduce((acc, item) => {
+            acc[item.key] = item;
+            return acc;
+        }, {})
+    ), [chartSeries]);
+
+    const distributionMetrics = useMemo(() => (
+        overviewMetrics.map((metric, index) => ({
+            ...metric,
+            renderValue: metric.value === 0 ? 0.0001 : metric.value,
+            color: metric.color || THEME_SERIES_COLORS[index % THEME_SERIES_COLORS.length]
+        }))
+    ), [overviewMetrics]);
+
+    const handleFloatingScroll = () => {
+        if (isDraggingScrollControl) return;
+        const root = mainScrollRef.current;
+        if (!root) return;
+
+        const step = Math.max(root.clientHeight * 0.7, 320);
+        const direction = canScrollDown ? 1 : -1;
+        root.scrollBy({ top: step * direction, behavior: 'smooth' });
+    };
 
     useEffect(() => {
         const handleResize = () => {
@@ -283,6 +450,62 @@ export default function AdminDashboard() {
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
     }, []);
+
+    useEffect(() => {
+        if (!mainScrollRef.current) return;
+        const root = mainScrollRef.current;
+
+        const updateScrollState = () => {
+            const maxScrollTop = Math.max(0, root.scrollHeight - root.clientHeight);
+            setCanScrollUp(root.scrollTop > 24);
+            setCanScrollDown(root.scrollTop < maxScrollTop - 24);
+            setShowScrollControl(true);
+
+            if (scrollHideTimerRef.current) clearTimeout(scrollHideTimerRef.current);
+            scrollHideTimerRef.current = setTimeout(() => {
+                setShowScrollControl(false);
+            }, 1200);
+        };
+
+        updateScrollState();
+        root.addEventListener('scroll', updateScrollState);
+        window.addEventListener('resize', updateScrollState);
+
+        return () => {
+            root.removeEventListener('scroll', updateScrollState);
+            window.removeEventListener('resize', updateScrollState);
+            if (scrollHideTimerRef.current) clearTimeout(scrollHideTimerRef.current);
+        };
+    }, [activeTab, stats, users.length, resets.length, adminNotifications.length, searchQuery]);
+
+    useEffect(() => {
+        if (!isDraggingScrollControl) return;
+
+        const handlePointerMove = (event) => {
+            const root = mainScrollRef.current;
+            const viewportHeight = window.innerHeight;
+            const controlSize = 48;
+            const nextTop = Math.max(12, Math.min(viewportHeight - (controlSize + 12), event.clientY - (controlSize / 2)));
+            setScrollControlTop((nextTop / viewportHeight) * 100);
+
+            if (!root) return;
+            const maxScrollTop = Math.max(0, root.scrollHeight - root.clientHeight);
+            const minTrackTop = 12;
+            const maxTrackTop = Math.max(minTrackTop, viewportHeight - (controlSize + 12));
+            const ratio = maxTrackTop === minTrackTop ? 0 : (nextTop - minTrackTop) / (maxTrackTop - minTrackTop);
+            root.scrollTop = maxScrollTop * ratio;
+        };
+
+        const handlePointerUp = () => setIsDraggingScrollControl(false);
+
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', handlePointerUp);
+
+        return () => {
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', handlePointerUp);
+        };
+    }, [isDraggingScrollControl]);
 
     useEffect(() => {
         if (activeTab === 'overview' && chartScrollRef.current && stats?.chartData) {
@@ -309,7 +532,7 @@ export default function AdminDashboard() {
 
                 if (scrollContainer) {
                     if (todayIndex !== -1) {
-                        const barGroupWidth = isMobile ? 80 : 120;
+                        const barGroupWidth = isMobile ? 84 : 96;
                         const targetScrollLeft = (todayIndex * barGroupWidth) - (scrollContainer.clientWidth / 2) + (barGroupWidth / 2);
                         scrollContainer.scrollLeft = Math.max(0, targetScrollLeft);
                     } else {
@@ -517,10 +740,12 @@ export default function AdminDashboard() {
         const token = localStorage.getItem('token');
         if (!token) return;
 
-        const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
+        const SOCKET_URL = isLanOrLocal ? window.location.origin : (import.meta.env.VITE_API_URL || window.location.origin);
         const socket = io(SOCKET_URL, {
             auth: { token },
-            transports: ['websocket', 'polling'], // Allow polling as fallback
+            transports: ['polling', 'websocket'],
+            upgrade: true,
+            timeout: 10000,
             reconnection: true,
         });
 
@@ -529,7 +754,12 @@ export default function AdminDashboard() {
         });
 
         socket.on('connect_error', (err) => {
-            console.error('Client: Socket Connection Error:', err);
+            const message = err?.message || '';
+            if (message.toLowerCase().includes('timeout')) {
+                console.warn('Client: Socket transport fallback in progress');
+                return;
+            }
+            console.warn('Client: Socket Connection Warning:', message || err);
         });
 
         socket.on('unethical_message_detected', (data) => {
@@ -1569,28 +1799,34 @@ export default function AdminDashboard() {
         if (!showNotifications) return null;
         return (
             <div className="admin-notification-dropdown" style={{
-                position: 'absolute', top: '55px', right: isMobile ? '10px' : '60px',
-                width: isMobile ? '280px' : '340px', background: 'white',
-                borderRadius: '12px', boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
-                zIndex: 3000, overflow: 'hidden', border: '1px solid #e9ecef',
+                position: isMobile ? 'fixed' : 'absolute',
+                top: isMobile ? '78px' : '55px',
+                right: isMobile ? '12px' : '60px',
+                left: isMobile ? '12px' : 'auto',
+                width: isMobile ? 'auto' : '360px',
+                maxWidth: isMobile ? 'none' : '360px',
+                background: '#111827',
+                borderRadius: '18px', boxShadow: '0 24px 60px rgba(2, 6, 23, 0.4)',
+                zIndex: 6000, overflow: 'hidden', border: '1px solid rgba(148, 163, 184, 0.14)',
                 animation: 'slideUp 0.3s ease-out'
             }}>
                 <div style={{
-                    padding: '16px', borderBottom: '1px solid #e9ecef',
+                    padding: '16px 18px', borderBottom: '1px solid rgba(148, 163, 184, 0.12)',
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    background: '#f8f9fe'
+                    background: '#172033'
                 }}>
-                    <span style={{ fontWeight: '700', color: '#111b21', fontSize: '0.95rem' }}>Review Box</span>
+                    <span style={{ fontWeight: '700', color: OFFICIAL_TEXT_PRIMARY, fontSize: '0.95rem' }}>Review Box</span>
                     <span style={{
-                        background: '#0FB5D0', color: 'white', padding: '2px 8px',
-                        borderRadius: '10px', fontSize: '0.7rem', fontWeight: '700'
+                        background: ADMIN_PILL_GRADIENT, color: 'white', padding: '3px 9px',
+                        borderRadius: '999px', fontSize: '0.7rem', fontWeight: '700',
+                        boxShadow: '0 10px 24px rgba(78, 89, 255, 0.24)'
                     }}>
                         {adminNotifications.length}
                     </span>
                 </div>
                 <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
                     {adminNotifications.length === 0 ? (
-                        <div style={{ padding: '40px 20px', textAlign: 'center', color: '#8898aa', fontSize: '0.85rem' }}>
+                        <div style={{ padding: '40px 20px', textAlign: 'center', color: OFFICIAL_TEXT_MUTED, fontSize: '0.85rem' }}>
                             <Bell size={30} style={{ margin: '0 auto 10px', opacity: 0.3, display: 'block' }} />
                             No recent actions to review
                         </div>
@@ -1600,61 +1836,59 @@ export default function AdminDashboard() {
                                 key={idx}
                                 onClick={() => handleViewAlert(alert)}
                                 style={{
-                                    padding: '12px 16px', borderBottom: '1px solid #f1f3f5',
+                                    padding: '14px 16px', borderBottom: '1px solid rgba(148, 163, 184, 0.1)',
                                     cursor: 'pointer', transition: 'background 0.2s',
                                     display: 'flex', gap: '12px', alignItems: 'flex-start'
                                 }}
-                                onMouseEnter={e => e.currentTarget.style.background = '#f8f9fe'}
-                                onMouseLeave={e => e.currentTarget.style.background = 'white'}
+                                onMouseEnter={e => e.currentTarget.style.background = '#162036'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                             >
                                 <div style={{
-                                    width: '36px', height: '36px', borderRadius: '50%',
-                                    background: alert.type === 'unethical' ? '#feebee' : 
-                                               alert.type === 'unblock_request' ? '#fff4e5' : 
-                                               alert.type === 'registration' ? '#e8f5e9' : 
-                                               alert.type === 'reset' ? '#f3e5f5' : '#e0f7fa',
+                                    width: '38px', height: '38px', borderRadius: '14px',
+                                    background: 'rgba(255,255,255,0.06)',
                                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    flexShrink: 0
+                                    flexShrink: 0,
+                                    border: '1px solid rgba(148, 163, 184, 0.1)'
                                 }}>
                                     {alert.type === 'unethical' ? (
                                         <AlertTriangle size={18} color="#f5365c" />
                                     ) : alert.type === 'unblock_request' ? (
-                                        <ShieldCheck size={18} color="#fb6340" />
+                                        <ShieldCheck size={18} color="#6e72ff" />
                                     ) : alert.type === 'registration' ? (
-                                        <UserCheck size={18} color="#2dce89" />
+                                        <UserCheck size={18} color="#2e7bff" />
                                     ) : alert.type === 'reset' ? (
-                                        <Key size={18} color="#8965e0" />
+                                        <Key size={18} color="#4e59ff" />
                                     ) : (
-                                        <Trash2 size={18} color="#0A7C8F" />
+                                        <Trash2 size={18} color="#1a9cff" />
                                     )}
                                 </div>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
-                                        <span style={{ fontWeight: '700', fontSize: '0.825rem', color: '#32325d' }}>
+                                        <span style={{ fontWeight: '700', fontSize: '0.825rem', color: OFFICIAL_TEXT_PRIMARY }}>
                                             {alert.type === 'unethical' ? 'Unethical Content' : 
                                              alert.type === 'unblock_request' ? 'Unblock Request' : 
                                              alert.type === 'registration' ? 'New Registration' : 
                                              alert.type === 'reset' ? 'Password Reset' : 'Message Deleted'}
                                         </span>
-                                        <span style={{ fontSize: '0.65rem', color: '#adb5bd' }}>
+                                        <span style={{ fontSize: '0.65rem', color: OFFICIAL_TEXT_MUTED }}>
                                             {new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                         </span>
                                     </div>
-                                    <div style={{ fontSize: '0.75rem', color: '#525f7f', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
+                                    <div style={{ fontSize: '0.75rem', color: OFFICIAL_TEXT_SECONDARY, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
                                         {alert.type === 'registration' ? <UserIcon size={12} /> : 
                                          alert.type === 'reset' ? <Key size={12} /> : 
                                          alert.type === 'unblock_request' ? <ShieldCheck size={12} /> : 
-                                         alert.isGroup ? <Users size={12} /> : <UserIcon size={12} />}
+                                            alert.isGroup ? <Users size={12} /> : <UserIcon size={12} />}
                                         <span style={{ fontWeight: '600' }}>{alert.deletedBy || alert.userName || alert.name}</span>
                                         {(alert.type === 'unethical' || alert.type === 'deletion') && (
                                             <>
-                                                <span style={{ color: '#adb5bd' }}>in</span>
-                                                <span style={{ fontWeight: '600', color: '#0A7C8F' }}>{alert.partnerName || 'Unknown Chat'}</span>
+                                                <span style={{ color: OFFICIAL_TEXT_MUTED }}>in</span>
+                                                <span style={{ fontWeight: '600', color: '#73a8ff' }}>{alert.partnerName || 'Unknown Chat'}</span>
                                             </>
                                         )}
                                     </div>
                                     <div style={{
-                                        fontSize: '0.75rem', color: '#8898aa',
+                                        fontSize: '0.75rem', color: OFFICIAL_TEXT_MUTED,
                                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                                         fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '4px'
                                     }}>
@@ -1684,8 +1918,8 @@ export default function AdminDashboard() {
                         onClick={(e) => { e.stopPropagation(); setAdminNotifications([]); }}
                         style={{
                             padding: '10px', textAlign: 'center', fontSize: '0.75rem',
-                            color: '#fb6340', fontWeight: '700', cursor: 'pointer',
-                            borderTop: '1px solid #e9ecef', background: '#fff'
+                            color: '#8ed2ff', fontWeight: '700', cursor: 'pointer',
+                            borderTop: '1px solid rgba(148, 163, 184, 0.12)', background: 'rgba(255,255,255,0.02)'
                         }}
                     >
                         Clear all notifications
@@ -1783,38 +2017,42 @@ export default function AdminDashboard() {
 
     const StatCard = ({ title, value, subtext, gradient, icon: Icon, onClick }) => (
         <div
+            className="stat-card"
             onClick={onClick}
             style={{
                 background: gradient,
                 padding: '1.5rem',
-                borderRadius: '10px',
+                borderRadius: '22px',
                 color: 'white',
-                boxShadow: '0 4px 15px rgba(10, 124, 143, 0.2)',
+                boxShadow: '0 18px 44px rgba(8, 15, 32, 0.24)',
                 position: 'relative',
                 overflow: 'hidden',
                 flex: 1,
-                minWidth: '300px',
-                minHeight: '180px',
+                minWidth: isMobile ? '100%' : '260px',
+                width: isMobile ? '100%' : 'auto',
+                minHeight: isMobile ? '152px' : '180px',
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
                 cursor: onClick ? 'pointer' : 'default',
                 transition: 'transform 0.2s',
+                border: '1px solid rgba(255, 255, 255, 0.12)'
             }}
             onMouseOver={(e) => onClick && (e.currentTarget.style.transform = 'translateY(-5px)')}
             onMouseOut={(e) => onClick && (e.currentTarget.style.transform = 'translateY(0)')}
         >
             {/* Background design dots/circles as seen in image */}
-            <div style={{ position: 'absolute', top: '-20px', right: '-20px', width: '100px', height: '100px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }}></div>
+            <div style={{ position: 'absolute', top: '-24px', right: '-24px', width: isMobile ? '84px' : '100px', height: isMobile ? '84px' : '100px', borderRadius: '50%', background: 'rgba(255,255,255,0.12)' }}></div>
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 45%)', pointerEvents: 'none' }} />
 
             <div style={{ zIndex: 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
                     <p style={{ fontSize: '0.95rem', fontWeight: '500', opacity: 0.9, margin: 0 }}>{title}</p>
                     <Icon size={24} style={{ opacity: 0.8 }} />
                 </div>
-                <h3 style={{ fontSize: '2.1rem', fontWeight: '600', margin: '0.5rem 0' }}>{value}</h3>
+                <h3 style={{ fontSize: isMobile ? '1.8rem' : '2.1rem', fontWeight: '600', margin: '0.5rem 0' }}>{value}</h3>
             </div>
-            <div style={{ zIndex: 1, fontSize: '0.85rem', fontWeight: '400', opacity: 0.9 }}>
+            <div style={{ zIndex: 1, fontSize: isMobile ? '0.8rem' : '0.85rem', fontWeight: '400', opacity: 0.9 }}>
                 {subtext}
             </div>
         </div>
@@ -1833,26 +2071,26 @@ export default function AdminDashboard() {
         return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
                 {query && searchMatches.length > 0 && (
-                    <div style={{ background: 'white', padding: '1.5rem', borderRadius: '1rem', boxShadow: '0 0 2rem rgba(0,0,0,0.05)', minWidth: 0 }}>
+                    <div className="admin-analytics-panel" style={{ padding: '1.5rem', borderRadius: '1.25rem', minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1rem' }}>
-                            <Search size={18} color="#0A7C8F" />
-                            <h4 style={{ margin: 0, fontWeight: '700', color: '#32325d' }}>Search Results of Users</h4>
+                            <Search size={18} color="#73a8ff" />
+                            <h4 style={{ margin: 0, fontWeight: '700', color: OFFICIAL_TEXT_PRIMARY }}>Search Results of Users</h4>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                             {searchMatches.slice(0, 5).map(u => (
-                                <div key={u.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem', background: '#f6f9fc', borderRadius: '8px', transition: 'all 0.2s', border: '1px solid transparent' }} className="hover-card">
+                                <div key={u.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.9rem', background: 'rgba(255,255,255,0.04)', borderRadius: '14px', transition: 'all 0.2s', border: '1px solid rgba(148, 163, 184, 0.12)' }} className="hover-card">
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flex: 1 }}>
-                                        <div style={{ width: '35px', height: '35px', background: 'linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #ced4da' }}>
-                                            <UserIcon size={16} color="#0A7C8F" />
+                                        <div style={{ width: '35px', height: '35px', background: 'rgba(255,255,255,0.06)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(148, 163, 184, 0.12)' }}>
+                                            <UserIcon size={16} color="#73a8ff" />
                                         </div>
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                            <div style={{ fontWeight: '700', color: '#32325d', fontSize: '0.95rem' }}>{u.name}</div>
+                                            <div style={{ fontWeight: '700', color: OFFICIAL_TEXT_PRIMARY, fontSize: '0.95rem' }}>{u.name}</div>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                <div style={{ fontSize: '0.75rem', color: '#8898aa', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                    <span style={{ fontWeight: '600', color: '#0A7C8F' }}>ID:</span> {u.login_id || 'N/A'}
+                                                <div style={{ fontSize: '0.75rem', color: OFFICIAL_TEXT_MUTED, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    <span style={{ fontWeight: '600', color: '#73a8ff' }}>ID:</span> {u.login_id || 'N/A'}
                                                 </div>
-                                                <span style={{ fontSize: '0.75rem', color: '#ced4da' }}>|</span>
-                                                <div style={{ fontSize: '0.75rem', color: '#8898aa' }}>{u.email}</div>
+                                                <span style={{ fontSize: '0.75rem', color: 'rgba(148, 163, 184, 0.45)' }}>|</span>
+                                                <div style={{ fontSize: '0.75rem', color: OFFICIAL_TEXT_MUTED }}>{u.email}</div>
                                             </div>
                                         </div>
                                     </div>
@@ -1860,19 +2098,19 @@ export default function AdminDashboard() {
                                         <button
                                             onClick={() => { setSearchQuery(''); setActiveTab('management'); }}
                                             style={{
-                                                background: 'white',
-                                                border: '1px solid #0A7C8F',
-                                                color: '#0A7C8F',
+                                                background: 'rgba(255,255,255,0.04)',
+                                                border: '1px solid rgba(115, 168, 255, 0.35)',
+                                                color: '#9ed6ff',
                                                 padding: '6px 16px',
                                                 borderRadius: '20px',
                                                 fontSize: '0.75rem',
                                                 fontWeight: '700',
                                                 cursor: 'pointer',
                                                 transition: 'all 0.2s',
-                                                boxShadow: '0 2px 4px rgba(10, 124, 143, 0.1)'
+                                                boxShadow: '0 10px 24px rgba(2, 6, 23, 0.12)'
                                             }}
-                                            onMouseOver={(e) => { e.currentTarget.style.background = '#0A7C8F'; e.currentTarget.style.color = 'white'; }}
-                                            onMouseOut={(e) => { e.currentTarget.style.background = 'white'; e.currentTarget.style.color = '#0A7C8F'; }}
+                                            onMouseOver={(e) => { e.currentTarget.style.background = ADMIN_PILL_GRADIENT; e.currentTarget.style.color = 'white'; e.currentTarget.style.borderColor = 'transparent'; }}
+                                            onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#9ed6ff'; e.currentTarget.style.borderColor = 'rgba(115, 168, 255, 0.35)'; }}
                                         >
                                             View in Users list
                                         </button>
@@ -1880,51 +2118,30 @@ export default function AdminDashboard() {
                                 </div>
                             ))}
                             {searchMatches.length > 5 && (
-                                <div style={{ textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', cursor: 'pointer' }} onClick={() => setActiveTab('management')}>
+                                <div style={{ textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, cursor: 'pointer' }} onClick={() => setActiveTab('management')}>
                                     View all {searchMatches.length} matches
                                 </div>
                             )}
                         </div>
                     </div>
                 )}
-                <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', justifyContent: isMobile ? 'center' : 'flex-start' }}>
-                    <StatCard
-                        title="Total Users"
-                        value={stats?.totalUsers || 0}
-                        subtext="Total registered members"
-                        gradient="linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)"
-                        icon={TrendingUp}
-                        onClick={() => setActiveTab('management')}
-                    />
-                    <StatCard
-                        title="Pending Approvals"
-                        value={stats?.pendingApprovals || 0}
-                        subtext="Waiting for your review"
-                        gradient="linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)"
-                        icon={LayoutDashboard}
-                        onClick={() => setActiveTab('pending')}
-                    />
-                    <StatCard
-                        title="Reset Requests"
-                        value={stats?.activeResets || 0}
-                        subtext="Active password reset tasks"
-                        gradient="linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)"
-                        icon={Key}
-                        onClick={() => setActiveTab('resets')}
-                    />
-                    <StatCard
-                        title="Unblock Requests"
-                        value={stats?.unblockRequests || 0}
-                        subtext="Users requesting restoration"
-                        gradient="linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)"
-                        icon={ShieldCheck}
-                        onClick={() => setActiveTab('unblock')}
-                    />
+                <div data-scroll-section="overview-metrics" style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', justifyContent: isMobile ? 'center' : 'flex-start', scrollMarginTop: '110px' }}>
+                    {overviewMetrics.map((metric) => (
+                        <StatCard
+                            key={metric.key}
+                            title={metric.label}
+                            value={metric.value}
+                            subtext={metric.subtext}
+                            gradient={metric.gradient}
+                            icon={metric.icon}
+                            onClick={metric.onClickTab ? () => setActiveTab(metric.onClickTab) : undefined}
+                        />
+                    ))}
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: '1.5rem', minHeight: '400px' }}>
+                <div className="dashboard-overview-grid" style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: '1.5rem', minHeight: '400px' }}>
                     {/* Bar Chart */}
-                    <div style={{ background: 'white', padding: '1.5rem', borderRadius: '1rem', boxShadow: '0 0 2rem rgba(0,0,0,0.05)', minWidth: 0 }}>
+                    <div data-scroll-section="overview-trends" className="admin-analytics-panel" style={{ padding: '1.5rem', borderRadius: '1.25rem', minWidth: 0, scrollMarginTop: '110px' }}>
                         <div style={{
                             display: 'flex',
                             flexDirection: 'column',
@@ -1933,104 +2150,96 @@ export default function AdminDashboard() {
                             marginBottom: '1.5rem',
                             textAlign: 'center'
                         }}>
-                            <h4 style={{ margin: 0, fontWeight: '700', color: '#32325d', width: '100%', textAlign: 'center' }}>User Activity & Request Trends</h4>
-                            <div style={{ display: 'flex', background: '#f6f9fc', padding: '4px', borderRadius: '8px' }}>
+                            <h4 style={{ margin: 0, fontWeight: '700', color: '#f8fafc', width: '100%', textAlign: 'center' }}>User Activity & Request Trends</h4>
+                            <div className="admin-period-toggle" style={{ display: 'flex', padding: '4px', borderRadius: '999px', width: isMobile ? '100%' : 'auto', justifyContent: 'center' }}>
                                 {['day', 'month', 'year'].map(p => (
-                                    <button key={p} onClick={() => setChartPeriod(p)} style={{ padding: '6px 16px', borderRadius: '6px', border: 'none', fontSize: '0.75rem', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s', background: chartPeriod === p ? 'white' : 'transparent', color: chartPeriod === p ? '#0FB5D0' : '#8898aa', boxShadow: chartPeriod === p ? '0 1px 3px rgba(50,50,93,.15), 0 1px 0 rgba(0,0,0,.02)' : 'none' }}>
+                                    <button
+                                        key={p}
+                                        onClick={() => setChartPeriod(p)}
+                                        style={{
+                                            padding: isMobile ? '8px 0' : '8px 18px',
+                                            borderRadius: '999px',
+                                            border: 'none',
+                                            fontSize: '0.78rem',
+                                            fontWeight: '700',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s',
+                                            background: chartPeriod === p ? ADMIN_PILL_GRADIENT : 'transparent',
+                                            color: chartPeriod === p ? '#f8fafc' : '#94a3b8',
+                                            boxShadow: chartPeriod === p ? '0 10px 24px rgba(78, 89, 255, 0.28)' : 'none',
+                                            minWidth: isMobile ? '0' : '88px',
+                                            flex: isMobile ? 1 : 'unset'
+                                        }}
+                                    >
                                         {p.charAt(0).toUpperCase() + p.slice(1)}
                                     </button>
                                 ))}
                             </div>
                         </div>
 
-                        {/* Chart Area with fixed Y Axis and scrollable Bar area */}
-                        <div style={{ display: 'flex', height: '300px', width: '100%', position: 'relative' }}>
-                            {(() => {
-                                const fullData = processChartData(stats?.chartData[chartPeriod] || []);
-                                const barGroupWidth = isMobile ? 80 : 120;
-                                const calculatedWidth = fullData.length * barGroupWidth;
-
-                                return (
-                                    <>
-                                        {/* Fixed Y-Axis Container */}
-                                        <div style={{ width: '40px', height: '100%', flexShrink: 0, zIndex: 10, background: 'white' }}>
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={fullData} margin={{ left: -25, right: 0, top: 0, bottom: isMobile ? 50 : 40 }}>
-                                                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#8898aa', fontSize: 12 }} />
-                                                    <Bar dataKey="maxVal" opacity={0} isAnimationActive={false} />
-                                                </BarChart>
-                                            </ResponsiveContainer>
-                                        </div>
-
-                                        {/* Scrollable Bar Area */}
-                                        <div
-                                            ref={chartScrollRef}
-                                            style={{
-                                                flex: 1,
-                                                overflowX: 'auto',
-                                                overflowY: 'hidden',
-                                                scrollBehavior: 'smooth',
-                                                minWidth: 0
+                        <div
+                            ref={chartScrollRef}
+                            className="table-responsive"
+                            style={{
+                                height: '320px',
+                                width: '100%',
+                                overflowX: 'auto',
+                                overflowY: 'hidden',
+                                scrollBehavior: 'smooth'
+                            }}
+                        >
+                            <div style={{ width: `${Math.max(activeChartData.length * (isMobile ? 84 : 96), 560)}px`, minWidth: '100%', height: '100%' }}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={activeChartData} margin={{ top: 10, right: 16, left: isMobile ? -18 : 0, bottom: 18 }} barGap={6} barCategoryGap={isMobile ? '28%' : '20%'}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.18)" />
+                                        <XAxis
+                                            dataKey="name"
+                                            axisLine={false}
+                                            tickLine={false}
+                                            tick={{ fill: '#94a3b8', fontSize: isMobile ? 10 : 12 }}
+                                            interval={0}
+                                            height={50}
+                                            tickFormatter={(val) => {
+                                                if (!val) return '';
+                                                if (chartPeriod === 'day') {
+                                                    const [y, m, d] = val.split('-');
+                                                    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                                                    const month = monthNames[parseInt(m, 10) - 1];
+                                                    const shortYear = y.substring(2);
+                                                    return isMobile ? `${parseInt(d, 10)} ${month}` : `${parseInt(d, 10)} ${month} '${shortYear}`;
+                                                }
+                                                if (chartPeriod === 'month') {
+                                                    const [y, m] = val.split('-');
+                                                    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                                                    return `${monthNames[parseInt(m, 10) - 1]} '${y.substring(2)}`;
+                                                }
+                                                return val;
                                             }}
-                                            className="table-responsive"
-                                        >
-                                            <div style={{ width: calculatedWidth > 0 ? `${calculatedWidth}px` : '100%', height: '100%', minWidth: '100%' }}>
-                                                <ResponsiveContainer width="100%" height="100%">
-                                                    <BarChart data={fullData} margin={{ left: 0, right: 10, top: 10, bottom: 60 }}>
-                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e9ecef" />
-                                                        <XAxis
-                                                            dataKey="name"
-                                                            axisLine={false}
-                                                            tickLine={false}
-                                                            tick={{ fill: '#8898aa', fontSize: isMobile ? 10 : 12 }}
-                                                            dy={isMobile ? 18 : 10}
-                                                            interval={0}
-                                                            angle={0}
-                                                            textAnchor="middle"
-                                                            height={isMobile ? 65 : 40}
-                                                            tickFormatter={(val) => {
-                                                                if (!val) return '';
-                                                                if (chartPeriod === 'day') {
-                                                                    const [y, m, d] = val.split('-');
-                                                                    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                                                                    const month = monthNames[parseInt(m) - 1];
-                                                                    const shortYear = y.substring(2);
-                                                                    return isMobile ? `${parseInt(d)} ${month} '${shortYear}` : `${parseInt(d)} ${month}`;
-                                                                }
-                                                                if (chartPeriod === 'month') {
-                                                                    const [y, m] = val.split('-');
-                                                                    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                                                                    const month = monthNames[parseInt(m) - 1];
-                                                                    const shortYear = y.substring(2);
-                                                                    return `${month} '${shortYear}`;
-                                                                }
-                                                                return val;
-                                                            }}
-                                                        />
-                                                        <YAxis hide domain={[0, 'auto']} />
-                                                        <Tooltip content={<CustomTooltip scrollRef={chartScrollRef} />} cursor={{ fill: '#f6f9fc' }} />
-                                                        <Bar dataKey="maxVal" shape={<CustomBar />} legendType="none" tabIndex={-1} />
-                                                    </BarChart>
-                                                </ResponsiveContainer>
-                                            </div>
-                                        </div>
-                                    </>
-                                );
-                            })()}
+                                        />
+                                        <YAxis axisLine={false} tickLine={false} allowDecimals={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
+                                        <Tooltip content={<CustomTooltip seriesMetaMap={chartSeriesMetaMap} />} cursor={{ fill: 'rgba(79, 107, 255, 0.08)' }} />
+                                        {chartSeries.map((series) => (
+                                            <Bar
+                                                key={series.key}
+                                                dataKey={series.key}
+                                                fill={series.color}
+                                                radius={[8, 8, 0, 0]}
+                                                maxBarSize={20}
+                                                tabIndex={-1}
+                                            />
+                                        ))}
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
                         </div>
 
-                        {/* Legend outside the scrollable area */}
                         <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'center' }}>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', justifyContent: 'center' }}>
-                                {[
-                                    { color: '#0A7C8F', label: 'Approved Users', count: stats?.totalUsers || 0 },
-                                    { color: '#0FB5D0', label: 'Pending Approvals', count: stats?.pendingApprovals || 0 },
-                                    { color: '#2BC9E4', label: 'Reset Requests', count: stats?.activeResets || 0 }
-                                ].map((item, i) => (
-                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                        <div style={{ width: '12px', height: '12px', background: item.color, borderRadius: '2px' }} />
-                                        <span style={{ fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>
-                                            {item.label} <span style={{ color: item.color, marginLeft: '4px' }}>{item.count}</span>
+                                {chartSeries.map((item) => (
+                                    <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <div style={{ width: '12px', height: '12px', background: item.color, borderRadius: '999px', boxShadow: `0 0 12px ${item.color}55` }} />
+                                        <span style={{ fontSize: '0.82rem', color: '#cbd5e1', fontWeight: '600' }}>
+                                            {item.label} <span style={{ color: item.color, marginLeft: '4px' }}>{item.totalKey ? (normalizedStats?.[item.totalKey] || 0) : '-'}</span>
                                         </span>
                                     </div>
                                 ))}
@@ -2039,74 +2248,38 @@ export default function AdminDashboard() {
                     </div>
 
                     {/* Pie Chart */}
-                    <div style={{ background: 'white', padding: '1.5rem', borderRadius: '1rem', boxShadow: '0 0 2rem rgba(0,0,0,0.05)', textAlign: 'center', position: 'relative' }}>
-                        <h4 style={{ margin: '0 0 1.5rem 0', fontWeight: '700', color: '#32325d', textAlign: 'center' }}>User Status Distribution</h4>
-                        <div style={{ height: '320px', width: '100%', position: 'relative' }}>
-                            {(() => {
-                                const COLORS = ['#0a7789', '#0eabc4', '#23d2ef'];
-                                const pieData = [
-                                    { name: 'Approved Users', value: stats?.totalUsers || 0 },
-                                    { name: 'Pending Approvals', value: stats?.pendingApprovals || 0 },
-                                    { name: 'Reset Requests', value: stats?.activeResets || 0 }
-                                ].map(item => ({
-                                    ...item,
-                                    // Visual trick: use a small value for 0 counts to make the slice visible
-                                    renderValue: item.value === 0 ? 0.8 : item.value
-                                }));
-                                return (
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <PieChart>
-                                            <Pie
-                                                data={pieData}
-                                                innerRadius={isMobile ? 70 : 85}
-                                                outerRadius={isMobile ? 100 : 120}
-                                                paddingAngle={2}
-                                                dataKey="renderValue"
-                                                tabIndex={-1}
-                                            >
-                                                {pieData.map((entry, index) => (
-                                                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} style={{ outline: 'none' }} />
-                                                ))}
-                                            </Pie>
-                                            <Tooltip
-                                                formatter={(value, name, props) => [props.payload.value, name]}
-                                                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                                            />
-                                        </PieChart>
-                                    </ResponsiveContainer>
-                                );
-                            })()}
+                    <div data-scroll-section="overview-distribution" className="admin-analytics-panel" style={{ padding: '1.5rem', borderRadius: '1.25rem', textAlign: 'center', position: 'relative', scrollMarginTop: '110px' }}>
+                        <h4 style={{ margin: '0 0 1.5rem 0', fontWeight: '700', color: '#f8fafc', textAlign: 'center' }}>User Status Distribution</h4>
+                        <div style={{ height: '280px', width: '100%', position: 'relative' }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie
+                                        data={distributionMetrics}
+                                        innerRadius={isMobile ? 68 : 84}
+                                        outerRadius={isMobile ? 98 : 118}
+                                        paddingAngle={2}
+                                        dataKey="renderValue"
+                                        stroke="none"
+                                        tabIndex={-1}
+                                    >
+                                        {distributionMetrics.map((entry, index) => (
+                                            <Cell key={`cell-${entry.key}-${index}`} fill={entry.color} stroke="none" style={{ outline: 'none' }} />
+                                        ))}
+                                    </Pie>
+                                    <Tooltip content={<PieTooltip />} />
+                                </PieChart>
+                            </ResponsiveContainer>
                         </div>
 
-                        {/* Custom Legend - Reorganized Layout */}
-                        <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
-                            {/* Row 1: Approved and Pending */}
-                            <div style={{ display: 'flex', gap: isMobile ? '1rem' : '1.5rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-                                {[
-                                    { color: '#0a7789', label: 'Approved Users', count: stats?.totalUsers || 0 },
-                                    { color: '#0eabc4', label: 'Pending Approvals', count: stats?.pendingApprovals || 0 }
-                                ].map((item, i) => (
-                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                        <div style={{ width: '14px', height: '14px', background: item.color, borderRadius: '3px' }} />
-                                        <span style={{ fontSize: isMobile ? '0.75rem' : '0.85rem', color: '#8898aa', fontWeight: '600' }}>
-                                            {item.label} <span style={{ color: item.color, marginLeft: '4px' }}>{item.count}</span>
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-                            {/* Row 2: Reset Requests (Centered) */}
-                            <div style={{ display: 'flex', justifyContent: 'center' }}>
-                                {[
-                                    { color: '#23d2ef', label: 'Reset Requests', count: stats?.activeResets || 0 }
-                                ].map((item, i) => (
-                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                        <div style={{ width: '14px', height: '14px', background: item.color, borderRadius: '3px' }} />
-                                        <span style={{ fontSize: isMobile ? '0.75rem' : '0.85rem', color: '#8898aa', fontWeight: '600' }}>
-                                            {item.label} <span style={{ color: item.color, marginLeft: '4px' }}>{item.count}</span>
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
+                        <div style={{ marginTop: '1.5rem', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '0.9rem 1.25rem' }}>
+                            {distributionMetrics.map((item) => (
+                                <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <div style={{ width: '14px', height: '14px', background: item.color, borderRadius: '999px', boxShadow: `0 0 12px ${item.color}55` }} />
+                                    <span style={{ fontSize: isMobile ? '0.75rem' : '0.85rem', color: '#cbd5e1', fontWeight: '600' }}>
+                                        {item.label} <span style={{ color: item.color, marginLeft: '4px' }}>{item.value}</span>
+                                    </span>
+                                </div>
+                            ))}
                         </div>
                     </div>
                 </div>
@@ -2133,18 +2306,22 @@ export default function AdminDashboard() {
         });
 
         return (
-            <div style={{ background: 'white', borderRadius: '1rem', overflowX: 'auto', boxShadow: '0 0 2rem rgba(0,0,0,0.05)' }}>
-                <table style={{ minWidth: isMobile ? '800px' : '100%', borderCollapse: 'collapse' }}>
+            <div
+                data-scroll-section={listType}
+                className="admin-data-panel table-responsive"
+                style={{ borderRadius: '1.25rem', overflowX: 'auto', scrollMarginTop: '110px' }}
+            >
+                <table style={{ minWidth: listType === 'pending' ? (isMobile ? '1120px' : '1280px') : (isMobile ? '800px' : '100%'), borderCollapse: 'collapse' }}>
                     <thead>
-                        <tr style={{ background: '#f6f9fc', borderBottom: '1px solid #e9ecef' }}>
-                            <th style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>Sl.No</th>
-                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>USER</th>
-                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>ROLE</th>
-                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>EMAIL</th>
-                            {(listType === 'management' || listType === 'pending') && <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600', whiteSpace: 'nowrap' }}>LOGIN ID</th>}
-                            {listType === 'pending' && <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>PASSWORD ALLOCATION</th>}
-                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600', whiteSpace: 'nowrap' }}>DATE & TIME</th>
-                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>MANAGE</th>
+                        <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(148, 163, 184, 0.12)' }}>
+                            <th style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>Sl.No</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>USER</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>ROLE</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>EMAIL</th>
+                            {(listType === 'management' || listType === 'pending') && <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600', whiteSpace: 'nowrap' }}>LOGIN ID</th>}
+                            {listType === 'pending' && <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>PASSWORD ALLOCATION</th>}
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600', whiteSpace: 'nowrap' }}>DATE & TIME</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>MANAGE</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -2159,37 +2336,37 @@ export default function AdminDashboard() {
                                 }}
                                 className="hover-row"
                                 onMouseOver={(e) => {
-                                    e.currentTarget.style.transform = 'translateY(-3px)';
-                                    e.currentTarget.style.background = '#fff';
-                                    e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.1)';
+                                    e.currentTarget.style.transform = 'none';
+                                    e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                                    e.currentTarget.style.boxShadow = '0 16px 36px rgba(2, 6, 23, 0.18)';
                                     e.currentTarget.style.zIndex = '1';
                                 }}
                                 onMouseOut={(e) => {
-                                    e.currentTarget.style.transform = 'translateY(0)';
+                                    e.currentTarget.style.transform = 'none';
                                     e.currentTarget.style.background = 'transparent';
                                     e.currentTarget.style.boxShadow = 'none';
                                     e.currentTarget.style.zIndex = '0';
                                 }}
                             >
-                                <td style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.9rem', color: '#525f7f' }}>{i + 1}</td>
+                                <td style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.9rem', color: OFFICIAL_TEXT_MUTED }}>{i + 1}</td>
                                 <td style={{ padding: '1rem' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                         <div style={{ textAlign: 'center' }}>
-                                            <div style={{ fontWeight: '600', color: '#32325d' }}>{u.name}</div>
+                                            <div style={{ fontWeight: '600', color: OFFICIAL_TEXT_PRIMARY }}>{u.name}</div>
                                         </div>
                                     </div>
                                 </td>
-                                <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.9rem', color: '#525f7f', fontWeight: '500' }}>
+                                <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.9rem', color: OFFICIAL_TEXT_SECONDARY, fontWeight: '500' }}>
                                     <span style={{
                                         display: 'inline-flex',
                                         alignItems: 'center',
                                         justifyContent: 'center',
                                         textAlign: 'center',
                                         padding: '4px 12px',
-                                        background: '#f6f9fc',
+                                        background: 'rgba(255,255,255,0.05)',
                                         borderRadius: '4px',
                                         fontSize: '0.75rem',
-                                        color: '#0A7C8F',
+                                        color: '#73a8ff',
                                         fontWeight: '700',
                                         minWidth: '60px',
                                         lineHeight: '1.2'
@@ -2197,8 +2374,19 @@ export default function AdminDashboard() {
                                         {u.designation || (u.role === 'admin' ? 'Admin' : 'User')}
                                     </span>
                                 </td>
-                                <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.9rem', color: '#525f7f', maxWidth: '180px', wordBreak: 'break-all', whiteSpace: 'normal' }}>{u.email}</td>
-                                {listType === 'management' && <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.9rem', color: '#525f7f' }}>{u.login_id}</td>}
+                                <td
+                                    style={{
+                                        padding: '1rem',
+                                        textAlign: 'center',
+                                        fontSize: '0.9rem',
+                                        color: OFFICIAL_TEXT_SECONDARY,
+                                        minWidth: listType === 'pending' ? '260px' : '180px',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    {u.email}
+                                </td>
+                                {listType === 'management' && <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.9rem', color: OFFICIAL_TEXT_SECONDARY }}>{u.login_id}</td>}
                                 {listType === 'pending' && (
                                     <td style={{ padding: '1rem', textAlign: 'center' }}>
                                         <input
@@ -2260,10 +2448,10 @@ export default function AdminDashboard() {
                                         </div>
                                     </td>
                                 )}
-                                <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.85rem', color: '#8898aa' }}>
+                                <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.85rem', color: OFFICIAL_TEXT_MUTED }}>
                                     {u.created_at ? (
                                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '2px' }}>
-                                            <div style={{ fontWeight: '600', color: '#525f7f' }}>{new Date(u.created_at).toLocaleDateString('en-IN')}</div>
+                                            <div style={{ fontWeight: '600', color: OFFICIAL_TEXT_SECONDARY }}>{new Date(u.created_at).toLocaleDateString('en-IN')}</div>
                                             <div style={{ fontSize: '0.75rem', opacity: 0.8, whiteSpace: 'nowrap' }}>
                                                 {new Date(u.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
                                             </div>
@@ -2282,22 +2470,9 @@ export default function AdminDashboard() {
                                                         }
                                                         handleApprove(u.id);
                                                     }}
-                                                    style={{ background: '#fff', color: '#0A7C8F', padding: '8px 12px', width: '110px', minWidth: '110px', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '700', transition: 'all 0.2s', boxShadow: '0 4px 6px -1px rgba(10, 124, 143, 0.1)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', whiteSpace: 'nowrap', outline: 'none' }}
-                                                    className="hover-card"
-                                                    onMouseOver={(e) => {
-                                                        e.currentTarget.style.background = 'linear-gradient(135deg, #0A7C8F 0%, #0FB5D0 100%)';
-                                                        e.currentTarget.style.color = 'white';
-                                                        e.currentTarget.style.transform = 'translateY(-1px)';
-                                                        e.currentTarget.style.border = 'none';
-                                                        e.currentTarget.style.outline = 'none';
-                                                    }}
-                                                    onMouseOut={(e) => {
-                                                        e.currentTarget.style.background = '#fff';
-                                                        e.currentTarget.style.color = '#0A7C8F';
-                                                        e.currentTarget.style.transform = 'translateY(0)';
-                                                        e.currentTarget.style.border = 'none';
-                                                        e.currentTarget.style.outline = 'none';
-                                                    }}
+                                                    style={getActionButtonStyle('primary')}
+                                                    onMouseOver={(e) => applyActionButtonHover(e.currentTarget, 'primary', true)}
+                                                    onMouseOut={(e) => applyActionButtonHover(e.currentTarget, 'primary', false)}
                                                 >
                                                     <Check size={16} /> Approve
                                                 </button>
@@ -2309,22 +2484,9 @@ export default function AdminDashboard() {
                                                         closeConfirm();
                                                         showSnackbar(`Pending Approval rejected for: ${u.name} (${u.login_id || u.email})`, 'success');
                                                     })}
-                                                    style={{ background: '#fff', color: '#f5365c', padding: '8px 12px', width: '110px', minWidth: '110px', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '700', transition: 'all 0.2s', boxShadow: '0 4px 6px -1px rgba(245, 54, 92, 0.1)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', whiteSpace: 'nowrap', outline: 'none' }}
-                                                    className="hover-card"
-                                                    onMouseOver={(e) => {
-                                                        e.currentTarget.style.background = '#f5365c';
-                                                        e.currentTarget.style.color = 'white';
-                                                        e.currentTarget.style.transform = 'translateY(-1px)';
-                                                        e.currentTarget.style.border = 'none';
-                                                        e.currentTarget.style.outline = 'none';
-                                                    }}
-                                                    onMouseOut={(e) => {
-                                                        e.currentTarget.style.background = '#fff';
-                                                        e.currentTarget.style.color = '#f5365c';
-                                                        e.currentTarget.style.transform = 'translateY(0)';
-                                                        e.currentTarget.style.border = 'none';
-                                                        e.currentTarget.style.outline = 'none';
-                                                    }}
+                                                    style={getActionButtonStyle('danger')}
+                                                    onMouseOver={(e) => applyActionButtonHover(e.currentTarget, 'danger', true)}
+                                                    onMouseOut={(e) => applyActionButtonHover(e.currentTarget, 'danger', false)}
                                                 >
                                                     <X size={16} /> Reject
                                                 </button>
@@ -2333,22 +2495,9 @@ export default function AdminDashboard() {
                                             <>
                                                 <button
                                                     onClick={() => handleReviewChat(u)}
-                                                    style={{ background: '#fff', color: '#0A7C8F', padding: '8px 12px', width: '110px', minWidth: '110px', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '700', transition: 'all 0.2s', boxShadow: '0 4px 6px -1px rgba(10, 124, 143, 0.1)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', whiteSpace: 'nowrap', outline: 'none' }}
-                                                    className="hover-card"
-                                                    onMouseOver={(e) => {
-                                                        e.currentTarget.style.background = 'linear-gradient(135deg, #0A7C8F 0%, #0FB5D0 100%)';
-                                                        e.currentTarget.style.color = 'white';
-                                                        e.currentTarget.style.transform = 'translateY(-1px)';
-                                                        e.currentTarget.style.border = 'none';
-                                                        e.currentTarget.style.outline = 'none';
-                                                    }}
-                                                    onMouseOut={(e) => {
-                                                        e.currentTarget.style.background = '#fff';
-                                                        e.currentTarget.style.color = '#0A7C8F';
-                                                        e.currentTarget.style.transform = 'translateY(0)';
-                                                        e.currentTarget.style.border = 'none';
-                                                        e.currentTarget.style.outline = 'none';
-                                                    }}
+                                                    style={getActionButtonStyle('primary')}
+                                                    onMouseOver={(e) => applyActionButtonHover(e.currentTarget, 'primary', true)}
+                                                    onMouseOut={(e) => applyActionButtonHover(e.currentTarget, 'primary', false)}
                                                 >
                                                     <MessageSquare size={16} /> Review
                                                 </button>
@@ -2360,22 +2509,9 @@ export default function AdminDashboard() {
                                                         closeConfirm();
                                                         showSnackbar(`Total User deleted: ${u.name} (${u.login_id || u.email})`, 'success');
                                                     })}
-                                                    style={{ background: '#fff', color: '#f5365c', padding: '8px 12px', width: '110px', minWidth: '110px', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '700', transition: 'all 0.2s', boxShadow: '0 4px 6px -1px rgba(245, 54, 92, 0.1)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', whiteSpace: 'nowrap', outline: 'none' }}
-                                                    className="hover-card"
-                                                    onMouseOver={(e) => {
-                                                        e.currentTarget.style.background = '#f5365c';
-                                                        e.currentTarget.style.color = 'white';
-                                                        e.currentTarget.style.transform = 'translateY(-1px)';
-                                                        e.currentTarget.style.border = 'none';
-                                                        e.currentTarget.style.outline = 'none';
-                                                    }}
-                                                    onMouseOut={(e) => {
-                                                        e.currentTarget.style.background = '#fff';
-                                                        e.currentTarget.style.color = '#f5365c';
-                                                        e.currentTarget.style.transform = 'translateY(0)';
-                                                        e.currentTarget.style.border = 'none';
-                                                        e.currentTarget.style.outline = 'none';
-                                                    }}
+                                                    style={getActionButtonStyle('danger')}
+                                                    onMouseOver={(e) => applyActionButtonHover(e.currentTarget, 'danger', true)}
+                                                    onMouseOut={(e) => applyActionButtonHover(e.currentTarget, 'danger', false)}
                                                 >
                                                     <Trash2 size={16} /> Delete
                                                 </button>
@@ -2401,22 +2537,22 @@ export default function AdminDashboard() {
         );
 
         return (
-            <div style={{ background: 'white', borderRadius: '1rem', overflowX: 'auto', boxShadow: '0 0 2rem rgba(0,0,0,0.05)' }}>
+            <div data-scroll-section="resets" className="admin-data-panel" style={{ borderRadius: '1.25rem', overflowX: 'auto', scrollMarginTop: '110px' }}>
                 {filteredResets.length === 0 ? (
-                    <div style={{ padding: '3rem', textAlign: 'center', color: '#8898aa' }}>
+                    <div style={{ padding: '3rem', textAlign: 'center', color: OFFICIAL_TEXT_MUTED }}>
                         <Search size={40} style={{ marginBottom: '1rem', opacity: 0.3 }} />
                         <div>No password reset requests found{query ? ` for "${searchQuery}"` : ''}.</div>
                     </div>
                 ) : (
                     <table style={{ minWidth: isMobile ? '800px' : '100%', borderCollapse: 'collapse' }}>
                         <thead>
-                            <tr style={{ background: '#f6f9fc', borderBottom: '1px solid #e9ecef' }}>
-                                <th style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>Sl.No</th>
-                                <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>USER</th>
-                                <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600', whiteSpace: 'nowrap' }}>LOGIN ID</th>
-                                <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>NEW PASSWORD</th>
-                                <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600', whiteSpace: 'nowrap' }}>DATE & TIME</th>
-                                <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>MANAGE</th>
+                            <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(148, 163, 184, 0.12)' }}>
+                                <th style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>Sl.No</th>
+                                <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>USER</th>
+                                <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600', whiteSpace: 'nowrap' }}>LOGIN ID</th>
+                                <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>NEW PASSWORD</th>
+                                <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600', whiteSpace: 'nowrap' }}>DATE & TIME</th>
+                                <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>MANAGE</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -2430,23 +2566,23 @@ export default function AdminDashboard() {
                                         zIndex: 0
                                     }}
                                     onMouseOver={(e) => {
-                                        e.currentTarget.style.transform = 'translateY(-3px)';
-                                        e.currentTarget.style.background = '#fff';
-                                        e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.1)';
+                                        e.currentTarget.style.transform = 'none';
+                                        e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                                        e.currentTarget.style.boxShadow = '0 16px 36px rgba(2, 6, 23, 0.18)';
                                         e.currentTarget.style.zIndex = '1';
                                     }}
                                     onMouseOut={(e) => {
-                                        e.currentTarget.style.transform = 'translateY(0)';
+                                        e.currentTarget.style.transform = 'none';
                                         e.currentTarget.style.background = 'transparent';
                                         e.currentTarget.style.boxShadow = 'none';
                                         e.currentTarget.style.zIndex = '0';
                                     }}
                                 >
-                                    <td style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.9rem', color: '#525f7f' }}>{i + 1}</td>
+                                    <td style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.9rem', color: OFFICIAL_TEXT_MUTED }}>{i + 1}</td>
                                     <td style={{ padding: '1rem', textAlign: 'center' }}>
-                                        <div style={{ fontWeight: '600', color: '#32325d' }}>{r.name}</div>
+                                        <div style={{ fontWeight: '600', color: OFFICIAL_TEXT_PRIMARY }}>{r.name}</div>
                                     </td>
-                                    <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.9rem', color: '#525f7f' }}>{r.login_id}</td>
+                                    <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.9rem', color: OFFICIAL_TEXT_SECONDARY }}>{r.login_id}</td>
                                     <td style={{ padding: '1rem' }}>
                                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
                                             <div style={{ position: 'relative' }}>
@@ -2509,10 +2645,10 @@ export default function AdminDashboard() {
                                             </div>
                                         </div>
                                     </td>
-                                    <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.85rem', color: '#8898aa' }}>
+                                    <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.85rem', color: OFFICIAL_TEXT_MUTED }}>
                                         {r.created_at ? (
                                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                                                <div style={{ fontWeight: '600', color: '#525f7f' }}>{new Date(r.created_at).toLocaleDateString('en-IN')}</div>
+                                                <div style={{ fontWeight: '600', color: OFFICIAL_TEXT_SECONDARY }}>{new Date(r.created_at).toLocaleDateString('en-IN')}</div>
                                                 <div style={{ fontSize: '0.75rem', opacity: 0.8, whiteSpace: 'nowrap' }}>
                                                     {new Date(r.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
                                                 </div>
@@ -2523,22 +2659,9 @@ export default function AdminDashboard() {
                                         <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem' }}>
                                             <button
                                                 onClick={() => handleReset(r.id, r.user_id)}
-                                                style={{ background: '#fff', color: '#0A7C8F', padding: '8px 12px', width: '110px', minWidth: '110px', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '700', transition: 'all 0.2s', boxShadow: '0 4px 6px -1px rgba(10, 124, 143, 0.1)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', whiteSpace: 'nowrap', outline: 'none' }}
-                                                className="hover-card"
-                                                onMouseOver={(e) => {
-                                                    e.currentTarget.style.background = 'linear-gradient(135deg, #0A7C8F 0%, #0FB5D0 100%)';
-                                                    e.currentTarget.style.color = 'white';
-                                                    e.currentTarget.style.border = 'none';
-                                                    e.currentTarget.style.outline = 'none';
-                                                    e.currentTarget.style.transform = 'translateY(-1px)';
-                                                }}
-                                                onMouseOut={(e) => {
-                                                    e.currentTarget.style.background = '#fff';
-                                                    e.currentTarget.style.color = '#0A7C8F';
-                                                    e.currentTarget.style.border = 'none';
-                                                    e.currentTarget.style.outline = 'none';
-                                                    e.currentTarget.style.transform = 'translateY(0)';
-                                                }}
+                                                style={getActionButtonStyle('primary')}
+                                                onMouseOver={(e) => applyActionButtonHover(e.currentTarget, 'primary', true)}
+                                                onMouseOut={(e) => applyActionButtonHover(e.currentTarget, 'primary', false)}
                                             >
                                                 <RefreshCw size={16} /> Update
                                             </button>
@@ -2548,17 +2671,11 @@ export default function AdminDashboard() {
                                                     fetchData();
                                                     fetchStats();
                                                     closeConfirm();
-                                                    showSnackbar(`Reset Request deleted for: ${r.name} (${r.login_id})`, 'success');
+                                                    showSnackbar(`Reset Request deleted for: ${r.name}`, 'success');
                                                 })}
-                                                style={{ background: '#fff', color: '#f5365c', padding: '8px 12px', width: '110px', minWidth: '110px', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '700', transition: 'all 0.2s', boxShadow: '0 4px 6px -1px rgba(245, 54, 92, 0.1)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', whiteSpace: 'nowrap', outline: 'none' }}
-                                                className="hover-card"
-                                                onMouseOver={(e) => {
-                                                    e.currentTarget.style.background = '#f5365c';
-                                                    e.currentTarget.style.color = 'white';
-                                                    e.currentTarget.style.transform = 'translateY(-1px)';
-                                                    e.currentTarget.style.border = 'none';
-                                                    e.currentTarget.style.outline = 'none';
-                                                }}
+                                                style={getActionButtonStyle('danger')}
+                                                onMouseOver={(e) => applyActionButtonHover(e.currentTarget, 'danger', true)}
+                                                onMouseOut={(e) => applyActionButtonHover(e.currentTarget, 'danger', false)}
                                             >
                                                 <Trash2 size={16} /> Delete
                                             </button>
@@ -2668,52 +2785,52 @@ export default function AdminDashboard() {
 
         if (unblockReqs.length === 0) {
             return (
-                <div style={{ background: 'white', borderRadius: '1rem', padding: '3rem', textAlign: 'center', boxShadow: '0 0 2rem rgba(0,0,0,0.05)' }}>
-                    <ShieldCheck size={48} color="#e9ecef" style={{ marginBottom: '1rem' }} />
-                    <h3 style={{ margin: 0, color: '#32325d' }}>No pending unblock requests</h3>
-                    <p style={{ color: '#8898aa', marginTop: '0.5rem' }}>All messaging restrictions are currently active or resolved.</p>
+                <div data-scroll-section="unblock" className="admin-empty-panel" style={{ borderRadius: '1.25rem', padding: '3rem', textAlign: 'center', scrollMarginTop: '110px' }}>
+                    <ShieldCheck size={48} color="#6e72ff" style={{ marginBottom: '1rem', opacity: 0.8 }} />
+                    <h3 style={{ margin: 0, color: OFFICIAL_TEXT_PRIMARY }}>No pending unblock requests</h3>
+                    <p style={{ color: OFFICIAL_TEXT_MUTED, marginTop: '0.5rem' }}>All messaging restrictions are currently active or resolved.</p>
                 </div>
             );
         }
 
         return (
-            <div style={{ background: 'white', borderRadius: '1rem', overflowX: 'auto', boxShadow: '0 0 2rem rgba(0,0,0,0.05)' }}>
+            <div data-scroll-section="unblock" className="admin-data-panel" style={{ borderRadius: '1.25rem', overflowX: 'auto', scrollMarginTop: '110px' }}>
                 <table style={{ minWidth: isMobile ? '800px' : '100%', borderCollapse: 'collapse' }}>
                     <thead>
-                        <tr style={{ background: '#f6f9fc', borderBottom: '1px solid #e9ecef' }}>
-                            <th style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>SL.NO</th>
-                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>USER</th>
-                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>JUSTIFICATION / REASON</th>
-                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>STRIKES</th>
-                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: '#8898aa', fontWeight: '600' }}>MANAGE</th>
+                        <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(148, 163, 184, 0.12)' }}>
+                            <th style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>SL.NO</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>USER</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>JUSTIFICATION / REASON</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>STRIKES</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>MANAGE</th>
                         </tr>
                     </thead>
                     <tbody>
                         {unblockReqs.map((u, i) => (
-                            <tr key={u.id} className="hover-row" style={{ borderBottom: '1px solid #f6f9fc' }}>
-                                <td style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.9rem', color: '#525f7f' }}>{i + 1}</td>
+                            <tr key={u.id} className="hover-row" style={{ borderBottom: '1px solid rgba(148, 163, 184, 0.08)' }}>
+                                <td style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.9rem', color: OFFICIAL_TEXT_MUTED }}>{i + 1}</td>
                                 <td style={{ padding: '1rem' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
-                                        <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#e9ecef', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                                            {u.image ? <img src={u.image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={16} color="#adb5bd" />}
+                                        <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', border: '1px solid rgba(148, 163, 184, 0.12)' }}>
+                                            {u.image ? <img src={u.image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={16} color="#73a8ff" />}
                                         </div>
                                         <div style={{ textAlign: 'left' }}>
-                                            <div style={{ fontWeight: '700', color: '#32325d', fontSize: '0.9rem' }}>{u.name}</div>
-                                            <div style={{ fontSize: '0.75rem', color: '#8898aa' }}>ID: {u.login_id}</div>
+                                            <div style={{ fontWeight: '700', color: OFFICIAL_TEXT_PRIMARY, fontSize: '0.9rem' }}>{u.name}</div>
+                                            <div style={{ fontSize: '0.75rem', color: OFFICIAL_TEXT_MUTED }}>ID: {u.login_id}</div>
                                         </div>
                                     </div>
                                 </td>
                                 <td style={{ padding: '1rem', textAlign: 'center' }}>
                                     <div style={{
-                                        background: '#ffffff',
+                                        background: 'rgba(255,255,255,0.04)',
                                         padding: '10px 15px',
-                                        borderRadius: '8px',
+                                        borderRadius: '12px',
                                         fontSize: '0.85rem',
-                                        color: '#525f7f',
+                                        color: OFFICIAL_TEXT_SECONDARY,
                                         maxWidth: '300px',
                                         margin: '0 auto',
                                         fontStyle: 'italic',
-                                        border: '1px solid #e9ecef'
+                                        border: '1px solid rgba(148, 163, 184, 0.12)'
                                     }}>
                                         "{u.unblockRequestReason || 'No reason provided'}"
                                     </div>
@@ -2734,49 +2851,17 @@ export default function AdminDashboard() {
                                     <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem' }}>
                                         <button
                                             onClick={() => handleApproveUnblock(u.id)}
-                                            style={{
-                                                background: '#fff', color: '#0A7C8F', border: 'none',
-                                                padding: '8px 16px', borderRadius: '8px', cursor: 'pointer',
-                                                fontSize: '0.85rem', fontWeight: '700', display: 'flex',
-                                                alignItems: 'center', gap: '6px', transition: 'all 0.2s',
-                                                boxShadow: '0 4px 6px -1px rgba(10, 124, 143, 0.1)',
-                                                width: '110px', justifyContent: 'center', outline: 'none'
-                                            }}
-                                            className="hover-card"
-                                            onMouseOver={e => {
-                                                e.currentTarget.style.background = 'linear-gradient(135deg, #0A7C8F 0%, #0FB5D0 100%)';
-                                                e.currentTarget.style.color = 'white';
-                                                e.currentTarget.style.transform = 'translateY(-1px)';
-                                            }}
-                                            onMouseOut={e => {
-                                                e.currentTarget.style.background = '#fff';
-                                                e.currentTarget.style.color = '#0A7C8F';
-                                                e.currentTarget.style.transform = 'translateY(0)';
-                                            }}
+                                            style={getActionButtonStyle('primary')}
+                                            onMouseOver={e => applyActionButtonHover(e.currentTarget, 'primary', true)}
+                                            onMouseOut={e => applyActionButtonHover(e.currentTarget, 'primary', false)}
                                         >
                                             <Check size={16} /> Restore
                                         </button>
                                         <button
                                             onClick={() => handleRejectUnblock(u.id)}
-                                            style={{
-                                                background: '#fff', color: '#f5365c', border: 'none',
-                                                padding: '8px 16px', borderRadius: '8px', cursor: 'pointer',
-                                                fontSize: '0.85rem', fontWeight: '700', display: 'flex',
-                                                alignItems: 'center', gap: '6px', transition: 'all 0.2s',
-                                                boxShadow: '0 4px 6px -1px rgba(245, 54, 92, 0.1)',
-                                                width: '110px', justifyContent: 'center', outline: 'none'
-                                            }}
-                                            className="hover-card"
-                                            onMouseOver={e => {
-                                                e.currentTarget.style.background = '#f5365c';
-                                                e.currentTarget.style.color = 'white';
-                                                e.currentTarget.style.transform = 'translateY(-1px)';
-                                            }}
-                                            onMouseOut={e => {
-                                                e.currentTarget.style.background = '#fff';
-                                                e.currentTarget.style.color = '#f5365c';
-                                                e.currentTarget.style.transform = 'translateY(0)';
-                                            }}
+                                            style={getActionButtonStyle('danger')}
+                                            onMouseOver={e => applyActionButtonHover(e.currentTarget, 'danger', true)}
+                                            onMouseOut={e => applyActionButtonHover(e.currentTarget, 'danger', false)}
                                         >
                                             <X size={16} /> Reject
                                         </button>
@@ -2810,8 +2895,8 @@ export default function AdminDashboard() {
             )}
 
             {/* Sidebar */}
-            <div className="sidebar" style={{
-                 width: isMobile ? '280px' : (sidebarOpen ? '260px' : '60px'),
+            <div className={`sidebar${isMobile && mobileSidebarOpen ? ' mobile-open' : ''}`} style={{
+                 width: isMobile ? '304px' : (sidebarOpen ? '300px' : '84px'),
                  background: 'white',
                  transition: 'all 0.3s ease',
                  boxShadow: '0 0 2rem rgba(0,0,0,0.05)',
@@ -2819,7 +2904,7 @@ export default function AdminDashboard() {
                  flexDirection: 'column',
                  zIndex: isMobile ? 1002 : 100,
                  position: isMobile ? 'fixed' : 'relative',
-                 left: isMobile ? (mobileSidebarOpen ? 0 : '-280px') : 0,
+                 left: isMobile ? (mobileSidebarOpen ? 0 : '-304px') : 0,
                  height: '100vh'
              }}>
                 <div
@@ -2831,23 +2916,23 @@ export default function AdminDashboard() {
                             else setSidebarOpen(!sidebarOpen);
                         }}
                         style={{
-                            width: (isMobile || sidebarOpen) ? '70px' : '55px', height: '38px',
+                            width: (isMobile || sidebarOpen) ? '70px' : '64px', height: (isMobile || sidebarOpen) ? '38px' : '48px',
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             cursor: 'pointer'
                         }}
                     >
                         <img src={logo} alt="Neural Chat Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                     </div>
-                    {(isMobile || sidebarOpen) && <h2 style={{ fontSize: '1.4rem', fontWeight: '800', color: '#0A7C8F', margin: 0, fontFamily: 'Public Sans, sans-serif', whiteSpace: 'nowrap' }}>Neural Chat</h2>}
+                    {(isMobile || sidebarOpen) && <h2 style={{ fontSize: '1.25rem', fontWeight: '800', color: '#9ed6ff', margin: 0, fontFamily: 'Public Sans, sans-serif', whiteSpace: 'nowrap' }}>Neural Chat</h2>}
                 </div>
 
                 <div style={{ flex: 1, padding: '0.5rem 0' }}>
                     {[
-                        { id: 'overview', name: 'Dashboard', icon: LayoutDashboard, color: '#0A7C8F' },
-                        { id: 'management', name: 'Total Users', icon: Users, count: stats?.totalUsers, color: '#0A7C8F' },
-                        { id: 'pending', name: 'Pending Approvals', icon: UserCheck, count: stats?.pendingApprovals, color: '#0FB5D0' },
-                        { id: 'resets', name: 'Reset Requests', icon: Key, count: stats?.activeResets, color: '#2BC9E4' },
-                        { id: 'unblock', name: 'Unblock Requests', icon: ShieldCheck, count: stats?.unblockRequests, color: '#0FB5D0' }
+                        { id: 'overview', name: 'Dashboard', icon: LayoutDashboard, color: '#73a8ff' },
+                        { id: 'management', name: 'Total Users', icon: Users, count: normalizedStats?.totalUsers, color: '#1a9cff' },
+                        { id: 'pending', name: 'Pending Approvals', icon: UserCheck, count: normalizedStats?.pendingApprovals, color: '#2e7bff' },
+                        { id: 'resets', name: 'Reset Requests', icon: Key, count: normalizedStats?.activeResets, color: '#4e59ff' },
+                        { id: 'unblock', name: 'Unblock Requests', icon: ShieldCheck, count: normalizedStats?.unblockRequests, color: '#6e72ff' }
                     ].map(item => (
                         <div
                             key={item.id}
@@ -2856,7 +2941,7 @@ export default function AdminDashboard() {
                                 display: 'flex', alignItems: 'center',
                                 justifyContent: (isMobile || sidebarOpen) ? 'flex-start' : 'center',
                                 gap: (isMobile || sidebarOpen) ? '1rem' : '0',
-                                padding: (isMobile || sidebarOpen) ? '0.8rem 1.5rem' : '0.8rem 0',
+                                padding: (isMobile || sidebarOpen) ? (isMobile ? '0.9rem 1.35rem' : '0.8rem 1.5rem') : '0.8rem 0',
                                 cursor: 'pointer',
                                 marginBottom: '0.5rem',
                                 transition: 'all 0.2s',
@@ -2865,33 +2950,43 @@ export default function AdminDashboard() {
                                 position: 'relative'
                             }}
                         >
-                            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                                <item.icon size={20} style={{ color: item.color }} />
+                            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', width: sidebarOpen || isMobile ? '20px' : '22px', height: sidebarOpen || isMobile ? '20px' : '22px' }}>
+                                <item.icon size={sidebarOpen || isMobile ? 18 : 20} strokeWidth={2} style={{ color: item.color }} />
                                 {(!sidebarOpen && !isMobile && item.count !== undefined) && (
                                     <span style={{
-                                        position: 'absolute', top: '-10px', right: '-12px',
-                                        background: 'transparent !important',
-                                        color: item.color,
-                                        fontSize: '0.65rem', fontWeight: '800',
-                                        padding: '0', borderRadius: '0',
-                                        minWidth: '14px', textAlign: 'center',
-                                        zIndex: 1,
-                                        boxShadow: 'none'
+                                        position: 'absolute',
+                                        top: '-8px',
+                                        right: '-10px',
+                                        minWidth: '17px',
+                                        height: '17px',
+                                        padding: '0 4px',
+                                        borderRadius: '999px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        background: 'linear-gradient(135deg, #59b7ff 0%, #4e59ff 100%)',
+                                        color: '#ffffff',
+                                        fontSize: '0.62rem',
+                                        fontWeight: '800',
+                                        lineHeight: 1,
+                                        border: '2px solid rgba(15, 23, 42, 0.96)',
+                                        zIndex: 2,
+                                        boxShadow: '0 8px 18px rgba(78, 89, 255, 0.35)'
                                     }}>
                                         {item.count || 0}
                                     </span>
                                 )}
                             </div>
                             {(isMobile || sidebarOpen) && (
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1, marginLeft: '1rem' }}>
-                                    <span style={{ fontWeight: activeTab === item.id ? '800' : '600', fontSize: '0.9rem' }}>{item.name}</span>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', flex: 1, marginLeft: '0.9rem', gap: '0.8rem', minWidth: 0 }}>
+                                    <span style={{ fontWeight: activeTab === item.id ? '800' : '600', fontSize: isMobile ? '0.96rem' : '0.88rem', whiteSpace: 'nowrap', lineHeight: 1.1 }}>{item.name}</span>
                                     {item.count !== undefined && (
                                         <span style={{
                                             background: 'transparent !important',
                                             color: item.color,
-                                            fontSize: '0.9rem', fontWeight: '700',
+                                            fontSize: isMobile ? '0.96rem' : '0.88rem', fontWeight: '700',
                                             padding: '0', borderRadius: '0',
-                                            minWidth: '20px', textAlign: 'center',
+                                            minWidth: '24px', textAlign: 'right', flexShrink: 0,
                                             boxShadow: 'none'
                                         }}>
                                             {item.count || 0}
@@ -2908,31 +3003,36 @@ export default function AdminDashboard() {
             <div className="admin-main-area" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
 
                 {/* Top Header */}
-                <header className="admin-top-header" style={{
-                     height: '60px',
-                     background: 'rgba(15, 23, 42, 0.58)',
-                     borderBottom: '1px solid rgba(148, 163, 184, 0.2)',
+                <header className="admin-top-header admin-top-header-glass" style={{
+                     height: '68px',
+                     background: 'transparent',
+                     borderBottom: '1px solid transparent',
                      display: 'flex',
                      alignItems: 'center',
                      justifyContent: isMobile ? 'space-between' : 'flex-end',
-                     padding: isMobile ? '0 0.5rem' : '0 2rem'
+                     padding: isMobile ? '0 0.55rem' : '0 0.45rem 0 1.25rem',
+                     boxShadow: 'none',
+                     borderRadius: isMobile ? '0 0 18px 18px' : '0',
+                     marginLeft: 0,
+                     marginRight: 0,
+                     transition: 'none'
                  }}>
                     {isMobile && (
                         <div
                             onClick={() => setMobileSidebarOpen(true)}
                             style={{
-                                display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer'
+                                display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', minWidth: 0, flexShrink: 1
                             }}
                         >
                             <div style={{ width: '40px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <img src={logo} alt="Neural Chat Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                             </div>
-                            <h2 style={{ fontSize: '1.05rem', fontWeight: '800', color: '#0A7C8F', margin: 0, fontFamily: 'Public Sans, sans-serif', whiteSpace: 'nowrap' }}>Neural Chat</h2>
+                            {!isMobile && <h2 style={{ fontSize: '0.9rem', fontWeight: '800', color: '#9ed6ff', margin: 0, fontFamily: 'Public Sans, sans-serif', whiteSpace: 'nowrap', minWidth: 0 }}>Neural Chat</h2>}
                         </div>
                     )}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.75rem' : '1.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.6rem' : '0.85rem', marginLeft: isMobile ? '0.5rem' : 'auto', justifyContent: 'flex-end', flexShrink: 0, flex: isMobile ? 1 : 'unset', minWidth: 0 }}>
 
-                        <div style={{ position: 'relative', width: isMobile ? '110px' : '300px', marginLeft: isMobile ? '4px' : '0' }}>
+                        <div style={{ position: 'relative', width: isMobile ? 'auto' : '320px', marginLeft: 0, flexShrink: 0, flex: isMobile ? 1 : 'unset', minWidth: isMobile ? 0 : 'unset' }}>
                             <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
                             <input
                                 type="search"
@@ -2952,53 +3052,56 @@ export default function AdminDashboard() {
                                 }}
                             />
                         </div>
-                        <div style={{ position: 'relative' }}>
+                        <div style={{ position: 'relative', flexShrink: 0 }}>
                             <div
                                 onClick={(e) => { e.stopPropagation(); setShowNotifications(!showNotifications); }}
                                 style={{
-                                    cursor: 'pointer', padding: '8px', borderRadius: '50%',
-                                    background: showNotifications ? '#f0f2f5' : 'transparent',
+                                    cursor: 'pointer', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, borderRadius: '50%',
+                                    background: 'transparent',
                                     transition: 'background 0.2s', position: 'relative'
                                 }}
                             >
-                                <Bell size={20} color={showNotifications ? '#0FB5D0' : '#525f7f'} />
+                                <Bell
+                                    size={20}
+                                    color={showNotifications ? '#73a8ff' : '#94a3b8'}
+                                    fill={showNotifications ? '#4e59ff' : 'none'}
+                                />
                                 {adminNotifications.length > 0 && (
                                     <span style={{
                                         position: 'absolute', top: '4px', right: '4px',
                                         background: '#f5365c', color: 'white', fontSize: '0.65rem',
                                         minWidth: '16px', height: '16px', borderRadius: '50%',
                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        fontWeight: '700', border: '2px solid white'
+                                        fontWeight: '700', border: '2px solid rgba(12, 20, 38, 0.9)'
                                     }}>
                                         {adminNotifications.length}
                                     </span>
                                 )}
                             </div>
-                            {renderNotificationDropdown()}
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '4px' : '0.75rem', cursor: 'pointer', padding: isMobile ? '5px' : '10px', borderRadius: '10px', transition: 'background 0.2s' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0' : '0.75rem', cursor: 'pointer', padding: isMobile ? '0' : '10px', borderRadius: '10px', transition: 'background 0.2s', flexShrink: 0 }}>
                             <div style={{ width: '32px', height: '32px', borderRadius: '50%', overflow: 'hidden' }}>
-                                <div style={{ width: '100%', height: '100%', background: 'linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', fontSize: '0.8rem' }}>
+                                <div style={{ width: '100%', height: '100%', background: ADMIN_PILL_GRADIENT, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', fontSize: '0.8rem' }}>
                                     {adminUser.name.charAt(0)}
                                 </div>
                             </div>
-                            {!isMobile && <div style={{ fontWeight: '600', color: '#32325d', fontSize: '0.875rem' }}>{adminUser.name}</div>}
+                            {!isMobile && <div style={{ fontWeight: '600', color: '#e2e8f0', fontSize: '0.875rem' }}>{adminUser.name}</div>}
                         </div>
-                        <div style={{ display: 'flex', gap: isMobile ? '0.6rem' : '1.2rem', color: '#cbd5e1', alignItems: 'center', marginRight: isMobile ? '0.3rem' : '0' }}>
+                        <div style={{ display: 'flex', gap: isMobile ? '0.6rem' : '0.55rem', color: '#cbd5e1', alignItems: 'center', marginRight: 0, flexShrink: 0 }}>
                             <div
-                                style={{ cursor: 'pointer', display: 'flex', position: 'relative' }}
+                                style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: isMobile ? '32px' : '32px', height: isMobile ? '32px' : '32px', position: 'relative' }}
                                 onClick={() => { localStorage.clear(); sessionStorage.clear(); navigate('/'); }}
                                 onMouseEnter={() => setShowLogoutTooltip(true)}
                                 onMouseLeave={() => setShowLogoutTooltip(false)}
                             >
-                                <LogOut size={18} />
-                                {showLogoutTooltip && (
+                                <LogOut size={isMobile ? 17 : 18} />
+                                {showLogoutTooltip && !isMobile && (
                                     <div style={{
                                         position: 'absolute',
                                         top: '45px',
                                         left: '50%',
                                         transform: 'translateX(-50%)',
-                                        color: '#0A7C8F',
+                                        color: '#9ed6ff',
                                         fontWeight: '600',
                                         fontSize: '14px',
                                         whiteSpace: 'nowrap',
@@ -3019,28 +3122,43 @@ export default function AdminDashboard() {
                 </header>
 
                 {/* Dashboard View */}
-                <main style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: isMobile ? '1rem 1rem' : '1.5rem 2.5rem', background: 'transparent' }}>
-                    <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+                <main
+                    ref={mainScrollRef}
+                    className="admin-scroll-main"
+                    style={{
+                        flex: 1,
+                        overflowY: 'auto',
+                        overflowX: 'hidden',
+                        padding: isMobile ? '1rem 1rem 1.25rem' : '1.25rem 2.5rem 2rem',
+                        background: 'transparent',
+                        position: 'relative',
+                        scrollbarWidth: 'none',
+                        msOverflowStyle: 'none'
+                    }}
+                >
+                    <div className="admin-scroll-shell" style={{ maxWidth: '1200px', margin: '0 auto', minWidth: 0, position: 'relative' }}>
 
-                        {(activeTab === 'overview' || activeTab === 'management' || activeTab === 'pending' || activeTab === 'resets') && (
+                        {(activeTab === 'overview' || activeTab === 'management' || activeTab === 'pending' || activeTab === 'resets' || activeTab === 'unblock') && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '2rem' }}>
                                 <div style={{
                                     width: '36px', height: '36px',
-                                    background: '#0A7C8F',
-                                    borderRadius: '8px',
+                                    background: ADMIN_PILL_GRADIENT,
+                                    borderRadius: '12px',
                                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    boxShadow: '0 4px 10px rgba(10, 124, 143, 0.4)'
+                                    boxShadow: '0 12px 24px rgba(78, 89, 255, 0.26)'
                                 }}>
                                     {activeTab === 'overview' && <LayoutDashboard size={20} color="white" />}
                                     {activeTab === 'management' && <Users size={20} color="white" />}
                                     {activeTab === 'pending' && <UserCheck size={20} color="white" />}
                                     {activeTab === 'resets' && <Key size={20} color="white" />}
+                                    {activeTab === 'unblock' && <ShieldCheck size={20} color="white" />}
                                 </div>
                                 <h1 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#f8fafc', fontStyle: 'normal', margin: 0 }}>
                                     {activeTab === 'overview' && 'Dashboard'}
                                     {activeTab === 'management' && 'Total Users'}
                                     {activeTab === 'pending' && 'Pending Approvals'}
                                     {activeTab === 'resets' && 'Reset Requests'}
+                                    {activeTab === 'unblock' && 'Unblock Requests'}
                                 </h1>
                                 <div style={{ flex: 1 }}></div>
                             </div>
@@ -3059,7 +3177,45 @@ export default function AdminDashboard() {
                             </>
                         )}
                     </div>
+                    {showScrollControl && (canScrollUp || canScrollDown) && (
+                        <button
+                            type="button"
+                            onClick={handleFloatingScroll}
+                            aria-label={canScrollDown ? 'Scroll down' : 'Scroll up'}
+                            style={{
+                                position: 'fixed',
+                                right: isMobile ? '10px' : '14px',
+                                top: `${scrollControlTop}%`,
+                                transform: 'translateY(-50%)',
+                                width: isMobile ? '42px' : '48px',
+                                height: isMobile ? '42px' : '48px',
+                                borderRadius: '50%',
+                                border: 'none',
+                                background: 'linear-gradient(180deg, rgba(44, 48, 57, 0.92) 0%, rgba(34, 37, 45, 0.92) 100%)',
+                                backdropFilter: 'blur(18px)',
+                                WebkitBackdropFilter: 'blur(18px)',
+                                boxShadow: '0 18px 40px rgba(2, 6, 23, 0.28)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '0px',
+                                color: '#cbd5e1',
+                                cursor: isDraggingScrollControl ? 'grabbing' : 'grab',
+                                zIndex: 80
+                            }}
+                            onPointerDown={(event) => {
+                                event.preventDefault();
+                                setIsDraggingScrollControl(true);
+                                setShowScrollControl(true);
+                            }}
+                        >
+                            <ChevronDown size={isMobile ? 13 : 15} style={{ transform: 'rotate(180deg)', opacity: canScrollUp ? 1 : 0.45 }} />
+                            <ChevronDown size={isMobile ? 13 : 15} style={{ opacity: canScrollDown ? 1 : 0.45, marginTop: '-2px' }} />
+                        </button>
+                    )}
                 </main>
+                {renderNotificationDropdown()}
                 {renderReactionAuditModal()}
                 {renderEventAuditModal()}
                 {renderMediaLightbox()}
@@ -3072,10 +3228,10 @@ export default function AdminDashboard() {
                     onClick={() => setViewChat(null)}
                 >
                     <div
-                        style={{ background: 'white', width: isMobile ? '95%' : '90%', maxWidth: '800px', height: isMobile ? '90vh' : '85vh', borderRadius: '1.5rem', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 50px 100px rgba(50,50,93,0.1), 0 15px 35px rgba(50,50,93,0.15)', position: 'relative' }}
+                        style={{ background: '#0f172a', width: isMobile ? '95%' : '90%', maxWidth: '800px', height: isMobile ? '90vh' : '85vh', borderRadius: '1.5rem', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 50px 100px rgba(2, 6, 23, 0.42)', position: 'relative', border: '1px solid rgba(148, 163, 184, 0.14)' }}
                         onClick={e => e.stopPropagation()}
                     >
-                        <div style={{ padding: isMobile ? '1rem' : '1.5rem', background: 'linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: isMobile ? 'wrap' : 'nowrap', gap: isMobile ? '0.75rem' : '0' }}>
+                        <div style={{ padding: isMobile ? '1rem' : '1.5rem', background: ADMIN_PILL_GRADIENT, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: isMobile ? 'wrap' : 'nowrap', gap: isMobile ? '0.75rem' : '0' }}>
                             <div style={{ textAlign: 'left', flex: isMobile ? '1 1 100%' : '0 0 auto' }}>
                                 <h3 style={{ margin: 0, fontSize: isMobile ? '1rem' : '1.2rem', fontWeight: '700' }}>Review Chat: {viewChat.user.name}</h3>
                                 <p style={{ margin: '4px 0 0 0', fontSize: isMobile ? '0.7rem' : '0.8rem', opacity: 0.9 }}>Viewing logs for monitoring</p>
@@ -3130,17 +3286,17 @@ export default function AdminDashboard() {
                             </div>
                         </div>
 
-                        <div style={{ flex: 1, padding: '1.5rem', overflowY: 'auto', background: '#f8f9fe' }}>
+                        <div style={{ flex: 1, padding: '1.5rem', overflowY: 'auto', background: '#111827' }}>
                             {loadingChat ? (
-                                <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8898aa' }}>Loading logs...</div>
+                                <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>Loading logs...</div>
                             ) : (
                                 <>
                                     {chatStep === 'contacts' && (
                                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '1rem' }}>
                                             {chatContacts.filter(c => c.type !== 'ai' && c.name !== 'AI Assistant').map(c => (
-                                                <div key={c.id} onClick={() => handleSelectContact(c)} style={{ background: 'white', padding: '1rem', borderRadius: '1rem', border: '1px solid #e9ecef', cursor: 'pointer', transition: 'all 0.2s' }} className="hover-card">
-                                                    <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#32325d' }}>{c.name}</div>
-                                                    <div style={{ fontSize: '0.75rem', color: '#8898aa' }}>{c.subtext || (c.type === 'ai' ? 'Automated Assistant' : (c.type === 'group' ? 'Group Chat' : 'Peer-to-Peer Chat'))}</div>
+                                                <div key={c.id} onClick={() => handleSelectContact(c)} style={{ background: '#172033', padding: '1rem', borderRadius: '1rem', border: '1px solid rgba(148, 163, 184, 0.12)', cursor: 'pointer', transition: 'all 0.2s' }} className="hover-card">
+                                                    <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#f8fafc' }}>{c.name}</div>
+                                                    <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{c.subtext || (c.type === 'ai' ? 'Automated Assistant' : (c.type === 'group' ? 'Group Chat' : 'Peer-to-Peer Chat'))}</div>
                                                 </div>
                                             ))}
                                         </div>
@@ -3877,8 +4033,7 @@ export default function AdminDashboard() {
                 .date-search-input::placeholder { color: rgba(255,255,255,0.9) !important; }
                 input[type="password"] { user-select: text !important; -webkit-user-select: text !important; }
                 @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-                ::-webkit-scrollbar { width: 6px; }
-                ::-webkit-scrollbar-thumb { background: #e9ecef; borderRadius: 3px; }
+                .admin-scroll-main::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
                 .recharts-bar-rectangle, .recharts-pie-sector, .recharts-bar-cursor, .recharts-sector, .recharts-surface, .recharts-wrapper, path, rect, g { outline: none !important; }
                 *:focus { outline: none !important; }
             `}</style>
