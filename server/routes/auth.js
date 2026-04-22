@@ -169,7 +169,14 @@ router.post('/login', async (req, res) => {
 
         res.json({
             token,
-            user: { id: user.id, name: userDisplayName, role: user.role, email: user.email, login_id: user.login_id }
+            user: { 
+                id: user.id, 
+                name: user.name, // Global name
+                displayName: userDisplayName, // Local alias
+                role: user.role, 
+                email: user.email, 
+                login_id: user.login_id 
+            }
         });
     } catch (err) {
         res.status(500).json({ error: err.message });

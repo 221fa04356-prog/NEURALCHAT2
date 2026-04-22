@@ -4,6 +4,7 @@ import {
     Pause, Play, Mic, User as UserIcon, CheckSquare, 
     Check, CheckCheck, Star, Pin, List, Calendar, X, CheckCircle
 } from 'lucide-react';
+import axios from 'axios';
 import { Virtuoso } from 'react-virtuoso';
 import ViewOnceBadge from './ViewOnceBadge';
 
@@ -292,7 +293,9 @@ const MessageList = memo(({
         const isPdfDoc = fileExt === 'pdf';
         const isOfficePreviewDoc = ['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods', 'ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'].includes(fileExt);
         const absoluteFileUrl = msg.file_path
-            ? (String(msg.file_path).startsWith('http') ? String(msg.file_path) : `${window.location.origin}${msg.file_path}`)
+            ? (String(msg.file_path).startsWith('http') || String(msg.file_path).startsWith('blob:') || String(msg.file_path).startsWith('data:')
+                ? String(msg.file_path) 
+                : `${(axios.defaults.baseURL || '').replace(/\/$/, '')}/${String(msg.file_path).replace(/^\//, '')}`)
             : '';
         const isLikelyLocalOrPrivatePreview = (() => {
             if (!absoluteFileUrl) return true;
@@ -568,7 +571,7 @@ const MessageList = memo(({
                                                 setViewingContact(null);
                                                 handleDownload(msg.file_path, msg.fileName, msg);
                                             }}>
-                                                <img src={msg.file_path} alt="Sent" className="wa-msg-image" />
+                                                <img src={absoluteFileUrl} alt="Sent" className="wa-msg-image" />
                                             </div>
                                         )}
                                         {(msg.type === 'video' || (msg.type === 'file' && isVideoByExt)) && (
@@ -581,12 +584,23 @@ const MessageList = memo(({
                                                 }}
                                             >
                                                 <video
-                                                    src={msg.file_path}
+                                                    src={absoluteFileUrl}
                                                     controls
                                                     playsInline
                                                     preload="metadata"
-                                                    style={{ width: '100%', maxWidth: 340, display: 'block', background: '#111b21' }}
-                                                />
+                                                    crossOrigin="anonymous"
+                                                    style={{ 
+                                                        width: '100%', 
+                                                        maxWidth: isMobile ? 240 : 340, 
+                                                        maxHeight: isMobile ? 320 : 420,
+                                                        display: 'block', 
+                                                        background: '#000', 
+                                                        borderRadius: 8,
+                                                        objectFit: 'contain'
+                                                    }}
+                                                >
+                                                    <source src={absoluteFileUrl} type={fileExt === 'webm' ? 'video/webm' : 'video/mp4'} />
+                                                </video>
                                             </div>
                                         )}
                                     </>
@@ -628,10 +642,10 @@ const MessageList = memo(({
                                                                 markMessageViewed(msg._id);
                                                             }
                                                             if (shouldUseSystemOpen && typeof handleOpenFile === 'function') {
-                                                                handleOpenFile(msg.file_path, displayFileName, msg);
+                                                                handleOpenFile(absoluteFileUrl, displayFileName, msg);
                                                                 return;
                                                             }
-                                                            window.open(msg.file_path, '_blank', 'noopener,noreferrer');
+                                                            window.open(absoluteFileUrl, '_blank', 'noopener,noreferrer');
                                                         }}
                                                     >
                                                         Open
@@ -644,7 +658,7 @@ const MessageList = memo(({
                                                             if (msg.is_view_once && !isMe) {
                                                                 markMessageViewed(msg._id);
                                                             }
-                                                            handleDownload(msg.file_path, displayFileName, msg); 
+                                                            handleDownload(absoluteFileUrl, displayFileName, msg); 
                                                         }}
                                                     >
                                                         Save as...

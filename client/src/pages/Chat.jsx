@@ -16,6 +16,13 @@ import {
     AlertCircle, UserCheck, Loader2, Ban, ChevronUp, Headphones
 } from 'lucide-react';
 
+const getMediaUrl = (path) => {
+    if (!path) return '';
+    if (path.startsWith('http') || path.startsWith('blob:') || path.startsWith('data:')) return path;
+    const base = axios.defaults.baseURL || '';
+    return `${base.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
+};
+
 
 
 const searchSlideStyles = `
@@ -1913,7 +1920,7 @@ export default function Chat() {
             // Force absolute URL if needed for protocol handlers
             let absolutePath = filePath;
             if (!filePath.startsWith('http')) {
-                absolutePath = window.location.origin + filePath;
+                absolutePath = getMediaUrl(filePath);
             }
 
             // Attempt to open with protocol
@@ -2780,7 +2787,7 @@ export default function Chat() {
         // Special handling for images - copy actual image data
         if (msg.type === 'image' && msg.file_path) {
             try {
-                const rawImageUrl = msg.file_path.startsWith('http') ? msg.file_path : `${window.location.origin}${msg.file_path}`;
+                const rawImageUrl = getMediaUrl(msg.file_path);
                 const imageUrl = encodeURI(rawImageUrl);
                 console.log('Attempting to copy image from:', imageUrl);
 
@@ -2890,7 +2897,7 @@ export default function Chat() {
                 console.error('Error details:', err.message, err.stack);
 
                 // Fallback to URL copy
-                const imageUrl = msg.file_path.startsWith('http') ? msg.file_path : `${window.location.origin}${msg.file_path}`;
+                const imageUrl = getMediaUrl(msg.file_path);
                 const urlToCopy = msg.content ? `${msg.content}\n${imageUrl}` : imageUrl;
 
                 try {
@@ -2924,7 +2931,7 @@ export default function Chat() {
             contentToCopy = msg.content || '';
         } else if (msg.type === 'file' || msg.type === 'video') {
             // Copy URL and content if available
-            const url = msg.file_path ? (msg.file_path.startsWith('http') ? msg.file_path : `${window.location.origin}${msg.file_path}`) : '';
+            const url = getMediaUrl(msg.file_path);
             contentToCopy = msg.content ? `${msg.content}\n${url}` : url;
         } else {
             // Fallback for any other type
@@ -3040,7 +3047,7 @@ export default function Chat() {
 
         const texts = selectedMediaMsgs.map(m => {
             if (m.type === 'text') return m.content;
-            const url = m.file_path ? (m.file_path.startsWith('http') ? m.file_path : `${window.location.origin}${m.file_path}`) : '';
+            const url = getMediaUrl(m.file_path);
             if (url) return `${m.content || ''}\n${url}`.trim();
             return m.content || '';
         }).join('\n---\n');
@@ -3136,7 +3143,7 @@ export default function Chat() {
 
         const texts = forwardSelectedMsgs.map(m => {
             if (m.type === 'text') return m.content;
-            const rawUrl = m.file_path ? (m.file_path.startsWith('http') ? m.file_path : `${window.location.origin}${m.file_path}`) : '';
+            const rawUrl = getMediaUrl(m.file_path);
             const url = encodeURI(rawUrl);
             if (url) {
                 // If there's a caption, include it
@@ -7535,7 +7542,8 @@ export default function Chat() {
                     groupId: selectedGroup._id,
                     message: {
                         ...sentMsg,
-                        sender_id: { _id: user.id || user._id, name: user.name }
+                        // critically: use the global name for others, not local alias
+                        sender_id: { _id: user.id || user._id, name: userData.name } 
                     }
                 });
 
@@ -7927,7 +7935,8 @@ export default function Chat() {
 
             const updatedUser = { ...userData };
             if (field === 'name') {
-                updatedUser.name = profileEditValue;
+                // For private alias, update displayName but keep name (global) the same
+                updatedUser.displayName = profileEditValue;
                 setIsEditingProfileName(false);
             }
             if (field === 'mobile') {
@@ -8439,8 +8448,8 @@ export default function Chat() {
                                 </div>
                             ) : (
                                 <>
-                                    <span className="wa-section-value" style={{ fontSize: 17, color: '#f8fafc' }}>{userData.name}</span>
-                                    <Pencil size={20} color="#38bdf8" style={{ cursor: 'pointer', opacity: 0.7 }} onClick={() => { setIsEditingProfileName(true); setProfileEditValue(userData.name || ""); }} />
+                                    <span className="wa-section-value" style={{ fontSize: 17, color: '#f8fafc' }}>{userData.displayName || userData.name}</span>
+                                    <Pencil size={20} color="#38bdf8" style={{ cursor: 'pointer', opacity: 0.7 }} onClick={() => { setIsEditingProfileName(true); setProfileEditValue(userData.displayName || userData.name || ""); }} />
                                 </>
                             )}
                         </div>
@@ -8935,14 +8944,14 @@ export default function Chat() {
     const renderGlobalStarredDrawer = () => {
         return (
             <div className={`wa-profile-drawer wa-new-chat-drawer ${isGlobalStarredOpen ? 'active' : ''}`}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef', boxSizing: 'border-box', width: '100%' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', boxSizing: 'border-box', width: '100%' }}>
                     <button
                         onClick={() => { setIsGlobalStarredOpen(false); }}
-                        style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', width: 32, padding: 0, flexShrink: 0 }}
+                        style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', width: 32, padding: 0, flexShrink: 0 }}
                     >
                         <ArrowLeft size={24} />
                     </button>
-                    <span style={{ fontSize: 19, fontWeight: 500, color: '#3b4a54', whiteSpace: 'nowrap', flexShrink: 0 }}>{t('contact_info.starred_messages')}</span>
+                    <span style={{ fontSize: 19, fontWeight: 500, color: '#f8fafc', whiteSpace: 'nowrap', flexShrink: 0 }}>{t('contact_info.starred_messages')}</span>
                     <div style={{ flex: 1 }}></div>
                     <div style={{ position: 'relative' }}>
                         <button
@@ -9022,7 +9031,15 @@ export default function Chat() {
                                         <div className={`wa-starred-bubble ${isMe ? 'sent' : 'received'}`} style={{ maxWidth: '100%', margin: 0, padding: '6px 7px 8px' }}>
                                             <div className="wa-starred-content">
                                                 {msg.type === 'image' && msg.file_path && (
-                                                    <img src={msg.file_path} alt="" style={{ maxWidth: '100%', borderRadius: '4px', marginBottom: '4px', display: 'block' }} />
+                                                    <img src={getMediaUrl(msg.file_path)} alt="" onClick={(e) => { e.stopPropagation(); setViewingImage(msg); }} style={{ maxWidth: '100%', borderRadius: '4px', marginBottom: '4px', display: 'block', cursor: 'pointer' }} />
+                                                )}
+                                                {msg.type === 'video' && msg.file_path && (
+                                                    <div onClick={(e) => { e.stopPropagation(); setViewingImage(msg); }} style={{ position: 'relative', maxWidth: '100%', borderRadius: '4px', overflow: 'hidden', background: '#000', marginBottom: '4px', cursor: 'pointer' }}>
+                                                        <video src={getMediaUrl(msg.file_path)} style={{ width: '100%', maxHeight: '200px', display: 'block', objectFit: 'cover' }} />
+                                                        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: 'rgba(0,0,0,0.5)', borderRadius: '50%', padding: '4px' }}>
+                                                            <Play size={20} color="white" fill="white" />
+                                                        </div>
+                                                    </div>
                                                 )}
                                                 {msg.type === 'contact' && (() => {
                                                     let cDataArray;
@@ -9610,25 +9627,29 @@ export default function Chat() {
                 padding: '16px 24px',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'space-between',
                 background: '#0b141a',
                 color: '#f8fafc',
                 flexShrink: 0,
-                borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
+                borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+                position: 'relative'
             }}>
                 <button
                     onClick={() => {
                         setFile(null);
                         setSelectedFiles([]);
                     }}
-                    style={{ background: 'none', border: 'none', color: '#aebac1', cursor: 'pointer', display: 'flex', padding: 4 }}
+                    style={{ background: 'none', border: 'none', color: '#aebac1', cursor: 'pointer', display: 'flex', padding: 4, zIndex: 2 }}
                     title="Close preview"
                 >
                     <X size={24} />
                 </button>
+
+                <div style={{ position: 'absolute', left: 0, width: '100%', textAlign: 'center', pointerEvents: 'none' }}>
+                    <span style={{ fontSize: 18, fontWeight: 500, color: '#f8fafc' }}>Preview</span>
+                </div>
                 
                 {isSingleImageOnly && (
-                    <div style={{ display: 'flex', gap: 24, color: '#aebac1', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: 24, color: '#aebac1', alignItems: 'center', marginLeft: 'auto', zIndex: 2 }}>
                         <Crop size={22} style={{ cursor: 'pointer' }} onClick={() => { setCapturedImage(getFilePreviewUrl(file)); setCameraModal('editor'); }} />
                         <Sticker size={22} style={{ cursor: 'pointer' }} />
                         <span style={{ fontSize: 20, fontWeight: 600, cursor: 'pointer', fontFamily: 'serif' }}>T</span>
@@ -9715,22 +9736,75 @@ export default function Chat() {
                 )}
             </div>
 
-            {/* Footer / Caption Input */}
+            {/* Footer / Caption Input Tray */}
             <div style={{
-                padding: '16px 24px 32px',
+                padding: '20px 24px 30px',
                 background: '#0b141a',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 16,
+                gap: 20,
                 borderTop: '1px solid rgba(255, 255, 255, 0.1)'
             }}>
-                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                {/* Thumbnails Tray (Above Input, Left-Aligned) */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingLeft: 10 }}>
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', overflowX: 'auto', padding: '4px 0' }}>
+                        {filesInTray.map((f, idx) => (
+                            <div key={idx} className="wa-file-tray-item" style={{
+                                width: 50, height: 50, borderRadius: 8,
+                                border: f === file ? '2px solid #38bdf8' : '2px solid rgba(255, 255, 255, 0.1)',
+                                overflow: 'hidden', cursor: 'pointer',
+                                background: '#1e293b', display: 'flex', justifyContent: 'center', alignItems: 'center',
+                                flexShrink: 0,
+                                position: 'relative'
+                            }} onClick={() => setFile(f)}>
+                                {f.type?.startsWith('image/') ? (
+                                    <img src={getFilePreviewUrl(f)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={`thumb-${idx}`} />
+                                ) : (
+                                    <FileText color="#94a3b8" size={24} />
+                                )}
+                                <div 
+                                    className="wa-file-remove-btn"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const updated = filesInTray.filter((_, i) => i !== idx);
+                                        setSelectedFiles(updated);
+                                        if (f === file) {
+                                            setFile(updated.length ? updated[0] : null);
+                                        }
+                                    }}
+                                    style={{
+                                        position: 'absolute', top: 2, right: 2, 
+                                        display: 'flex', 
+                                        alignItems: 'center', justifyContent: 'center', color: '#111b21',
+                                        zIndex: 10
+                                    }}
+                                >
+                                    <X size={18} strokeWidth={2.5} />
+                                </div>
+                            </div>
+                        ))}
+
+                        <div style={{
+                            width: 50, height: 50, borderRadius: 8, border: '2px dashed rgba(255, 255, 255, 0.2)',
+                            display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer',
+                            flexShrink: 0, color: '#94a3b8', transition: 'all 0.2s'
+                        }} 
+                        onMouseOver={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.4)'}
+                        onMouseOut={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)'}
+                        onClick={() => document.getElementById('add-more-preview-files')?.click()}>
+                            <Plus size={24} />
+                            <input type="file" id="add-more-preview-files" multiple onChange={(e) => { handleFileSelect(e); }} style={{ display: 'none' }} />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Caption Input Row (Full Width) */}
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16, width: '100%' }}>
                     <div style={{
                         background: '#2a3942',
                         borderRadius: 8,
                         padding: '12px 16px',
-                        width: '100%',
-                        maxWidth: 600,
+                        flex: 1,
                         display: 'flex',
                         alignItems: 'center',
                         gap: 16
@@ -9761,62 +9835,10 @@ export default function Chat() {
                             <ViewOnceBadge size={22} color={isViewOnceVoice ? "#0EA5BE" : "#8696a0"} />
                         </div>
                     </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', marginTop: 12 }}>
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', overflowX: 'auto', maxWidth: 'calc(100% - 100px)', padding: '4px 0' }}>
-                        {filesInTray.map((f, idx) => (
-                            <div key={idx} style={{
-                                width: 50, height: 50, borderRadius: 8,
-                                border: f === file ? '2px solid #38bdf8' : '2px solid rgba(255, 255, 255, 0.1)',
-                                overflow: 'hidden', cursor: 'pointer',
-                                background: '#1e293b', display: 'flex', justifyContent: 'center', alignItems: 'center',
-                                flexShrink: 0,
-                                position: 'relative'
-                            }} onClick={() => setFile(f)}>
-                                {f.type?.startsWith('image/') ? (
-                                    <img src={getFilePreviewUrl(f)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={`thumb-${idx}`} />
-                                ) : (
-                                    <FileText color="#94a3b8" size={24} />
-                                )}
-                                <div 
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        const updated = filesInTray.filter((_, i) => i !== idx);
-                                        setSelectedFiles(updated);
-                                        if (f === file) {
-                                            setFile(updated.length ? updated[0] : null);
-                                        }
-                                    }}
-                                    style={{
-                                        position: 'absolute', top: -4, right: -4, background: '#ef4444', 
-                                        borderRadius: '50%', width: 16, height: 16, display: 'flex', 
-                                        alignItems: 'center', justifyContent: 'center', color: 'white'
-                                    }}
-                                >
-                                    <X size={10} />
-                                </div>
-                            </div>
-                        ))}
-
-                        <div style={{
-                            width: 50, height: 50, borderRadius: 8, border: '2px dashed rgba(255, 255, 255, 0.2)',
-                            display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer',
-                            flexShrink: 0, color: '#94a3b8', transition: 'all 0.2s'
-                        }} 
-                        onMouseOver={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.4)'}
-                        onMouseOut={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)'}
-                        onClick={() => document.getElementById('add-more-preview-files')?.click()}>
-                            <Plus size={24} />
-                            <input type="file" id="add-more-preview-files" multiple onChange={(e) => { handleFileSelect(e); }} style={{ display: 'none' }} />
-                        </div>
-                    </div>
 
                     <button
                         onClick={handleSend}
                         style={{
-                            position: 'absolute',
-                            right: 0,
                             width: 50,
                             height: 50,
                             borderRadius: '50%',
@@ -9826,7 +9848,8 @@ export default function Chat() {
                             alignItems: 'center',
                             justifyContent: 'center',
                             cursor: 'pointer',
-                            boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
+                            boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+                            flexShrink: 0
                         }}
                     >
                         <Send size={24} color="#111b21" />
@@ -10428,11 +10451,11 @@ export default function Chat() {
                         {(() => {
                             const chatMsgs = groupMessages || [];
                             const activeMsgs = chatMsgs.filter(m => !m.is_deleted_by_user && !m.is_deleted_by_admin);
-                            const images = activeMsgs.filter(m => m.type === 'image' || m.type === 'video').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                            const links = activeMsgs.filter(m => (m.link_preview?.url || /(https?:\/\/[^\s]+)/.test(m.content || '')) && m.type !== 'image' && m.type !== 'video').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                            const mediaMsgs = activeMsgs.filter(m => m.type === 'image' || m.type === 'video' || m.type === 'audio').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                            const links = activeMsgs.filter(m => (m.link_preview?.url || /(https?:\/\/[^\s]+)/.test(m.content || '')) && m.type !== 'image' && m.type !== 'video' && m.type !== 'audio' && m.type !== 'file').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                             const docs = activeMsgs.filter(m => m.type === 'file').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                            const totalCount = images.length + links.length + docs.length;
-                            const previewItems = [...images, ...links, ...docs].slice(0, 4);
+                            const totalCount = mediaMsgs.length + links.length + docs.length;
+                            const previewItems = [...mediaMsgs, ...links, ...docs].slice(0, 4);
 
                             return (
                                 <div style={{ background: itemBgColor }}>
@@ -10445,7 +10468,7 @@ export default function Chat() {
                                             </div>
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12, color: subTextColor, fontSize: 14 }}>
-                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Image size={16} color="#38bdf8" /> {images.length} Media</span>
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Image size={16} color="#38bdf8" /> {mediaMsgs.length} Media</span>
                                             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><LinkIcon size={16} color="#38bdf8" /> {links.length} Links</span>
                                             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><FileText size={16} color="#38bdf8" /> {docs.length} Docs</span>
                                         </div>
@@ -10456,6 +10479,16 @@ export default function Chat() {
                                                 return (
                                                     <div key={i} onClick={(e) => { e.stopPropagation(); setViewingImage(m); }} style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }}>
                                                         <img src={m.file_path} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                    </div>
+                                                );
+                                            }
+                                            if (m.type === 'audio') {
+                                                return (
+                                                    <div key={i} style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f7fa', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px', overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id); }}>
+                                                        <Headphones size={20} color="#0EA5BE" />
+                                                        <div style={{ fontSize: 9, color: '#667781', textAlign: 'center', marginTop: 4, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                            {m.fileName || 'Audio'}
+                                                        </div>
                                                     </div>
                                                 );
                                             }
@@ -10663,20 +10696,20 @@ export default function Chat() {
                                 <span className="wa-info-item-text" style={{ color: '#f8fafc' }}>{t('contact_info.media_links_docs')}</span>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                     <span className="wa-info-item-count">
-                                        {(activeTarget.mediaCount || 0) + (activeTarget.linkCount || 0) + (activeTarget.docCount || 0)}
+                                        {totalCount}
                                     </span>
                                     <ChevronDown size={20} color="#38bdf8" style={{ transform: 'rotate(-90deg)' }} />
                                 </div>
                             </div>
                             <div style={{ display: 'flex', gap: 12, fontSize: 12, color: '#94a3b8' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                    <Image size={14} /> <span>{activeTarget.mediaCount || 0} Media</span>
+                                    <Image size={14} /> <span>{mediaMsgs.length} Media</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                    <LinkIcon size={14} /> <span>{activeTarget.linkCount || 0} Links</span>
+                                    <LinkIcon size={14} /> <span>{linkMsgs.length} Links</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                    <FileText size={14} /> <span>{activeTarget.docCount || 0} Docs</span>
+                                    <FileText size={14} /> <span>{docMsgs.length} Docs</span>
                                 </div>
                             </div>
                         </div>
@@ -10687,9 +10720,9 @@ export default function Chat() {
                                                 return (
                                                     <div key={i} className="wa-media-thumb" onClick={(e) => { e.stopPropagation(); setViewingImage(m); }} style={{ cursor: 'pointer', flexShrink: 0 }}>
                                                         {m.type === 'video' ? (
-                                                            <video src={m.file_path} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, background: '#111b21' }} />
+                                                            <video src={getMediaUrl(m.file_path)} muted playsInline preload="metadata" crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, background: '#000' }} />
                                                         ) : (
-                                                            <img src={m.file_path} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }} />
+                                                            <img src={getMediaUrl(m.file_path)} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }} />
                                                         )}
                                                     </div>
                                                 );
@@ -11141,7 +11174,15 @@ export default function Chat() {
                                             <div className="wa-starred-content">
                                                 {msg.type === 'image' && msg.file_path && (
                                                     <div className="wa-starred-image-container" onClick={(e) => { e.stopPropagation(); setViewingImage(msg); }} style={{ cursor: 'pointer' }}>
-                                                        <img src={msg.file_path} alt="Starred" className="wa-starred-image" />
+                                                        <img src={getMediaUrl(msg.file_path)} alt="Starred" className="wa-starred-image" />
+                                                    </div>
+                                                )}
+                                                {msg.type === 'video' && msg.file_path && (
+                                                    <div className="wa-starred-video-container" style={{ position: 'relative', maxWidth: '100%', borderRadius: '8px', overflow: 'hidden', background: '#000', marginBottom: '8px' }}>
+                                                        <video src={getMediaUrl(msg.file_path)} style={{ width: '100%', maxHeight: '200px', display: 'block', objectFit: 'cover' }} />
+                                                        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: 'rgba(0,0,0,0.5)', borderRadius: '50%', padding: '8px' }}>
+                                                            <Play size={24} color="white" fill="white" />
+                                                        </div>
                                                     </div>
                                                 )}
                                                 {msg.type === 'file' && (
@@ -11386,8 +11427,16 @@ export default function Chat() {
                         <div className={`wa-bubble sent`} style={{ whiteSpace: 'pre-wrap' }}>
                             {infoMessage.type === 'image' ? (
                                 <div className="wa-msg-image">
-                                    <img src={infoMessage.file_path} alt="sent" />
+                                    <img src={getMediaUrl(infoMessage.file_path)} alt="sent" />
                                     {infoMessage.content && <p>{infoMessage.content}</p>}
+                                </div>
+                            ) : infoMessage.type === 'video' ? (
+                                <div className="wa-msg-image-container" style={{ position: 'relative', maxWidth: '100%', borderRadius: '8px', overflow: 'hidden', background: '#000', marginBottom: '8px' }}>
+                                    <video src={getMediaUrl(infoMessage.file_path)} style={{ width: '100%', maxHeight: '300px', display: 'block', objectFit: 'contain' }} />
+                                    <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: 'rgba(0,0,0,0.5)', borderRadius: '50%', padding: '12px' }}>
+                                        <Play size={32} color="white" fill="white" />
+                                    </div>
+                                    {infoMessage.content && <p style={{ padding: '8px', color: '#f8fafc', fontSize: '14px' }}>{infoMessage.content}</p>}
                                 </div>
                             ) : infoMessage.type === 'file' ? (
                                 <div className="wa-msg-file">
@@ -12004,8 +12053,8 @@ export default function Chat() {
             }
             if (viewingImage.type === 'video') {
                 return (
-                    <video controls autoPlay className="wa-full-image">
-                        <source src={viewingImage.file_path} type="video/mp4" />
+                    <video controls autoPlay crossOrigin="anonymous" className="wa-full-image" style={{ background: '#000' }}>
+                        <source src={getMediaUrl(viewingImage.file_path)} type={viewingImage.file_path?.endsWith('.webm') ? 'video/webm' : 'video/mp4'} />
                         Your browser does not support the video tag.
                     </video>
                 );
@@ -12032,16 +12081,28 @@ export default function Chat() {
             return null;
         };
 
+        const senderId = String(viewingImage.sender_id?._id || viewingImage.sender_id || viewingImage.user_id?._id || viewingImage.user_id || '');
+        const isMe = senderId === String(user?.id || user?._id);
+        const senderData = isMe ? user : users.find(u => String(u._id || u.id) === senderId);
+        const senderName = isMe ? t('chat_window.you') : (senderData?.name || 'User');
+        const senderAvatar = senderData?.image || senderData?.avatar || senderData?.avatarUrl;
+
         return (
             <div className="wa-image-viewer-overlay" onClick={() => setViewingImage(null)}>
                 <div className="wa-viewer-header">
                     <div className="wa-viewer-user-info">
                         <div className="wa-avatar" style={{ width: 40, height: 40, marginRight: 12 }}>
-                            <span>{selectedUser?.name?.charAt(0).toUpperCase()}</span>
+                            {senderAvatar ? (
+                                <img src={getMediaUrl(senderAvatar)} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                            ) : (
+                                <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#38bdf8', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold' }}>
+                                    {senderName?.charAt(0).toUpperCase()}
+                                </div>
+                            )}
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column' }}>
-                            <span style={{ fontWeight: '500' }}>{selectedUser?.name}</span>
-                            <span style={{ fontSize: 13, color: '#667781' }}>{formatTime(viewingImage.created_at)}</span>
+                            <span style={{ fontWeight: '500' }}>{senderName}</span>
+                            <span style={{ fontSize: 13, color: '#94a3b8' }}>{formatTime(viewingImage.created_at)}</span>
                         </div>
                     </div>
                     <div className="wa-viewer-actions">
@@ -12111,9 +12172,14 @@ export default function Chat() {
                                 className={`wa-viewer-thumb ${msg._id === viewingImage._id ? 'active' : ''}`}
                                 onClick={() => setViewingImage(msg)}
                             >
-                                {msg.type === 'image' ? <img src={msg.file_path} alt="thumb" /> :
-                                    <video src={msg.file_path} />
-                                }
+                                {msg.type === 'image' ? (
+                                    <img src={getMediaUrl(msg.file_path)} alt="thumb" onError={(e) => { e.target.style.display = 'none'; }} />
+                                ) : (
+                                    <div style={{ position: 'relative', width: '100%', height: '100%', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        <video src={getMediaUrl(msg.file_path)} crossOrigin="anonymous" muted style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.6 }} />
+                                        <div style={{ position: 'absolute', color: 'white', opacity: 0.9, zIndex: 1 }}><Play size={16} fill="currentColor" /></div>
+                                    </div>
+                                )}
                             </div>
                         ))}
                     </div>
@@ -14144,24 +14210,17 @@ export default function Chat() {
 
                                 try {
                                     // 1. Call Backend API for Persistence
-                                    const response = await fetch(`${window.location.origin}/api/chat/user/update`, {
-                                        method: 'POST',
-                                        headers: {
-                                            'Content-Type': 'application/json',
-                                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                                        },
-                                        body: JSON.stringify({
-                                            targetUserId: contactId,
-                                            name: newAlias,
-                                            mobile: editPhone,
-                                            countryCode: editCountry.dial
-                                        })
+                                    const res = await axios.post('/api/chat/user/update', {
+                                        targetUserId: contactId,
+                                        name: newAlias,
+                                        mobile: editPhone,
+                                        countryCode: editCountry.dial
+                                    }, {
+                                        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
                                     });
 
-                                    if (!response.ok) {
-                                        const errData = await response.json();
-                                        throw new Error(errData.error || 'Failed to update contact');
-                                    }
+                                    setSnackbar({ message: 'Contact name updated', type: 'success' });
+                                    setIsEditContactOpen(false);
 
                                     // 2. Update Local State for Immediate UI Feedback
                                     setContactAliases(prev => {
@@ -14169,6 +14228,7 @@ export default function Chat() {
                                         const idKeys = [selectedUser?._id, selectedUser?.id]
                                             .map(v => String(v || '').trim())
                                             .filter(Boolean);
+
                                         for (const idKey of idKeys) {
                                             const lower = idKey.toLowerCase();
                                             if (newAlias) {
@@ -14179,9 +14239,7 @@ export default function Chat() {
                                                 delete next[lower];
                                             }
                                         }
-                                        try {
-                                            localStorage.setItem(contactAliasStorageKey, JSON.stringify(next));
-                                        } catch (_) { }
+                                        localStorage.setItem(contactAliasStorageKey, JSON.stringify(next));
                                         return next;
                                     });
 
@@ -14264,11 +14322,30 @@ export default function Chat() {
             );
         }
 
-        const mediaMsgs = chatMsgs.filter(m => m.type === 'image' || m.type === 'video' || m.type === 'audio');
-        const docMsgs = chatMsgs.filter(m => m.type === 'file');
-        const linkMsgs = chatMsgs.filter(m => (m.link_preview?.url || /(https?:\/\/[^\s]+)/.test(m.content)) && m.type !== 'image' && m.type !== 'video' && m.type !== 'audio' && m.type !== 'file');
+        const mediaMsgs = chatMsgs.filter(m => m.type === 'image' || m.type === 'video' || m.type === 'audio').sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+        const docMsgs = chatMsgs.filter(m => m.type === 'file').sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+        const linkMsgs = chatMsgs.filter(m => (m.link_preview?.url || /(https?:\/\/[^\s]+)/.test(m.content)) && m.type !== 'image' && m.type !== 'video' && m.type !== 'audio' && m.type !== 'file').sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
         const currentItems = sharedMediaTab === 'media' ? mediaMsgs : (sharedMediaTab === 'links' ? linkMsgs : docMsgs);
+
+        const groupMessagesByMonth = (msgs) => {
+            const grouped = {};
+            msgs.forEach(m => {
+                const date = new Date(m.created_at || Date.now());
+                const now = new Date();
+                let monthLabel = '';
+                if (date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()) {
+                    monthLabel = 'THIS MONTH';
+                } else {
+                    monthLabel = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
+                }
+                if (!grouped[monthLabel]) grouped[monthLabel] = [];
+                grouped[monthLabel].push(m);
+            });
+            return grouped;
+        };
+
+        const groupedItems = groupMessagesByMonth(currentItems);
         const isSelectionMode = selectedMediaMsgs.length > 0;
 
         const toggleSelection = (msg) => {
@@ -14357,7 +14434,7 @@ export default function Chat() {
 
         return (
             <div className={`wa-contact-info-panel shared-media-panel ${isSharedMediaOpen ? 'active' : ''}`}>
-                <div className="wa-contact-info-header" style={{ background: '#fff', borderBottom: 'none', height: 60, display: 'flex', alignItems: 'center', padding: '0 15px' }}>
+                <div className="wa-contact-info-header" style={{ background: 'transparent', borderBottom: 'none', height: 60, display: 'flex', alignItems: 'center', padding: '0 15px' }}>
                     {isSelectionMode ? (
                         <div className="wa-selection-header-grid">
                             <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
@@ -14386,7 +14463,7 @@ export default function Chat() {
                             </button>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'center', overflow: 'hidden' }}>
-                            <span style={{ fontSize: 16, fontWeight: 500, color: '#3b4a54', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('contact_info.media_links_docs')}</span>
+                            <span style={{ fontSize: 16, fontWeight: 500, color: '#0EA5BE', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('contact_info.media_links_docs')}</span>
                         </div>
                         <div /> {/* Spacer */}
                     </div>
@@ -14421,113 +14498,131 @@ export default function Chat() {
                     ) : (
                         <div style={{ padding: '15px' }}>
                             {sharedMediaTab === 'media' && (
-                                <div className="wa-media-grid">
-                                    {currentItems.map(msg => {
-                                        const msgKey = msg._id || msg.id;
-                                        const isSelected = !!selectedMediaMsgs.find(m => String(m._id || m.id) === String(msgKey));
-                                        const isAnySelected = selectedMediaMsgs.length > 0;
-
-                                        return (
-                                            <div key={msgKey} className="wa-media-grid-item" onClick={(e) => {
-                                                e.stopPropagation();
-                                                if (isAnySelected) {
-                                                    toggleSelection(msg);
-                                                } else {
-                                                    if (msg.type === 'audio' || msg.type === 'video') {
-                                                        handleSearchClick(msgKey);
-                                                        return;
-                                                    }
-                                                    // Mobile: Lightbox. Desktop: Redirect THEN Lightbox.
-                                                    if (window.innerWidth > 768) {
-                                                        handleSearchClick(msgKey);
-                                                        // Delay opening to allow scroll to finish
-                                                        setTimeout(() => setViewingImage(msg), 600);
-                                                    } else {
-                                                        setViewingImage(msg);
-                                                    }
-                                                }
-                                            }}>
-                                                {msg.type === 'audio' ? (
-                                                    <div style={{ width: '100%', height: '100%', background: '#f0f7fa', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 8 }}>
-                                                        <Headphones size={24} color="#0EA5BE" />
-                                                        <div style={{ fontSize: 11, color: '#3b4a54', textAlign: 'center', lineHeight: 1.3, wordBreak: 'break-word' }}>
-                                                            {msg.fileName || 'Audio'}
-                                                        </div>
-                                                    </div>
-                                                ) : msg.type === 'video' ? (
-                                                    <video
-                                                        src={msg.file_path}
-                                                        muted
-                                                        playsInline
-                                                        preload="metadata"
-                                                        style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#111b21' }}
-                                                    />
-                                                ) : (
-                                                    <img src={msg.file_path} alt="media" />
-                                                )}
-                                                <div
-                                                    className={`wa-media-overlay ${isSelected ? 'selected' : ''}`}
-                                                    style={{ background: isSelected ? 'rgba(0,0,0,0.4)' : undefined }}
-                                                >
-                                                    <div
-                                                        className="wa-media-select-btn"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            toggleSelection(msg);
-                                                        }}
-                                                    >
-                                                        {isSelected ? (
-                                                            <CheckSquare size={24} color="white" fill="#0EA5BE" />
-                                                        ) : (
-                                                            <div style={{ width: 24, height: 24, border: '2px solid white', borderRadius: 4, background: 'rgba(0,0,0,0.1)' }} />
-                                                        )}
-                                                    </div>
-                                                </div>
+                                <div className="wa-media-groups">
+                                    {Object.entries(groupedItems).map(([month, msgs]) => (
+                                        <div key={month} className="wa-media-group">
+                                            <div className="wa-media-group-header" style={{ color: '#0EA5BE', fontSize: '13px', fontWeight: '500', padding: '10px 0 15px', textTransform: 'uppercase' }}>
+                                                {month}
                                             </div>
-                                        );
-                                    })}
+                                            <div className="wa-media-grid">
+                                                {msgs.map(msg => {
+                                                    const msgKey = msg._id || msg.id;
+                                                    const isSelected = !!selectedMediaMsgs.find(m => String(m._id || m.id) === String(msgKey));
+                                                    const isAnySelected = selectedMediaMsgs.length > 0;
+
+                                                    return (
+                                                        <div key={msgKey} className="wa-media-grid-item" onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            if (isAnySelected) {
+                                                                toggleSelection(msg);
+                                                            } else {
+                                                                if (msg.type === 'audio') {
+                                                                    handleSearchClick(msgKey);
+                                                                    return;
+                                                                }
+                                                                // Mobile: Lightbox. Desktop: Redirect THEN Lightbox.
+                                                                if (window.innerWidth > 768) {
+                                                                    handleSearchClick(msgKey);
+                                                                    // Delay opening to allow scroll to finish
+                                                                    setTimeout(() => setViewingImage(msg), 600);
+                                                                } else {
+                                                                    setViewingImage(msg);
+                                                                }
+                                                            }
+                                                        }}>
+                                                            {msg.type === 'audio' ? (
+                                                                <div style={{ width: '100%', height: '100%', background: '#f0f7fa', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 8 }}>
+                                                                    <Headphones size={24} color="#0EA5BE" />
+                                                                    <div style={{ fontSize: 11, color: '#3b4a54', textAlign: 'center', lineHeight: 1.3, wordBreak: 'break-word' }}>
+                                                                        {msg.fileName || 'Audio'}
+                                                                    </div>
+                                                                </div>
+                                                            ) : msg.type === 'video' ? (
+                                                                <video
+                                                                    src={getMediaUrl(msg.file_path)}
+                                                                    muted
+                                                                    playsInline
+                                                                    preload="metadata"
+                                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#111b21' }}
+                                                                />
+                                                            ) : (
+                                                                <img src={getMediaUrl(msg.file_path)} alt="media" />
+                                                            )}
+                                                            <div
+                                                                className={`wa-media-overlay ${isSelected ? 'selected' : ''}`}
+                                                                style={{ background: isSelected ? 'rgba(0,0,0,0.4)' : undefined }}
+                                                            >
+                                                                <div
+                                                                    className="wa-media-select-btn"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        toggleSelection(msg);
+                                                                    }}
+                                                                >
+                                                                    {isSelected ? (
+                                                                        <CheckSquare size={24} color="white" fill="#0EA5BE" />
+                                                                    ) : (
+                                                                        <div style={{ width: 24, height: 24, border: '2px solid white', borderRadius: 4, background: 'rgba(0,0,0,0.1)' }} />
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             )}
 
                             {sharedMediaTab === 'docs' && (
-                                <div className="wa-docs-list">
-                                    {currentItems.map(msg => (
-                                        <div key={msg._id || msg.id} className="wa-doc-list-item">
-                                            <div
-                                                className={`wa-doc-select-box ${selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? 'active' : ''}`}
-                                                onClick={(e) => { e.stopPropagation(); toggleSelection(msg); }}
-                                                style={{ cursor: 'pointer' }}
-                                            >
-                                                {selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? (
-                                                    <CheckCheck size={14} color="#fff" />
-                                                ) : (
-                                                    <div className="wa-doc-checkbox-placeholder" />
-                                                )}
+                                <div className="wa-docs-groups">
+                                    {Object.entries(groupedItems).map(([month, msgs]) => (
+                                        <div key={month} className="wa-docs-group">
+                                            <div className="wa-docs-group-header" style={{ color: '#0EA5BE', fontSize: '13px', fontWeight: '500', padding: '15px 0 10px', textTransform: 'uppercase' }}>
+                                                {month}
                                             </div>
-                                            <div
-                                                className="wa-doc-content-wrapper"
-                                                style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, cursor: 'pointer', minHeight: 52 }}
-                                                onClick={() => handleSearchClick(msg._id || msg.id)}
-                                            >
-                                                <div className="wa-doc-icon-small" style={{ width: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                                    {(() => {
-                                                        const displayName = getDisplayFileName(msg);
-                                                        const ext = getSharedFileExt(displayName);
-                                                        const badge = getSharedFileBadge(ext);
-                                                        const accent = getSharedFileAccent(ext);
-                                                        return (
-                                                            <div style={{ width: 34, height: 34, borderRadius: 8, background: accent, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4 }}>
-                                                                {badge}
+                                            <div className="wa-docs-list">
+                                                {msgs.map(msg => (
+                                                    <div key={msg._id || msg.id} className="wa-doc-list-item">
+                                                        <div
+                                                            className={`wa-doc-select-box ${selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? 'active' : ''}`}
+                                                            onClick={(e) => { e.stopPropagation(); toggleSelection(msg); }}
+                                                            style={{ cursor: 'pointer' }}
+                                                        >
+                                                            {selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? (
+                                                                <CheckCheck size={14} color="#fff" />
+                                                            ) : (
+                                                                <div className="wa-doc-checkbox-placeholder" />
+                                                            )}
+                                                        </div>
+                                                        <div
+                                                            className="wa-doc-content-wrapper"
+                                                            style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, cursor: 'pointer', minHeight: 52 }}
+                                                            onClick={() => handleSearchClick(msg._id || msg.id)}
+                                                        >
+                                                            <div className="wa-doc-icon-small" style={{ width: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                {(() => {
+                                                                    const displayName = getDisplayFileName(msg);
+                                                                    const ext = getSharedFileExt(displayName);
+                                                                    const badge = getSharedFileBadge(ext);
+                                                                    const accent = getSharedFileAccent(ext);
+                                                                    return (
+                                                                        <div style={{ width: 34, height: 34, borderRadius: 8, background: accent, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                                                                            {badge}
+                                                                        </div>
+                                                                    );
+                                                                })()}
                                                             </div>
-                                                        );
-                                                    })()}
-                                                </div>
-                                                <div className="wa-doc-info" style={{ minWidth: 0 }}>
-                                                    <div className="wa-doc-name-small">{getDisplayFileName(msg) || 'Document'}</div>
-                                                    <div className="wa-doc-meta-small">
-                                                        {(() => { const displayName = getDisplayFileName(msg); const ext = getSharedFileExt(displayName); const badge = getSharedFileBadge(ext); const sizeLabel = formatFileSize(msg.fileSize || msg.file_size || 0) || 'File'; return sizeLabel + ' - ' + badge + ' - ' + formatSharedMediaTimestamp(msg.created_at); })()}
+                                                            <div className="wa-doc-info" style={{ minWidth: 0 }}>
+                                                                <div className="wa-doc-name-small">{getDisplayFileName(msg) || 'Document'}</div>
+                                                                <div className="wa-doc-meta-small">
+                                                                    {(() => { const displayName = getDisplayFileName(msg); const ext = getSharedFileExt(displayName); const badge = getSharedFileBadge(ext); const sizeLabel = formatFileSize(msg.fileSize || msg.file_size || 0) || 'File'; return sizeLabel + ' - ' + badge + ' - ' + formatSharedMediaTimestamp(msg.created_at); })()}
+                                                                </div>
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                </div>
+                                                ))}
                                             </div>
                                         </div>
                                     ))}
@@ -14535,64 +14630,73 @@ export default function Chat() {
                             )}
 
                             {sharedMediaTab === 'links' && (
-                                <div className="wa-links-list">
-                                    {currentItems.map(msg => {
-                                        const actualUrl = msg.link_preview?.url || msg.content?.match(/(https?:\/\/[^\s]+)/)?.[0];
-                                        return (
-                                            <div key={msg._id || msg.id} className="wa-link-list-item">
-                                                <div
-                                                    className={`wa-doc-select-box ${selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? 'active' : ''}`}
-                                                    onClick={(e) => { e.stopPropagation(); toggleSelection(msg); }}
-                                                    style={{ cursor: 'pointer' }}
-                                                >
-                                                    {selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? (
-                                                        <CheckCheck size={18} color="#fff" />
-                                                    ) : (
-                                                        <div className="wa-doc-checkbox-placeholder" />
-                                                    )}
-                                                </div>
-                                                <a
-                                                    className={`wa-link-card-small ${getYouTubeVideoId(actualUrl) ? 'youtube' : ''}`}
-                                                    href={actualUrl}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    onClick={(e) => {
-                                                        e.preventDefault();
-                                                        handleSearchClick(msg._id || msg.id);
-                                                    }}
-                                                    style={{ cursor: 'pointer', textDecoration: 'none', display: 'block' }}
-                                                >
-                                                    <div className="wa-link-header-small">
-                                                        <span className="wa-link-author">{msg.sender_id === user.id || msg.user_id === user.id ? 'You' : (selectedUser?.name || 'User')}</span>
-                                                        <span className="wa-link-time-small">{formatSharedMediaTimestamp(msg.created_at)}</span>
-                                                    </div>
-                                                    <div style={{ display: 'flex', gap: 10 }}>
-                                                        {msg.link_preview?.image && (
-                                                            <div className="wa-link-thumb-small-wrapper">
-                                                                <img src={msg.link_preview.image} alt="preview" className="wa-link-thumb-small" />
-                                                                {getYouTubeVideoId(actualUrl) && (
-                                                                    <div
-                                                                        className="wa-yt-preview-overlay-small"
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            e.preventDefault();
-                                                                            setPreviewVideoUrl(actualUrl);
-                                                                        }}
-                                                                    >
-                                                                        <Play size={16} color="white" fill="white" />
-                                                                    </div>
+                                <div className="wa-links-groups">
+                                    {Object.entries(groupedItems).map(([month, msgs]) => (
+                                        <div key={month} className="wa-links-group">
+                                            <div className="wa-links-group-header" style={{ color: '#0EA5BE', fontSize: '13px', fontWeight: '500', padding: '15px 0 10px', textTransform: 'uppercase' }}>
+                                                {month}
+                                            </div>
+                                            <div className="wa-links-list">
+                                                {msgs.map(msg => {
+                                                    const actualUrl = msg.link_preview?.url || msg.content?.match(/(https?:\/\/[^\s]+)/)?.[0];
+                                                    return (
+                                                        <div key={msg._id || msg.id} className="wa-link-list-item">
+                                                            <div
+                                                                className={`wa-doc-select-box ${selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? 'active' : ''}`}
+                                                                onClick={(e) => { e.stopPropagation(); toggleSelection(msg); }}
+                                                                style={{ cursor: 'pointer' }}
+                                                            >
+                                                                {selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? (
+                                                                    <CheckCheck size={18} color="#fff" />
+                                                                ) : (
+                                                                    <div className="wa-doc-checkbox-placeholder" />
                                                                 )}
                                                             </div>
-                                                        )}
-                                                        <div className="wa-link-details-small">
-                                                            {msg.link_preview?.title && <div className="wa-link-title-small">{msg.link_preview.title}</div>}
-                                                            <div className="wa-link-url-small" style={{ wordBreak: 'break-all' }}>{actualUrl}</div>
+                                                            <a
+                                                                className={`wa-link-card-small ${getYouTubeVideoId(actualUrl) ? 'youtube' : ''}`}
+                                                                href={actualUrl}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                onClick={(e) => {
+                                                                    e.preventDefault();
+                                                                    handleSearchClick(msg._id || msg.id);
+                                                                }}
+                                                                style={{ cursor: 'pointer', textDecoration: 'none', display: 'block' }}
+                                                            >
+                                                                <div className="wa-link-header-small">
+                                                                    <span className="wa-link-author">{isMeMsg(msg) ? 'You' : (msg.sender_id?.name || msg.sender_name || msg.senderName || msg.user_name || selectedUser?.name || 'Member')}</span>
+                                                                    <span className="wa-link-time-small">{formatSharedMediaTimestamp(msg.created_at)}</span>
+                                                                </div>
+                                                                <div style={{ display: 'flex', gap: 10 }}>
+                                                                    {msg.link_preview?.image && (
+                                                                        <div className="wa-link-thumb-small-wrapper">
+                                                                            <img src={msg.link_preview.image} alt="preview" className="wa-link-thumb-small" />
+                                                                            {getYouTubeVideoId(actualUrl) && (
+                                                                                <div
+                                                                                    className="wa-yt-preview-overlay-small"
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        e.preventDefault();
+                                                                                        setPreviewVideoUrl(actualUrl);
+                                                                                    }}
+                                                                                >
+                                                                                    <Play size={16} color="white" fill="white" />
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                    <div className="wa-link-details-small">
+                                                                        {msg.link_preview?.title && <div className="wa-link-title-small">{msg.link_preview.title}</div>}
+                                                                        <div className="wa-link-url-small" style={{ wordBreak: 'break-all' }}>{actualUrl}</div>
+                                                                    </div>
+                                                                </div>
+                                                            </a>
                                                         </div>
-                                                    </div>
-                                                </a>
+                                                    );
+                                                })}
                                             </div>
-                                        );
-                                    })}
+                                        </div>
+                                    ))}
                                 </div>
                             )}
                         </div>
@@ -16695,7 +16799,7 @@ export default function Chat() {
                             if (msg.type === 'image' || msg.type === 'video') {
                                 previewContent = (
                                     <div style={{ width: 36, height: 36, marginLeft: 12, borderRadius: 4, overflow: 'hidden', flexShrink: 0, backgroundColor: '#f0f2f5' }}>
-                                        {msg.type === 'image' ? <img src={msg.file_path} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned" /> : <video src={msg.file_path} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+                                        {msg.type === 'image' ? <img src={getMediaUrl(msg.file_path)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned" /> : <video src={getMediaUrl(msg.file_path)} muted crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />}
                                     </div>
                                 );
                             } else if (isExcel) {
@@ -17297,7 +17401,7 @@ export default function Chat() {
                             if (msg.type === 'image' || msg.type === 'video') {
                                 previewContent = (
                                     <div style={{ width: 36, height: 36, marginLeft: 12, borderRadius: 4, overflow: 'hidden', flexShrink: 0, backgroundColor: '#f0f2f5' }}>
-                                        {msg.type === 'image' ? <img src={msg.file_path} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned" /> : <video src={msg.file_path} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+                                        {msg.type === 'image' ? <img src={getMediaUrl(msg.file_path)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned" /> : <video src={getMediaUrl(msg.file_path)} muted crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />}
                                     </div>
                                 );
                             } else if (isExcel) {
@@ -20184,7 +20288,7 @@ export default function Chat() {
 
                             {/* File Preview Overlay (Restricted to Chat Area) */}
                             {(file || selectedFiles.length > 0) && (
-                                <div style={{ position: 'absolute', top: 60, left: 0, width: '100%', height: 'calc(100% - 60px)', zIndex: 2000, display: 'flex', flexDirection: 'column', background: '#e9edef' }}>
+                                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 2000, display: 'flex', flexDirection: 'column', background: '#e9edef' }}>
                                     {renderFilePreview()}
                                 </div>
                             )}

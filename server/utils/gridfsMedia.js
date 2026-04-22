@@ -43,11 +43,16 @@ const getContentTypeFromName = (name = '') => {
     const ext = path.extname(name).toLowerCase();
     const typeMap = {
         '.ogg': 'audio/ogg',
-        '.webm': 'audio/webm',
+        '.opus': 'audio/ogg',
+        '.webm': 'video/webm',
         '.mp3': 'audio/mpeg',
         '.m4a': 'audio/mp4',
-        '.mp4': 'audio/mp4',
-        '.wav': 'audio/wav'
+        '.mp4': 'video/mp4',
+        '.wav': 'audio/wav',
+        '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo',
+        '.mkv': 'video/x-matroska',
+        '.m4v': 'video/x-m4v'
     };
     return typeMap[ext] || 'application/octet-stream';
 };
