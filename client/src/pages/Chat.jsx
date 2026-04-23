@@ -49,20 +49,21 @@ const appendMediaToken = (url) => {
 const buildMediaProxyUrl = (rawPath) => {
     if (!rawPath) return '';
     const raw = String(rawPath);
-    const normalizedPath = (() => {
+    return (() => {
         try {
             const parsed = new URL(raw, window.location.origin);
-            return `${parsed.pathname || raw}${parsed.search || ''}`;
+            if (parsed.pathname.startsWith('/uploads/')) {
+                return `${parsed.pathname}${parsed.search || ''}`;
+            }
+            return appendMediaToken(`${parsed.pathname || raw}${parsed.search || ''}`);
         } catch (_) {
-            return raw;
+            const normalized = raw.startsWith('/') ? raw : `/${raw.replace(/^\/+/, '')}`;
+            if (normalized.startsWith('/uploads/')) {
+                return normalized;
+            }
+            return appendMediaToken(normalized);
         }
     })();
-    const pathOnly = normalizedPath.split('?')[0] || normalizedPath;
-    const fileName = pathOnly.split('/').pop() || '';
-    const params = new URLSearchParams();
-    params.set('path', normalizedPath);
-    if (fileName) params.set('name', fileName);
-    return appendMediaToken(`/api/chat/media?${params.toString()}`);
 };
 
 const getMediaUrl = (path) => {

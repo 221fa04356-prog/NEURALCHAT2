@@ -356,12 +356,12 @@ router.get('/media/message/:messageId', async (req, res) => {
         let isGroupMsg = false;
 
         if (wantsGroup) {
-            msg = await GroupMessage.findById(messageId).select('type file_path fileName group_id sender_id');
+            msg = await GroupMessage.findById(messageId).select('+__enc_file_path +__enc_fileName type file_path fileName group_id sender_id');
             isGroupMsg = !!msg;
         } else {
-            msg = await Message.findById(messageId).select('type file_path fileName user_id receiver_id');
+            msg = await Message.findById(messageId).select('+__enc_file_path +__enc_fileName type file_path fileName user_id receiver_id');
             if (!msg) {
-                msg = await GroupMessage.findById(messageId).select('type file_path fileName group_id sender_id');
+                msg = await GroupMessage.findById(messageId).select('+__enc_file_path +__enc_fileName type file_path fileName group_id sender_id');
                 isGroupMsg = !!msg;
             }
         }
@@ -388,7 +388,24 @@ router.get('/media/message/:messageId', async (req, res) => {
 
         const rawPath = String(msg.file_path || '');
         const fileName = String(msg.fileName || '');
-        if (!rawPath && !fileName) return res.status(404).json({ error: 'Media path not found' });
+        if (!rawPath && !fileName) {
+            const fallbackPath = String(req.query.legacyPath || req.query.path || '');
+            const fallbackName = String(req.query.name || '');
+            if (!fallbackPath && !fallbackName) {
+                return res.status(404).json({ error: 'Media path not found' });
+            }
+
+            let candidate = safeResolveMediaPath(fallbackPath);
+            if (!candidate && fallbackName) {
+                candidate = safeResolveMediaPath(`/uploads/${fallbackName}`);
+            }
+            if (!candidate || !fs.existsSync(candidate)) {
+                const found = findByFilenameRecursive(path.resolve(__dirname, '../uploads'), fallbackName || path.basename(fallbackPath));
+                if (!found) return res.status(404).json({ error: 'Media not found' });
+                candidate = found;
+            }
+            return streamFileWithRange(req, res, candidate);
+        }
 
         // GridFS-backed route path
         if (/\/api\/chat\/media\/file\//i.test(rawPath)) {
@@ -408,8 +425,15 @@ router.get('/media/message/:messageId', async (req, res) => {
         if (!candidate && fileName) {
             candidate = safeResolveMediaPath(`/uploads/${fileName}`);
         }
+        if ((!candidate || !fs.existsSync(candidate)) && req.query.legacyPath) {
+            candidate = safeResolveMediaPath(String(req.query.legacyPath));
+        }
+        if ((!candidate || !fs.existsSync(candidate)) && req.query.name) {
+            candidate = safeResolveMediaPath(`/uploads/${String(req.query.name)}`);
+        }
         if (!candidate || !fs.existsSync(candidate)) {
-            const found = findByFilenameRecursive(path.resolve(__dirname, '../uploads'), fileName || path.basename(rawPath));
+            const fallbackLookupName = String(req.query.name || fileName || path.basename(rawPath));
+            const found = findByFilenameRecursive(path.resolve(__dirname, '../uploads'), fallbackLookupName);
             if (!found) return res.status(404).json({ error: 'Media not found' });
             candidate = found;
         }

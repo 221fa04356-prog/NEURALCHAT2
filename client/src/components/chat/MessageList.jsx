@@ -1,4 +1,4 @@
-import React, { memo, Fragment, useRef, useEffect, useState } from 'react';
+import React, { memo, Fragment, useRef, useEffect, useState, useCallback } from 'react';
 import { 
     Trash2, XCircle, Forward, ChevronDown, Camera, FileText, 
     Pause, Play, Mic, User as UserIcon, CheckSquare, 
@@ -11,8 +11,6 @@ import ViewOnceBadge from './ViewOnceBadge';
 const DEFAULT_VOICE_WAVEFORM = [8, 10, 9, 12, 11, 8, 13, 15, 12, 9, 11, 14, 10, 13, 8, 10, 15, 11, 13, 10, 14, 12, 9, 8, 10, 13, 11, 12, 9, 11];
 const VOICE_WAVEFORM_BARS = 30;
 const voiceWaveformCache = new Map();
-const failedMediaUrlCache = new Set();
-
 const buildVoiceWaveform = async (src, signal) => {
     if (!src || typeof window === 'undefined') return DEFAULT_VOICE_WAVEFORM;
 
@@ -145,24 +143,26 @@ const appendMediaToken = (url) => {
 const buildMediaProxyUrl = (rawPath) => {
     if (!rawPath) return '';
     const raw = String(rawPath);
-    const normalizedPath = (() => {
+    return (() => {
         try {
             const parsed = new URL(raw, window.location.origin);
-            return parsed.pathname || raw;
+            if (parsed.pathname.startsWith('/uploads/')) {
+                return `${parsed.pathname}${parsed.search || ''}`;
+            }
+            return appendMediaToken(`${parsed.pathname || raw}${parsed.search || ''}`);
         } catch (_) {
-            return raw;
+            const normalized = raw.startsWith('/') ? raw : `/${raw.replace(/^\/+/, '')}`;
+            if (normalized.startsWith('/uploads/')) {
+                return normalized;
+            }
+            return appendMediaToken(normalized);
         }
     })();
-    const fileName = normalizedPath.split('/').pop() || '';
-    const params = new URLSearchParams();
-    params.set('path', normalizedPath);
-    if (fileName) params.set('name', fileName);
-    return appendMediaToken(`/api/chat/media?${params.toString()}`);
 };
 
 const buildMessageMediaFallbackUrl = (msg, isGroupChat = false) => {
     const msgId = String(msg?._id || msg?.id || '');
-    if (!msgId) return '';
+    if (!/^[a-f0-9]{24}$/i.test(msgId)) return '';
     const token = localStorage.getItem('token') || '';
     const params = new URLSearchParams();
     if (token) params.set('token', token);
@@ -180,44 +180,72 @@ const buildMessageMediaFallbackUrl = (msg, isGroupChat = false) => {
     return appendMediaToken(url);
 };
 
-const resolveAbsoluteMessageFileUrl = (msg, isGroupChat = false) => {
+const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
     const rawPath = msg?.file_path || msg?.filePath || '';
-    if (!rawPath) return '';
+    const messageUrl = buildMessageMediaFallbackUrl(msg, isGroupChat);
+    if (!rawPath) {
+        return { primaryUrl: messageUrl, retryUrl: '' };
+    }
+
     const raw = String(rawPath);
-    if (raw.startsWith('blob:') || raw.startsWith('data:')) return raw;
-    const fallbackUrl = buildMessageMediaFallbackUrl(msg, isGroupChat);
+    if (raw.startsWith('blob:') || raw.startsWith('data:')) {
+        return { primaryUrl: raw, retryUrl: '' };
+    }
+
+    const makeManagedResult = (directUrl) => {
+        const primaryUrl = messageUrl || directUrl;
+        const retryUrl = messageUrl && directUrl && messageUrl !== directUrl ? directUrl : '';
+        return { primaryUrl, retryUrl };
+    };
 
     if (raw.startsWith('http')) {
         try {
             const parsed = new URL(raw);
+            const normalizedUrl = `${parsed.pathname}${parsed.search || ''}`;
+            if (parsed.pathname.startsWith('/api/chat/media/message/')) {
+                return { primaryUrl: appendMediaToken(normalizedUrl), retryUrl: '' };
+            }
+            if (parsed.pathname.startsWith('/api/chat/media/file/')) {
+                return makeManagedResult(appendMediaToken(normalizedUrl));
+            }
             if (parsed.pathname.startsWith('/api/chat/media')) {
-                const resolved = /\/api\/chat\/media\/file\//i.test(parsed.pathname)
-                    ? appendMediaToken(`${parsed.pathname}${parsed.search || ''}`)
-                    : (fallbackUrl || appendMediaToken(`${parsed.pathname}${parsed.search || ''}`));
-                return failedMediaUrlCache.has(resolved) ? '' : resolved;
+                return { primaryUrl: appendMediaToken(normalizedUrl), retryUrl: messageUrl && messageUrl !== appendMediaToken(normalizedUrl) ? messageUrl : '' };
             }
             if (parsed.pathname.startsWith('/uploads/')) {
-                const resolved = fallbackUrl || buildMediaProxyUrl(parsed.pathname);
-                return failedMediaUrlCache.has(resolved) ? '' : resolved;
+                return makeManagedResult(buildMediaProxyUrl(normalizedUrl));
             }
         } catch (_) { }
-        const resolved = fallbackUrl || appendMediaToken(raw);
-        return failedMediaUrlCache.has(resolved) ? '' : resolved;
+
+        const directUrl = appendMediaToken(raw) || '';
+        return {
+            primaryUrl: directUrl || messageUrl,
+            retryUrl: messageUrl && directUrl && messageUrl !== directUrl ? messageUrl : ''
+        };
     }
 
     const normalized = raw.startsWith('/') ? raw : `/${raw.replace(/^\/+/, '')}`;
+    if (normalized.startsWith('/api/chat/media/message/')) {
+        return { primaryUrl: appendMediaToken(normalized), retryUrl: '' };
+    }
+    if (normalized.startsWith('/api/chat/media/file/')) {
+        return makeManagedResult(appendMediaToken(normalized));
+    }
     if (normalized.startsWith('/api/chat/media')) {
-        const resolved = /\/api\/chat\/media\/file\//i.test(normalized)
-            ? appendMediaToken(normalized)
-            : (fallbackUrl || appendMediaToken(normalized));
-        return failedMediaUrlCache.has(resolved) ? '' : resolved;
+        const directUrl = appendMediaToken(normalized);
+        return {
+            primaryUrl: directUrl,
+            retryUrl: messageUrl && directUrl && messageUrl !== directUrl ? messageUrl : ''
+        };
     }
     if (normalized.startsWith('/uploads/')) {
-        const resolved = fallbackUrl || buildMediaProxyUrl(normalized);
-        return failedMediaUrlCache.has(resolved) ? '' : resolved;
+        return makeManagedResult(buildMediaProxyUrl(normalized));
     }
-    const resolved = fallbackUrl || appendMediaToken(normalized);
-    return failedMediaUrlCache.has(resolved) ? '' : resolved;
+
+    const directUrl = appendMediaToken(normalized) || '';
+    return {
+        primaryUrl: directUrl || messageUrl,
+        retryUrl: messageUrl && directUrl && messageUrl !== directUrl ? messageUrl : ''
+    };
 };
 
 const MessageScroller = React.forwardRef((props, ref) => (
@@ -292,16 +320,49 @@ const MessageList = memo(({
     isMobile
 }) => {
     const [isAtBottom, setIsAtBottom] = useState(true);
-    const [, setFailedMediaVersion] = useState(0);
-    const rememberFailedMediaUrl = (url) => {
-        if (!url || failedMediaUrlCache.has(url)) return;
-        failedMediaUrlCache.add(url);
-        setFailedMediaVersion((v) => v + 1);
-    };
+    const [failedMediaKeys, setFailedMediaKeys] = useState(() => new Set());
+    const [mediaUrlOverrides, setMediaUrlOverrides] = useState(() => new Map());
     const virtuosoRef = useRef(null);
     const handledJumpNonceRef = useRef(null);
     const targetId = String(selectedUser?._id || '').toLowerCase();
     const typingSet = typingUsers[targetId];
+
+    const getMessageKey = useCallback((msg) => String(msg?._id || msg?.id || ''), []);
+    const isMediaAborted = useCallback((event) => {
+        const mediaError = event?.currentTarget?.error;
+        return mediaError?.code === 1;
+    }, []);
+    const markMediaFailed = useCallback((msg, event) => {
+        const messageKey = getMessageKey(msg);
+        if (!messageKey || isMediaAborted(event)) return;
+        setFailedMediaKeys((prev) => {
+            if (prev.has(messageKey)) return prev;
+            const next = new Set(prev);
+            next.add(messageKey);
+            return next;
+        });
+    }, [getMessageKey, isMediaAborted]);
+    const handleMediaError = useCallback((msg, retryUrl, event) => {
+        const messageKey = getMessageKey(msg);
+        const mediaEl = event?.currentTarget;
+        if (messageKey && retryUrl && mediaEl) {
+            const currentSrc = String(mediaEl.currentSrc || mediaEl.src || '');
+            if (currentSrc !== retryUrl) {
+                setMediaUrlOverrides((prev) => {
+                    if (prev.get(messageKey) === retryUrl) return prev;
+                    const next = new Map(prev);
+                    next.set(messageKey, retryUrl);
+                    return next;
+                });
+                mediaEl.src = retryUrl;
+                if (typeof mediaEl.load === 'function') {
+                    mediaEl.load();
+                }
+                return;
+            }
+        }
+        markMediaFailed(msg, event);
+    }, [getMessageKey, markMediaFailed]);
 
     // 1. Prepare Flattened List for Virtuoso
     const flattenedItems = React.useMemo(() => {
@@ -397,13 +458,14 @@ const MessageList = memo(({
         const msg = item.data;
         const isLastItem = index === flattenedItems.length - 1;
         const msgId = msg._id || msg.id;
+        const messageKey = getMessageKey(msg);
         const isMe = isMeMsg(msg);
         const isAudioPlaying = String(playingAudioId) === String(msg._id || msg.id);
         const activePlaybackDuration = Math.max(1, Number(playbackDuration || msg.duration || 1));
         const pendingSeekPercentForMsg = pendingVoiceSeekTargets?.[String(msg._id || msg.id)] ?? null;
         const displayElapsedSeconds = isAudioPlaying
-            ? Math.min(Math.max(0, Math.round(activePlaybackDuration)), Math.max(0, Math.floor(Number(playbackPosition || 0))))
-            : Math.max(0, Math.round(msg.duration || 0));
+            ? Math.min(Math.max(0, Math.floor(activePlaybackDuration)), Math.max(0, Math.floor(Number(playbackPosition || 0))))
+            : Math.max(0, Math.floor(Number(msg.duration || 0)));
         const activePlaybackRatio = isAudioPlaying
             ? Math.max(0, Math.min(1, Number(playbackPosition || 0) / activePlaybackDuration))
             : (pendingSeekPercentForMsg != null ? Math.max(0, Math.min(1, Number(pendingSeekPercentForMsg || 0))) : 0);
@@ -510,7 +572,11 @@ const MessageList = memo(({
         const isVideoByExt = ['mp4', 'avi', 'mkv', 'mov', 'webm', 'm4v'].includes(fileExt);
         const isPdfDoc = fileExt === 'pdf';
         const isOfficePreviewDoc = ['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods', 'ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'].includes(fileExt);
-        const absoluteFileUrl = msg.file_path ? resolveAbsoluteMessageFileUrl(msg, isGroup) : '';
+        const overriddenMediaUrl = mediaUrlOverrides.get(messageKey) || '';
+        const { primaryUrl: resolvedFileUrl, retryUrl: retryFileUrl } = failedMediaKeys.has(messageKey)
+            ? { primaryUrl: '', retryUrl: '' }
+            : resolveMessageMediaUrls(msg, isGroup);
+        const absoluteFileUrl = overriddenMediaUrl || resolvedFileUrl;
         const isLikelyLocalOrPrivatePreview = (() => {
             if (!absoluteFileUrl) return true;
             try {
@@ -770,10 +836,10 @@ const MessageList = memo(({
                             </div>
                         ) : (
                             <>
-                                {msg.is_view_once && msg.is_viewed && !isMeMsg(msg) ? (
+                                {msg.is_view_once && msg.is_viewed && !isMeMsg(msg) && msg.type !== 'audio' ? (
                                     <div className="wa-spent-view-once-media" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', color: '#8696a0', fontSize: 14 }}>
                                         <ViewOnceBadge size={20} />
-                                        <span>{msg.type === 'image' ? 'Photo' : 'Video'}</span>
+                                        <span>{msg.type === 'image' ? 'Photo' : msg.type === 'file' ? 'File' : 'Video'}</span>
                                     </div>
                                 ) : (
                                     <>
@@ -789,10 +855,11 @@ const MessageList = memo(({
                                             }}>
                                                 {absoluteFileUrl ? (
                                                     <img
+                                                        key={`${messageKey}:${absoluteFileUrl}`}
                                                         src={absoluteFileUrl}
                                                         alt="Sent"
                                                         className="wa-msg-image"
-                                                        onError={() => rememberFailedMediaUrl(absoluteFileUrl)}
+                                                        onError={(event) => handleMediaError(msg, retryFileUrl, event)}
                                                     />
                                                 ) : (
                                                     <div className="wa-deleted-tag">
@@ -812,12 +879,13 @@ const MessageList = memo(({
                                             >
                                                 {absoluteFileUrl ? (
                                                     <video
+                                                        key={`${messageKey}:${absoluteFileUrl}`}
                                                         src={absoluteFileUrl}
                                                         controls
                                                         playsInline
-                                                        preload="metadata"
+                                                        preload="auto"
                                                         crossOrigin="anonymous"
-                                                        onError={() => rememberFailedMediaUrl(absoluteFileUrl)}
+                                                        onError={(event) => handleMediaError(msg, retryFileUrl, event)}
                                                         style={{ 
                                                             width: '100%', 
                                                             maxWidth: isMobile ? 240 : 340, 
@@ -827,9 +895,7 @@ const MessageList = memo(({
                                                             borderRadius: 8,
                                                             objectFit: 'contain'
                                                         }}
-                                                    >
-                                                        <source src={absoluteFileUrl} type={fileExt === 'webm' ? 'video/webm' : 'video/mp4'} />
-                                                    </video>
+                                                    />
                                                 ) : (
                                                     <div className="wa-deleted-tag" style={{ padding: '16px' }}>
                                                         <XCircle size={16} /> Video unavailable
