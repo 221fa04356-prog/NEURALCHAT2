@@ -16,11 +16,79 @@ import {
     AlertCircle, UserCheck, Loader2, Ban, ChevronUp, Headphones
 } from 'lucide-react';
 
+const browserHostname = window.location.hostname || '';
+const isLanOrLocalHost =
+    browserHostname === 'localhost' ||
+    browserHostname === '127.0.0.1' ||
+    browserHostname.startsWith('192.168.') ||
+    browserHostname.startsWith('10.') ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(browserHostname);
+
+const appendMediaToken = (url) => {
+    if (!url) return '';
+    const token = localStorage.getItem('token') || '';
+    if (!token) return url;
+
+    try {
+        const parsed = new URL(url, window.location.origin);
+        if (!parsed.pathname.startsWith('/api/chat/media')) return url;
+        parsed.searchParams.set('token', token);
+        if (/^https?:\/\//i.test(url)) return parsed.toString();
+        return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    } catch (_) {
+        if (!String(url).includes('/api/chat/media')) return url;
+        const withoutToken = String(url)
+            .replace(/([?&])token=[^&#]*&?/i, '$1')
+            .replace(/[?&]$/g, '');
+        return withoutToken.includes('?')
+            ? `${withoutToken}&token=${encodeURIComponent(token)}`
+            : `${withoutToken}?token=${encodeURIComponent(token)}`;
+    }
+};
+
+const buildMediaProxyUrl = (rawPath) => {
+    if (!rawPath) return '';
+    const raw = String(rawPath);
+    const normalizedPath = (() => {
+        try {
+            const parsed = new URL(raw, window.location.origin);
+            return `${parsed.pathname || raw}${parsed.search || ''}`;
+        } catch (_) {
+            return raw;
+        }
+    })();
+    const pathOnly = normalizedPath.split('?')[0] || normalizedPath;
+    const fileName = pathOnly.split('/').pop() || '';
+    const params = new URLSearchParams();
+    params.set('path', normalizedPath);
+    if (fileName) params.set('name', fileName);
+    return appendMediaToken(`/api/chat/media?${params.toString()}`);
+};
+
 const getMediaUrl = (path) => {
     if (!path) return '';
-    if (path.startsWith('http') || path.startsWith('blob:') || path.startsWith('data:')) return path;
+    if (path.startsWith('blob:') || path.startsWith('data:')) return path;
+    if (path.startsWith('http')) {
+        try {
+            const parsed = new URL(path);
+            if (parsed.pathname.startsWith('/uploads/')) {
+                return buildMediaProxyUrl(`${parsed.pathname}${parsed.search || ''}`);
+            }
+            if (parsed.pathname.startsWith('/api/chat/media')) {
+                return appendMediaToken(`${parsed.pathname}${parsed.search || ''}`);
+            }
+        } catch (_) { }
+        return appendMediaToken(path);
+    }
+    if (path.startsWith('/uploads/')) {
+        return buildMediaProxyUrl(path);
+    }
+    if (path.startsWith('/api/chat/media')) {
+        return appendMediaToken(path);
+    }
     const base = axios.defaults.baseURL || '';
-    return `${base.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
+    const resolved = `${base.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
+    return appendMediaToken(resolved);
 };
 
 
@@ -82,7 +150,7 @@ import EmojiPicker from '../components/EmojiPicker';
 // --- Socket Link ---
 // --- Socket Link ---
 // --- Socket Link ---
-const SOCKET_URL = import.meta.env.VITE_API_URL || '/';
+const SOCKET_URL = isLanOrLocalHost ? '/' : (import.meta.env.VITE_API_URL || '/');
 const socket = io(SOCKET_URL, {
     autoConnect: false, // Don't connect until we have a token
     transports: ['websocket'], // Changed to websocket only to perfectly match user's previous folder
@@ -668,6 +736,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
     const iconSize = isMobile ? 18 : 24;
     const actionGap = isMobile ? '2px' : '16px';
     const sendBtnSize = isMobile ? '38px' : '44px';
+    const recordingTimerColor = (!isPaused && !isReviewing) ? '#ffffff' : '#e2e8f0';
 
     return (
         <div style={{ display: 'flex', width: '100%', alignItems: 'center', gap: '8px' }}>
@@ -688,7 +757,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                             {(userData?.image || userData?.avatar) ? (
                                 <img src={userData.image || userData.avatar} alt="me" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
                             ) : (
-                                <div style={{ fontSize: isMobile ? '12px' : '14px', fontWeight: 'bold', color: '#54656f' }}>
+                                <div style={{ fontSize: isMobile ? '12px' : '14px', fontWeight: 'bold', color: '#ffffff' }}>
                                     {(userData?.name || 'M')[0].toUpperCase()}
                                 </div>
                             )}
@@ -698,7 +767,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                             {!isPaused && !isReviewing && <div className="wa-recording-dot" style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ef4444', animation: 'wa-pulse 1.5s infinite ease-in-out' }} />}
-                            <span style={{ color: '#111b21', fontSize: isMobile ? '11px' : '12px', fontWeight: 500 }}>
+                            <span style={{ color: recordingTimerColor, fontSize: isMobile ? '11px' : '12px', fontWeight: 600, minWidth: isMobile ? '34px' : '42px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                                 {(!isPaused && !isReviewing)
                                     ? formatVoiceTime(recordingTime)
                                     : (isPlayingPreview || previewProgress > 0 ? formatVoiceTime(previewSeconds) : formatVoiceTime(recordingTime))}
@@ -814,6 +883,15 @@ const getYouTubeVideoId = (url) => {
 };
 
 export default function Chat() {
+    const WINDOWS_OPEN_HELPER_ORIGIN = 'http://127.0.0.1:48723';
+    const getDirectApiOrigin = () => {
+        const apiBase = (axios.defaults.baseURL || '').replace(/\/$/, '');
+        if (apiBase) {
+            return apiBase.replace(/\/api$/i, '');
+        }
+        const host = window.location.hostname || '127.0.0.1';
+        return `http://${host}:3000`;
+    };
     const [users, setUsers] = useState([]);
     const [selectedUser, setSelectedUser] = useState(null);
     const [selectedGroup, setSelectedGroup] = useState(null);
@@ -1751,7 +1829,7 @@ export default function Chat() {
 
     const [searchTarget, setSearchTarget] = useState(null); // { type: 'p2p'|'group', id: string }
     const [openingFile, setOpeningFile] = useState(null);
-    const [fileToOpenConfirm, setFileToOpenConfirm] = useState(null); // { filePath, fileName }
+    const [fileToOpenConfirm, setFileToOpenConfirm] = useState(null); // { filePath, fileName, isRisky, rawFilePath }
     const [appNotFoundInfo, setAppNotFoundInfo] = useState(null); // { ext, filePath }
     const mouseFollowerRef = useRef(null);
     const [isWaitingForApp, setIsWaitingForApp] = useState(false);
@@ -1874,20 +1952,51 @@ export default function Chat() {
         );
     };
 
-    const handleOpenFile = (filePath, fileName) => {
+    const handleOpenFile = (filePath, fileName, msgMeta = null) => {
         const safeExtensions = ['pdf', 'docx', 'doc', 'docm', 'dotx', 'dot', 'rtf', 'odt', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xltx', 'xlt', 'ods', 'ppt', 'pptx', 'pptm', 'potx', 'pot', 'ppsx', 'pps', 'odp', 'txt', 'jpg', 'jpeg', 'png', 'gif', 'mp4', 'mov', 'avi', 'mp3', 'wav', 'csv'];
         const ext = fileName.split('.').pop().toLowerCase();
+        setFileToOpenConfirm({
+            filePath,
+            fileName,
+            isRisky: !safeExtensions.includes(ext),
+            rawFilePath: msgMeta?.file_path || ''
+        });
+    };
 
-        // If the file is a "Safe" known type, skip the confirmation modal
-        if (safeExtensions.includes(ext)) {
-            handleOpenFileActual(filePath, fileName);
-        } else {
-            // Only show the confirmation for suspicious file types (exe, bat, sh, etc.)
-            setFileToOpenConfirm({ filePath, fileName });
+    const openViaWindowsHelper = async (downloadUrl, fileName, ext) => {
+        const authToken = localStorage.getItem('token') || '';
+        const helperDownloadUrl = (() => {
+            try {
+                return new URL(downloadUrl, getDirectApiOrigin()).toString();
+            } catch (_) {
+                return downloadUrl;
+            }
+        })();
+        const health = await fetch(`${WINDOWS_OPEN_HELPER_ORIGIN}/health`, { method: 'GET' });
+        if (!health.ok) {
+            throw new Error('Helper unavailable');
+        }
+
+        const response = await fetch(`${WINDOWS_OPEN_HELPER_ORIGIN}/open`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: helperDownloadUrl,
+                fileName,
+                ext,
+                authToken
+            })
+        });
+
+        if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            const error = new Error(payload.error || 'Helper open failed');
+            error.code = payload.code || 'HELPER_OPEN_FAILED';
+            throw error;
         }
     };
 
-    const handleOpenFileActual = (filePath, fileName) => {
+    const handleOpenFileActual = async (filePath, fileName, rawFilePath = '') => {
         setOpeningFile(fileName);
         // Hide status after 5 seconds
         setTimeout(() => setOpeningFile(null), 5000);
@@ -1912,52 +2021,63 @@ export default function Chat() {
             'potx': 'ms-powerpoint:ofe|u|',
             'pot': 'ms-powerpoint:ofe|u|',
             'ppsx': 'ms-powerpoint:ofe|u|',
-            'pps': 'ms-powerpoint:ofe|u|',
-            'pdf': 'ms-pdf:'
+            'pps': 'ms-powerpoint:ofe|u|'
         };
 
         if (microsoftProtocols[ext]) {
-            // Force absolute URL if needed for protocol handlers
             let absolutePath = filePath;
             if (!filePath.startsWith('http')) {
-                absolutePath = getMediaUrl(filePath);
+                const apiOrigin = getDirectApiOrigin();
+                const normalizedPath = filePath.startsWith('/') ? filePath : `/${filePath}`;
+                absolutePath = `${apiOrigin}${normalizedPath}`;
             }
+            const helperSource = resolveUploadUrl(rawFilePath || absolutePath);
 
-            // Attempt to open with protocol
-            const protocolUrl = microsoftProtocols[ext] + absolutePath;
+            try {
+                const parsedUrl = new URL(absolutePath);
+                const host = (parsedUrl.hostname || '').toLowerCase();
+                const isPrivateHost = host === 'localhost'
+                    || host === '127.0.0.1'
+                    || host === '0.0.0.0'
+                    || /^10\./.test(host)
+                    || /^192\.168\./.test(host)
+                    || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
 
-            // Reliability improvement: use blur check to detect protocol success
-            let hasBlurred = false;
-            const handleBlur = () => {
-                hasBlurred = true;
-                setIsWaitingForApp(false);
-                window.removeEventListener('blur', handleBlur);
-            };
-            window.addEventListener('blur', handleBlur);
-
-            // Delay the mouse-following loader so it only appears after the notification disappears
-            setTimeout(() => {
-                if (!hasBlurred) {
-                    setIsWaitingForApp(true);
+                // Office tends to accept direct LAN HTTP URLs more reliably than
+                // local/self-signed HTTPS origins for app-protocol launches.
+                if (isPrivateHost && parsedUrl.protocol === 'https:') {
+                    parsedUrl.protocol = 'http:';
+                    absolutePath = parsedUrl.toString();
                 }
-            }, 3500);
+            } catch (_) { }
 
-            // Execute protocol
-            window.location.href = protocolUrl;
-
-            // Increase timeout and check if blur happened. 
-            // If focus remains after 8s AND no blur happened, it's likely not found.
-            // This longer timeout allows for browser prompts ("Open this in Word?")
-            setTimeout(() => {
-                window.removeEventListener('blur', handleBlur);
+            try {
+                await openViaWindowsHelper(helperSource, fileName, ext);
                 setIsWaitingForApp(false);
-                if (!hasBlurred && document.hasFocus() && !document.hidden) {
-                    setAppNotFoundInfo({ ext, filePath });
+                setAppNotFoundInfo(null);
+                return;
+            } catch (error) {
+                setIsWaitingForApp(false);
+                if (error?.code === 'APP_NOT_FOUND') {
+                    setAppNotFoundInfo({ ext, filePath: absolutePath });
+                    try {
+                        window.location.assign(`ms-windows-store://search?query=.${ext}`);
+                    } catch (_) { }
+                    return;
                 }
-            }, 8000);
-        } else {
-            window.open(filePath, '_blank');
+
+                setSnackbar({
+                    message: `Could not open ${fileName} in the system app right now.`,
+                    type: 'error',
+                    variant: 'system'
+                });
+            }
+            return;
         }
+
+        setIsWaitingForApp(false);
+        setAppNotFoundInfo(null);
+        window.open(filePath, '_blank', 'noopener,noreferrer');
     };
 
     const renderLastMessagePreview = (msg, isGroup = false, defaultText = 'No messages yet', chatId = null) => {
@@ -6205,40 +6325,57 @@ export default function Chat() {
     const resolveUploadUrl = (rawUrl) => {
         if (!rawUrl) return '';
         if (rawUrl.startsWith('blob:') || rawUrl.startsWith('data:')) return rawUrl;
-        const apiBase = (axios.defaults.baseURL || '').replace(/\/$/, '');
-        const apiOrigin = apiBase.replace(/\/api$/i, '');
+        const apiOrigin = getDirectApiOrigin();
         const token = localStorage.getItem('token') || '';
         const withToken = (u) => {
             if (!token) return u;
-            return u.includes('?') ? `${u}&token=${encodeURIComponent(token)}` : `${u}?token=${encodeURIComponent(token)}`;
+            try {
+                const parsed = new URL(u, window.location.origin);
+                parsed.searchParams.set('token', token);
+                if (/^https?:\/\//i.test(u)) return parsed.toString();
+                return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+            } catch (_) {
+                const withoutToken = String(u)
+                    .replace(/([?&])token=[^&#]*&?/i, '$1')
+                    .replace(/[?&]$/g, '');
+                return withoutToken.includes('?')
+                    ? `${withoutToken}&token=${encodeURIComponent(token)}`
+                    : `${withoutToken}?token=${encodeURIComponent(token)}`;
+            }
         };
 
         if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
             try {
                 const parsed = new URL(rawUrl);
-                if (parsed.pathname.startsWith('/api/chat/media/file/')) {
+                if (parsed.pathname.startsWith('/api/chat/media')) {
                     const direct = apiOrigin ? `${apiOrigin}${parsed.pathname}${parsed.search || ''}` : `${parsed.pathname}${parsed.search || ''}`;
                     return withToken(direct);
                 }
                 if (parsed.pathname.startsWith('/uploads/')) {
-                    return apiOrigin ? `${apiOrigin}${parsed.pathname}${parsed.search || ''}` : `${parsed.pathname}${parsed.search || ''}`;
+                    return apiOrigin ? buildMediaProxyUrl(`${apiOrigin}${parsed.pathname}${parsed.search || ''}`) : buildMediaProxyUrl(`${parsed.pathname}${parsed.search || ''}`);
                 }
             } catch (_) { }
             return rawUrl;
         }
 
         if (rawUrl.startsWith('/')) {
-            if (rawUrl.startsWith('/api/chat/media/file/')) {
+            if (rawUrl.startsWith('/api/chat/media')) {
                 const direct = apiOrigin ? `${apiOrigin}${rawUrl}` : rawUrl;
                 return withToken(direct);
+            }
+            if (rawUrl.startsWith('/uploads/')) {
+                return buildMediaProxyUrl(apiOrigin ? `${apiOrigin}${rawUrl}` : rawUrl);
             }
             return apiOrigin ? `${apiOrigin}${rawUrl}` : rawUrl;
         }
 
         const normalized = rawUrl.replace(/^\/+/, '');
-        if (normalized.startsWith('api/chat/media/file/')) {
+        if (normalized.startsWith('api/chat/media')) {
             const direct = apiOrigin ? `${apiOrigin}/${normalized}` : `/${normalized}`;
             return withToken(direct);
+        }
+        if (normalized.startsWith('uploads/')) {
+            return buildMediaProxyUrl(apiOrigin ? `${apiOrigin}/${normalized}` : `/${normalized}`);
         }
         return apiOrigin ? `${apiOrigin}/${normalized}` : `/${normalized}`;
     };
@@ -11135,6 +11272,18 @@ export default function Chat() {
                             const myId = user.id || user._id;
                             const isMe = String(msg.sender_id?._id || msg.sender_id || msg.user_id) === String(myId);
                             const senderName = isMe ? 'You' : (msg.sender_id?.name || msg.user_id?.name || activeTarget.name || 'Someone');
+                            const starredAudioPlaying = String(playingAudioId) === String(msg._id || msg.id);
+                            const starredAudioDuration = Math.max(1, Number(playbackDuration || msg.duration || 1));
+                            const starredAudioRatio = starredAudioPlaying
+                                ? Math.max(0, Math.min(1, Number(playbackPosition || 0) / starredAudioDuration))
+                                : 0;
+                            const starredAvatarImage = isMe
+                                ? (userData?.image || userData?.profile_pic || userData?.avatar || userData?.profile_photo)
+                                : (msg.sender_id?.profile_photo || msg.sender_id?.image || msg.sender_id?.profile_pic || msg.sender_id?.avatar || activeTarget?.profile_photo || activeTarget?.avatar || activeTarget?.image);
+                            const starredInitial = isMe
+                                ? (userData?.name || 'M')[0].toUpperCase()
+                                : (msg.sender_id?.name || activeTarget?.name || 'U')[0].toUpperCase();
+                            const starredWaveHeights = [8, 14, 10, 15, 11, 9, 14, 17, 13, 10, 12, 16, 11, 15, 9, 12, 16, 10, 14, 12, 17, 13, 10, 8, 11, 15, 12, 14, 10, 13];
 
                             let recipientName = '';
                             if (isGroupOrCommunity) {
@@ -11182,6 +11331,65 @@ export default function Chat() {
                                                         <video src={getMediaUrl(msg.file_path)} style={{ width: '100%', maxHeight: '200px', display: 'block', objectFit: 'cover' }} />
                                                         <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: 'rgba(0,0,0,0.5)', borderRadius: '50%', padding: '8px' }}>
                                                             <Play size={24} color="white" fill="white" />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {msg.type === 'audio' && (
+                                                    <div className="wa-starred-voice-shell" onClick={(e) => e.stopPropagation()}>
+                                                        <div className={`wa-voice-card ${isMe ? 'sent' : 'received'}`} style={{ marginBottom: 0, width: '100%', minWidth: 0 }}>
+                                                            <div className="wa-voice-avatar-section">
+                                                                <div className="wa-voice-bubble-avatar" style={{ position: 'relative', width: 38, height: 38, background: '#0a84c6', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                                                    {starredAvatarImage ? (
+                                                                        <img src={starredAvatarImage} alt="user" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                                                                    ) : (
+                                                                        <div className="wa-avatar-letter" style={{ fontSize: '15px', fontWeight: 'bold', color: '#ffffff', background: '#0a84c6' }}>
+                                                                            {starredInitial}
+                                                                        </div>
+                                                                    )}
+                                                                    <div className="wa-voice-mic-badge" style={{ position: 'absolute', bottom: '0', right: '0', width: '14px', height: '14px', background: 'white', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>
+                                                                        <Mic size={10} color={msg.is_read ? '#53bdeb' : '#8696a0'} />
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <button
+                                                                className="wa-voice-play-btn"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handlePlayAudio(msg);
+                                                                }}
+                                                            >
+                                                                {starredAudioPlaying ? <Pause size={28} fill="currentColor" /> : <Play size={28} fill="currentColor" />}
+                                                            </button>
+
+                                                            <div className="wa-voice-track">
+                                                                <div
+                                                                    className="wa-voice-progress-dot"
+                                                                    style={{ left: `${starredAudioRatio * 100}%` }}
+                                                                />
+                                                                <div className="wa-voice-waveform-static" style={{ display: 'flex', alignItems: 'center', height: '100%', width: '100%', cursor: 'pointer' }}>
+                                                                    <svg width="100%" height="24" viewBox="0 0 150 24" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
+                                                                        {starredWaveHeights.map((height, waveIndex) => {
+                                                                            const isActive = starredAudioRatio > (waveIndex / starredWaveHeights.length);
+                                                                            return (
+                                                                                <rect
+                                                                                    key={`starred-wave-${idx}-${waveIndex}`}
+                                                                                    x={waveIndex * 5}
+                                                                                    y={(24 - height) / 2}
+                                                                                    width="3"
+                                                                                    height={height}
+                                                                                    rx="1.5"
+                                                                                    fill={isActive ? '#34b7f1' : 'rgba(84, 101, 111, 0.18)'}
+                                                                                />
+                                                                            );
+                                                                        })}
+                                                                    </svg>
+                                                                </div>
+                                                            </div>
+
+                                                            <span className="wa-voice-duration-text" style={{ color: starredAudioPlaying ? '#5f6f79' : '#667781' }}>
+                                                                {starredAudioPlaying ? formatVoiceTime(Math.floor(Number(playbackPosition || 0))) : formatVoiceTime(msg.duration || 0)}
+                                                            </span>
                                                         </div>
                                                     </div>
                                                 )}
@@ -21252,21 +21460,18 @@ export default function Chat() {
             {fileToOpenConfirm && (
                 <ConfirmModal
                     isOpen={!!fileToOpenConfirm}
-                    title="Security Warning: Open File?"
-                    confirmVariant="danger"
-                    message={`Caution: "${fileToOpenConfirm.fileName}" could be harmful. Only open files from people you trust.`}
+                    title={fileToOpenConfirm.isRisky ? 'Security Warning: Open File?' : 'Open In System App?'}
+                    confirmVariant={fileToOpenConfirm.isRisky ? 'danger' : 'primary'}
+                    message={fileToOpenConfirm.isRisky
+                        ? `Caution: "${fileToOpenConfirm.fileName}" could be harmful. Only open files from people you trust. If you are unsure, go back and use Save as... instead.`
+                        : `Neural Chat will try to open "${fileToOpenConfirm.fileName}" in your system app. If you would rather keep a copy first, go back and use Save as... instead.`}
                     onConfirm={() => {
-                        handleOpenFileActual(fileToOpenConfirm.filePath, fileToOpenConfirm.fileName);
+                        handleOpenFileActual(fileToOpenConfirm.filePath, fileToOpenConfirm.fileName, fileToOpenConfirm.rawFilePath);
                         setFileToOpenConfirm(null);
                     }}
-                    onSecondary={() => {
-                        window.open(fileToOpenConfirm.filePath, '_blank');
-                        setFileToOpenConfirm(null);
-                    }}
-                    secondaryText="Download Instead"
-                    secondaryVariant="primary"
                     onCancel={() => setFileToOpenConfirm(null)}
-                    confirmText="Proceed with Open"
+                    cancelText="Go Back"
+                    confirmText="Open in System App"
                 />
             )}
 
@@ -21275,17 +21480,11 @@ export default function Chat() {
                     isOpen={!!appNotFoundInfo}
                     title="System App Not Found"
                     confirmVariant="primary"
-                    message={`It seems you don't have a registered application to open .${appNotFoundInfo.ext} files directly. You can find one in the Store or open/download it here in your browser.`}
+                    message={`It seems you don't have a registered application to open .${appNotFoundInfo.ext} files directly. You can find one in the Store.`}
                     onConfirm={() => {
                         window.location.assign(`ms-windows-store://search?query=.${appNotFoundInfo.ext}`);
                         setAppNotFoundInfo(null);
                     }}
-                    onSecondary={() => {
-                        window.open(appNotFoundInfo.filePath, '_blank');
-                        setAppNotFoundInfo(null);
-                    }}
-                    secondaryText="Open in Browser"
-                    secondaryVariant="primary"
                     onCancel={() => setAppNotFoundInfo(null)}
                     confirmText="Go to Store"
                 />

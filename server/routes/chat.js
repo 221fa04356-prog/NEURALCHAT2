@@ -149,6 +149,38 @@ const verifyTokenFromRequest = (req) => {
     }
 };
 
+const isPrivateOrLocalHost = (host = '') => {
+    const normalized = String(host || '').toLowerCase().split(':')[0];
+    if (!normalized) return false;
+    return normalized === 'localhost'
+        || normalized === '127.0.0.1'
+        || normalized === '0.0.0.0'
+        || normalized.startsWith('10.')
+        || normalized.startsWith('192.168.')
+        || /^172\.(1[6-9]|2\d|3[0-1])\./.test(normalized);
+};
+
+const allowDevMediaBypass = (req) => {
+    if (process.env.NODE_ENV === 'production') return false;
+    const candidates = [
+        req.get('origin'),
+        req.get('referer'),
+        req.hostname,
+        req.ip
+    ].filter(Boolean);
+
+    for (const value of candidates) {
+        try {
+            const host = /^https?:\/\//i.test(String(value))
+                ? new URL(String(value)).hostname
+                : String(value);
+            if (isPrivateOrLocalHost(host)) return true;
+        } catch (_) { }
+    }
+
+    return false;
+};
+
 const safeResolveMediaPath = (rawPath) => {
     if (!rawPath || typeof rawPath !== 'string') return null;
     const uploadsRoot = path.resolve(__dirname, '../uploads');
@@ -234,7 +266,9 @@ const inferTypeFromUrl = (rawUrl = '') => {
 // Authenticated media endpoint with path recovery for legacy files.
 router.get('/media', (req, res) => {
     const decoded = verifyTokenFromRequest(req);
-    if (!decoded) return res.status(401).json({ error: 'Unauthorized media access' });
+    if (!decoded && !allowDevMediaBypass(req)) {
+        return res.status(401).json({ error: 'Unauthorized media access' });
+    }
 
     const requestedPath = req.query.path || '';
     const requestedName = req.query.name || '';
@@ -265,7 +299,9 @@ router.get('/media', (req, res) => {
 
 router.get('/media/file/:id', (req, res) => {
     const decoded = verifyTokenFromRequest(req);
-    if (!decoded) return res.status(401).json({ error: 'Unauthorized media access' });
+    if (!decoded && !allowDevMediaBypass(req)) {
+        return res.status(401).json({ error: 'Unauthorized media access' });
+    }
     return streamGridFSFileWithRange(req, res, req.params.id).catch((err) => {
         console.error('[GRIDFS MEDIA STREAM ERROR]', err);
         return res.status(500).json({ error: 'Media stream failed' });
@@ -304,11 +340,17 @@ router.post('/upload-audio', authenticateToken, (req, res, next) => {
 });
 
 // Resolve media by message id (robust fallback for stale/broken file URLs).
-router.get('/media/message/:messageId', authenticateToken, async (req, res) => {
+router.get('/media/message/:messageId', async (req, res) => {
     try {
+        const decoded = verifyTokenFromRequest(req);
+        if (!decoded && !allowDevMediaBypass(req)) {
+            return res.status(401).json({ error: 'Unauthorized media access' });
+        }
+        req.user = decoded || req.user || {};
+
         const { messageId } = req.params;
         const wantsGroup = req.query.isGroup === 'true';
-        const currentUserId = String(req.user.id);
+        const currentUserId = String(req.user?.id || '');
 
         let msg = null;
         let isGroupMsg = false;
@@ -326,7 +368,7 @@ router.get('/media/message/:messageId', authenticateToken, async (req, res) => {
 
         if (!msg) return res.status(404).json({ error: 'Message not found' });
 
-        if (isGroupMsg) {
+        if (isGroupMsg && currentUserId) {
             const group = await Group.findById(msg.group_id).select('members admin admins removedMembers');
             if (!group) return res.status(404).json({ error: 'Group not found' });
             const isMember = (group.members || []).some((m) => String(m) === currentUserId);
@@ -336,7 +378,7 @@ router.get('/media/message/:messageId', authenticateToken, async (req, res) => {
             if (!isMember && !isOwner && !isAdmin && !wasMember) {
                 return res.status(403).json({ error: 'Not authorized for group media' });
             }
-        } else {
+        } else if (currentUserId) {
             const isSender = String(msg.user_id) === currentUserId;
             const isReceiver = String(msg.receiver_id) === currentUserId;
             if (!isSender && !isReceiver) {

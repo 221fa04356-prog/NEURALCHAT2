@@ -18,6 +18,7 @@ const ConfirmModal = ({
     onSecondary,
     secondaryText,
     secondaryVariant = 'secondary', // 'secondary' | 'primary' | 'success'
+    cancelText,
     icon: CustomIcon
 }) => {
     if (!isOpen) return null;
@@ -53,7 +54,7 @@ const ConfirmModal = ({
                     <p>{message}</p>
                 </div>
                 <div className="confirm-modal-footer">
-                    <button className="btn-secondary" onClick={onCancel}>Cancel</button>
+                    <button className="btn-secondary" onClick={onCancel}>{cancelText || 'Cancel'}</button>
 
                     {onSecondary && (
                         <button className={secondaryBtnClass} onClick={onSecondary}>

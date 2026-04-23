@@ -2948,7 +2948,8 @@ html {
 }
 
 .wa-doc-btn:hover {
-    background: rgba(17, 27, 33, 0.04);
+    background: transparent;
+    color: #0EA5BE;
 }
 
 .wa-doc-btn-open {
@@ -3263,7 +3264,7 @@ html {
     right: -100%;
     width: var(--wa-sidebar-width);
     height: 100%;
-    background: rgba(13, 22, 29, 0.95);
+    background: #111b32;
     backdrop-filter: blur(20px);
     z-index: 1200;
     transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -3312,7 +3313,7 @@ html {
 
 /* Specific Info Panel Background */
 .wa-info-panel {
-    background: #f0f2f5;
+    background: #111b32;
 }
 
 .wa-info-panel.active,
@@ -3355,7 +3356,7 @@ html {
 
 /* --- Contact Info Panel Specifics --- */
 .wa-contact-info-panel {
-    background: transparent;
+    background: #111b32;
     z-index: 1200;
     display: flex;
     flex-direction: column;
@@ -4579,6 +4580,15 @@ html {
     border-radius: 8px;
     margin-bottom: 4px;
     border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wa-starred-voice-shell {
+    min-width: 0;
+    width: min(100%, 360px);
+}
+
+.wa-starred-voice-shell .wa-voice-card {
+    max-width: 100%;
 }
 
 .wa-starred-meta {
@@ -9027,14 +9037,15 @@ svg.wa-back-icon,
     color: #718390;
     font-weight: 500;
     line-height: 1;
-    min-width: 44px;
-    text-align: center;
+    min-width: 48px;
+    text-align: left;
     grid-column: 3;
     grid-row: 2;
     align-self: start;
-    justify-self: center;
-    transform: translate(-102px, -1px);
-    padding-left: 0;
+    justify-self: start;
+    transform: none;
+    padding-left: 2px;
+    font-variant-numeric: tabular-nums;
 }
 
 .wa-voice-track {
@@ -9273,7 +9284,7 @@ svg.wa-back-icon,
 .wa-event-details-panel,
 .wa-shared-media-panel,
 .wa-poll-details-panel {
-    background: #0b141a !important;
+    background: #111b32 !important;
     color: #f8fafc !important;
     border-left: 1px solid rgba(255, 255, 255, 0.1) !important;
 }
@@ -9281,7 +9292,7 @@ svg.wa-back-icon,
 .wa-drawer-header,
 .wa-contact-info-header,
 .wa-search-sidebar-header {
-    background: #0b141a !important;
+    background: #111b32 !important;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
     color: #f8fafc !important;
 }
@@ -9289,7 +9300,7 @@ svg.wa-back-icon,
 .wa-drawer-content,
 .wa-contact-info-content,
 .wa-search-sidebar-content {
-    background: #0b141a !important;
+    background: #111b32 !important;
 }
 
 /* Ensure mobile responsiveness for all panels */

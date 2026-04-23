@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const { spawn } = require('child_process');
 const connectDB = require('./database');
 
 const http = require('http');
@@ -19,6 +20,25 @@ const io = new Server(server, {
         credentials: true
     }
 });
+
+const startWindowsOpenHelper = () => {
+    if (process.platform !== 'win32') return;
+    if (process.env.NEURALCHAT_DISABLE_OPEN_HELPER === '1') return;
+
+    try {
+        const child = spawn(process.execPath, [path.join(__dirname, 'scripts', 'windows-open-helper.js')], {
+            cwd: __dirname,
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: true
+        });
+        child.unref();
+    } catch (error) {
+        console.error('[STARTUP] Failed to start Windows open helper:', error.message || error);
+    }
+};
+
+startWindowsOpenHelper();
 
 // Connect to Database
 connectDB().then(async () => {

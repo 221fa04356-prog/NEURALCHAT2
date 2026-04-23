@@ -8,6 +8,218 @@ import axios from 'axios';
 import { Virtuoso } from 'react-virtuoso';
 import ViewOnceBadge from './ViewOnceBadge';
 
+const DEFAULT_VOICE_WAVEFORM = [8, 10, 9, 12, 11, 8, 13, 15, 12, 9, 11, 14, 10, 13, 8, 10, 15, 11, 13, 10, 14, 12, 9, 8, 10, 13, 11, 12, 9, 11];
+const VOICE_WAVEFORM_BARS = 30;
+const voiceWaveformCache = new Map();
+const failedMediaUrlCache = new Set();
+
+const buildVoiceWaveform = async (src, signal) => {
+    if (!src || typeof window === 'undefined') return DEFAULT_VOICE_WAVEFORM;
+
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) return DEFAULT_VOICE_WAVEFORM;
+
+    const response = await fetch(src, { signal, credentials: 'include' });
+    if (!response.ok) {
+        throw new Error(`Waveform fetch failed: ${response.status}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const audioContext = new AudioContextCtor();
+
+    try {
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+        const channelData = audioBuffer.getChannelData(0);
+        if (!channelData?.length) return DEFAULT_VOICE_WAVEFORM;
+
+        const samples = new Array(VOICE_WAVEFORM_BARS).fill(0);
+        const blockSize = Math.max(1, Math.floor(channelData.length / VOICE_WAVEFORM_BARS));
+        const noiseFloor = 0.018;
+
+        for (let i = 0; i < VOICE_WAVEFORM_BARS; i++) {
+            const start = i * blockSize;
+            const end = Math.min(channelData.length, start + blockSize);
+            let peak = 0;
+            let sumSquares = 0;
+
+            for (let j = start; j < end; j++) {
+                const value = Math.abs(channelData[j] || 0);
+                peak = Math.max(peak, value);
+                sumSquares += value * value;
+            }
+
+            const frameLength = Math.max(1, end - start);
+            const rms = Math.sqrt(sumSquares / frameLength);
+            const energy = Math.max(0, (peak * 0.45) + (rms * 0.9) - noiseFloor);
+            samples[i] = energy;
+        }
+
+        const maxEnergy = Math.max(...samples, 0);
+        if (maxEnergy <= 0.002) return DEFAULT_VOICE_WAVEFORM;
+
+        return samples.map((value) => {
+            const normalized = Math.max(0, Math.min(1, value / maxEnergy));
+            return Math.round(6 + (Math.pow(normalized, 0.72) * 12));
+        });
+    } finally {
+        audioContext.close().catch(() => {});
+    }
+};
+
+const VoiceWaveform = memo(({ src, activePlaybackRatio, isInteractive }) => {
+    const [bars, setBars] = useState(() => voiceWaveformCache.get(src) || DEFAULT_VOICE_WAVEFORM);
+
+    useEffect(() => {
+        if (!src) {
+            setBars(DEFAULT_VOICE_WAVEFORM);
+            return undefined;
+        }
+
+        const cachedBars = voiceWaveformCache.get(src);
+        if (cachedBars) {
+            setBars(cachedBars);
+            return undefined;
+        }
+
+        const controller = new AbortController();
+        let disposed = false;
+
+        buildVoiceWaveform(src, controller.signal)
+            .then((nextBars) => {
+                if (disposed) return;
+                voiceWaveformCache.set(src, nextBars);
+                setBars(nextBars);
+            })
+            .catch(() => {
+                if (!disposed) setBars(DEFAULT_VOICE_WAVEFORM);
+            });
+
+        return () => {
+            disposed = true;
+            controller.abort();
+        };
+    }, [src]);
+
+    return (
+        <>
+            {bars.map((height, index) => {
+                const isActiveBar = isInteractive && activePlaybackRatio > (index / bars.length);
+                return (
+                    <div
+                        key={`${src || 'voice'}-${index}`}
+                        className="wa-waveform-bar"
+                        style={{
+                            height: `${height}px`,
+                            background: isActiveBar ? '#34b7f1' : 'rgba(84, 101, 111, 0.18)'
+                        }}
+                    />
+                );
+            })}
+        </>
+    );
+});
+VoiceWaveform.displayName = 'VoiceWaveform';
+
+const appendMediaToken = (url) => {
+    if (!url) return '';
+    const token = localStorage.getItem('token') || '';
+    if (!token) return url;
+
+    try {
+        const parsed = new URL(url, window.location.origin);
+        if (!parsed.pathname.startsWith('/api/chat/media')) return url;
+        parsed.searchParams.set('token', token);
+        if (/^https?:\/\//i.test(url)) return parsed.toString();
+        return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    } catch (_) {
+        if (!String(url).includes('/api/chat/media')) return url;
+        const withoutToken = String(url)
+            .replace(/([?&])token=[^&#]*&?/i, '$1')
+            .replace(/[?&]$/g, '');
+        return withoutToken.includes('?')
+            ? `${withoutToken}&token=${encodeURIComponent(token)}`
+            : `${withoutToken}?token=${encodeURIComponent(token)}`;
+    }
+};
+
+const buildMediaProxyUrl = (rawPath) => {
+    if (!rawPath) return '';
+    const raw = String(rawPath);
+    const normalizedPath = (() => {
+        try {
+            const parsed = new URL(raw, window.location.origin);
+            return parsed.pathname || raw;
+        } catch (_) {
+            return raw;
+        }
+    })();
+    const fileName = normalizedPath.split('/').pop() || '';
+    const params = new URLSearchParams();
+    params.set('path', normalizedPath);
+    if (fileName) params.set('name', fileName);
+    return appendMediaToken(`/api/chat/media?${params.toString()}`);
+};
+
+const buildMessageMediaFallbackUrl = (msg, isGroupChat = false) => {
+    const msgId = String(msg?._id || msg?.id || '');
+    if (!msgId) return '';
+    const token = localStorage.getItem('token') || '';
+    const params = new URLSearchParams();
+    if (token) params.set('token', token);
+    if (msg?.fileName || msg?.file_name || msg?.name) {
+        params.set('name', msg.fileName || msg.file_name || msg.name);
+    }
+    if (msg?.file_path) {
+        params.set('legacyPath', msg.file_path);
+    }
+    if (isGroupChat || msg?.group_id) {
+        params.set('isGroup', 'true');
+    }
+    const query = params.toString();
+    const url = `/api/chat/media/message/${encodeURIComponent(msgId)}${query ? `?${query}` : ''}`;
+    return appendMediaToken(url);
+};
+
+const resolveAbsoluteMessageFileUrl = (msg, isGroupChat = false) => {
+    const rawPath = msg?.file_path || msg?.filePath || '';
+    if (!rawPath) return '';
+    const raw = String(rawPath);
+    if (raw.startsWith('blob:') || raw.startsWith('data:')) return raw;
+    const fallbackUrl = buildMessageMediaFallbackUrl(msg, isGroupChat);
+
+    if (raw.startsWith('http')) {
+        try {
+            const parsed = new URL(raw);
+            if (parsed.pathname.startsWith('/api/chat/media')) {
+                const resolved = /\/api\/chat\/media\/file\//i.test(parsed.pathname)
+                    ? appendMediaToken(`${parsed.pathname}${parsed.search || ''}`)
+                    : (fallbackUrl || appendMediaToken(`${parsed.pathname}${parsed.search || ''}`));
+                return failedMediaUrlCache.has(resolved) ? '' : resolved;
+            }
+            if (parsed.pathname.startsWith('/uploads/')) {
+                const resolved = fallbackUrl || buildMediaProxyUrl(parsed.pathname);
+                return failedMediaUrlCache.has(resolved) ? '' : resolved;
+            }
+        } catch (_) { }
+        const resolved = fallbackUrl || appendMediaToken(raw);
+        return failedMediaUrlCache.has(resolved) ? '' : resolved;
+    }
+
+    const normalized = raw.startsWith('/') ? raw : `/${raw.replace(/^\/+/, '')}`;
+    if (normalized.startsWith('/api/chat/media')) {
+        const resolved = /\/api\/chat\/media\/file\//i.test(normalized)
+            ? appendMediaToken(normalized)
+            : (fallbackUrl || appendMediaToken(normalized));
+        return failedMediaUrlCache.has(resolved) ? '' : resolved;
+    }
+    if (normalized.startsWith('/uploads/')) {
+        const resolved = fallbackUrl || buildMediaProxyUrl(normalized);
+        return failedMediaUrlCache.has(resolved) ? '' : resolved;
+    }
+    const resolved = fallbackUrl || appendMediaToken(normalized);
+    return failedMediaUrlCache.has(resolved) ? '' : resolved;
+};
+
 const MessageScroller = React.forwardRef((props, ref) => (
     <div
         {...props}
@@ -80,6 +292,12 @@ const MessageList = memo(({
     isMobile
 }) => {
     const [isAtBottom, setIsAtBottom] = useState(true);
+    const [, setFailedMediaVersion] = useState(0);
+    const rememberFailedMediaUrl = (url) => {
+        if (!url || failedMediaUrlCache.has(url)) return;
+        failedMediaUrlCache.add(url);
+        setFailedMediaVersion((v) => v + 1);
+    };
     const virtuosoRef = useRef(null);
     const handledJumpNonceRef = useRef(null);
     const targetId = String(selectedUser?._id || '').toLowerCase();
@@ -292,11 +510,7 @@ const MessageList = memo(({
         const isVideoByExt = ['mp4', 'avi', 'mkv', 'mov', 'webm', 'm4v'].includes(fileExt);
         const isPdfDoc = fileExt === 'pdf';
         const isOfficePreviewDoc = ['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods', 'ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'].includes(fileExt);
-        const absoluteFileUrl = msg.file_path
-            ? (String(msg.file_path).startsWith('http') || String(msg.file_path).startsWith('blob:') || String(msg.file_path).startsWith('data:')
-                ? String(msg.file_path) 
-                : `${(axios.defaults.baseURL || '').replace(/\/$/, '')}/${String(msg.file_path).replace(/^\//, '')}`)
-            : '';
+        const absoluteFileUrl = msg.file_path ? resolveAbsoluteMessageFileUrl(msg, isGroup) : '';
         const isLikelyLocalOrPrivatePreview = (() => {
             if (!absoluteFileUrl) return true;
             try {
@@ -338,7 +552,9 @@ const MessageList = memo(({
             return 'Document';
         };
         const docTypeName = getDocTypeName();
+        const audioSourceUrl = absoluteFileUrl || (typeof msg.content === 'string' && /^https?:\/\//i.test(msg.content) ? msg.content : '');
         const shouldUseSystemOpen = ['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'csv', 'ods', 'ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'].includes(fileExt);
+        const docOpenUrl = officePreviewUrl || absoluteFileUrl;
         
         const unreadSeparator = (firstUnreadMessageId && String(msgId) === String(firstUnreadMessageId)) ? (
             <div className="wa-unread-separator">
@@ -571,7 +787,18 @@ const MessageList = memo(({
                                                 setViewingContact(null);
                                                 handleDownload(msg.file_path, msg.fileName, msg);
                                             }}>
-                                                <img src={absoluteFileUrl} alt="Sent" className="wa-msg-image" />
+                                                {absoluteFileUrl ? (
+                                                    <img
+                                                        src={absoluteFileUrl}
+                                                        alt="Sent"
+                                                        className="wa-msg-image"
+                                                        onError={() => rememberFailedMediaUrl(absoluteFileUrl)}
+                                                    />
+                                                ) : (
+                                                    <div className="wa-deleted-tag">
+                                                        <XCircle size={16} /> Media unavailable
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                         {(msg.type === 'video' || (msg.type === 'file' && isVideoByExt)) && (
@@ -583,24 +810,31 @@ const MessageList = memo(({
                                                     }
                                                 }}
                                             >
-                                                <video
-                                                    src={absoluteFileUrl}
-                                                    controls
-                                                    playsInline
-                                                    preload="metadata"
-                                                    crossOrigin="anonymous"
-                                                    style={{ 
-                                                        width: '100%', 
-                                                        maxWidth: isMobile ? 240 : 340, 
-                                                        maxHeight: isMobile ? 320 : 420,
-                                                        display: 'block', 
-                                                        background: '#000', 
-                                                        borderRadius: 8,
-                                                        objectFit: 'contain'
-                                                    }}
-                                                >
-                                                    <source src={absoluteFileUrl} type={fileExt === 'webm' ? 'video/webm' : 'video/mp4'} />
-                                                </video>
+                                                {absoluteFileUrl ? (
+                                                    <video
+                                                        src={absoluteFileUrl}
+                                                        controls
+                                                        playsInline
+                                                        preload="metadata"
+                                                        crossOrigin="anonymous"
+                                                        onError={() => rememberFailedMediaUrl(absoluteFileUrl)}
+                                                        style={{ 
+                                                            width: '100%', 
+                                                            maxWidth: isMobile ? 240 : 340, 
+                                                            maxHeight: isMobile ? 320 : 420,
+                                                            display: 'block', 
+                                                            background: '#000', 
+                                                            borderRadius: 8,
+                                                            objectFit: 'contain'
+                                                        }}
+                                                    >
+                                                        <source src={absoluteFileUrl} type={fileExt === 'webm' ? 'video/webm' : 'video/mp4'} />
+                                                    </video>
+                                                ) : (
+                                                    <div className="wa-deleted-tag" style={{ padding: '16px' }}>
+                                                        <XCircle size={16} /> Video unavailable
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </>
@@ -645,7 +879,9 @@ const MessageList = memo(({
                                                                 handleOpenFile(absoluteFileUrl, displayFileName, msg);
                                                                 return;
                                                             }
-                                                            window.open(absoluteFileUrl, '_blank', 'noopener,noreferrer');
+                                                            if (docOpenUrl) {
+                                                                window.open(docOpenUrl, '_blank', 'noopener,noreferrer');
+                                                            }
                                                         }}
                                                     >
                                                         Open
@@ -741,22 +977,11 @@ const MessageList = memo(({
                                                         }}
                                                         style={{ display: 'flex', alignItems: 'center', height: '100%', width: '100%', cursor: 'pointer' }}
                                                     >
-                                                        <svg width="100%" height="24" viewBox="0 0 150 24" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
-                                                            {[8, 14, 10, 15, 11, 9, 14, 17, 13, 10, 12, 16, 11, 15, 9, 12, 16, 10, 14, 12, 17, 13, 10, 8, 11, 15, 12, 14, 10, 13].map((h, i) => {
-                                                                const isActive = ((isAudioPlaying || isWaveSelected) && activePlaybackRatio > (i / 30));
-                                                                return (
-                                                                    <rect 
-                                                                        key={i} 
-                                                                        x={i * 5} 
-                                                                        y={(24 - h) / 2} 
-                                                                        width="3" 
-                                                                        height={h} 
-                                                                        rx="1.5" 
-                                                                        fill={isActive ? '#34b7f1' : 'rgba(84, 101, 111, 0.18)'} 
-                                                                    />
-                                                                );
-                                                            })}
-                                                        </svg>
+                                                        <VoiceWaveform
+                                                            src={audioSourceUrl}
+                                                            activePlaybackRatio={activePlaybackRatio}
+                                                            isInteractive={isAudioPlaying || isWaveSelected}
+                                                        />
                                                     </div>
                                                 </div>
 
