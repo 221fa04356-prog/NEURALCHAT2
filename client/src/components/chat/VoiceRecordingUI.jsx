@@ -36,6 +36,8 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
     const hasDispatchedSendRef = useRef(false);
     const stopFallbackTimerRef = useRef(null);
     const sendOnNextDataRef = useRef(false);
+    const waveformLevelRef = useRef(0);
+    const silenceFramesRef = useRef(0);
 
     const setPreviewProgressSafe = (value) => {
         const safeValue = Math.max(0, Math.min(100, Number(value || 0)));
@@ -94,20 +96,33 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
             if (audioContextRef.current && analyser && dataArray) {
                 analyser.getByteTimeDomainData(dataArray);
 
-                let sum = 0;
+                let sumSquares = 0;
+                let peakDeviation = 0;
                 for (let i = 0; i < dataArray.length; i++) {
-                    sum += Math.abs(dataArray[i] - 128);
-                }
-                const avg = sum / dataArray.length;
-
-                let finalHeight = 4;
-                if (avg > 6) {
-                    const peak = Math.min(20, (avg / 64) * 20);
-                    finalHeight += peak;
+                    const deviation = Math.abs((dataArray[i] - 128) / 128);
+                    peakDeviation = Math.max(peakDeviation, deviation);
+                    sumSquares += deviation * deviation;
                 }
 
-                if (avg > 10) finalHeight += (Math.random() - 0.5) * 2.5;
-                finalHeight = Math.min(24, Math.max(4, finalHeight));
+                const rms = Math.sqrt(sumSquares / dataArray.length);
+                const energy = (peakDeviation * 0.55) + (rms * 0.9);
+                const noiseGate = 0.05;
+
+                if (energy <= noiseGate) {
+                    silenceFramesRef.current += 1;
+                } else {
+                    silenceFramesRef.current = 0;
+                }
+
+                const normalized = energy <= noiseGate
+                    ? 0
+                    : Math.min(1, (energy - noiseGate) / 0.28);
+                const smoothedLevel = (waveformLevelRef.current * 0.7) + (Math.pow(normalized, 0.82) * 0.3);
+                waveformLevelRef.current = silenceFramesRef.current > 2
+                    ? smoothedLevel * 0.82
+                    : smoothedLevel;
+
+                const finalHeight = Math.min(22, Math.max(4, 4 + (waveformLevelRef.current * 18)));
 
                 allWaveformPointsRef.current.push(finalHeight);
                 setWaveformPoints(prev => {
@@ -177,6 +192,8 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
         setPreviewProgressSafe(0);
         setPreviewSeconds(0);
         allWaveformPointsRef.current = [];
+        waveformLevelRef.current = 0;
+        silenceFramesRef.current = 0;
         clearRecordingLoop();
         accumulatedDurationRef.current = 0;
         startTimeRef.current = null;
@@ -516,6 +533,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
     const iconSize = isMobile ? 18 : 24;
     const actionGap = isMobile ? '2px' : '16px';
     const sendBtnSize = isMobile ? '38px' : '44px';
+    const recordingTimerColor = (!isPaused && !isReviewing) ? '#ffffff' : '#e2e8f0';
     const previewDragRectRef = useRef(null);
 
     const clampPercent = (value) => Math.max(0, Math.min(100, value));
@@ -625,7 +643,7 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
                     </button>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
                         {!isPaused && !isReviewing && <div className="wa-recording-dot" style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ef4444', animation: 'wa-pulse 1.5s infinite ease-in-out' }} />}
-                        <span style={{ color: '#111b21', fontSize: isMobile ? '11px' : '12px', fontWeight: 500 }}>
+                        <span style={{ color: recordingTimerColor, fontSize: isMobile ? '11px' : '12px', fontWeight: 600, minWidth: isMobile ? '34px' : '42px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
                             {(!isPaused && !isReviewing)
                                 ? formatVoiceTime(recordingTime)
                                 : (isPlayingPreview || previewProgress > 0 ? formatVoiceTime(previewSeconds) : formatVoiceTime(recordingTime))}

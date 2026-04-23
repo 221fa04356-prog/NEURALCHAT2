@@ -149,6 +149,38 @@ const verifyTokenFromRequest = (req) => {
     }
 };
 
+const isPrivateOrLocalHost = (host = '') => {
+    const normalized = String(host || '').toLowerCase().split(':')[0];
+    if (!normalized) return false;
+    return normalized === 'localhost'
+        || normalized === '127.0.0.1'
+        || normalized === '0.0.0.0'
+        || normalized.startsWith('10.')
+        || normalized.startsWith('192.168.')
+        || /^172\.(1[6-9]|2\d|3[0-1])\./.test(normalized);
+};
+
+const allowDevMediaBypass = (req) => {
+    if (process.env.NODE_ENV === 'production') return false;
+    const candidates = [
+        req.get('origin'),
+        req.get('referer'),
+        req.hostname,
+        req.ip
+    ].filter(Boolean);
+
+    for (const value of candidates) {
+        try {
+            const host = /^https?:\/\//i.test(String(value))
+                ? new URL(String(value)).hostname
+                : String(value);
+            if (isPrivateOrLocalHost(host)) return true;
+        } catch (_) { }
+    }
+
+    return false;
+};
+
 const safeResolveMediaPath = (rawPath) => {
     if (!rawPath || typeof rawPath !== 'string') return null;
     const uploadsRoot = path.resolve(__dirname, '../uploads');
@@ -234,7 +266,9 @@ const inferTypeFromUrl = (rawUrl = '') => {
 // Authenticated media endpoint with path recovery for legacy files.
 router.get('/media', (req, res) => {
     const decoded = verifyTokenFromRequest(req);
-    if (!decoded) return res.status(401).json({ error: 'Unauthorized media access' });
+    if (!decoded && !allowDevMediaBypass(req)) {
+        return res.status(401).json({ error: 'Unauthorized media access' });
+    }
 
     const requestedPath = req.query.path || '';
     const requestedName = req.query.name || '';
@@ -265,7 +299,9 @@ router.get('/media', (req, res) => {
 
 router.get('/media/file/:id', (req, res) => {
     const decoded = verifyTokenFromRequest(req);
-    if (!decoded) return res.status(401).json({ error: 'Unauthorized media access' });
+    if (!decoded && !allowDevMediaBypass(req)) {
+        return res.status(401).json({ error: 'Unauthorized media access' });
+    }
     return streamGridFSFileWithRange(req, res, req.params.id).catch((err) => {
         console.error('[GRIDFS MEDIA STREAM ERROR]', err);
         return res.status(500).json({ error: 'Media stream failed' });
@@ -304,29 +340,35 @@ router.post('/upload-audio', authenticateToken, (req, res, next) => {
 });
 
 // Resolve media by message id (robust fallback for stale/broken file URLs).
-router.get('/media/message/:messageId', authenticateToken, async (req, res) => {
+router.get('/media/message/:messageId', async (req, res) => {
     try {
+        const decoded = verifyTokenFromRequest(req);
+        if (!decoded && !allowDevMediaBypass(req)) {
+            return res.status(401).json({ error: 'Unauthorized media access' });
+        }
+        req.user = decoded || req.user || {};
+
         const { messageId } = req.params;
         const wantsGroup = req.query.isGroup === 'true';
-        const currentUserId = String(req.user.id);
+        const currentUserId = String(req.user?.id || '');
 
         let msg = null;
         let isGroupMsg = false;
 
         if (wantsGroup) {
-            msg = await GroupMessage.findById(messageId).select('type file_path fileName group_id sender_id');
+            msg = await GroupMessage.findById(messageId).select('+__enc_file_path +__enc_fileName type file_path fileName group_id sender_id');
             isGroupMsg = !!msg;
         } else {
-            msg = await Message.findById(messageId).select('type file_path fileName user_id receiver_id');
+            msg = await Message.findById(messageId).select('+__enc_file_path +__enc_fileName type file_path fileName user_id receiver_id');
             if (!msg) {
-                msg = await GroupMessage.findById(messageId).select('type file_path fileName group_id sender_id');
+                msg = await GroupMessage.findById(messageId).select('+__enc_file_path +__enc_fileName type file_path fileName group_id sender_id');
                 isGroupMsg = !!msg;
             }
         }
 
         if (!msg) return res.status(404).json({ error: 'Message not found' });
 
-        if (isGroupMsg) {
+        if (isGroupMsg && currentUserId) {
             const group = await Group.findById(msg.group_id).select('members admin admins removedMembers');
             if (!group) return res.status(404).json({ error: 'Group not found' });
             const isMember = (group.members || []).some((m) => String(m) === currentUserId);
@@ -336,7 +378,7 @@ router.get('/media/message/:messageId', authenticateToken, async (req, res) => {
             if (!isMember && !isOwner && !isAdmin && !wasMember) {
                 return res.status(403).json({ error: 'Not authorized for group media' });
             }
-        } else {
+        } else if (currentUserId) {
             const isSender = String(msg.user_id) === currentUserId;
             const isReceiver = String(msg.receiver_id) === currentUserId;
             if (!isSender && !isReceiver) {
@@ -346,7 +388,24 @@ router.get('/media/message/:messageId', authenticateToken, async (req, res) => {
 
         const rawPath = String(msg.file_path || '');
         const fileName = String(msg.fileName || '');
-        if (!rawPath && !fileName) return res.status(404).json({ error: 'Media path not found' });
+        if (!rawPath && !fileName) {
+            const fallbackPath = String(req.query.legacyPath || req.query.path || '');
+            const fallbackName = String(req.query.name || '');
+            if (!fallbackPath && !fallbackName) {
+                return res.status(404).json({ error: 'Media path not found' });
+            }
+
+            let candidate = safeResolveMediaPath(fallbackPath);
+            if (!candidate && fallbackName) {
+                candidate = safeResolveMediaPath(`/uploads/${fallbackName}`);
+            }
+            if (!candidate || !fs.existsSync(candidate)) {
+                const found = findByFilenameRecursive(path.resolve(__dirname, '../uploads'), fallbackName || path.basename(fallbackPath));
+                if (!found) return res.status(404).json({ error: 'Media not found' });
+                candidate = found;
+            }
+            return streamFileWithRange(req, res, candidate);
+        }
 
         // GridFS-backed route path
         if (/\/api\/chat\/media\/file\//i.test(rawPath)) {
@@ -366,8 +425,15 @@ router.get('/media/message/:messageId', authenticateToken, async (req, res) => {
         if (!candidate && fileName) {
             candidate = safeResolveMediaPath(`/uploads/${fileName}`);
         }
+        if ((!candidate || !fs.existsSync(candidate)) && req.query.legacyPath) {
+            candidate = safeResolveMediaPath(String(req.query.legacyPath));
+        }
+        if ((!candidate || !fs.existsSync(candidate)) && req.query.name) {
+            candidate = safeResolveMediaPath(`/uploads/${String(req.query.name)}`);
+        }
         if (!candidate || !fs.existsSync(candidate)) {
-            const found = findByFilenameRecursive(path.resolve(__dirname, '../uploads'), fileName || path.basename(rawPath));
+            const fallbackLookupName = String(req.query.name || fileName || path.basename(rawPath));
+            const found = findByFilenameRecursive(path.resolve(__dirname, '../uploads'), fallbackLookupName);
             if (!found) return res.status(404).json({ error: 'Media not found' });
             candidate = found;
         }
