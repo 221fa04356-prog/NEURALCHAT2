@@ -791,19 +791,21 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
                 console.warn(`[GROUP AUDIO WARN] Very small audio blob received (${fileSize} bytes): ${file.originalname}`);
             }
 
-            // Permanent durability: persist audio bytes in Mongo GridFS.
-            if (type === 'audio') {
+            // Permanent durability: persist every uploaded attachment in Mongo GridFS.
+            if (['audio', 'video', 'image', 'file'].includes(type)) {
                 try {
                     const absPath = path.join(__dirname, '../uploads', file.filename);
                     const { fileId } = await uploadLocalFileToGridFS(absPath, file.originalname || file.filename, {
                         senderId,
                         groupId,
-                        legacyPath: file_path
+                        legacyPath: file_path,
+                        mimeType: file.mimetype,
+                        messageType: type
                     });
                     file_path = `/api/chat/media/file/${String(fileId)}`;
                 } catch (gridErr) {
                     console.error('[GROUP GRIDFS UPLOAD ERROR]', gridErr);
-                    return res.status(500).json({ error: 'Failed to store audio permanently' });
+                    return res.status(500).json({ error: 'Failed to store media permanently' });
                 }
             }
 
