@@ -24,6 +24,11 @@ const isLanOrLocalHost =
     browserHostname.startsWith('10.') ||
     /^172\.(1[6-9]|2\d|3[0-1])\./.test(browserHostname);
 
+const isChatDebugEnabled = import.meta.env.DEV && localStorage.getItem('chat_debug') === '1';
+const debugLog = (...args) => {
+    if (isChatDebugEnabled) console.info(...args);
+};
+
 const appendMediaToken = (url) => {
     if (!url) return '';
     const token = localStorage.getItem('token') || '';
@@ -53,13 +58,13 @@ const buildMediaProxyUrl = (rawPath) => {
         try {
             const parsed = new URL(raw, window.location.origin);
             if (parsed.pathname.startsWith('/uploads/')) {
-                return `${parsed.pathname}${parsed.search || ''}`;
+                return '';
             }
             return appendMediaToken(`${parsed.pathname || raw}${parsed.search || ''}`);
         } catch (_) {
             const normalized = raw.startsWith('/') ? raw : `/${raw.replace(/^\/+/, '')}`;
             if (normalized.startsWith('/uploads/')) {
-                return normalized;
+                return '';
             }
             return appendMediaToken(normalized);
         }
@@ -67,29 +72,81 @@ const buildMediaProxyUrl = (rawPath) => {
 };
 
 const getMediaUrl = (path) => {
-    if (!path) return '';
+    if (!path) return null;
     if (path.startsWith('blob:') || path.startsWith('data:')) return path;
     if (path.startsWith('http')) {
         try {
             const parsed = new URL(path);
             if (parsed.pathname.startsWith('/uploads/')) {
-                return buildMediaProxyUrl(`${parsed.pathname}${parsed.search || ''}`);
+                return buildMediaProxyUrl(`${parsed.pathname}${parsed.search || ''}`) || null;
             }
             if (parsed.pathname.startsWith('/api/chat/media')) {
+                const legacyPath = parsed.searchParams.get('path') || '';
+                if (legacyPath.startsWith('/uploads/')) return null;
                 return appendMediaToken(`${parsed.pathname}${parsed.search || ''}`);
             }
         } catch (_) { }
         return appendMediaToken(path);
     }
     if (path.startsWith('/uploads/')) {
-        return buildMediaProxyUrl(path);
+        return buildMediaProxyUrl(path) || null;
     }
     if (path.startsWith('/api/chat/media')) {
+        try {
+            const parsed = new URL(path, window.location.origin);
+            const legacyPath = parsed.searchParams.get('path') || '';
+            if (legacyPath.startsWith('/uploads/')) return null;
+        } catch (_) { }
         return appendMediaToken(path);
     }
     const base = axios.defaults.baseURL || '';
     const resolved = `${base.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
-    return appendMediaToken(resolved);
+    return appendMediaToken(resolved) || null;
+};
+
+const getUploadMediaDuration = async (mediaFile) => {
+    if (!mediaFile || !(mediaFile instanceof Blob || mediaFile instanceof File)) return 0;
+    const mimeType = String(mediaFile.type || '').toLowerCase();
+    const isVideo = mimeType.startsWith('video/');
+    const isAudio = mimeType.startsWith('audio/');
+    if (!isVideo && !isAudio) return 0;
+
+    const objectUrl = URL.createObjectURL(mediaFile);
+    const mediaEl = document.createElement(isVideo ? 'video' : 'audio');
+    mediaEl.preload = 'metadata';
+    mediaEl.muted = true;
+    mediaEl.playsInline = true;
+
+    try {
+        const duration = await new Promise((resolve) => {
+            let settled = false;
+            const cleanup = () => {
+                mediaEl.onloadedmetadata = null;
+                mediaEl.onerror = null;
+                mediaEl.removeAttribute('src');
+                mediaEl.load?.();
+                URL.revokeObjectURL(objectUrl);
+            };
+            const finish = (value) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                resolve(value);
+            };
+
+            mediaEl.onloadedmetadata = () => {
+                const nextDuration = Number(mediaEl.duration || 0);
+                finish(Number.isFinite(nextDuration) && nextDuration > 0 ? Math.round(nextDuration) : 0);
+            };
+            mediaEl.onerror = () => finish(0);
+            mediaEl.src = objectUrl;
+        });
+
+        return duration;
+    } catch (_) {
+        URL.revokeObjectURL(objectUrl);
+        return 0;
+    }
 };
 
 
@@ -2348,7 +2405,7 @@ export default function Chat() {
             countryCode: userData.countryCode,
             about: userData.about
         };
-        console.log('[CLIENT] Attempting profile update with payload:', payload);
+        debugLog('[CLIENT] Attempting profile update with payload:', payload);
 
         if (!payload.userId) {
             console.error('[CLIENT] Error: No user ID found in session');
@@ -2363,7 +2420,7 @@ export default function Chat() {
 
         try {
             const res = await axios.put('/api/auth/update-profile', payload);
-            console.log('[CLIENT] Update successful:', res.data);
+            debugLog('[CLIENT] Update successful:', res.data);
 
             if (res.data.user) {
                 // Merge with current userData to preserve fields like 'image' not returned by endpoint
@@ -2910,15 +2967,15 @@ export default function Chat() {
             try {
                 const rawImageUrl = getMediaUrl(msg.file_path);
                 const imageUrl = encodeURI(rawImageUrl);
-                console.log('Attempting to copy image from:', imageUrl);
+                debugLog('Attempting to copy image from:', imageUrl);
 
                 // Check if we have modern clipboard API
                 const hasClipboardAPI = navigator.clipboard && window.ClipboardItem;
-                console.log('Clipboard API available:', hasClipboardAPI);
+                debugLog('Clipboard API available:', hasClipboardAPI);
 
                 if (!hasClipboardAPI) {
                     // HTTP Fallback: Use contenteditable div with image
-                    console.log('Using HTTP fallback method for image copy');
+                    debugLog('Using HTTP fallback method for image copy');
 
                     try {
                         // Create a temporary contenteditable div
@@ -2967,7 +3024,7 @@ export default function Chat() {
                         selection.removeAllRanges();
 
                         if (successful) {
-                            console.log('ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Image copied using HTTP fallback');
+                            debugLog('ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Image copied using HTTP fallback');
                             setSnackbar({ message: 'Image copied to clipboard!', type: 'success', variant: 'system' });
                             setOpenDropdown(null);
                             return;
@@ -2982,7 +3039,7 @@ export default function Chat() {
 
                 // Modern Clipboard API (HTTPS/localhost)
                 if (hasClipboardAPI) {
-                    console.log('Using modern Clipboard API');
+                    debugLog('Using modern Clipboard API');
 
                     // Fetch the image as a blob
                     const response = await fetch(imageUrl);
@@ -2992,11 +3049,11 @@ export default function Chat() {
                     }
 
                     let blob = await response.blob();
-                    console.log('Image blob fetched, type:', blob.type, 'size:', blob.size);
+                    debugLog('Image blob fetched, type:', blob.type, 'size:', blob.size);
 
                     // Some browsers require PNG format for clipboard
                     if (blob.type !== 'image/png') {
-                        console.log('Converting image to PNG for clipboard compatibility');
+                        debugLog('Converting image to PNG for clipboard compatibility');
                         blob = await convertToPng(blob);
                     }
 
@@ -3007,7 +3064,7 @@ export default function Chat() {
                         })
                     ]);
 
-                    console.log('ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Image copied successfully');
+                    debugLog('ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Image copied successfully');
                     setSnackbar({ message: 'Image copied to clipboard!', type: 'success', variant: 'system' });
                     setOpenDropdown(null);
                     return;
@@ -3609,14 +3666,14 @@ export default function Chat() {
         // --- Setup Listeners BEFORE Connecting ---
 
         const onConnect = () => {
-            console.log('Socket: Connected as', currentUserId);
+            debugLog('Socket: Connected as', currentUserId);
             if (selectedUserRef.current) {
                 fetchP2PRequest(selectedUserRef.current._id);
             }
         };
 
         const onDisconnect = (reason) => {
-            console.log('Socket: Disconnected, reason:', reason);
+            debugLog('Socket: Disconnected, reason:', reason);
         };
 
         const onConnectError = (err) => {
@@ -3665,18 +3722,18 @@ export default function Chat() {
             const currentSelected = selectedUserRef.current;
             const myId = userRef.current?.id || userRef.current?._id;
 
-            console.log(`[DEBUG] onReceiveMessage: Sender: ${senderId}, Me: ${myId}, Selected: ${currentSelected?._id}`);
+            debugLog(`[DEBUG] onReceiveMessage: Sender: ${senderId}, Me: ${myId}, Selected: ${currentSelected?._id}`);
 
             // Ignore messages sent by ME (if server echoes them back)
             if (String(senderId) === String(myId)) {
-                console.log('[DEBUG] Ignoring my own message echo.');
+                debugLog('[DEBUG] Ignoring my own message echo.');
                 return;
             }
 
             const isActiveChat = currentSelected && String(senderId) === String(currentSelected._id);
 
             if (isActiveChat) {
-                console.log('[DEBUG] Active chat open with', senderId, '- adding and marking read.');
+                debugLog('[DEBUG] Active chat open with', senderId, '- adding and marking read.');
                 const nearBottom = isChatNearBottom();
                 const incomingMsgId = String(data._id || data.id || '');
 
@@ -3703,7 +3760,7 @@ export default function Chat() {
                     setUnreadBarLockedUntil(Date.now() + 5000);
                 }
             } else {
-                console.log('[DEBUG] Background message from', senderId, '- showing notification.');
+                debugLog('[DEBUG] Background message from', senderId, '- showing notification.');
 
                 // Check if user is muted
                 const mutedKey = `mutedChats_${userRef.current?.id || userRef.current?._id}`;
@@ -3730,7 +3787,7 @@ export default function Chat() {
                         type: 'info',
                         duration: 6000,
                         onReply: (text) => {
-                            console.log(`[DEBUG] Snackbar onReply triggered. Target: ${senderId}, Text: ${text}`);
+                            debugLog(`[DEBUG] Snackbar onReply triggered. Target: ${senderId}, Text: ${text}`);
                             handleNotificationReply(text, senderId);
                         }
                     });
@@ -3803,7 +3860,7 @@ export default function Chat() {
         const onMessagesRead = (data) => {
             const readerId = String(data.reader_id || '');
             const senderPayloadId = String(data.sender_id || ''); // Optional from broadcast
-            console.log('[DEBUG] Socket: messages_read received', { readerId, senderPayloadId });
+            debugLog('[DEBUG] Socket: messages_read received', { readerId, senderPayloadId });
 
             const myId = String(userRef.current?.id || userRef.current?._id || '');
             const currentSelectedId = String(selectedUserRef.current?._id || selectedUserRef.current?.id || '');
@@ -3830,7 +3887,7 @@ export default function Chat() {
 
             // Update active view
             if (currentSelectedId === readerId) {
-                console.log('[DEBUG] Updating active messages with blue ticks.');
+                debugLog('[DEBUG] Updating active messages with blue ticks.');
                 setMessages(prev => {
                     const next = prev.map(markMsg);
                     return next; // Optimization: we could check for changes but assignment is fine here
@@ -3859,15 +3916,15 @@ export default function Chat() {
         };
 
         const onMessagesUnread = (data) => {
-            console.log('[CLIENT] Socket: messages_unread received!', data);
-            console.log('[CLIENT] Current user ID:', user.id);
-            console.log('[CLIENT] Reader ID from event:', data.reader_id);
+            debugLog('[CLIENT] Socket: messages_unread received!', data);
+            debugLog('[CLIENT] Current user ID:', user.id);
+            debugLog('[CLIENT] Reader ID from event:', data.reader_id);
 
             const currentSelected = selectedUserRef.current;
-            console.log('[CLIENT] Currently selected user:', currentSelected?._id);
+            debugLog('[CLIENT] Currently selected user:', currentSelected?._id);
 
             if (currentSelected && String(data.reader_id) === String(currentSelected._id)) {
-                console.log('[CLIENT] Marking batch as unread. IDs:', data.message_ids);
+                debugLog('[CLIENT] Marking batch as unread. IDs:', data.message_ids);
 
                 setMessages(prev => prev.map(msg => {
                     // Check if this message is in the affected batch
@@ -3879,7 +3936,7 @@ export default function Chat() {
                     return msg;
                 }));
             } else {
-                console.log('[CLIENT] Not updating active view - reader ID mismatch or no chat open');
+                debugLog('[CLIENT] Not updating active view - reader ID mismatch or no chat open');
             }
         };
 
@@ -3942,7 +3999,7 @@ export default function Chat() {
         };
 
         const onMessageEdited = (data) => {
-            console.log('Socket: message_edited', data);
+            debugLog('Socket: message_edited', data);
             const updateMsgs = prev => prev.map(m => (String(m._id || m.id) === String(data.messageId)) ? { ...m, content: data.content, is_edited: true, edited_at: data.edited_at } : m);
             setMessages(updateMsgs);
 
@@ -3957,7 +4014,7 @@ export default function Chat() {
         socket.on('message_edited', onMessageEdited);
 
         const onGroupMessageEdited = (data) => {
-            console.log('Socket: group_message_edited', data);
+            debugLog('Socket: group_message_edited', data);
             const updateMsgs = prev => prev.map(m => (String(m._id || m.id) === String(data.messageId)) ? { ...m, content: data.content, is_edited: true, edited_at: data.edited_at } : m);
             setGroupMessages(updateMsgs);
 
@@ -3994,7 +4051,7 @@ export default function Chat() {
         socket.on('group_message_edited', onGroupMessageEdited);
 
         const onMessageDeleted = (data) => {
-            console.log('Socket: message_deleted', data);
+            debugLog('Socket: message_deleted', data);
             setMessages(prev => prev.map(msg =>
                 (msg._id === data.messageId || msg.id === data.messageId)
                     ? { ...msg, is_deleted_by_admin: data.is_deleted_by_admin, is_deleted_by_user: data.is_deleted_by_user }
@@ -4009,7 +4066,7 @@ export default function Chat() {
         };
 
         const onPollVoted = (data) => {
-            console.log('Socket: poll_voted', data);
+            debugLog('Socket: poll_voted', data);
             const { messageId, poll, isGroup } = data;
 
             const updateMsgs = prev => prev.map(m =>
@@ -4026,7 +4083,7 @@ export default function Chat() {
 
 
         const onUserProfileUpdated = (data) => {
-            console.log('Socket: user_profile_updated', data);
+            debugLog('Socket: user_profile_updated', data);
             setUsers(prev => prev.map(u =>
                 String(u._id) === String(data.userId)
                     ? { ...u, name: data.name, mobile: data.mobile, about: data.about }
@@ -4039,7 +4096,7 @@ export default function Chat() {
         };
 
         const onReconnectAttempt = (attempt) => {
-            console.log(`Socket: Reconnecting attempt #${attempt}...`);
+            debugLog(`Socket: Reconnecting attempt #${attempt}...`);
         };
 
         const onReconnectFailed = () => {
@@ -4058,9 +4115,9 @@ export default function Chat() {
         socket.on('messages_read_broadcast', onMessagesRead);
         socket.on('messages_unread', onMessagesUnread);
         socket.on('messages_unread_broadcast', (data) => {
-            console.log('[CLIENT] Received broadcast test:', data);
+            debugLog('[CLIENT] Received broadcast test:', data);
             if (String(data.target) === String(user.id)) {
-                console.log('[CLIENT] This broadcast is for me!');
+                debugLog('[CLIENT] This broadcast is for me!');
                 onMessagesUnread({ reader_id: data.reader_id, message_id: data.message_id });
             }
         });
@@ -4072,7 +4129,7 @@ export default function Chat() {
         socket.on('user_profile_updated', onUserProfileUpdated);
         socket.on('poll_voted', onPollVoted);
         const onEventUpdated = (data) => {
-            console.log('Socket: event_updated', data);
+            debugLog('Socket: event_updated', data);
             fetchReminders();
             const { messageId, event, isGroup } = data;
             const updateFn = prev => prev.map(m => (String(m._id || m.id) === String(messageId)) ? { ...m, event: event } : m);
@@ -4101,7 +4158,7 @@ export default function Chat() {
         socket.on('force_logout', onForceLogout);
 
         const onNewMessageRequest = (data) => {
-            console.log('Socket: new_message_request', data);
+            debugLog('Socket: new_message_request', data);
             const existingContact = (usersRef.current || []).find(
                 u => String(u._id || u.id) === String(data.senderId)
             );
@@ -4145,7 +4202,7 @@ export default function Chat() {
         socket.on('new_message_request', onNewMessageRequest);
 
         const onRequestAccepted = (data) => {
-            console.log('Socket: request_accepted', data);
+            debugLog('Socket: request_accepted', data);
             setSnackbar({ message: `Your message request to ${data.receiverName} was accepted!`, type: 'success', variant: 'system' });
             fetchUsers();
             fetchMessageRequests();
@@ -4153,27 +4210,27 @@ export default function Chat() {
         socket.on('request_accepted', onRequestAccepted);
 
         const onAccountBanned = (data) => {
-            console.log('Socket: account_banned', data);
+            debugLog('Socket: account_banned', data);
             setAccountBanned(data.bannedUntil);
             // Removed snackbar as requested by user - banner will handle display
         };
         socket.on('account_banned', onAccountBanned);
 
         const onAccountLocked = (data) => {
-            console.log('Socket: account_locked', data);
+            debugLog('Socket: account_locked', data);
             setAccountLocked(true);
             setSnackbar({ message: 'Your account has been locked due to multiple rejections.', type: 'error' });
         };
         socket.on('account_locked', onAccountLocked);
 
         socket.on('user_blocked', () => {
-            console.log('[SOCKET] user_blocked event received');
+            debugLog('[SOCKET] user_blocked event received');
             setIsMessagingBlocked(true);
             setShowUnblockModal(true);
         });
 
         socket.on('user_unblocked', () => {
-            console.log('[SOCKET] user_unblocked event received');
+            debugLog('[SOCKET] user_unblocked event received');
             setIsMessagingBlocked(false);
             setUnblockRequested(false);
             setShowUnblockModal(false);
@@ -4181,13 +4238,13 @@ export default function Chat() {
         });
 
         socket.on('unblock_request_rejected', () => {
-            console.log('[SOCKET] unblock_request_rejected received');
+            debugLog('[SOCKET] unblock_request_rejected received');
             setUnblockRequested(false);
             setSnackbar({ message: 'Your unblock request was reviewed and rejected.', type: 'error', variant: 'system' });
         });
 
         const onMessageReactionUpdated = (data) => {
-            console.log('Socket: message_reaction_updated', data);
+            debugLog('Socket: message_reaction_updated', data);
             const { messageId, reactions, isGroup } = data;
             const updateFn = prev => prev.map(m => (String(m._id || m.id) === String(messageId)) ? { ...m, reactions } : m);
             if (isGroup) {
@@ -4252,7 +4309,7 @@ export default function Chat() {
 
 
         const onMessageRestrictionUpdated = (data) => {
-            console.log('Socket: message_restriction_updated', data);
+            debugLog('Socket: message_restriction_updated', data);
             const { targetId, status, updatedAt, rejectedBy } = data;
 
             setUsers(prev => prev.map(u =>
@@ -4275,7 +4332,7 @@ export default function Chat() {
         // --- Connect ---
         socket.auth = { token: localStorage.getItem('token') };
         if (!socket.connected) {
-            console.log('Socket: Attempting connect...');
+            debugLog('Socket: Attempting connect...');
             socket.connect();
         } else {
             // Already connected (e.g. after HMR), still run onConnect logic
@@ -4311,7 +4368,7 @@ export default function Chat() {
 
         // Listen for community member removal notifications
         const onCommunityMemberRemoved = (data) => {
-            console.log('Socket: community_member_removed', data);
+            debugLog('Socket: community_member_removed', data);
 
             // Only show snackbar if the removed member is ME
             const myId = userRef.current?.id || userRef.current?._id;
@@ -4328,7 +4385,7 @@ export default function Chat() {
 
         // Listen for community member added (being added to a community)
         const onCommunityMemberAdded = (data) => {
-            console.log('Socket: community_member_added', data);
+            debugLog('Socket: community_member_added', data);
             fetchCommunities();
             if (data.community) {
                 const updatedComm = { ...data.community, id: data.community._id || data.community.id, is_community: true };
@@ -4344,7 +4401,7 @@ export default function Chat() {
 
         // Listen for community updates (member list changes for everyone else)
         const onCommunityUpdated = (data) => {
-            console.log('Socket: community_updated', data);
+            debugLog('Socket: community_updated', data);
             fetchCommunities();
             // If we are looking at this community's info, refresh it
             const commId = data.communityId || data.community?._id || data.community?.id;
@@ -4582,7 +4639,7 @@ export default function Chat() {
         socket.on('group_messages_read', onGroupMessagesRead);
 
         const onGroupMessagesAllRead = (data) => {
-            console.log('Socket: group_messages_all_read (all read)', data);
+            debugLog('Socket: group_messages_all_read (all read)', data);
             const currentSelectedGroup = selectedGroupRef?.current;
             if (currentSelectedGroup && String(currentSelectedGroup._id) === String(data.groupId)) {
                 setGroupMessages(prev => prev.map(msg => {
@@ -4657,7 +4714,7 @@ export default function Chat() {
         socket.on('group_message_partial_read', onGroupMessagePartialRead);
 
         const onGroupMessagesUnread = (data) => {
-            console.log('Socket: group_messages_unread', data);
+            debugLog('Socket: group_messages_unread', data);
             const currentSelectedGroup = selectedGroupRef?.current;
             if (currentSelectedGroup && String(currentSelectedGroup._id) === String(data.groupId)) {
                 setGroupMessages(prev => prev.map(msg => {
@@ -5339,9 +5396,9 @@ export default function Chat() {
                 const isRegistered = localStorage.getItem(`signal_registered_${userData.id}`);
                 if (!isRegistered) {
                     try {
-                        console.log('[E2EE] Registering for Signal Protocol...');
+                        debugLog('[E2EE] Registering for Signal Protocol...');
                         await SignalService.register(userData.id);
-                        console.log('[E2EE] Signal Protocol Registration Successful');
+                        debugLog('[E2EE] Signal Protocol Registration Successful');
                     } catch (err) {
                         console.error('[E2EE] Registration Failed:', err);
                     }
@@ -5565,7 +5622,7 @@ export default function Chat() {
         try {
             const token = localStorage.getItem('token');
             const myId = user.id || user._id;
-            console.log(`[DEBUG] markAsRead EXECUTING: Messages from ${targetSenderId} read by ${myId}`);
+            debugLog(`[DEBUG] markAsRead EXECUTING: Messages from ${targetSenderId} read by ${myId}`);
             const res = await axios.post('/api/chat/messages/mark-read',
                 { userId: myId, senderId: targetSenderId },
                 { headers: { 'Authorization': `Bearer ${token}` } }
@@ -6395,6 +6452,7 @@ export default function Chat() {
         } else if (!rawUrl.startsWith('/')) {
             mediaPath = `/${rawUrl.replace(/^\/+/, '')}`;
         }
+        if (String(mediaPath).startsWith('/uploads/')) return '';
         const qs = `path=${encodeURIComponent(mediaPath)}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
         return `${apiOrigin}/api/chat/media?${qs}`;
     };
@@ -6595,7 +6653,6 @@ export default function Chat() {
         const rawUrl = msg.file_path || (typeof msg.content === 'string' && msg.content.includes('/uploads/') ? msg.content : null);
         const url = resolveUploadUrl(rawUrl);
         const fallbackCandidates = [
-            resolveMessageMediaFallbackUrl(msg),
             resolveGridFsFallbackUrl(rawUrl, msg),
             resolveMediaProxyUrl(rawUrl)
         ].filter((u, idx, arr) => !!u && u !== url && arr.indexOf(u) === idx);
@@ -7544,6 +7601,7 @@ export default function Chat() {
         const targetFile = fileOverride || voiceFile || file || (selectedFiles.length > 0 ? selectedFiles[0] : null);
         const isVoiceMessage = !!voiceFile && !fileOverride;
         const isCloudAudioMessage = !!cloudAudio;
+        const resolvedMediaDuration = voiceDuration || await getUploadMediaDuration(targetFile);
 
         // 1. Basic empty check
         if ((!textToSend.trim() && !targetFile && !isCloudAudioMessage) || (!selectedUser && !selectedGroup)) return;
@@ -7575,7 +7633,7 @@ export default function Chat() {
             file_path: (targetFile && (targetFile instanceof Blob || targetFile instanceof File)) ? URL.createObjectURL(targetFile) : null, // Local preview
             fileName: targetFile ? targetFile.name : null,
             fileSize: targetFile ? targetFile.size : null,
-            duration: voiceDuration || null,
+            duration: resolvedMediaDuration || null,
             pageCount: 1, // Default for optimistic UI
             created_at: new Date(),
             is_read: false,
@@ -7639,8 +7697,8 @@ export default function Chat() {
             if (tempMsg.is_view_once) {
                 formData.append('is_view_once', true);
             }
-            if (voiceDuration) {
-                formData.append('duration', voiceDuration);
+            if (resolvedMediaDuration) {
+                formData.append('duration', resolvedMediaDuration);
             }
 
             // Ensure socket is connected before potential emit
@@ -8106,8 +8164,8 @@ export default function Chat() {
         }
 
         const senderId = currentUser.id || currentUser._id;
-        console.log(`[DEBUG] handleNotificationReply: Sending reply. Text: "${text}", To: ${targetUserId}, From: ${senderId}`);
-        console.log(`[DEBUG] handleNotificationReply: Current Selected Chat: ${selectedUserRef.current?._id}`);
+        debugLog(`[DEBUG] handleNotificationReply: Sending reply. Text: "${text}", To: ${targetUserId}, From: ${senderId}`);
+        debugLog(`[DEBUG] handleNotificationReply: Current Selected Chat: ${selectedUserRef.current?._id}`);
 
         // Construct simplified message object
         const tempId = 'temp-' + Date.now();
@@ -8124,7 +8182,7 @@ export default function Chat() {
 
         // Update UI if we are in the chat with the target user
         const isChatOpenWithTarget = selectedUserRef.current && String(selectedUserRef.current._id) === String(targetUserId);
-        console.log(`[DEBUG] handleNotificationReply: Is chat open with target? ${isChatOpenWithTarget}`);
+        debugLog(`[DEBUG] handleNotificationReply: Is chat open with target? ${isChatOpenWithTarget}`);
 
         if (isChatOpenWithTarget) {
             setMessages(prev => [...prev, replyMsg]);
@@ -8137,7 +8195,7 @@ export default function Chat() {
             formData.append('content', text);
             formData.append('reply_to', ''); // Explicitly empty for notification reply
 
-            console.log('[DEBUG] Posting message to API...');
+            debugLog('[DEBUG] Posting message to API...');
             const token = localStorage.getItem('token');
             const res = await axios.post('/api/chat/send', formData, {
                 headers: {
@@ -8145,7 +8203,7 @@ export default function Chat() {
                 }
             });
 
-            console.log('[DEBUG] Emitting send_message socket event...');
+            debugLog('[DEBUG] Emitting send_message socket event...');
             const sentMsg = res.data.message || res.data;
             const socketData = {
                 _id: sentMsg._id, // Pass true server ID
@@ -8186,7 +8244,7 @@ export default function Chat() {
         }
 
         const senderId = currentUser.id || currentUser._id;
-        console.log(`[DEBUG] handleGroupNotificationReply: Sending reply. Text: "${text}", To Group: ${targetGroupId}, From: ${senderId}`);
+        debugLog(`[DEBUG] handleGroupNotificationReply: Sending reply. Text: "${text}", To Group: ${targetGroupId}, From: ${senderId}`);
 
         const tempId = 'temp-' + Date.now();
         const replyMsg = {
@@ -8287,7 +8345,7 @@ export default function Chat() {
             }
         } catch (err) {
             // Permissions API not supported in this browser ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â fall through to permission screen
-            console.log('Permissions API not available, showing permission modal');
+            debugLog('Permissions API not available, showing permission modal');
         }
 
         // Default: show the permission request screen
@@ -10616,7 +10674,7 @@ export default function Chat() {
                                             if (m.type === 'image' || m.type === 'video') {
                                                 return (
                                                     <div key={i} onClick={(e) => { e.stopPropagation(); setViewingImage(m); }} style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }}>
-                                                        <img src={m.file_path} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                        <img src={getMediaUrl(m.file_path)} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                     </div>
                                                 );
                                             }
@@ -10854,13 +10912,22 @@ export default function Chat() {
                         <div className="wa-media-preview-row">
                                     <>
                                         {previewItems.map((m, i) => {
+                                            const previewUrl = getMediaUrl(m.file_path);
                                             if (m.type === 'image' || m.type === 'video') {
                                                 return (
                                                     <div key={i} className="wa-media-thumb" onClick={(e) => { e.stopPropagation(); setViewingImage(m); }} style={{ cursor: 'pointer', flexShrink: 0 }}>
                                                         {m.type === 'video' ? (
-                                                            <video src={getMediaUrl(m.file_path)} muted playsInline preload="metadata" crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, background: '#000' }} />
+                                                            previewUrl ? (
+                                                                <video src={previewUrl} muted playsInline preload="metadata" crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, background: '#0f1f33' }} />
+                                                            ) : (
+                                                                <div style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, background: '#0f1f33' }} />
+                                                            )
                                                         ) : (
-                                                            <img src={getMediaUrl(m.file_path)} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }} />
+                                                            previewUrl ? (
+                                                                <img src={previewUrl} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }} />
+                                                            ) : (
+                                                                <div style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, background: '#0f1f33' }} />
+                                                            )
                                                         )}
                                                     </div>
                                                 );
@@ -12227,6 +12294,14 @@ export default function Chat() {
 
         const renderViewerContent = () => {
             if (viewingImage.type === 'image') {
+                const imageSrc = getMediaUrl(viewingImage.file_path);
+                if (!imageSrc) {
+                    return (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#54656f' }}>
+                            <span>Media unavailable</span>
+                        </div>
+                    );
+                }
                 return (
                     <div
                         className="wa-image-container"
@@ -12237,7 +12312,7 @@ export default function Chat() {
                         onMouseLeave={handleMouseUp} // Stop dragging if left
                     >
                         <img
-                            src={viewingImage.file_path}
+                            src={imageSrc}
                             alt="Full view"
                             className="wa-full-image"
                             ref={imageRef}
@@ -12261,9 +12336,17 @@ export default function Chat() {
                 );
             }
             if (viewingImage.type === 'video') {
+                const videoSrc = getMediaUrl(viewingImage.file_path);
+                if (!videoSrc) {
+                    return (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#54656f' }}>
+                            <span>Video unavailable</span>
+                        </div>
+                    );
+                }
                 return (
                     <video controls autoPlay crossOrigin="anonymous" className="wa-full-image" style={{ background: '#000' }}>
-                        <source src={getMediaUrl(viewingImage.file_path)} type={viewingImage.file_path?.endsWith('.webm') ? 'video/webm' : 'video/mp4'} />
+                        <source src={videoSrc} type={viewingImage.file_path?.endsWith('.webm') ? 'video/webm' : 'video/mp4'} />
                         Your browser does not support the video tag.
                     </video>
                 );
@@ -12272,11 +12355,23 @@ export default function Chat() {
                 const ext = (viewingImage.fileName || viewingImage.file_path).split('.').pop().toLowerCase();
                 if (ext === 'pdf') {
                     return (
-                        <iframe
-                            src={`${viewingImage.file_path}#toolbar=0`}
-                            style={{ width: '80%', height: '80%', background: 'white', border: 'none', borderRadius: 8 }}
-                            title="PDF Preview"
-                        />
+                        (() => {
+                            const pdfSrcBase = getMediaUrl(viewingImage.file_path);
+                            if (!pdfSrcBase) {
+                                return (
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#54656f' }}>
+                                        <span>Media unavailable</span>
+                                    </div>
+                                );
+                            }
+                            return (
+                                <iframe
+                                    src={`${pdfSrcBase}#toolbar=0`}
+                                    style={{ width: '80%', height: '80%', background: 'white', border: 'none', borderRadius: 8 }}
+                                    title="PDF Preview"
+                                />
+                            );
+                        })()
                     );
                 }
                 return (
@@ -13876,7 +13971,7 @@ export default function Chat() {
                                             if (m.type === 'image' || m.type === 'video') {
                                                 return (
                                                     <div key={i} className="wa-media-thumb" onClick={(e) => { e.stopPropagation(); setViewingImage(m); }} style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }}>
-                                                        <img src={m.file_path} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                        <img src={getMediaUrl(m.file_path)} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                     </div>
                                                 );
                                             }
@@ -14718,6 +14813,7 @@ export default function Chat() {
                                                     const msgKey = msg._id || msg.id;
                                                     const isSelected = !!selectedMediaMsgs.find(m => String(m._id || m.id) === String(msgKey));
                                                     const isAnySelected = selectedMediaMsgs.length > 0;
+                                                    const mediaUrl = getMediaUrl(msg.file_path);
 
                                                     return (
                                                         <div key={msgKey} className="wa-media-grid-item" onClick={(e) => {
@@ -14747,15 +14843,21 @@ export default function Chat() {
                                                                     </div>
                                                                 </div>
                                                             ) : msg.type === 'video' ? (
-                                                                <video
-                                                                    src={getMediaUrl(msg.file_path)}
-                                                                    muted
-                                                                    playsInline
-                                                                    preload="metadata"
-                                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#111b21' }}
-                                                                />
+                                                                mediaUrl ? (
+                                                                    <video
+                                                                        src={mediaUrl}
+                                                                        muted
+                                                                        playsInline
+                                                                        preload="metadata"
+                                                                        style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#0f1f33' }}
+                                                                    />
+                                                                ) : (
+                                                                    <div style={{ width: '100%', height: '100%', background: '#0f1f33' }} />
+                                                                )
                                                             ) : (
-                                                                <img src={getMediaUrl(msg.file_path)} alt="media" />
+                                                                mediaUrl
+                                                                    ? <img src={mediaUrl} alt="media" />
+                                                                    : <div style={{ width: '100%', height: '100%', background: '#0f1f33' }} />
                                                             )}
                                                             <div
                                                                 className={`wa-media-overlay ${isSelected ? 'selected' : ''}`}
@@ -17394,7 +17496,7 @@ export default function Chat() {
                                                             </div>
                                                             {replyingTo.type === 'image' && replyingTo.file_path && (
                                                                 <div className="wa-reply-preview-thumb">
-                                                                    <img src={replyingTo.file_path} alt="thumbnail" />
+                                                                    <img src={getMediaUrl(replyingTo.file_path)} alt="thumbnail" />
                                                                 </div>
                                                             )}
                                                             <X size={24} className="wa-reply-preview-close" onClick={() => setReplyingTo(null)} />
@@ -18102,7 +18204,7 @@ export default function Chat() {
                                                                 if (replyingTo.type === 'image' && replyingTo.file_path) {
                                                                     return (
                                                                         <div className="wa-reply-preview-thumb">
-                                                                            <img src={replyingTo.file_path} alt="thumbnail" />
+                                                                            <img src={getMediaUrl(replyingTo.file_path)} alt="thumbnail" />
                                                                         </div>
                                                                     );
                                                                 }
@@ -21700,6 +21802,7 @@ export default function Chat() {
         </>
     );
 }
+
 
 
 

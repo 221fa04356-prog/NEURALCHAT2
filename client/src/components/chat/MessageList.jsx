@@ -147,13 +147,13 @@ const buildMediaProxyUrl = (rawPath) => {
         try {
             const parsed = new URL(raw, window.location.origin);
             if (parsed.pathname.startsWith('/uploads/')) {
-                return `${parsed.pathname}${parsed.search || ''}`;
+                return '';
             }
             return appendMediaToken(`${parsed.pathname || raw}${parsed.search || ''}`);
         } catch (_) {
             const normalized = raw.startsWith('/') ? raw : `/${raw.replace(/^\/+/, '')}`;
             if (normalized.startsWith('/uploads/')) {
-                return normalized;
+                return '';
             }
             return appendMediaToken(normalized);
         }
@@ -182,7 +182,8 @@ const buildMessageMediaFallbackUrl = (msg, isGroupChat = false) => {
 
 const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
     const rawPath = msg?.file_path || msg?.filePath || '';
-    const messageUrl = buildMessageMediaFallbackUrl(msg, isGroupChat);
+    // Only use message-id fallback when we truly do not have a concrete media path.
+    const messageUrl = rawPath ? '' : buildMessageMediaFallbackUrl(msg, isGroupChat);
     if (!rawPath) {
         return { primaryUrl: messageUrl, retryUrl: '' };
     }
@@ -193,8 +194,8 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
     }
 
     const makeManagedResult = (directUrl) => {
-        const primaryUrl = messageUrl || directUrl;
-        const retryUrl = messageUrl && directUrl && messageUrl !== directUrl ? directUrl : '';
+        const primaryUrl = directUrl || messageUrl;
+        const retryUrl = messageUrl && directUrl && messageUrl !== directUrl ? messageUrl : '';
         return { primaryUrl, retryUrl };
     };
 
@@ -209,10 +210,16 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
                 return makeManagedResult(appendMediaToken(normalizedUrl));
             }
             if (parsed.pathname.startsWith('/api/chat/media')) {
+                const legacyPath = parsed.searchParams.get('path') || '';
+                if (legacyPath.startsWith('/uploads/')) {
+                    return { primaryUrl: messageUrl || '', retryUrl: '' };
+                }
                 return { primaryUrl: appendMediaToken(normalizedUrl), retryUrl: messageUrl && messageUrl !== appendMediaToken(normalizedUrl) ? messageUrl : '' };
             }
             if (parsed.pathname.startsWith('/uploads/')) {
-                return makeManagedResult(buildMediaProxyUrl(normalizedUrl));
+                // Never hit legacy /uploads directly from the browser.
+                // If we cannot build a message-id resolver URL, render unavailable state.
+                return { primaryUrl: messageUrl || '', retryUrl: '' };
             }
         } catch (_) { }
 
@@ -231,6 +238,13 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
         return makeManagedResult(appendMediaToken(normalized));
     }
     if (normalized.startsWith('/api/chat/media')) {
+        try {
+            const parsed = new URL(normalized, window.location.origin);
+            const legacyPath = parsed.searchParams.get('path') || '';
+            if (legacyPath.startsWith('/uploads/')) {
+                return { primaryUrl: messageUrl || '', retryUrl: '' };
+            }
+        } catch (_) { }
         const directUrl = appendMediaToken(normalized);
         return {
             primaryUrl: directUrl,
@@ -238,7 +252,9 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
         };
     }
     if (normalized.startsWith('/uploads/')) {
-        return makeManagedResult(buildMediaProxyUrl(normalized));
+        // Never hit legacy /uploads directly from the browser.
+        // If we cannot build a message-id resolver URL, render unavailable state.
+        return { primaryUrl: messageUrl || '', retryUrl: '' };
     }
 
     const directUrl = appendMediaToken(normalized) || '';
@@ -321,13 +337,23 @@ const MessageList = memo(({
 }) => {
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [failedMediaKeys, setFailedMediaKeys] = useState(() => new Set());
+    const [failedMediaUrls, setFailedMediaUrls] = useState(() => new Set());
     const [mediaUrlOverrides, setMediaUrlOverrides] = useState(() => new Map());
+    const [videoDurationByKey, setVideoDurationByKey] = useState(() => new Map());
     const virtuosoRef = useRef(null);
     const handledJumpNonceRef = useRef(null);
     const targetId = String(selectedUser?._id || '').toLowerCase();
     const typingSet = typingUsers[targetId];
 
     const getMessageKey = useCallback((msg) => String(msg?._id || msg?.id || ''), []);
+    const normalizeMediaCompareUrl = useCallback((url) => {
+        if (!url) return '';
+        try {
+            return new URL(String(url), window.location.origin).toString();
+        } catch (_) {
+            return String(url);
+        }
+    }, []);
     const isMediaAborted = useCallback((event) => {
         const mediaError = event?.currentTarget?.error;
         return mediaError?.code === 1;
@@ -335,34 +361,55 @@ const MessageList = memo(({
     const markMediaFailed = useCallback((msg, event) => {
         const messageKey = getMessageKey(msg);
         if (!messageKey || isMediaAborted(event)) return;
+        const mediaEl = event?.currentTarget;
+        const failedSrc = normalizeMediaCompareUrl(mediaEl?.currentSrc || mediaEl?.src || '');
+        if (failedSrc) {
+            setFailedMediaUrls((prev) => {
+                if (prev.has(failedSrc)) return prev;
+                const next = new Set(prev);
+                next.add(failedSrc);
+                return next;
+            });
+        }
         setFailedMediaKeys((prev) => {
             if (prev.has(messageKey)) return prev;
             const next = new Set(prev);
             next.add(messageKey);
             return next;
         });
-    }, [getMessageKey, isMediaAborted]);
+    }, [getMessageKey, isMediaAborted, normalizeMediaCompareUrl]);
     const handleMediaError = useCallback((msg, retryUrl, event) => {
         const messageKey = getMessageKey(msg);
         const mediaEl = event?.currentTarget;
         if (messageKey && retryUrl && mediaEl) {
-            const currentSrc = String(mediaEl.currentSrc || mediaEl.src || '');
-            if (currentSrc !== retryUrl) {
+            const currentSrc = normalizeMediaCompareUrl(mediaEl.currentSrc || mediaEl.src || '');
+            const normalizedRetryUrl = normalizeMediaCompareUrl(retryUrl);
+            const hasAlreadyRetried = mediaUrlOverrides.get(messageKey) === retryUrl;
+            if (!hasAlreadyRetried && currentSrc && currentSrc !== normalizedRetryUrl) {
                 setMediaUrlOverrides((prev) => {
                     if (prev.get(messageKey) === retryUrl) return prev;
                     const next = new Map(prev);
                     next.set(messageKey, retryUrl);
                     return next;
                 });
-                mediaEl.src = retryUrl;
-                if (typeof mediaEl.load === 'function') {
-                    mediaEl.load();
-                }
                 return;
             }
         }
         markMediaFailed(msg, event);
-    }, [getMessageKey, markMediaFailed]);
+    }, [getMessageKey, markMediaFailed, mediaUrlOverrides, normalizeMediaCompareUrl]);
+    const handleVideoMetadataLoaded = useCallback((msg, event) => {
+        const messageKey = getMessageKey(msg);
+        if (!messageKey) return;
+        const duration = Number(event?.currentTarget?.duration || 0);
+        if (!Number.isFinite(duration) || duration <= 0) return;
+        const rounded = Math.max(1, Math.round(duration));
+        setVideoDurationByKey((prev) => {
+            if (prev.get(messageKey) === rounded) return prev;
+            const next = new Map(prev);
+            next.set(messageKey, rounded);
+            return next;
+        });
+    }, [getMessageKey]);
 
     // 1. Prepare Flattened List for Virtuoso
     const flattenedItems = React.useMemo(() => {
@@ -576,7 +623,11 @@ const MessageList = memo(({
         const { primaryUrl: resolvedFileUrl, retryUrl: retryFileUrl } = failedMediaKeys.has(messageKey)
             ? { primaryUrl: '', retryUrl: '' }
             : resolveMessageMediaUrls(msg, isGroup);
-        const absoluteFileUrl = overriddenMediaUrl || resolvedFileUrl;
+        const candidateFileUrl = overriddenMediaUrl || resolvedFileUrl;
+        const normalizedCandidateUrl = normalizeMediaCompareUrl(candidateFileUrl);
+        const absoluteFileUrl = normalizedCandidateUrl && failedMediaUrls.has(normalizedCandidateUrl)
+            ? ''
+            : candidateFileUrl;
         const isLikelyLocalOrPrivatePreview = (() => {
             if (!absoluteFileUrl) return true;
             try {
@@ -870,7 +921,7 @@ const MessageList = memo(({
                                         )}
                                         {(msg.type === 'video' || (msg.type === 'file' && isVideoByExt)) && (
                                             <div className="wa-msg-image-container" 
-                                                style={{ borderRadius: 10, overflow: 'hidden', background: '#111b21', cursor: 'pointer' }}
+                                                style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#111b21', cursor: 'pointer' }}
                                                 onClick={(e) => {
                                                     if (msg.is_view_once && !isMe) {
                                                         markAsRead(msg);
@@ -878,24 +929,27 @@ const MessageList = memo(({
                                                 }}
                                             >
                                                 {absoluteFileUrl ? (
-                                                    <video
-                                                        key={`${messageKey}:${absoluteFileUrl}`}
-                                                        src={absoluteFileUrl}
-                                                        controls
-                                                        playsInline
-                                                        preload="auto"
-                                                        crossOrigin="anonymous"
-                                                        onError={(event) => handleMediaError(msg, retryFileUrl, event)}
-                                                        style={{ 
-                                                            width: '100%', 
-                                                            maxWidth: isMobile ? 240 : 340, 
-                                                            maxHeight: isMobile ? 320 : 420,
-                                                            display: 'block', 
-                                                            background: '#000', 
-                                                            borderRadius: 8,
-                                                            objectFit: 'contain'
-                                                        }}
-                                                    />
+                                                    <>
+                                                        <video
+                                                            key={`${messageKey}:${absoluteFileUrl}`}
+                                                            src={absoluteFileUrl}
+                                                            playsInline
+                                                            preload="auto"
+                                                            controls
+                                                            onError={(event) => handleMediaError(msg, retryFileUrl, event)}
+                                                            onLoadedMetadata={(event) => handleVideoMetadataLoaded(msg, event)}
+                                                            onClick={(event) => event.stopPropagation()}
+                                                            style={{ 
+                                                                width: '100%', 
+                                                                maxWidth: isMobile ? 240 : 340, 
+                                                                maxHeight: isMobile ? 320 : 420,
+                                                                display: 'block', 
+                                                                background: '#000', 
+                                                                borderRadius: 8,
+                                                                objectFit: 'cover'
+                                                            }}
+                                                        />
+                                                    </>
                                                 ) : (
                                                     <div className="wa-deleted-tag" style={{ padding: '16px' }}>
                                                         <XCircle size={16} /> Video unavailable

@@ -2848,6 +2848,11 @@ html {
     display: block;
 }
 
+/* Show only full duration in native video controls (hide left current-time 0:00 at start). */
+.wa-msg-image-container video::-webkit-media-controls-current-time-display {
+    display: none !important;
+}
+
 /* File Card Styling */
 .wa-msg-file-card {
     display: flex;

@@ -432,6 +432,14 @@ router.get('/media/message/:messageId', async (req, res) => {
             candidate = safeResolveMediaPath(`/uploads/${String(req.query.name)}`);
         }
         if (!candidate || !fs.existsSync(candidate)) {
+            try {
+                req.query.name = req.query.name || fileName;
+                req.query.legacyPath = req.query.legacyPath || rawPath;
+                return await streamGridFSFileWithRange(req, res, '');
+            } catch (gridErr) {
+                console.error('[MESSAGE MEDIA GRIDFS FALLBACK ERROR]', gridErr);
+            }
+
             const fallbackLookupName = String(req.query.name || fileName || path.basename(rawPath));
             const found = findByFilenameRecursive(path.resolve(__dirname, '../uploads'), fallbackLookupName);
             if (!found) return res.status(404).json({ error: 'Media not found' });
@@ -1543,19 +1551,21 @@ router.post('/send', authenticateToken, (req, res, next) => {
             console.warn(`[AUDIO WARN] Very small audio blob received (${fileSize} bytes): ${file.originalname}`);
         }
 
-        // Permanent durability: persist audio bytes in Mongo GridFS.
-        if (type === 'audio') {
+        // Permanent durability: persist every uploaded attachment in Mongo GridFS.
+        if (['audio', 'video', 'image', 'file'].includes(type)) {
             try {
                 const absPath = path.join(__dirname, '../uploads', file.filename);
                 const { fileId } = await uploadLocalFileToGridFS(absPath, file.originalname || file.filename, {
                     senderId: userId,
                     receiverId: toUserId || null,
-                    legacyPath: filePath
+                    legacyPath: filePath,
+                    mimeType: file.mimetype,
+                    messageType: type
                 });
                 filePath = `/api/chat/media/file/${String(fileId)}`;
             } catch (gridErr) {
                 console.error('[GRIDFS UPLOAD ERROR]', gridErr);
-                return res.status(500).json({ error: 'Failed to store audio permanently' });
+                return res.status(500).json({ error: 'Failed to store media permanently' });
             }
         }
 
