@@ -1318,15 +1318,33 @@ router.get('/p2p/:userId/:otherUserId', authenticateToken, async (req, res) => {
         }
         // --- END GUARD ---
 
-        const messages = await Message.find({
+        const requestedLimit = Number.parseInt(req.query.limit, 10);
+        const pageLimit = Number.isFinite(requestedLimit) ? Math.max(20, Math.min(300, requestedLimit)) : 120;
+        const withMeta = String(req.query.withMeta || '') === '1';
+        const beforeRaw = String(req.query.before || '').trim();
+        const beforeDate = beforeRaw ? new Date(beforeRaw) : null;
+        const hasValidBefore = beforeDate && Number.isFinite(beforeDate.getTime());
+
+        const baseQuery = {
             $or: [
                 { user_id: new mongoose.Types.ObjectId(userId), receiver_id: new mongoose.Types.ObjectId(otherUserId) },
                 { user_id: new mongoose.Types.ObjectId(otherUserId), receiver_id: new mongoose.Types.ObjectId(userId) }
             ],
             deleted_for: { $ne: new mongoose.Types.ObjectId(req.user.id) }
-        })
-            .sort({ created_at: 1 })
+        };
+
+        if (hasValidBefore) {
+            baseQuery.created_at = { $lt: beforeDate };
+        }
+
+        const messagesDesc = await Message.find(baseQuery)
+            .sort({ created_at: -1 })
+            .limit(pageLimit + 1)
             .populate('reply_to', 'content type file_path user_id sender_id ciphertext session_header');
+
+        const hasMore = messagesDesc.length > pageLimit;
+        const pageMessages = hasMore ? messagesDesc.slice(0, pageLimit) : messagesDesc;
+        const messages = pageMessages.reverse();
 
         // Map messages to include user-specific is_starred boolean
         const enrichedMessages = messages.map(msg => {
@@ -1335,6 +1353,15 @@ router.get('/p2p/:userId/:otherUserId', authenticateToken, async (req, res) => {
             msgObj.is_edited = msg.is_edited || false;
             return msgObj;
         });
+
+        if (withMeta) {
+            const nextBefore = messages.length > 0 ? messages[0].created_at : null;
+            return res.json({
+                messages: enrichedMessages,
+                hasMore,
+                nextBefore
+            });
+        }
 
         res.json(enrichedMessages);
     } catch (err) {

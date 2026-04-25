@@ -360,15 +360,35 @@ router.get('/:groupId/messages', authenticateToken, async (req, res) => {
         const currentUserObj = await User.findById(userId).select('nameOverrides');
         const nameOverrides = currentUserObj?.nameOverrides || new Map();
 
-        const messages = await GroupMessage.find({
+        const requestedLimit = Number.parseInt(req.query.limit, 10);
+        const pageLimit = Number.isFinite(requestedLimit) ? Math.max(20, Math.min(300, requestedLimit)) : 120;
+        const withMeta = String(req.query.withMeta || '') === '1';
+        const beforeRaw = String(req.query.before || '').trim();
+        const beforeDate = beforeRaw ? new Date(beforeRaw) : null;
+        const hasValidBefore = beforeDate && Number.isFinite(beforeDate.getTime());
+
+        const baseQuery = {
             group_id: groupId,
             deleted_for: { $ne: userId },
             created_at: { $gte: visibleFrom }
-        })
+        };
+        if (hasValidBefore) {
+            baseQuery.created_at = {
+                $gte: visibleFrom,
+                $lt: beforeDate
+            };
+        }
+
+        const messagesDesc = await GroupMessage.find(baseQuery)
             .populate('sender_id', 'name _id __enc_name')
             .populate('read_by', 'name image _id')
             .populate('read_details.user_id', 'name image _id')
-            .sort({ created_at: 1 });
+            .sort({ created_at: -1 })
+            .limit(pageLimit + 1);
+
+        const hasMore = messagesDesc.length > pageLimit;
+        const pageMessages = hasMore ? messagesDesc.slice(0, pageLimit) : messagesDesc;
+        const messages = pageMessages.reverse();
 
         const enriched = messages.map(msg => {
             const m = msg.toObject();
@@ -380,6 +400,15 @@ router.get('/:groupId/messages', authenticateToken, async (req, res) => {
             m.is_edited = msg.is_edited || false;
             return m;
         });
+        if (withMeta) {
+            const nextBefore = messages.length > 0 ? messages[0].created_at : null;
+            return res.json({
+                messages: enriched,
+                hasMore,
+                nextBefore
+            });
+        }
+
         res.json(enriched);
     } catch (err) {
         res.status(500).json({ error: err.message });

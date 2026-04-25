@@ -2848,8 +2848,13 @@ html {
     display: block;
 }
 
-/* Show only full duration in native video controls (hide left current-time 0:00 at start). */
-.wa-msg-image-container video::-webkit-media-controls-current-time-display {
+/* Hide the small native play button before the time text in chat videos. */
+.wa-msg-image-container video::-webkit-media-controls-play-button {
+    display: none !important;
+}
+
+/* While PiP is active, hide captions control button in native controls (WebKit browsers). */
+.wa-msg-image-container.pip-active video::-webkit-media-controls-toggle-closed-captions-button {
     display: none !important;
 }
 
@@ -9377,4 +9382,9 @@ svg.wa-back-icon,
 }
 
 .wa-message-bubble.is-poll.wa-msg-sent {
+}
+
+/* Hide composer while a view-once preview modal is open */
+body.wa-view-once-open .wa-footer-wrapper {
+    display: none !important;
 }
