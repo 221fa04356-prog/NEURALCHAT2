@@ -3998,7 +3998,6 @@ export default function Chat() {
                     setIsProfileOpen(false);
                     setIsArchivedChatsOpen(false);
                     setIsGlobalStarredOpen(false);
-                    setIsGroupInfoOpen(false);
                     setIsCommunityInfoOpen(false);
                     setIsNotificationSettingsOpen(false);
                     setIsCommunitySettingsOpen(false);
@@ -5951,7 +5950,6 @@ export default function Chat() {
         setEventDetailsMsg(msg);
         setIsEventDetailsOpen(true);
         setIsContactInfoOpen(false);
-        setIsGroupInfoOpen(false);
         setIsCommunityInfoOpen(false);
         setIsMessageSearchOpen(false);
         setIsStarredMessagesOpen(false);

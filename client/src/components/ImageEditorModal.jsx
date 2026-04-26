@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Undo, Crop, Type, Download } from 'lucide-react';
+import { X, Undo, Crop, Type, Download, RotateCcw, RotateCw } from 'lucide-react';
 
-export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }) {
+export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose, startInCropMode = false }) {
     const [texts, setTexts] = useState([]);
     const [draggingText, setDraggingText] = useState(null);
     const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -19,6 +19,8 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
     const [cropStart, setCropStart] = useState(null);
     const [cropCurrent, setCropCurrent] = useState(null);
     const [croppedArea, setCroppedArea] = useState(null); // {x, y, w, h} in internal canvas coords
+    const [cropGuide, setCropGuide] = useState(null); // {x, y, w, h} in displayed canvas coords
+    const [rotation, setRotation] = useState(0);
 
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
@@ -82,6 +84,25 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
     useEffect(() => {
         drawCanvas();
     }, [drawCanvas, isCropping]);
+
+    useEffect(() => {
+        if (!startInCropMode) return;
+        setIsCropping(true);
+    }, [startInCropMode]);
+
+    useEffect(() => {
+        if (!isCropping || !canvasRef.current) return;
+        const c = canvasRef.current;
+        const w = c.width || 0;
+        const h = c.height || 0;
+        if (!w || !h) return;
+        setCropGuide({
+            x: Math.round(w * 0.15),
+            y: Math.round(h * 0.12),
+            w: Math.round(w * 0.7),
+            h: Math.round(h * 0.76)
+        });
+    }, [isCropping, baseImg]);
 
     const handleAddTextPrompt = () => {
         setTempTextInput("");
@@ -247,10 +268,10 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
                     h: (y2 - y1) * scaleY * baseYScale
                 };
                 setCroppedArea(newCrop);
+                setCropGuide({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 });
             }
             setCropStart(null);
             setCropCurrent(null);
-            setIsCropping(false);
             return;
         }
 
@@ -259,20 +280,59 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
 
     // Render crop overlay box
     const renderCropOverlay = () => {
-        if (!isCropping || !cropStart || !cropCurrent) return null;
-        const x1 = Math.min(cropStart.x, cropCurrent.x);
-        const y1 = Math.min(cropStart.y, cropCurrent.y);
-        const w = Math.abs(cropCurrent.x - cropStart.x);
-        const h = Math.abs(cropCurrent.y - cropStart.y);
+        if (!isCropping) return null;
+        let x1;
+        let y1;
+        let w;
+        let h;
+        if (cropStart && cropCurrent) {
+            x1 = Math.min(cropStart.x, cropCurrent.x);
+            y1 = Math.min(cropStart.y, cropCurrent.y);
+            w = Math.abs(cropCurrent.x - cropStart.x);
+            h = Math.abs(cropCurrent.y - cropStart.y);
+        } else if (cropGuide) {
+            x1 = cropGuide.x;
+            y1 = cropGuide.y;
+            w = cropGuide.w;
+            h = cropGuide.h;
+        } else {
+            return null;
+        }
+
+        const handles = [
+            { left: -6, top: -6 },
+            { left: '50%', top: -6, transform: 'translateX(-50%)' },
+            { right: -6, top: -6 },
+            { left: -6, top: '50%', transform: 'translateY(-50%)' },
+            { right: -6, top: '50%', transform: 'translateY(-50%)' },
+            { left: -6, bottom: -6 },
+            { left: '50%', bottom: -6, transform: 'translateX(-50%)' },
+            { right: -6, bottom: -6 }
+        ];
 
         return (
             <div style={{
                 position: 'absolute',
                 border: `2px solid ${themeColor}`,
-                background: 'rgba(0,132,255,0.2)',
+                background: 'rgba(47, 184, 255, 0.12)',
                 left: x1, top: y1, width: w, height: h,
                 pointerEvents: 'none', zIndex: 100
-            }} />
+            }}>
+                {handles.map((hPos, i) => (
+                    <span
+                        key={i}
+                        style={{
+                            position: 'absolute',
+                            width: 12,
+                            height: 12,
+                            borderRadius: '50%',
+                            background: '#f8fafc',
+                            border: '2px solid #111827',
+                            ...hPos
+                        }}
+                    />
+                ))}
+            </div>
         );
     };
 
@@ -332,8 +392,8 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
                             <Crop
                                 size={22}
                                 style={{ cursor: 'pointer', color: isCropping ? themeColor : iconColor }}
-                                onClick={() => setIsCropping(!isCropping)}
-                                title="Crop"
+                                onClick={() => setIsCropping((prev) => !prev)}
+                                title="Crop & Rotate"
                             />
                             <Type size={22} style={{ cursor: 'pointer' }} onClick={handleAddTextPrompt} title="Add Text" />
                         </div>
@@ -363,7 +423,7 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
                     <div style={{ position: 'relative' }}>
                         <canvas
                             ref={canvasRef}
-                            style={{ background: '#000', borderRadius: 4, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', cursor: isCropping ? 'crosshair' : 'default', maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain' }}
+                            style={{ background: '#000', borderRadius: 4, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', cursor: isCropping ? 'crosshair' : 'default', maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain', transform: `rotate(${rotation}deg)` }}
                             onMouseDown={handleCanvasPointerDown}
                             onTouchStart={handleCanvasPointerDown}
                         />
@@ -404,31 +464,69 @@ export default function ImageEditorModal({ imageUrl, onRetake, onDone, onClose }
                     display: 'flex', flexDirection: window.innerWidth <= 768 ? 'column' : 'row',
                     alignItems: 'center', justifyContent: 'center', gap: 15, padding: '10px 20px', flexShrink: 0, borderTop: `1px solid ${borderColor}`, background: containerBg
                 }}>
-                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
-                        {colors.map(c => (
-                            <div
-                                key={c}
-                                onClick={() => handleColorChange(c)}
-                                style={{
-                                    width: 22, height: 22, borderRadius: '50%', background: c, cursor: 'pointer',
-                                    border: activeColor === c ? `3px solid ${themeColor}` : '1px solid #d1d7db'
-                                }}
-                            />
-                        ))}
-                    </div>
+                    {isCropping ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+                            <button
+                                type="button"
+                                title="Rotate left"
+                                onClick={() => setRotation((prev) => prev - 90)}
+                                style={{ border: 'none', background: 'transparent', color: '#94a3b8', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                            >
+                                <RotateCcw size={24} />
+                            </button>
+                            <button
+                                type="button"
+                                title="Rotate right"
+                                onClick={() => setRotation((prev) => prev + 90)}
+                                style={{ border: 'none', background: 'transparent', color: '#94a3b8', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                            >
+                                <RotateCw size={24} />
+                            </button>
+                            <button
+                                type="button"
+                                title="Reset"
+                                onClick={() => { setRotation(0); setCroppedArea(null); setCropGuide(null); }}
+                                style={{ border: 'none', background: 'transparent', color: '#94a3b8', fontSize: 30, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                            >
+                                <RotateCcw size={22} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => { setRotation(0); setCroppedArea(null); setCropGuide(null); }}
+                                style={{ border: 'none', background: 'transparent', color: '#94a3b8', fontSize: 32, fontWeight: 500, cursor: 'pointer' }}
+                            >
+                                Reset
+                            </button>
+                        </div>
+                    ) : (
+                        <>
+                            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+                                {colors.map(c => (
+                                    <div
+                                        key={c}
+                                        onClick={() => handleColorChange(c)}
+                                        style={{
+                                            width: 22, height: 22, borderRadius: '50%', background: c, cursor: 'pointer',
+                                            border: activeColor === c ? `3px solid ${themeColor}` : '1px solid #d1d7db'
+                                        }}
+                                    />
+                                ))}
+                            </div>
 
-                    <div style={{ marginLeft: window.innerWidth <= 768 ? 0 : 30, display: 'flex', alignItems: 'center', gap: 10, color: iconColor, fontSize: 14 }}>
-                        <div style={{ width: 28, height: 28, color: iconColor, display: 'flex', alignItems: 'center', justifyContent: 'center', background: borderColor, borderRadius: '50%', fontWeight: 'bold' }}>A</div>
-                        <select
-                            style={{ background: 'transparent', color: textColor, border: 'none', fontSize: 14, outline: 'none', cursor: 'pointer', fontWeight: 500 }}
-                            value={activeFont}
-                            onChange={(e) => handleFontChange(e.target.value)}
-                        >
-                            {fonts.map(f => (
-                                <option key={f} value={f} style={{ background: containerBg, color: textColor }}>{f}</option>
-                            ))}
-                        </select>
-                    </div>
+                            <div style={{ marginLeft: window.innerWidth <= 768 ? 0 : 30, display: 'flex', alignItems: 'center', gap: 10, color: iconColor, fontSize: 14 }}>
+                                <div style={{ width: 28, height: 28, color: iconColor, display: 'flex', alignItems: 'center', justifyContent: 'center', background: borderColor, borderRadius: '50%', fontWeight: 'bold' }}>A</div>
+                                <select
+                                    style={{ background: 'transparent', color: textColor, border: 'none', fontSize: 14, outline: 'none', cursor: 'pointer', fontWeight: 500 }}
+                                    value={activeFont}
+                                    onChange={(e) => handleFontChange(e.target.value)}
+                                >
+                                    {fonts.map(f => (
+                                        <option key={f} value={f} style={{ background: containerBg, color: textColor }}>{f}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </>
+                    )}
                 </div>
             </div>
         </div>
