@@ -293,6 +293,7 @@ const MessageList = memo(({
     handleMsgDropdownOpen,
     longPressTimer,
     handleDownload,
+    onOpenMessageMedia,
     playingAudioId,
     handlePlayAudio,
     playbackSpeed,
@@ -1151,7 +1152,11 @@ const MessageList = memo(({
                                                     return;
                                                 }
                                                 setViewingContact(null);
-                                                handleDownload(msg.file_path, msg.fileName, msg);
+                                                if (typeof onOpenMessageMedia === 'function') {
+                                                    onOpenMessageMedia(msg);
+                                                } else {
+                                                    handleDownload(msg.file_path, msg.fileName, msg);
+                                                }
                                             }}>
                                                 {msg.is_view_once && !isViewOnceConsumed ? (
                                                     <div
@@ -1426,11 +1431,9 @@ const MessageList = memo(({
                                                             if (msg.is_view_once && !isMe) {
                                                                 markMessageViewed(msg._id);
                                                             }
-                                                            if (shouldUseSystemOpen && typeof handleOpenFile === 'function') {
-                                                                handleOpenFile(absoluteFileUrl, displayFileName, msg);
-                                                                return;
-                                                            }
-                                                            if (docOpenUrl) {
+                                                            if (typeof handleOpenFile === 'function') {
+                                                                handleOpenFile(docOpenUrl || absoluteFileUrl || msg.file_path || msg.filePath, displayFileName, msg);
+                                                            } else if (docOpenUrl) {
                                                                 window.open(docOpenUrl, '_blank', 'noopener,noreferrer');
                                                             }
                                                         }}

@@ -58,13 +58,15 @@ const buildMediaProxyUrl = (rawPath) => {
         try {
             const parsed = new URL(raw, window.location.origin);
             if (parsed.pathname.startsWith('/uploads/')) {
-                return '';
+                const mediaApiPath = `/api/chat/media?path=${encodeURIComponent(parsed.pathname)}`;
+                return appendMediaToken(mediaApiPath);
             }
             return appendMediaToken(`${parsed.pathname || raw}${parsed.search || ''}`);
         } catch (_) {
             const normalized = raw.startsWith('/') ? raw : `/${raw.replace(/^\/+/, '')}`;
             if (normalized.startsWith('/uploads/')) {
-                return '';
+                const mediaApiPath = `/api/chat/media?path=${encodeURIComponent(normalized)}`;
+                return appendMediaToken(mediaApiPath);
             }
             return appendMediaToken(normalized);
         }
@@ -81,8 +83,6 @@ const getMediaUrl = (path) => {
                 return buildMediaProxyUrl(`${parsed.pathname}${parsed.search || ''}`) || null;
             }
             if (parsed.pathname.startsWith('/api/chat/media')) {
-                const legacyPath = parsed.searchParams.get('path') || '';
-                if (legacyPath.startsWith('/uploads/')) return null;
                 return appendMediaToken(`${parsed.pathname}${parsed.search || ''}`);
             }
         } catch (_) { }
@@ -92,11 +92,6 @@ const getMediaUrl = (path) => {
         return buildMediaProxyUrl(path) || null;
     }
     if (path.startsWith('/api/chat/media')) {
-        try {
-            const parsed = new URL(path, window.location.origin);
-            const legacyPath = parsed.searchParams.get('path') || '';
-            if (legacyPath.startsWith('/uploads/')) return null;
-        } catch (_) { }
         return appendMediaToken(path);
     }
     const base = axios.defaults.baseURL || '';
@@ -1403,8 +1398,9 @@ export default function Chat() {
             }
         };
 
-        const handleBlur = () => {
-            setIsAppAsleep(true);
+        const handleMouseMove = () => {
+            resetSleepTimer();
+            if (isAppAsleep) setIsAppAsleep(false);
         };
 
         // Wake on any click if asleep
@@ -1418,15 +1414,11 @@ export default function Chat() {
         };
 
         // Register listeners
-        window.addEventListener('mousemove', () => {
-            resetSleepTimer();
-            if (isAppAsleep) setIsAppAsleep(false);
-        });
+        window.addEventListener('mousemove', handleMouseMove);
         window.addEventListener('keydown', resetSleepTimer);
         window.addEventListener('mousedown', resetSleepTimer);
         window.addEventListener('touchstart', resetSleepTimer);
         window.addEventListener('visibilitychange', handleGlobalStateChange);
-        window.addEventListener('blur', handleBlur);
         window.addEventListener('click', handleWakeUp, true); // Use capture to intercept wake clicks
 
         if (isAppAsleep) {
@@ -1440,15 +1432,29 @@ export default function Chat() {
 
         return () => {
             if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current);
-            window.removeEventListener('mousemove', resetSleepTimer);
+            if (sleepOverlayTimeoutRef) clearTimeout(sleepOverlayTimeoutRef);
+            window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('keydown', resetSleepTimer);
             window.removeEventListener('mousedown', resetSleepTimer);
             window.removeEventListener('touchstart', resetSleepTimer);
             window.removeEventListener('visibilitychange', handleGlobalStateChange);
-            window.removeEventListener('blur', handleBlur);
             window.removeEventListener('click', handleWakeUp, true);
         };
     }, [selectedUser, selectedGroup, isAppAsleep]); // Re-run when chat changes or when we enter/exit sleep
+
+    useEffect(() => {
+        const shouldLockScroll = !!viewingImage || isAppAsleep || !!file || (selectedFiles && selectedFiles.length > 0);
+        const previousOverflow = document.body.style.overflow;
+        const previousOverscroll = document.body.style.overscrollBehavior;
+        if (shouldLockScroll) {
+            document.body.style.overflow = 'hidden';
+            document.body.style.overscrollBehavior = 'none';
+        }
+        return () => {
+            document.body.style.overflow = previousOverflow;
+            document.body.style.overscrollBehavior = previousOverscroll;
+        };
+    }, [viewingImage, isAppAsleep, file, selectedFiles]);
 
     const fetchReminders = async () => {
         try {
@@ -2091,7 +2097,9 @@ export default function Chat() {
                 const normalizedPath = filePath.startsWith('/') ? filePath : `/${filePath}`;
                 absolutePath = `${apiOrigin}${normalizedPath}`;
             }
-            const helperSource = resolveUploadUrl(rawFilePath || absolutePath);
+            const rawCandidate = String(rawFilePath || '').trim();
+            const helperCandidate = (!/^blob:|^data:/i.test(rawCandidate) && rawCandidate) ? rawCandidate : absolutePath;
+            const helperSource = resolveUploadUrl(helperCandidate);
 
             try {
                 const parsedUrl = new URL(absolutePath);
@@ -9939,16 +9947,16 @@ export default function Chat() {
                                 width: 40,
                                 height: 40,
                                 borderRadius: '50%',
-                                border: '1px solid rgba(148, 163, 184, 0.3)',
-                                background: 'linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.08))',
-                                color: '#c1d2e2',
+                                border: '1px solid #cbd5e1',
+                                background: '#e5e7eb',
+                                color: '#6b7280',
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 cursor: 'pointer'
                             }}
                         >
-                            <RotateCcw size={18} />
+                            <Crop size={18} />
                         </button>
                         <Sticker size={20} style={{ cursor: 'pointer' }} />
                         <Pencil size={20} style={{ cursor: 'pointer' }} onClick={() => { setCapturedImage(getFilePreviewUrl(file)); setEditorStartInCropMode(false); setCameraModal('editor'); }} />
@@ -10028,7 +10036,9 @@ export default function Chat() {
                             src={getFilePreviewUrl(file)}
                             controls
                             autoPlay
+                            playsInline
                             muted
+                            preload="auto"
                             controlsList="nodownload"
                             style={{
                                 maxWidth: '100%',
@@ -10112,13 +10122,9 @@ export default function Chat() {
                                 {f.type?.startsWith('image/') ? (
                                     <img src={getFilePreviewUrl(f)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={`thumb-${idx}`} />
                                 ) : f.type?.startsWith('video/') ? (
-                                    <video
-                                        src={getFilePreviewUrl(f)}
-                                        muted
-                                        playsInline
-                                        preload="metadata"
-                                        style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#071224' }}
-                                    />
+                                    <div style={{ width: '100%', height: '100%', background: 'linear-gradient(180deg, rgba(10, 35, 58, 0.95), rgba(8, 28, 46, 0.95))', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+                                        <Play size={14} color="#b9d8ea" fill="#b9d8ea" />
+                                    </div>
                                 ) : (
                                     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(180deg, rgba(10, 35, 58, 0.95), rgba(8, 28, 46, 0.95))' }}>
                                         <FileText color="#9cc5dd" size={16} />
@@ -12285,6 +12291,8 @@ export default function Chat() {
         );
     };
 
+    const sharePreparedFileCacheRef = useRef(new Map());
+
     const renderImageViewer = () => {
         if (!viewingImage) return null;
 
@@ -12308,14 +12316,140 @@ export default function Chat() {
         const [cropRect, setCropRect] = useState(null); // { x, y, width, height } (percentages)
         const [isDragging, setIsDragging] = useState(false);
         const [dragStart, setDragStart] = useState(null); // { x, y, initialRect }
+        const preparedShareFileRef = useRef(null);
+        const [isPreparingShareFile, setIsPreparingShareFile] = useState(false);
+        const [isShareFileReady, setIsShareFileReady] = useState(false);
+        const [isMainVideoLoading, setIsMainVideoLoading] = useState(true);
+        const failedMediaUrlsRef = useRef(new Set());
+        const [isViewerMediaUnavailable, setIsViewerMediaUnavailable] = useState(false);
         const imageRef = useRef(null);
+        const videoRef = useRef(null);
         const containerRef = useRef(null);
+
+        const getViewerMediaUrl = (msg) => {
+            if (!msg) return '';
+            const fallbackUrl = resolveMessageMediaFallbackUrl(msg);
+            const rawPath = String(msg.file_path || '');
+            const directUrl = rawPath ? getMediaUrl(rawPath) : '';
+
+            if (!rawPath) return fallbackUrl || directUrl || '';
+
+            const usesLegacyUploads = /(^|\/)uploads\//i.test(rawPath);
+            if (usesLegacyUploads && fallbackUrl) return fallbackUrl;
+
+            return directUrl || fallbackUrl || '';
+        };
+
+        const getViewerMediaCandidates = (msg) => {
+            const rawPath = String(msg?.file_path || '');
+            return [
+                getViewerMediaUrl(msg),
+                resolveMessageMediaFallbackUrl(msg),
+                rawPath ? getMediaUrl(rawPath) : ''
+            ]
+                .filter((u, idx, arr) => !!u && arr.indexOf(u) === idx)
+                .filter((u) => !failedMediaUrlsRef.current.has(u));
+        };
+
+        const handleViewerImageError = (event, msg, opts = {}) => {
+            const el = event.currentTarget;
+            const currentSrc = el.currentSrc || el.src || '';
+            if (currentSrc) {
+                failedMediaUrlsRef.current.add(currentSrc);
+            }
+            const triedIndex = Number(el.dataset.mediaRetryIndex || '0');
+            const candidates = getViewerMediaCandidates(msg);
+            const nextIndex = triedIndex + 1;
+            if (nextIndex < candidates.length) {
+                el.dataset.mediaRetryIndex = String(nextIndex);
+                el.src = candidates[nextIndex];
+                return;
+            }
+            if (opts?.forMainViewer) {
+                setIsViewerMediaUnavailable(true);
+                return;
+            }
+            el.style.display = 'none';
+        };
 
         // Reset crop state when image changes
         useEffect(() => {
             setIsCropping(false);
             setCropRect(null);
+            setIsViewerMediaUnavailable(false);
+            setIsShareFileReady(false);
+            setIsMainVideoLoading(true);
         }, [viewingImage._id]);
+
+        const prepareShareFileNow = async (mediaMsg) => {
+            if (!mediaMsg?.file_path) return null;
+            const cacheKey = `${String(mediaMsg?._id || mediaMsg?.id || '')}::${String(mediaMsg?.file_path || '')}`;
+            const cachedFile = sharePreparedFileCacheRef.current.get(cacheKey);
+            if (cachedFile) return cachedFile;
+
+            const liveSource = imageRef.current?.currentSrc || videoRef.current?.currentSrc || '';
+            const mediaCandidates = [
+                liveSource,
+                getViewerMediaUrl(mediaMsg),
+                resolveMessageMediaFallbackUrl(mediaMsg),
+                getMediaUrl(mediaMsg.file_path)
+            ].filter((u, idx, arr) => !!u && arr.indexOf(u) === idx);
+
+            const authToken = localStorage.getItem('token') || '';
+            let blob = null;
+            for (const mediaUrl of mediaCandidates) {
+                try {
+                    const response = await fetch(mediaUrl, {
+                        credentials: 'include',
+                        headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+                        cache: 'force-cache'
+                    });
+                    if (!response.ok) continue;
+                    const candidateBlob = await response.blob();
+                    if (candidateBlob && candidateBlob.size > 0) {
+                        blob = candidateBlob;
+                        break;
+                    }
+                } catch (_) { }
+            }
+            if (!blob) return null;
+
+            const fallbackExt = mediaMsg?.type === 'video' ? 'mp4' : 'jpg';
+            const baseName = String(mediaMsg.fileName || `media-${mediaMsg._id || Date.now()}.${fallbackExt}`);
+            const file = new File([blob], baseName, { type: blob.type || 'application/octet-stream' });
+            sharePreparedFileCacheRef.current.set(cacheKey, file);
+            return file;
+        };
+
+        // Preload a real File so Windows share sheet can show file-style card
+        // (name/size/edit actions) instead of only "Share link".
+        useEffect(() => {
+            let cancelled = false;
+            const cacheKey = `${String(viewingImage?._id || viewingImage?.id || '')}::${String(viewingImage?.file_path || '')}`;
+            const cached = sharePreparedFileCacheRef.current.get(cacheKey);
+            preparedShareFileRef.current = cached || null;
+            setIsShareFileReady(!!cached);
+            setIsPreparingShareFile(!cached);
+
+            const prepareShareFile = async () => {
+                try {
+                    const file = await prepareShareFileNow(viewingImage);
+                    if (!file) return;
+                    if (!cancelled) {
+                        preparedShareFileRef.current = file;
+                        setIsShareFileReady(true);
+                    }
+                } catch (_) { }
+                finally {
+                    if (!cancelled) setIsPreparingShareFile(false);
+                }
+            };
+
+            prepareShareFile();
+            return () => {
+                cancelled = true;
+            };
+        }, [viewingImage?._id, viewingImage?.file_path, viewingImage?.fileName, viewingImage?.type]);
 
         const viewableMsgs = messages.filter(m => m.type === 'image' || m.type === 'video'); // Removed 'file' to prevent navigation to docs
         const currentIndex = viewableMsgs.findIndex(m => m._id === viewingImage._id);
@@ -12333,6 +12467,37 @@ export default function Chat() {
                 setViewingImage(viewableMsgs[currentIndex - 1]);
             }
         };
+
+        useEffect(() => {
+            const onViewerKeyDown = (event) => {
+                const tag = String(event.target?.tagName || '').toLowerCase();
+                if (tag === 'input' || tag === 'textarea' || event.target?.isContentEditable) return;
+
+                if (event.key === 'ArrowRight') {
+                    if (currentIndex < viewableMsgs.length - 1) {
+                        event.preventDefault();
+                        setViewingImage(viewableMsgs[currentIndex + 1]);
+                    }
+                    return;
+                }
+
+                if (event.key === 'ArrowLeft') {
+                    if (currentIndex > 0) {
+                        event.preventDefault();
+                        setViewingImage(viewableMsgs[currentIndex - 1]);
+                    }
+                    return;
+                }
+
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setViewingImage(null);
+                }
+            };
+
+            window.addEventListener('keydown', onViewerKeyDown);
+            return () => window.removeEventListener('keydown', onViewerKeyDown);
+        }, [currentIndex, viewableMsgs, setViewingImage]);
 
         const handleViewerStar = async (e) => {
             e.stopPropagation();
@@ -12369,46 +12534,64 @@ export default function Chat() {
             e.stopPropagation();
             if (!viewingImage || !viewingImage.file_path) return;
 
-            const url = viewingImage.file_path;
-            const fileName = viewingImage.fileName || 'image.jpg';
-
+            const fileName = viewingImage.fileName || `media-${viewingImage._id || Date.now()}.jpg`;
             if (navigator.share) {
                 try {
-                    // Try to share as a file first if possible
-                    const response = await fetch(url);
-                    const blob = await response.blob();
-                    const file = new File([blob], fileName, { type: blob.type });
-
-                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                        await navigator.share({
-                            files: [file],
-                            title: fileName,
-                            text: 'Check out this'
-                        });
-                    } else {
-                        // Fallback to URL sharing
-                        await navigator.share({
-                            title: fileName,
-                            text: 'Check out this',
-                            url: url
-                        });
+                    const preparedFile = preparedShareFileRef.current;
+                    if (!preparedFile) {
+                        if (!isPreparingShareFile) {
+                            setIsPreparingShareFile(true);
+                            prepareShareFileNow(viewingImage)
+                                .then((file) => {
+                                    if (file) {
+                                        preparedShareFileRef.current = file;
+                                        setIsShareFileReady(true);
+                                    }
+                                })
+                                .catch(() => { })
+                                .finally(() => setIsPreparingShareFile(false));
+                        }
+                        return;
                     }
-                } catch (error) {
-                    console.error('Error sharing:', error);
-                    // Fallback to simpler share if file share fails
-                    try {
-                        await navigator.share({
-                            title: fileName,
-                            text: 'Check out this',
-                            url: url
+
+                    if (!(navigator.canShare && navigator.canShare({ files: [preparedFile] }))) {
+                        setSnackbar({
+                            message: 'This browser context does not support file-style Share/Edit.',
+                            type: 'info',
+                            variant: 'system'
                         });
-                    } catch (urlErr) {
-                        console.error('URL share failed too', urlErr);
+                        return;
+                    }
+
+                    await navigator.share({
+                        files: [preparedFile],
+                        title: preparedFile.name
+                    });
+                    return;
+                } catch (error) {
+                    // AbortError: user canceled share sheet (not a real error).
+                    // NotAllowedError: gesture/context restriction; avoid noisy console spam.
+                    if (error?.name === 'NotAllowedError') {
+                        setSnackbar({
+                            message: 'Windows Share needs a direct tap. Tap Share/Edit once again.',
+                            type: 'info',
+                            variant: 'system'
+                        });
                     }
                 }
-            } else {
-                setSnackbar({ message: 'Web Share API not supported on this browser', type: 'info' });
             }
+            const host = String(window.location.hostname || '').toLowerCase();
+            const isLocalHost = host === 'localhost' || host === '127.0.0.1';
+            const isHttps = window.location.protocol === 'https:';
+            let reason = 'Windows Share is unavailable in this browser context.';
+            if (!navigator.share) {
+                reason = 'Web Share API is not available in this browser.';
+            } else if (isHttps && !window.isSecureContext) {
+                reason = 'HTTPS certificate is not trusted. Trust the local cert and retry.';
+            } else if (!isHttps && !isLocalHost) {
+                reason = 'Use HTTPS (or localhost) to open the Windows Share sheet.';
+            }
+            setSnackbar({ message: reason, type: 'info', variant: 'system' });
         };
 
         // --- Crop Logic ---
@@ -12519,14 +12702,25 @@ export default function Chat() {
 
 
         const renderViewerContent = () => {
+            const renderUnavailable = (label = 'Media unavailable') => (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                    <div style={{
+                        background: 'rgba(15,23,42,0.75)',
+                        border: '1px solid rgba(148,163,184,0.35)',
+                        borderRadius: 12,
+                        padding: '14px 16px',
+                        color: '#e2e8f0',
+                        fontSize: 14
+                    }}>
+                        {label}
+                    </div>
+                </div>
+            );
+
             if (viewingImage.type === 'image') {
-                const imageSrc = getMediaUrl(viewingImage.file_path);
-                if (!imageSrc) {
-                    return (
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#54656f' }}>
-                            <span>Media unavailable</span>
-                        </div>
-                    );
+                const imageSrc = getViewerMediaUrl(viewingImage);
+                if (!imageSrc || isViewerMediaUnavailable) {
+                    return renderUnavailable('Image unavailable');
                 }
                 return (
                     <div
@@ -12542,6 +12736,12 @@ export default function Chat() {
                             alt="Full view"
                             className="wa-full-image"
                             ref={imageRef}
+                            onLoad={(e) => {
+                                const w = Number(e.currentTarget.naturalWidth || 0);
+                                const h = Number(e.currentTarget.naturalHeight || 0);
+                                if (w <= 2 && h <= 2) setIsViewerMediaUnavailable(true);
+                            }}
+                            onError={(e) => handleViewerImageError(e, viewingImage, { forMainViewer: true })}
                         />
                         {isCropping && cropRect && (
                             <div
@@ -12562,19 +12762,37 @@ export default function Chat() {
                 );
             }
             if (viewingImage.type === 'video') {
-                const videoSrc = getMediaUrl(viewingImage.file_path);
-                if (!videoSrc) {
-                    return (
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#54656f' }}>
-                            <span>Video unavailable</span>
-                        </div>
-                    );
+                const videoSrc = getViewerMediaUrl(viewingImage);
+                if (!videoSrc || isViewerMediaUnavailable) {
+                    return renderUnavailable('Video unavailable');
                 }
                 return (
-                    <video controls autoPlay crossOrigin="anonymous" className="wa-full-image" style={{ background: '#000' }}>
-                        <source src={videoSrc} type={viewingImage.file_path?.endsWith('.webm') ? 'video/webm' : 'video/mp4'} />
-                        Your browser does not support the video tag.
-                    </video>
+                    <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                        {isMainVideoLoading && (
+                            <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#9fb3c8' }}>
+                                <Loader2 size={28} style={{ animation: 'spin 1s linear infinite' }} />
+                            </div>
+                        )}
+                        <video
+                            ref={videoRef}
+                            controls
+                            autoPlay
+                            playsInline
+                            preload="auto"
+                            crossOrigin="anonymous"
+                            className="wa-full-image"
+                            style={{ background: '#000' }}
+                            onLoadedData={() => setIsMainVideoLoading(false)}
+                            onCanPlay={() => setIsMainVideoLoading(false)}
+                            onError={() => {
+                                setIsMainVideoLoading(false);
+                                setIsViewerMediaUnavailable(true);
+                            }}
+                        >
+                            <source src={videoSrc} type={viewingImage.file_path?.endsWith('.webm') ? 'video/webm' : 'video/mp4'} />
+                            Your browser does not support the video tag.
+                        </video>
+                    </div>
                 );
             }
             if (viewingImage.type === 'file') {
@@ -12582,13 +12800,9 @@ export default function Chat() {
                 if (ext === 'pdf') {
                     return (
                         (() => {
-                            const pdfSrcBase = getMediaUrl(viewingImage.file_path);
+                            const pdfSrcBase = getViewerMediaUrl(viewingImage);
                             if (!pdfSrcBase) {
-                                return (
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#54656f' }}>
-                                        <span>Media unavailable</span>
-                                    </div>
-                                );
+                                return renderUnavailable('Document unavailable');
                             }
                             return (
                                 <iframe
@@ -12630,9 +12844,9 @@ export default function Chat() {
                                 </div>
                             )}
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column' }}>
-                            <span style={{ fontWeight: '500' }}>{senderName}</span>
-                            <span style={{ fontSize: 13, color: '#94a3b8' }}>{formatTime(viewingImage.created_at)}</span>
+                        <div className="wa-viewer-user-meta">
+                            <span className="wa-viewer-user-name">{senderName}</span>
+                            <span className="wa-viewer-user-time">{formatTime(viewingImage.created_at)}</span>
                         </div>
                     </div>
                     <div className="wa-viewer-actions">
@@ -12652,8 +12866,18 @@ export default function Chat() {
                                         <Crop size={20} />
                                     </button>
                                 )}
-                                <button className="wa-viewer-btn" onClick={handleOpenWith} title="Share/Edit">
-                                    <Share2 size={20} />
+                                <button
+                                    className="wa-viewer-btn"
+                                    onClick={handleOpenWith}
+                                    title={isShareFileReady ? 'Share/Edit' : 'Preparing Share/Edit...'}
+                                    disabled={!isShareFileReady}
+                                    style={{ opacity: isShareFileReady ? 0.8 : 0.45, cursor: isShareFileReady ? 'pointer' : 'not-allowed' }}
+                                >
+                                    {isShareFileReady ? (
+                                        <Share2 size={20} />
+                                    ) : (
+                                        <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
+                                    )}
                                 </button>
                                 <button className="wa-viewer-btn" onClick={handleViewerStar} title={viewingImage.is_starred ? "Unstar" : "Star"}>
                                     <Star size={20} fill={viewingImage.is_starred ? "#54656f" : "none"} />
@@ -12703,10 +12927,14 @@ export default function Chat() {
                                 onClick={() => setViewingImage(msg)}
                             >
                                 {msg.type === 'image' ? (
-                                    <img src={getMediaUrl(msg.file_path)} alt="thumb" onError={(e) => { e.target.style.display = 'none'; }} />
+                                    <img
+                                        src={getViewerMediaUrl(msg)}
+                                        alt="thumb"
+                                        onError={(e) => handleViewerImageError(e, msg)}
+                                        loading="lazy"
+                                    />
                                 ) : (
-                                    <div style={{ position: 'relative', width: '100%', height: '100%', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                        <video src={getMediaUrl(msg.file_path)} crossOrigin="anonymous" muted style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.6 }} />
+                                    <div style={{ position: 'relative', width: '100%', height: '100%', background: 'linear-gradient(180deg, rgba(11,26,43,0.95), rgba(8,20,35,0.95))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                         <div style={{ position: 'absolute', color: 'white', opacity: 0.9, zIndex: 1 }}><Play size={16} fill="currentColor" /></div>
                                     </div>
                                 )}
@@ -17559,6 +17787,7 @@ export default function Chat() {
                                 handleMsgDropdownOpen={handleMsgDropdownOpen}
                                 longPressTimer={longPressTimer}
                                 handleDownload={handleDownload}
+                                onOpenMessageMedia={setViewingImage}
                                 playingAudioId={playingAudioId}
                                 handlePlayAudio={handlePlayAudio}
                                 playbackSpeed={playbackSpeed}
@@ -18160,6 +18389,7 @@ export default function Chat() {
                                 handleMsgDropdownOpen={handleMsgDropdownOpen}
                                 longPressTimer={longPressTimer}
                                 handleDownload={handleDownload}
+                                onOpenMessageMedia={setViewingImage}
                                 playingAudioId={playingAudioId}
                                 handlePlayAudio={handlePlayAudio}
                                 playbackSpeed={playbackSpeed}
@@ -20807,7 +21037,7 @@ export default function Chat() {
                                     className="wa-sleep-overlay"
                                     onClick={() => setIsAppAsleep(false)}
                                     style={{
-                                        position: 'absolute',
+                                        position: 'fixed',
                                         inset: 0,
                                         background: '#0f172a',
                                         backdropFilter: 'none',
@@ -20884,7 +21114,7 @@ export default function Chat() {
 
                             {/* File Preview Overlay (Restricted to Chat Area) */}
                             {(file || selectedFiles.length > 0) && (
-                                <div style={{ position: 'absolute', top: '60px', left: 0, width: '100%', height: 'calc(100% - 60px)', zIndex: 2000, display: 'flex', flexDirection: 'column', background: '#061a2d' }}>
+                                <div style={{ position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', flexDirection: 'column', background: '#061a2d' }}>
                                     {renderFilePreview()}
                                 </div>
                             )}

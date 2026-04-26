@@ -12,10 +12,52 @@ const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET;
 
 const app = express();
+
+const isDevClientOrigin = (origin = '') => {
+    if (!origin) return false;
+    try {
+        const parsed = new URL(origin);
+        const host = String(parsed.hostname || '').toLowerCase();
+        const port = String(parsed.port || (parsed.protocol === 'https:' ? '443' : '80'));
+        if (port !== '5173') return false;
+        return host === 'localhost'
+            || host === '127.0.0.1'
+            || /^10\./.test(host)
+            || /^192\.168\./.test(host)
+            || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+    } catch (_) {
+        return false;
+    }
+};
+
+const buildAllowedOrigins = () => {
+    const fromEnv = String(process.env.CLIENT_URL || '').trim();
+    if (!fromEnv) return null;
+    return [
+        fromEnv,
+        'http://localhost:5173',
+        'https://localhost:5173',
+        'http://127.0.0.1:5173',
+        'https://127.0.0.1:5173'
+    ];
+};
+
+const strictAllowedOrigins = buildAllowedOrigins();
+const isAllowedOrigin = (origin) => {
+    if (!origin) return true;
+    if (strictAllowedOrigins) return strictAllowedOrigins.includes(origin) || isDevClientOrigin(origin);
+    return true;
+};
+
+const corsOrigin = (origin, callback) => {
+    if (isAllowedOrigin(origin)) return callback(null, true);
+    return callback(new Error(`Not allowed by CORS: ${origin}`));
+};
+
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: process.env.CLIENT_URL ? [process.env.CLIENT_URL, "http://localhost:5173"] : true,
+        origin: corsOrigin,
         methods: ["GET", "POST"],
         credentials: true
     }
@@ -40,27 +82,8 @@ const startWindowsOpenHelper = () => {
 
 startWindowsOpenHelper();
 
-// Connect to Database
-connectDB().then(async () => {
-    try {
-        const User = require('./models/User');
-        // Reset anyone who was stuck "Online" due to a server crash/restart
-        const result = await User.updateMany(
-            { isOnline: true },
-            { isOnline: false, lastSeen: new Date() }
-        );
-        if (result.modifiedCount > 0) {
-            console.log(`[STARTUP] Reset ${result.modifiedCount} stuck users to offline status`);
-        } else {
-            console.log('[STARTUP] All users were already offline');
-        }
-    } catch (err) {
-        console.error('[STARTUP] Error resetting user statuses on startup:', err);
-    }
-});
-
 const corsOptions = {
-    origin: process.env.CLIENT_URL ? [process.env.CLIENT_URL, "http://localhost:5173"] : true,
+    origin: corsOrigin,
     credentials: true
 };
 app.use(cors(corsOptions));
@@ -353,11 +376,35 @@ io.on('connection', async (socket) => {
 const getLocalIp = require('./utils/getLocalIp');
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    const localIp = getLocalIp();
-    console.log(`Server running on port ${PORT}`);
-    console.log(`> Local:   http://localhost:${PORT}`);
-    console.log(`> Network: http://${localIp}:${PORT}`);
+const bootstrap = async () => {
+    await connectDB();
+
+    try {
+        // Reset anyone who was stuck "Online" due to a server crash/restart
+        const result = await User.updateMany(
+            { isOnline: true },
+            { isOnline: false, lastSeen: new Date() }
+        );
+        if (result.modifiedCount > 0) {
+            console.log(`[STARTUP] Reset ${result.modifiedCount} stuck users to offline status`);
+        } else {
+            console.log('[STARTUP] All users were already offline');
+        }
+    } catch (err) {
+        console.error('[STARTUP] Error resetting user statuses on startup:', err);
+    }
+
+    server.listen(PORT, () => {
+        const localIp = getLocalIp();
+        console.log(`Server running on port ${PORT}`);
+        console.log(`> Local:   http://localhost:${PORT}`);
+        console.log(`> Network: http://${localIp}:${PORT}`);
+    });
+};
+
+bootstrap().catch((err) => {
+    console.error('[STARTUP FATAL]', err);
+    process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
