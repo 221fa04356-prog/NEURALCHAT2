@@ -1,4 +1,4 @@
-﻿diff --git a/client/src/pages/Chat.jsx b/client/src/pages/Chat.jsx
+diff --git a/client/src/pages/Chat.jsx b/client/src/pages/Chat.jsx
 index 2f0481b..e635aed 100644
 --- a/client/src/pages/Chat.jsx
 +++ b/client/src/pages/Chat.jsx

@@ -624,7 +624,7 @@ router.post('/verify-call-otp', async (req, res) => {
 });
 
 router.put('/update-profile', async (req, res) => {
-    const { userId, about, mobile, countryCode } = req.body;
+    const { userId, about, mobile, countryCode, privacySettings } = req.body;
     console.log('[PROFILE UPDATE] Request received for userId:', userId);
 
     if (!userId) {
@@ -651,8 +651,41 @@ router.put('/update-profile', async (req, res) => {
             updateData.mobile = mobile;
         }
 
+        if (privacySettings !== undefined) {
+            const visibilityKeys = ['lastSeen', 'onlineStatus', 'profilePhoto', 'about', 'status'];
+            const sanitizeChoice = (value, allowed, fallback) => allowed.includes(value) ? value : fallback;
+            const sanitizeNumberChoice = (value, allowed, fallback) => {
+                const normalized = Number(value);
+                return allowed.includes(normalized) ? normalized : fallback;
+            };
+            const sanitizeVisibilityRule = (rule) => {
+                const mode = ['everyone', 'everyone_except', 'no_one'].includes(rule?.mode) ? rule.mode : 'everyone';
+                const exceptUserIds = Array.isArray(rule?.exceptUserIds)
+                    ? [...new Set(rule.exceptUserIds.map(id => String(id || '').trim()).filter(Boolean))]
+                    : [];
+                return { mode, exceptUserIds };
+            };
+
+            updateData.privacySettings = {
+                ...(Object.fromEntries(visibilityKeys.map((key) => [key, sanitizeVisibilityRule(privacySettings?.[key])]))),
+                readReceipts: privacySettings?.readReceipts !== false,
+                typingIndicator: privacySettings?.typingIndicator !== false,
+                whoCanMessageMe: sanitizeChoice(privacySettings?.whoCanMessageMe, ['Everyone', 'My Contacts', 'No One'], 'Everyone'),
+                messageRequestsRequired: privacySettings?.messageRequestsRequired !== false,
+                blockUnknown: privacySettings?.blockUnknown === true,
+                whoCanAddMeToGroups: sanitizeChoice(privacySettings?.whoCanAddMeToGroups, ['Everyone', 'My Contacts', 'No One'], 'Everyone'),
+                requireConsentBeforeForward: privacySettings?.requireConsentBeforeForward === true,
+                forwardLimit: sanitizeNumberChoice(privacySettings?.forwardLimit, [1, 3, 5, 10], 5),
+                notifyOnForward: privacySettings?.notifyOnForward === true,
+                screenshotDetection: privacySettings?.screenshotDetection !== false,
+                notifyOnScreenshot: privacySettings?.notifyOnScreenshot !== false,
+                blurOnScreenshot: privacySettings?.blurOnScreenshot === true,
+                addWatermark: privacySettings?.addWatermark === true
+            };
+        }
+
         console.log('[PROFILE UPDATE] Updating with:', updateData);
-        const updatedUser = await User.findByIdAndUpdate(userId, updateData, { new: true });
+        const updatedUser = await User.findByIdAndUpdate(userId, updateData, { returnDocument: 'after' });
 
         if (!updatedUser) {
             console.error('[PROFILE UPDATE] User not found for ID:', userId);
@@ -666,7 +699,8 @@ router.put('/update-profile', async (req, res) => {
                 userId: updatedUser._id,
                 name: updatedUser.name,
                 mobile: updatedUser.mobile,
-                about: updatedUser.about
+                about: updatedUser.about,
+                privacySettings: updatedUser.privacySettings
             });
         }
 

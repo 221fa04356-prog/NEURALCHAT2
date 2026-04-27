@@ -324,6 +324,7 @@ const MessageList = memo(({
     navigateToMessage,
     isChatSelectionMode,
     setViewingContact,
+    setReactionDetails,
     setShowScrollBtn,
     clearPendingUnread,
     markAsRead,
@@ -681,6 +682,84 @@ const MessageList = memo(({
             </div>
         ) : null;
 
+        const resolveCommunityGroupUpdate = () => {
+            const metadata = msg.metadata || {};
+            const normalizedType = String(msg.type || '').toLowerCase();
+            const content = String(msg.content || '');
+            const actionFromMetadata = String(metadata.action || '').toLowerCase();
+
+            if (normalizedType === 'community_link' || metadata.kind === 'community_group_update') {
+                const inferredAction = actionFromMetadata || (content.toLowerCase().includes('removed') ? 'removed' : 'added');
+                return {
+                    action: inferredAction === 'removed' ? 'removed' : 'added',
+                    groupName: metadata.groupName || msg.group_name || '',
+                    communityName: metadata.communityName || '',
+                    actorName: isMe ? 'You' : (msg.sender_id?.name || 'Admin')
+                };
+            }
+
+            const legacyMatch = content.match(/^Group\s+"(.+?)"\s+was\s+(added|removed)$/i);
+            if (!legacyMatch) return null;
+
+            return {
+                action: legacyMatch[2].toLowerCase() === 'removed' ? 'removed' : 'added',
+                groupName: legacyMatch[1],
+                communityName: metadata.communityName || '',
+                actorName: isMe ? 'You' : (msg.sender_id?.name || 'Admin')
+            };
+        };
+
+        const renderCommunityGroupUpdate = (update) => {
+            if (!update) return null;
+
+            const isRemoved = update.action === 'removed';
+            const title = isRemoved ? 'Group removed from community' : 'Group added to community';
+            const accentColor = isRemoved ? '#c2410c' : '#0f766e';
+            const accentBg = isRemoved ? 'rgba(251, 146, 60, 0.16)' : 'rgba(20, 184, 166, 0.14)';
+            const borderColor = isRemoved ? 'rgba(251, 146, 60, 0.3)' : 'rgba(20, 184, 166, 0.28)';
+            const glowColor = isRemoved ? 'rgba(251, 146, 60, 0.2)' : 'rgba(45, 212, 191, 0.22)';
+            const Icon = isRemoved ? XCircle : CheckCircle;
+            const detailText = update.communityName
+                ? `"${update.groupName || 'Group'}" ${isRemoved ? 'is no longer linked to' : 'is now linked to'} "${update.communityName}"`
+                : `"${update.groupName || 'Group'}" ${isRemoved ? 'was removed from the community' : 'was added to the community'}`;
+
+            return (
+                <div className="wa-community-update-wrap">
+                    <div
+                        className="wa-community-update-card"
+                        style={{
+                            '--wa-community-update-accent': accentColor,
+                            '--wa-community-update-border': borderColor,
+                            '--wa-community-update-bg': accentBg,
+                            '--wa-community-update-glow': glowColor
+                        }}
+                    >
+                        <div className="wa-community-update-icon">
+                            <Icon size={16} />
+                        </div>
+                        <div className="wa-community-update-copy">
+                            <div className="wa-community-update-title">{title}</div>
+                            <div className="wa-community-update-text">{detailText}</div>
+                            <div className="wa-community-update-meta">
+                                <span>{update.actorName}</span>
+                                {update.communityName && (
+                                    <>
+                                        <span className="wa-community-update-dot" />
+                                        <span>{update.communityName}</span>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const communityGroupUpdate = resolveCommunityGroupUpdate();
+        if (communityGroupUpdate) {
+            return renderCommunityGroupUpdate(communityGroupUpdate);
+        }
+
         if (msg.is_system || msg.type === 'system') {
             const content = msg.content || '';
             let displayContent = content;
@@ -735,19 +814,6 @@ const MessageList = memo(({
                 </div>
             );
         }
-        if (msg.type === 'community_link') {
-            const commName = msg.metadata?.communityName || 'Community';
-            const isMe = String(msg.sender_id?._id || msg.sender_id) === String(user?.id || user?._id);
-            const displayContent = isMe ? `You added this group to the community: ${commName}` : `${msg.sender_id?.name || 'Admin'} added this group to the community: ${commName}`;
-            return (
-                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-                    <div style={{ background: '#F3FDFE', borderRadius: '12px', padding: '16px 24px', textAlign: 'center', border: '1px solid #E0F2F1', color: '#00695C', fontSize: '14px', maxWidth: '85%' }}>
-                        {displayContent}
-                    </div>
-                </div>
-            );
-        }
-
         return (
             <Fragment key={msgId}>
                 {unreadSeparator}
@@ -1266,6 +1332,37 @@ const MessageList = memo(({
                                 )}
                             </div>
                         )}
+
+                        {msg.reactions && msg.reactions.length > 0 && (() => {
+                            const currentUserId = user.id || user._id;
+                            const grouped = msg.reactions.reduce((acc, r) => {
+                                if (!acc[r.emoji]) acc[r.emoji] = { count: 0, reactedByMe: false };
+                                acc[r.emoji].count++;
+                                if (String(r.user_id) === String(currentUserId)) {
+                                    acc[r.emoji].reactedByMe = true;
+                                }
+                                return acc;
+                            }, {});
+
+                            return (
+                                <div className={`wa-reaction-badges ${isMe ? 'wa-reaction-badges-sent' : 'wa-reaction-badges-recv'}`}>
+                                    {Object.entries(grouped).map(([emoji, { count, reactedByMe }]) => (
+                                        <span
+                                            key={emoji}
+                                            className={`wa-reaction-badge ${reactedByMe ? 'reacted' : ''}`}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const bubble = e.currentTarget.closest('.wa-message-bubble') || e.currentTarget.closest('.wa-msg-sent') || e.currentTarget.closest('.wa-msg-rec');
+                                                setReactionDetails({ msg, isGroup: !!isGroup, rect: (bubble || e.currentTarget).getBoundingClientRect() });
+                                            }}
+                                        >
+                                            {emoji}
+                                            {count > 1 && <span className="wa-reaction-count">{count}</span>}
+                                        </span>
+                                    ))}
+                                </div>
+                            );
+                        })()}
                     </div>
                 </div>
             </Fragment>
