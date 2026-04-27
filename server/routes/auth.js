@@ -35,11 +35,11 @@ router.post('/register', async (req, res) => {
     }
 
     // Validations
-    const nameRegex = /^[A-Za-z\s]+$/;
+    const nameRegex = /^[A-Za-z0-9][A-Za-z0-9 .'-]*$/;
     const mobileRegex = /^\d{10}$/;
     const emailRegex = /^[a-zA-Z0-9._%+-]+@(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/;
 
-    if (!nameRegex.test(name)) return res.status(400).json({ error: 'Name must check contain only alphabets and spaces.' });
+    if (!nameRegex.test(name)) return res.status(400).json({ error: 'Name may contain letters, numbers, spaces, dots, apostrophes, and hyphens.' });
     if (!mobileRegex.test(mobile)) return res.status(400).json({ error: 'Mobile number must be exactly 10 digits.' });
     if (!emailRegex.test(email)) return res.status(400).json({ error: 'Please enter a valid email address.' });
 
@@ -57,7 +57,7 @@ router.post('/register', async (req, res) => {
         }
 
         // Insert as pending
-        const newUser = await User.create({ name, email, mobile, countryCode, designation, status: 'pending', is_temporary_password: false });
+        const newUser = await User.create({ name, displayName: name, email, mobile, countryCode, designation, status: 'pending', is_temporary_password: false });
 
         // Emit Socket Event
         if (req.io) {
@@ -159,20 +159,12 @@ router.post('/login', async (req, res) => {
             { expiresIn: '7d' }
         );
 
-        const myId = user.id.toString();
-        let userDisplayName = user.name;
-        if (user.nameOverrides) {
-            const overrides = user.nameOverrides;
-            const customName = (overrides instanceof Map) ? overrides.get(myId) : (overrides[myId] || overrides[myId.toString()]);
-            if (customName) userDisplayName = customName;
-        }
-
         res.json({
             token,
             user: { 
                 id: user.id, 
                 name: user.name, // Global name
-                displayName: userDisplayName, // Local alias
+                displayName: user.displayName || user.name,
                 role: user.role, 
                 email: user.email, 
                 login_id: user.login_id 
@@ -298,6 +290,7 @@ router.post('/admin/register', async (req, res) => {
 
         await User.create({
             name,
+            displayName: name,
             email,
             password: hash,
             password_signature: signature,
@@ -624,7 +617,7 @@ router.post('/verify-call-otp', async (req, res) => {
 });
 
 router.put('/update-profile', async (req, res) => {
-    const { userId, about, mobile, countryCode, privacySettings } = req.body;
+    const { userId, name, about, mobile, countryCode, privacySettings } = req.body;
     console.log('[PROFILE UPDATE] Request received for userId:', userId);
 
     if (!userId) {
@@ -634,6 +627,17 @@ router.put('/update-profile', async (req, res) => {
 
     try {
         const updateData = {};
+        if (name !== undefined) {
+            const trimmedName = String(name || '').trim();
+            const nameRegex = /^[A-Za-z0-9][A-Za-z0-9 .'-]*$/;
+            if (!trimmedName) {
+                return res.status(400).json({ error: 'Name is required' });
+            }
+            if (!nameRegex.test(trimmedName)) {
+                return res.status(400).json({ error: 'Name may contain letters, numbers, spaces, dots, apostrophes, and hyphens.' });
+            }
+            updateData.displayName = trimmedName;
+        }
         if (about !== undefined) updateData.about = about;
         if (countryCode !== undefined) updateData.countryCode = countryCode;
         if (mobile !== undefined) {
@@ -695,9 +699,10 @@ router.put('/update-profile', async (req, res) => {
         console.log('[PROFILE UPDATE] Successfully updated user:', updatedUser._id);
 
         if (req.io) {
-            req.io.emit('user_profile_updated', {
+            req.io.to(updatedUser._id.toString()).emit('user_profile_updated', {
                 userId: updatedUser._id,
                 name: updatedUser.name,
+                displayName: updatedUser.displayName || updatedUser.name,
                 mobile: updatedUser.mobile,
                 about: updatedUser.about,
                 privacySettings: updatedUser.privacySettings

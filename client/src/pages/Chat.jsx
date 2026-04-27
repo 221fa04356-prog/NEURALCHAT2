@@ -11,7 +11,7 @@ import {
     ArrowLeft, CheckCheck, CheckCircle, User as UserIcon, FileText, Calendar, X, Star, ChevronDown, ChevronRight, ChevronLeft, Bell,
     Info, Reply, Copy, Forward, Pin, CheckSquare, Download, Trash2, Archive, BellOff, HeartOff, XCircle, Lock, List, Heart, ThumbsDown, Share, Pencil, Image, StarOff, Camera, Link2 as LinkIcon,
     LayoutGrid, UserPlus, ArrowRight, Share2, Crop, Check, RotateCcw, Minus, Delete, User, Play, MapPin, IndianRupee, Sticker, PlusCircle,
-    ShieldCheck, Monitor, BellRing, Laptop, LogOut, Globe, Clock, Building2, Mail, Briefcase, ExternalLink,
+    ShieldCheck, Monitor, BellRing, Laptop, LogOut, Globe, Clock, Mail, Briefcase, ExternalLink,
     ShieldAlert, Fingerprint, HardDrive, Keyboard, HelpCircle, Settings2, Volume2, MonitorSmartphone, Shield,
     AlertCircle, UserCheck, Loader2, Ban, ChevronUp, Headphones
 } from 'lucide-react';
@@ -275,9 +275,7 @@ const LANGUAGE_OPTIONS = Object.entries(LANGUAGE_CODE_MAP).map(([label, code]) =
 const PRIVACY_VISIBILITY_FIELDS = [
     { key: 'lastSeen', label: 'Last Seen Visibility', description: 'Choose who can view when you were last active.' },
     { key: 'onlineStatus', label: 'Online Status Visibility', description: 'Choose who can view when you are online.' },
-    { key: 'profilePhoto', label: 'Profile Photo Visibility', description: 'Choose who can view your profile photo.' },
     { key: 'about', label: 'About Visibility', description: 'Choose who can view your about text.' },
-    { key: 'status', label: 'Status Visibility', description: 'Choose who can view your status updates.' },
 ];
 
 const createDefaultVisibilityRule = () => ({
@@ -1798,6 +1796,7 @@ export default function Chat() {
     const [muteDuration, setMuteDuration] = useState('8 hours'); // '8 hours' | '1 week' | 'Always'
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [activeSettingsTab, setActiveSettingsTab] = useState(null);
+    const [settingsSearchQuery, setSettingsSearchQuery] = useState('');
     const [isSettingsEditing, setIsSettingsEditing] = useState(false);
     const [pinReplaceModal, setPinReplaceModal] = useState(null); // { newId, isGroup, pinnedIds }
     const [pinMessageModal, setPinMessageModal] = useState(null);
@@ -2138,6 +2137,40 @@ export default function Chat() {
         return false;
     };
 
+    const getGroupWelcomeTitle = (group) => {
+        if (!group) return '';
+        const myId = String(userRef.current?._id || userRef.current?.id || user?._id || user?.id || '');
+        const myName = String(userRef.current?.name || userData?.name || user?.name || '').trim();
+        const ownerId = String(group.admin?._id || group.admin || group.creator_id || group.creatorId || '');
+        if (myId && ownerId === myId) return 'You created this group';
+
+        const myHistory = (group.userHistory || []).find(history => String(history?.user?._id || history?.user) === myId);
+        const addedBy = myHistory?.addedBy || group.addedByUser;
+        const addedByName = typeof addedBy === 'object'
+            ? (addedBy.name || addedBy.firstName || addedBy.username)
+            : null;
+
+        if (addedByName) return `${addedByName} added you`;
+
+        const addedMeMessage = [...(groupMessages || [])].reverse().find(message => {
+            const content = String(message?.content || '');
+            if (!(message?.is_system || message?.type === 'system') || !content.includes(' added ')) return false;
+            const addedMemberIds = message?.metadata?.addedMemberIds || [];
+            if (addedMemberIds.some(id => String(id) === myId)) return true;
+            const targetText = content.split(' added ').slice(1).join(' added ');
+            return !!myName && targetText.toLowerCase().includes(myName.toLowerCase());
+        });
+        if (addedMeMessage) {
+            const content = String(addedMeMessage.content || '');
+            const actorFromContent = content.split(' added ')[0]?.trim();
+            const actorName = actorFromContent || addedMeMessage.sender_id?.name || 'Someone';
+            return `${actorName} added you`;
+        }
+
+        if (group.admin?.name) return `${group.admin.name} created this group`;
+        return 'You were added to this group';
+    };
+
     const [searchTarget, setSearchTarget] = useState(null); // { type: 'p2p'|'group', id: string }
     const [openingFile, setOpeningFile] = useState(null);
     const [fileToOpenConfirm, setFileToOpenConfirm] = useState(null); // { filePath, fileName, isRisky, rawFilePath }
@@ -2413,7 +2446,7 @@ export default function Chat() {
                 return (
                     <span style={{ color: '#16a34a', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         <span style={{ fontWeight: 600 }}>Draft:</span>
-                        <span style={{ color: '#111b21' }}>{truncateFileName(savedDraft, 42)}</span>
+                        <span style={{ color: '#dbeafe' }}>{truncateFileName(savedDraft, 42)}</span>
                     </span>
                 );
             }
@@ -2620,6 +2653,7 @@ export default function Chat() {
                 if (msg.is_system) {
                     let content = msg.content;
                     const myId = user.id || user._id || userData?.id || userData?._id;
+                    const myName = user.name || userData?.name || '';
                     const senderId = msg.sender_id?._id || msg.sender_id || msg.user_id?._id || msg.user_id;
                     const isMe = String(senderId) === String(myId);
 
@@ -2640,6 +2674,30 @@ export default function Chat() {
                                 {isMe ? `You deleted ${eventName}` : `${msg.sender_id?.name || 'Someone'} deleted ${eventName}`}
                             </span>
                         );
+                    }
+                    if (content.includes(' removed ')) {
+                        const parts = content.split(' removed ');
+                        const remover = isMe ? 'You' : (parts[0] || msg.sender_id?.name || 'Someone');
+                        let target = parts.slice(1).join(' removed ');
+                        const removedMemberId = msg.metadata?.removedMemberId;
+                        if (removedMemberId && String(removedMemberId) === String(myId)) {
+                            target = 'you';
+                        } else if (myName && target.includes(myName)) {
+                            target = target.replace(myName, 'you');
+                        }
+                        return `${remover} removed ${target}`;
+                    }
+                    if (content.includes(' added ')) {
+                        const parts = content.split(' added ');
+                        const adder = isMe ? 'You' : (parts[0] || msg.sender_id?.name || 'Someone');
+                        let target = parts.slice(1).join(' added ');
+                        const addedMemberIds = msg.metadata?.addedMemberIds || [];
+                        if (addedMemberIds.some(id => String(id) === String(myId))) {
+                            target = 'you';
+                        } else if (myName && target.includes(myName)) {
+                            target = target.replace(myName, 'you');
+                        }
+                        return `${adder} added ${target}`;
                     }
                     return `${msg.sender_id?.name || 'Someone'} ${content}`;
                 }
@@ -2667,8 +2725,10 @@ export default function Chat() {
 
     const handleUpdateProfile = async () => {
         const cleanMobile = (userData.mobile || '').replace(/\D/g, '');
+        const cleanName = String(userData.displayName || userData.name || '').trim();
         const payload = {
             userId: userData.id || userData._id || user.id || user._id,
+            name: cleanName,
             mobile: cleanMobile,
             countryCode: userData.countryCode,
             about: userData.about
@@ -2686,13 +2746,23 @@ export default function Chat() {
             return;
         }
 
+        if (!cleanName) {
+            setSnackbar({ message: 'Error: Display name is required', type: 'error' });
+            return;
+        }
+
         try {
             const res = await axios.put('/api/auth/update-profile', payload);
             debugLog('[CLIENT] Update successful:', res.data);
 
             if (res.data.user) {
                 // Merge with current userData to preserve fields like 'image' not returned by endpoint
-                const updatedUser = { ...userData, ...res.data.user };
+                const updatedUser = {
+                    ...userData,
+                    ...res.data.user,
+                    name: res.data.user.name || userData.name,
+                    displayName: res.data.user.displayName || cleanName || userData.displayName || userData.name
+                };
                 localStorage.setItem('user', JSON.stringify(updatedUser));
                 setUserData(updatedUser);
                 setSnackbar({ message: 'Profile Updated successfully', type: 'success', variant: 'system' });
@@ -4493,14 +4563,29 @@ export default function Chat() {
 
         const onUserProfileUpdated = (data) => {
             debugLog('Socket: user_profile_updated', data);
+            if (String(userRef.current?.id || userRef.current?._id || '') === String(data.userId)) {
+                setUserData(prev => {
+                    const updatedUser = {
+                        ...prev,
+                        name: data.name || prev?.name,
+                        displayName: data.displayName || prev?.displayName || data.name || prev?.name,
+                        mobile: data.mobile ?? prev?.mobile,
+                        about: data.about ?? prev?.about,
+                        privacySettings: data.privacySettings ?? prev?.privacySettings
+                    };
+                    localStorage.setItem('user', JSON.stringify(updatedUser));
+                    return updatedUser;
+                });
+            }
+
             setUsers(prev => prev.map(u =>
                 String(u._id) === String(data.userId)
-                    ? { ...u, name: data.name, mobile: data.mobile, about: data.about }
+                    ? { ...u, name: data.name || u.name, mobile: data.mobile, about: data.about }
                     : u
             ));
 
             if (selectedUserRef.current && String(selectedUserRef.current._id) === String(data.userId)) {
-                setSelectedUser(prev => ({ ...prev, name: data.name, mobile: data.mobile, about: data.about }));
+                setSelectedUser(prev => ({ ...prev, name: data.name || prev?.name, mobile: data.mobile, about: data.about }));
             }
         };
 
@@ -4774,6 +4859,40 @@ export default function Chat() {
             }
         };
         socket.on('group_created', onGroupCreated);
+
+        const onGroupJoined = (data) => {
+            const nextGroup = data?.group;
+            if (!nextGroup?._id && !nextGroup?.id) {
+                fetchGroups();
+                return;
+            }
+
+            const nextGroupId = String(nextGroup._id || nextGroup.id);
+            const normalizedGroup = { ...nextGroup, addedByUser: data?.addedByUser, isGroup: true };
+
+            setGroups(prev => {
+                const exists = prev.some(g => String(g._id || g.id) === nextGroupId);
+                if (exists) {
+                    return prev.map(g => String(g._id || g.id) === nextGroupId ? { ...g, ...normalizedGroup } : g);
+                }
+                return [normalizedGroup, ...prev];
+            });
+
+            const currentSelectedGroup = selectedGroupRef?.current;
+            if (currentSelectedGroup && String(currentSelectedGroup._id || currentSelectedGroup.id) === nextGroupId) {
+                setSelectedGroup(prev => ({ ...prev, ...normalizedGroup }));
+            }
+
+            setSnackbar({
+                senderName: normalizedGroup.name || 'Group',
+                senderAvatar: normalizedGroup.icon || null,
+                message: `You were added to "${normalizedGroup.name || 'this group'}"`,
+                type: 'info',
+                variant: 'system',
+                forceShow: true
+            });
+        };
+        socket.on('group_joined', onGroupJoined);
 
         // Listen for community member removal notifications
         const onCommunityMemberRemoved = (data) => {
@@ -5180,29 +5299,69 @@ export default function Chat() {
         socket.on('group_admin_updated', onGroupAdminUpdated);
 
         const onGroupMembersUpdated = (data) => {
-            const { groupId, members, admin, admins } = data;
-            setGroups(prev => prev.map(g => String(g._id || g.id) === String(groupId) ? { ...g, members, ...(admin ? { admin } : {}), ...(admins ? { admins } : {}) } : g));
+            const { groupId, members, admin, admins, removedMembers, group } = data;
+            const groupPatch = {
+                ...(group || {}),
+                ...(members ? { members } : {}),
+                ...(admin ? { admin } : {}),
+                ...(admins ? { admins } : {}),
+                ...(removedMembers ? { removedMembers } : {})
+            };
+
+            setGroups(prev => {
+                const exists = prev.some(g => String(g._id || g.id) === String(groupId));
+                if (exists) {
+                    return prev.map(g => String(g._id || g.id) === String(groupId) ? { ...g, ...groupPatch } : g);
+                }
+                if (group) {
+                    return [{ ...group, isGroup: true }, ...prev];
+                }
+                return prev;
+            });
 
             const currentSelectedGroup = selectedGroupRef?.current;
             if (currentSelectedGroup && String(currentSelectedGroup._id || currentSelectedGroup.id) === String(groupId)) {
                 const nextAdmin = admin || currentSelectedGroup.admin;
                 const newAdmins = admins || currentSelectedGroup.admins || [];
-                const updatedMembers = members.map(m => ({
+                const nextMembers = members || currentSelectedGroup.members || [];
+                const updatedMembers = nextMembers.map(m => ({
                     ...m,
                     isAdmin: newAdmins.some(adminId => String(adminId) === String(m._id || m.id))
                 }));
-                setSelectedGroup(prev => ({ ...prev, members: updatedMembers, admin: nextAdmin, admins: newAdmins }));
+                setSelectedGroup(prev => ({ ...prev, ...groupPatch, members: updatedMembers, admin: nextAdmin, admins: newAdmins }));
             }
         };
         socket.on('group_members_updated', onGroupMembersUpdated);
 
         const onGroupMemberRemoved = (data) => {
-            const { groupId, message } = data || {};
-            setGroups(prev => prev.filter(group => String(group._id || group.id) !== String(groupId)));
+            const { groupId, message, group } = data || {};
+            const removedGroup = group ? { ...group, isGroup: true } : null;
+            const removalMessage = removedGroup?.lastMessage;
 
             const currentSelectedGroup = selectedGroupRef?.current;
+            setGroups(prev => {
+                if (removedGroup) {
+                    const exists = prev.some(g => String(g._id || g.id) === String(groupId));
+                    if (exists) {
+                        return prev.map(g => String(g._id || g.id) === String(groupId) ? { ...g, ...removedGroup } : g);
+                    }
+                    return [removedGroup, ...prev];
+                }
+                fetchGroups();
+                return prev;
+            });
+
             if (currentSelectedGroup && String(currentSelectedGroup._id || currentSelectedGroup.id) === String(groupId)) {
-                handleBackToChatList();
+                if (removedGroup) {
+                    setSelectedGroup(prev => ({ ...prev, ...removedGroup }));
+                }
+                if (removalMessage?._id || removalMessage?.id) {
+                    setGroupMessages(prev => {
+                        const removalId = String(removalMessage._id || removalMessage.id);
+                        if (prev.some(m => String(m._id || m.id) === removalId)) return prev;
+                        return [...prev, removalMessage];
+                    });
+                }
             }
 
             setSnackbar({
@@ -5216,6 +5375,7 @@ export default function Chat() {
 
         return () => {
             socket.off('group_created', onGroupCreated);
+            socket.off('group_joined', onGroupJoined);
             socket.off('group_message', onGroupMessage);
             socket.off('group_messages_read', onGroupMessagesRead);
             socket.off('group_messages_all_read', onGroupMessagesAllRead);
@@ -5489,7 +5649,18 @@ export default function Chat() {
                 const res = await axios.get('/api/chat/me', {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
-                setUserData(res.data);
+                const normalizedUser = {
+                    ...userData,
+                    ...res.data,
+                    id: res.data?.id || res.data?._id || userData?.id || userData?._id || user.id || user._id,
+                    _id: res.data?._id || res.data?.id || userData?._id || userData?.id || user._id || user.id,
+                    name: res.data?.name || userData?.name || '',
+                    displayName: res.data?.displayName || userData?.displayName || res.data?.name || userData?.name || '',
+                    loginId: res.data?.loginId || res.data?.login_id,
+                    login_id: res.data?.login_id || res.data?.loginId
+                };
+                setUserData(normalizedUser);
+                localStorage.setItem('user', JSON.stringify(normalizedUser));
             } catch (err) {
                 console.error("Failed to fetch my profile", err);
             }
@@ -8720,8 +8891,38 @@ export default function Chat() {
     const saveProfileField = async (field) => {
         try {
             const token = localStorage.getItem('token');
-            const data = { targetUserId: user.id || user._id };
-            if (field === 'name') data.name = profileEditValue;
+            const currentUserId = user.id || user._id;
+            const trimmedValue = String(profileEditValue || '').trim();
+
+            if (field === 'name') {
+                if (!trimmedValue) {
+                    setSnackbar({ message: 'Error: Display name is required', type: 'error' });
+                    return;
+                }
+
+                const res = await axios.put('/api/auth/update-profile', {
+                    userId: currentUserId,
+                    name: trimmedValue
+                }, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                const returnedUser = res.data?.user || {};
+                const updatedUser = {
+                    ...userData,
+                    ...returnedUser,
+                    name: returnedUser.name || userData.name,
+                    displayName: returnedUser.displayName || trimmedValue || userData.displayName || userData.name
+                };
+
+                setUserData(updatedUser);
+                localStorage.setItem('user', JSON.stringify(updatedUser));
+                setIsEditingProfileName(false);
+                setSnackbar({ message: 'Profile Updated successfully', type: 'success', variant: 'system' });
+                return;
+            }
+
+            const data = { targetUserId: currentUserId };
             if (field === 'mobile') {
                 const cleanMobile = profileEditValue.replace(/\D/g, '');
                 if (cleanMobile.length !== 10) {
@@ -8737,11 +8938,6 @@ export default function Chat() {
             });
 
             const updatedUser = { ...userData };
-            if (field === 'name') {
-                // For private alias, update displayName but keep name (global) the same
-                updatedUser.displayName = profileEditValue;
-                setIsEditingProfileName(false);
-            }
             if (field === 'mobile') {
                 updatedUser.mobile = profileEditValue;
                 setIsEditingProfilePhone(false);
@@ -14709,25 +14905,6 @@ export default function Chat() {
                                 setIsConfirmGroupAddMembersOpen(false);
                                 setIsGroupAddMemberOpen(false);
 
-                                const memberNames = selectedGroupMembersToAdd.map(m => m.name);
-                                let addedText = "";
-                                if (memberNames.length === 1) addedText = `You added ${memberNames[0]}`;
-                                else if (memberNames.length === 2) addedText = `You added ${memberNames[0]} & ${memberNames[1]}`;
-                                else if (memberNames.length > 2) {
-                                    const last = memberNames.pop();
-                                    addedText = `You added ${memberNames.join(', ')} & ${last}`;
-                                }
-
-                                const sysMsg = {
-                                    _id: 'sys_' + Date.now(),
-                                    type: 'system',
-                                    is_system: true,
-                                    content: addedText,
-                                    created_at: new Date().toISOString(),
-                                    sender_id: user.id || user._id,
-                                    group_id: selectedGroup._id || selectedGroup.id
-                                };
-
                                 try {
                                     const token = localStorage.getItem('token');
                                     const memberIds = selectedGroupMembersToAdd.map(m => m._id || m.id).filter(Boolean);
@@ -14737,7 +14914,6 @@ export default function Chat() {
                                         headers: { 'Authorization': `Bearer ${token}` }
                                     });
 
-                                    setGroupMessages(prev => [...prev, sysMsg]);
                                     setSelectedGroupMembersToAdd([]);
                                     setSnackbar({ message: 'Members added successfully', type: 'success' });
                                 } catch (err) {
@@ -18535,7 +18711,7 @@ export default function Chat() {
                                                         return "You're no longer a member in this community.";
                                                     }
                                                 }
-                                                return selectedGroup ? 'You were removed from this group and cannot send messages.' : 'Messaging is restricted.';
+                                                return selectedGroup ? 'You are no longer a member of the group.' : 'Messaging is restricted.';
                                             })()}
                                         </div>
                                     ) : (
@@ -18925,15 +19101,17 @@ export default function Chat() {
                                                     {selectedGroup.icon ? (
                                                         <img src={selectedGroup.icon} alt="group" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
                                                     ) : (
-                                                        <Camera size={44} color="#8696a0" />
+                                                        <Users size={44} color="#9a6b11" />
                                                     )}
-                                                    <div className="wa-welcome-camera-badge"><Camera size={14} color="white" /></div>
+                                                    {String(selectedGroup.admin?._id || selectedGroup.admin) === String(user.id || user._id) && (
+                                                        <div className="wa-welcome-camera-badge"><Camera size={14} color="white" /></div>
+                                                    )}
                                                 </div>
                                                 <div className="wa-group-welcome-title">
-                                                    {String(selectedGroup.admin?._id || selectedGroup.admin) === String(user.id || user._id) ? 'You created this group' : `${selectedGroup.admin?.name || 'Admin'} created this group`}
+                                                    {getGroupWelcomeTitle(selectedGroup)}
                                                 </div>
                                                 <div className="wa-group-welcome-subtitle">
-                                                    {selectedGroup.members?.length} members • {selectedGroup.members?.length} contacts • Created {formatDateForSeparator(selectedGroup.created_at)}
+                                                    {selectedGroup.members?.length || 0} members • Created {formatDateForSeparator(selectedGroup.created_at)}
                                                 </div>
                                                 <div className="wa-group-welcome-action">Add description...</div>
                                                 <div className="wa-group-welcome-buttons">
@@ -20726,12 +20904,19 @@ export default function Chat() {
         if (!isSettingsOpen) return null;
 
         const settingsTabs = [
-            { id: 'profile', label: t('settings.tabs.profile.label'), icon: User, description: t('settings.tabs.profile.description') },
-            { id: 'general', label: t('settings.tabs.general.label'), icon: Settings2, description: t('settings.tabs.general.description') },
-            { id: 'privacy', label: t('settings.tabs.privacy.label'), icon: Lock, description: t('settings.tabs.privacy.description') },
-            { id: 'chats', label: t('settings.tabs.chats.label'), icon: MessageSquare, description: t('settings.tabs.chats.description') },
-            { id: 'notifications', label: t('settings.tabs.notifications.label'), icon: BellRing, description: t('settings.tabs.notifications.description') },
+            { id: 'profile', label: t('settings.tabs.profile.label'), icon: User, description: 'Profile photo, display name, about, phone and identity details.' },
+            { id: 'general', label: t('settings.tabs.general.label'), icon: Settings2, description: 'Language, startup behavior, interface scale and shortcuts.' },
+            { id: 'privacy', label: t('settings.tabs.privacy.label'), icon: Lock, description: 'Visibility, read receipts, typing, screenshots and watermark.' },
+            { id: 'chats', label: t('settings.tabs.chats.label'), icon: MessageSquare, description: 'Theme, workspace appearance, chat history and storage.' },
+            { id: 'notifications', label: t('settings.tabs.notifications.label'), icon: BellRing, description: 'Desktop alerts, groups, sound, previews and quiet hours.' },
         ];
+        const normalizedSettingsSearch = settingsSearchQuery.trim().toLowerCase();
+        const filteredSettingsTabs = normalizedSettingsSearch
+            ? settingsTabs.filter(tab =>
+                tab.label.toLowerCase().includes(normalizedSettingsSearch) ||
+                tab.description.toLowerCase().includes(normalizedSettingsSearch)
+            )
+            : settingsTabs;
 
         const renderTabContent = () => {
             switch (activeSettingsTab) {
@@ -20743,22 +20928,24 @@ export default function Chat() {
                                 <div className="wa-settings-profile-main">
                                     <div className="wa-settings-avatar-wrap">
                                         <div className="wa-settings-avatar">
-                                            <img src={userData.image || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256&h=256"} alt="Profile" />
+                                            {userData.image ? (
+                                                <img src={userData.image} alt="Profile" />
+                                            ) : (
+                                                <span className="wa-settings-avatar-fallback">
+                                                    {(userData.displayName || userData.name || "User").trim().charAt(0).toUpperCase()}
+                                                </span>
+                                            )}
                                         </div>
                                         <button className="wa-settings-avatar-edit"><Camera size={18} /></button>
                                     </div>
                                     <div className="wa-settings-profile-info">
                                         <div className="wa-settings-name-row">
-                                            <h3>{userData.name || "User"}</h3>
+                                            <h3>{userData.displayName || userData.name || "User"}</h3>
                                             <span className="wa-settings-status-badge">
                                                 <div className="wa-settings-status-dot pulse" /> {t('settings.profile.status_available')}
                                             </span>
                                         </div>
-                                        <p className="wa-settings-title">{userData.designation || "Lead Systems Architect"} - <span>Enterprise Core</span></p>
-                                        <div className="wa-settings-meta-row">
-                                            <div className="wa-settings-meta-item"><Building2 size={14} /> HQ - San Francisco</div>
-                                            <div className="wa-settings-meta-item"><Clock size={14} /> (GMT-7) Pacific Time</div>
-                                        </div>
+                                        <p className="wa-settings-title">{userData.designation || "User"}</p>
                                     </div>
                                 </div>
                             </div>
@@ -20772,7 +20959,7 @@ export default function Chat() {
                                         </div>
                                         <div className="wa-settings-field read-only">
                                             <label>{t('settings.profile.emp_id')}</label>
-                                            <p className="font-mono">{userData.loginId || "EMP-992-ARC"}</p>
+                                            <p className="font-mono">{userData.loginId || userData.login_id || "N/A"}</p>
                                         </div>
                                         <div className="wa-settings-field read-only">
                                             <label>{t('settings.profile.job_pos')}</label>
@@ -20783,9 +20970,19 @@ export default function Chat() {
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">{t('settings.profile.personal_bio')}</h4>
                                     <div className="wa-settings-fields">
-                                        <div className="wa-settings-field read-only">
+                                        <div className="wa-settings-field">
                                             <label>{t('settings.profile.display_name')}</label>
-                                            <p>{userData.name || "User"}</p>
+                                            {isSettingsEditing ? (
+                                                <input
+                                                    type="text"
+                                                    className="wa-settings-input"
+                                                    value={userData.displayName || userData.name || ""}
+                                                    placeholder="Enter your display name"
+                                                    onChange={(e) => setUserData({ ...userData, displayName: e.target.value })}
+                                                />
+                                            ) : (
+                                                <p>{userData.displayName || userData.name || "User"}</p>
+                                            )}
                                         </div>
                                         <div className="wa-settings-field">
                                             <label>{t('settings.profile.about')}</label>
@@ -20918,7 +21115,7 @@ export default function Chat() {
                                     </div>
                                 )}
                                 <p className="wa-general-font-hint">
-                                    Use <kbd className="wa-general-kbd">Ctrl</kbd> + <kbd className="wa-general-kbd">/</kbd> - {t('general.font_size_hint')}
+                                    Use <kbd className="wa-general-kbd">Ctrl</kbd> + <kbd className="wa-general-kbd">+</kbd> - {t('general.font_size_hint')}
                                 </p>
                             </div>
                         </div>
@@ -20946,24 +21143,10 @@ export default function Chat() {
                                         </div>
                                         <ChevronRight size={16} />
                                     </button>
-                                    <button className="wa-settings-list-action" onClick={() => openPrivacyVisibilityDialog('profilePhoto')}>
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Profile Photo Visibility</p>
-                                            <p className="wa-settings-item-desc">{getPrivacySummary(privacySettings.profilePhoto)}</p>
-                                        </div>
-                                        <ChevronRight size={16} />
-                                    </button>
                                     <button className="wa-settings-list-action" onClick={() => openPrivacyVisibilityDialog('about')}>
                                         <div className="wa-settings-item-info">
                                             <p className="wa-settings-item-label">About Visibility</p>
                                             <p className="wa-settings-item-desc">{getPrivacySummary(privacySettings.about)}</p>
-                                        </div>
-                                        <ChevronRight size={16} />
-                                    </button>
-                                    <button className="wa-settings-list-action" onClick={() => openPrivacyVisibilityDialog('status')}>
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Status Visibility</p>
-                                            <p className="wa-settings-item-desc">{getPrivacySummary(privacySettings.status)}</p>
                                         </div>
                                         <ChevronRight size={16} />
                                     </button>
@@ -21461,12 +21644,18 @@ export default function Chat() {
                             <h2 className="wa-settings-sidebar-title">{t('settings.title')}</h2>
                             <div className="wa-settings-search">
                                 <Search size={16} />
-                                <input placeholder={t('settings.search_placeholder')} />
+                                <input
+                                    placeholder={t('settings.search_placeholder')}
+                                    value={settingsSearchQuery}
+                                    onChange={(e) => setSettingsSearchQuery(e.target.value)}
+                                />
                             </div>
                         </div>
 
                         <nav className="wa-settings-nav custom-scrollbar">
-                            {settingsTabs.map((tab) => (
+                            {filteredSettingsTabs.length === 0 ? (
+                                <div className="wa-settings-nav-empty">No settings found</div>
+                            ) : filteredSettingsTabs.map((tab) => (
                                 <button
                                     key={tab.id}
                                     onClick={() => setActiveSettingsTab(tab.id)}
@@ -21511,20 +21700,22 @@ export default function Chat() {
                                         {settingsTabs.find(tab => tab.id === activeSettingsTab)?.label || activeSettingsTab}
                                     </h2>
                                 </div>
-                                <div className="wa-settings-header-actions">
-                                    {!isSettingsEditing ? (
-                                        <button className="wa-settings-btn-edit" onClick={() => setIsSettingsEditing(true)}>
-                                            <Pencil size={14} />
-                                            <span className="wa-settings-btn-text-desktop">{t('settings.edit_identity')}</span>
-                                            <span className="wa-settings-btn-text-mobile">Edit</span>
-                                        </button>
-                                    ) : (
-                                        <>
-                                            <button className="wa-settings-btn-cancel" onClick={() => setIsSettingsEditing(false)}>{t('settings.discard_changes')}</button>
-                                            <button className="wa-settings-btn-commit" onClick={handleUpdateProfile}>{t('settings.commit_updates')}</button>
-                                        </>
-                                    )}
-                                </div>
+                                {activeSettingsTab === 'profile' && (
+                                    <div className="wa-settings-header-actions">
+                                        {!isSettingsEditing ? (
+                                            <button className="wa-settings-btn-edit" onClick={() => setIsSettingsEditing(true)}>
+                                                <Pencil size={14} />
+                                                <span className="wa-settings-btn-text-desktop">{t('settings.edit_identity')}</span>
+                                                <span className="wa-settings-btn-text-mobile">Edit</span>
+                                            </button>
+                                        ) : (
+                                            <>
+                                                <button className="wa-settings-btn-cancel" onClick={() => setIsSettingsEditing(false)}>{t('settings.discard_changes')}</button>
+                                                <button className="wa-settings-btn-commit" onClick={handleUpdateProfile}>{t('settings.commit_updates')}</button>
+                                            </>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         )}
 

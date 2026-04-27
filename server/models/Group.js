@@ -17,6 +17,7 @@ const groupSchema = new mongoose.Schema({
     isAnnouncementGroup: { type: Boolean, default: false },
     userHistory: [{
         user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        addedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
         joinedAt: { type: Date, default: Date.now },
         leftAt: { type: Date },
         visibleFrom: { type: Date, default: Date.now }

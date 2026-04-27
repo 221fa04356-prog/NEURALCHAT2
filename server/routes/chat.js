@@ -614,31 +614,14 @@ router.get('/history/:userId', async (req, res) => {
 // GET Current User Profile - Secured with Auth
 router.get('/me', authenticateToken, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).select('name email mobile designation about role isOnline lastSeen bannedUntil rejectionCount adminLock messagingBlocked unblockRequested nameOverrides privacySettings __enc_name __enc_email __enc_mobile __enc_designation __enc_about');
+        const user = await User.findById(req.user.id).select('name displayName email mobile countryCode designation about role login_id isOnline lastSeen bannedUntil rejectionCount adminLock messagingBlocked unblockRequested nameOverrides privacySettings __enc_name __enc_displayName __enc_email __enc_mobile __enc_designation __enc_about');
         if (!user) return res.status(404).json({ error: 'User not found' });
         
         // Convert to plain object to modify response without affecting DB
         const userObj = user.toObject();
-        
-        // Apply self-override if it exists
-        if (userObj.nameOverrides) {
-            const myId = req.user.id.toString();
-            const overrides = userObj.nameOverrides;
-            
-            // Mongoose Maps can be retrieved via .get() or via direct key access on plain objects
-            let customName = null;
-            if (overrides instanceof Map) {
-                customName = overrides.get(myId);
-            } else if (overrides && typeof overrides === 'object') {
-                // Try both direct access and string key access
-                customName = overrides[myId] || overrides[myId.toString()];
-            }
-            
-            if (customName) {
-                console.log(`[DEBUG] /me: Applying self-override for ${myId}: ${userObj.name} -> ${customName}`);
-                userObj.name = customName;
-            }
-        }
+        userObj.id = String(user._id);
+        userObj.displayName = userObj.displayName || userObj.name || '';
+        userObj.loginId = userObj.login_id || '';
         
         res.json(userObj);
     } catch (err) {
