@@ -999,9 +999,13 @@ const MessageList = memo(({
                 let remover = parts[0];
                 let target = parts[1];
                 if (String(msg.sender_id?._id || msg.sender_id) === String(myId)) remover = 'You';
-                if (target === myName) {
+                const removedMemberId = msg.metadata?.removedMemberId;
+                if (removedMemberId && String(removedMemberId) === String(myId)) {
                     target = 'you';
-                    displayContent = (remover !== 'You') ? `You were removed by ${remover}` : `You removed you`;
+                    displayContent = `${remover} removed ${target}`;
+                } else if (target === myName) {
+                    target = 'you';
+                    displayContent = `${remover} removed ${target}`;
                 } else {
                     displayContent = `${remover} removed ${target}`;
                 }
@@ -1010,7 +1014,12 @@ const MessageList = memo(({
                 let adder = parts[0];
                 let target = parts[1];
                 if (String(msg.sender_id?._id || msg.sender_id) === String(myId)) adder = 'You';
-                if (target === myName || target.includes(myName)) target = target.replace(myName, 'you');
+                const addedMemberIds = msg.metadata?.addedMemberIds || [];
+                if (addedMemberIds.some(id => String(id) === String(myId))) {
+                    target = 'you';
+                } else if (target === myName || target.includes(myName)) {
+                    target = target.replace(myName, 'you');
+                }
                 displayContent = `${adder} added ${target}`;
             } else if (content.includes(' assigned ') && content.includes(' as the new owner')) {
                 const parts = content.split(' assigned ');

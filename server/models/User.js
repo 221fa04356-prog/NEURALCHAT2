@@ -15,6 +15,7 @@ const privacyVisibilitySchema = new mongoose.Schema({
 
 const userSchema = new mongoose.Schema({
     name: { type: String, required: true },
+    displayName: { type: String, default: '' },
     email: { type: String, unique: true, required: true },
     mobile: { type: String, unique: true, required: true },
     countryCode: { type: String, required: true, default: '+91' },
@@ -121,6 +122,7 @@ const userSchema = new mongoose.Schema({
 // Ensure user profile flags are always selected
 userSchema.add({
     __enc_name: { type: Boolean, select: true, default: false },
+    __enc_displayName: { type: Boolean, select: true, default: false },
     __enc_email: { type: Boolean, select: true, default: false },
     __enc_mobile: { type: Boolean, select: true, default: false },
     __enc_about: { type: Boolean, select: true, default: false },
@@ -129,7 +131,7 @@ userSchema.add({
 
 // App-level Field Encryption
 userSchema.plugin(fieldEncryption, {
-    fields: ["name", "email", "mobile", "about", "designation"],
+    fields: ["name", "displayName", "email", "mobile", "about", "designation"],
     secret: process.env.DEFAULT_ENCRYPTION_SECRET,
     salt: process.env.DEFAULT_ENCRYPTION_SALT
 });

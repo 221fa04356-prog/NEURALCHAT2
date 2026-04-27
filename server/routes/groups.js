@@ -21,6 +21,16 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole']; // Precise bad words
 
+const markUsersAddedBy = (group, userIds, addedByUserId) => {
+    if (!group?.userHistory || !addedByUserId) return;
+    const ids = new Set((Array.isArray(userIds) ? userIds : [userIds]).map(id => String(id)));
+    group.userHistory.forEach(history => {
+        if (history?.user && ids.has(String(history.user))) {
+            history.addedBy = addedByUserId;
+        }
+    });
+};
+
 const inferTypeFromUrl = (rawUrl = '') => {
     const url = String(rawUrl || '').toLowerCase();
     if (!url) return 'text';
@@ -183,6 +193,7 @@ router.post('/create', authenticateToken, async (req, res) => {
         });
 
         handleMembershipJoin(group, allMembers);
+        markUsersAddedBy(group, memberIds, adminId);
         await group.save();
 
         console.log('[GROUP CREATE] Group created successfully:', group._id);
@@ -190,7 +201,8 @@ router.post('/create', authenticateToken, async (req, res) => {
         // Populate members for response
         const populatedGroup = await Group.findById(group._id)
             .populate('members', 'name email _id isOnline lastSeen __enc_name __enc_email')
-            .populate('admin', 'name _id __enc_name');
+            .populate('admin', 'name _id __enc_name')
+            .populate('userHistory.addedBy', 'name _id __enc_name');
 
         // Create the system message "group created"
         await GroupMessage.create({
@@ -239,6 +251,7 @@ router.get('/my-groups', authenticateToken, async (req, res) => {
         })
             .populate('members', 'name email _id isOnline lastSeen __enc_name __enc_email')
             .populate('admin', 'name _id __enc_name')
+            .populate('userHistory.addedBy', 'name _id __enc_name')
             .sort({ created_at: -1 });
 
         // Enrich each group with last message and unread count
@@ -319,7 +332,8 @@ router.get('/:groupId', authenticateToken, async (req, res) => {
         const group = await Group.findById(groupId)
             .populate('members', 'name email _id isOnline lastSeen about mobile countryCode __enc_name __enc_email __enc_about __enc_mobile')
             .populate('admin', 'name _id __enc_name')
-            .populate('admins', 'name _id __enc_name');
+            .populate('admins', 'name _id __enc_name')
+            .populate('userHistory.addedBy', 'name _id __enc_name');
 
         if (!group) return res.status(404).json({ error: 'Group not found' });
 
@@ -1310,6 +1324,7 @@ router.patch('/:groupId/members', authenticateToken, async (req, res) => {
         const { groupId } = req.params;
         const { memberIds } = req.body;
         const userId = req.user.id;
+        const actor = await User.findById(userId).select('name _id __enc_name');
 
         const group = await Group.findById(groupId);
         if (!group) return res.status(404).json({ error: 'Group not found' });
@@ -1324,7 +1339,28 @@ router.patch('/:groupId/members', authenticateToken, async (req, res) => {
         if (newMemberIds.length === 0) return res.json({ status: 'success', group });
 
         handleMembershipJoin(group, newMemberIds);
+        markUsersAddedBy(group, newMemberIds, userId);
         await group.save();
+        const addedUsers = await User.find({ _id: { $in: newMemberIds } }).select('name _id __enc_name');
+        const addedNames = addedUsers.map(u => u.name || 'a member');
+        let addedTargetText = addedNames[0] || 'a member';
+        if (addedNames.length === 2) {
+            addedTargetText = `${addedNames[0]} & ${addedNames[1]}`;
+        } else if (addedNames.length > 2) {
+            addedTargetText = `${addedNames.slice(0, -1).join(', ')} & ${addedNames[addedNames.length - 1]}`;
+        }
+        const addedMessage = await GroupMessage.create({
+            group_id: group._id,
+            sender_id: userId,
+            type: 'system',
+            is_system: true,
+            metadata: {
+                action: 'members_added',
+                addedMemberIds: newMemberIds.map(id => String(id)),
+                addedBy: String(userId)
+            },
+            content: `${actor?.name || 'Someone'} added ${addedTargetText}`
+        });
 
         // SYNC WITH COMMUNITY
         // If this group belongs to a community, ensure members are added there too
@@ -1370,11 +1406,35 @@ router.patch('/:groupId/members', authenticateToken, async (req, res) => {
 
         // Emit to all members
         if (req.io) {
-            const populated = await Group.findById(groupId).populate('members', 'name image mobile about __enc_name __enc_mobile __enc_about');
+            const populated = await Group.findById(groupId)
+                .populate('members', 'name image mobile about email _id isOnline lastSeen __enc_name __enc_mobile __enc_about __enc_email')
+                .populate('admin', 'name _id __enc_name')
+                .populate('admins', 'name _id __enc_name')
+                .populate('userHistory.addedBy', 'name _id __enc_name');
+            const populatedObj = populated.toObject();
+            const addedByUser = actor;
+            const populatedAddedMessage = await GroupMessage.findById(addedMessage._id)
+                .populate('sender_id', 'name _id __enc_name');
             group.members.forEach(m => {
-                req.io.to(m.toString()).emit('group_members_updated', { 
-                    groupId, 
-                    members: populated.members 
+                req.io.to(m.toString()).emit('group_members_updated', {
+                    groupId,
+                    members: populated.members,
+                    admin: populated.admin,
+                    admins: populated.admins || [],
+                    removedMembers: populated.removedMembers || [],
+                    group: { ...populatedObj, isGroup: true }
+                });
+                req.io.to(m.toString()).emit('group_message', {
+                    groupId,
+                    message: populatedAddedMessage.toObject()
+                });
+            });
+
+            newMemberIds.forEach(memberId => {
+                req.io.to(String(memberId)).emit('group_joined', {
+                    group: { ...populatedObj, isGroup: true },
+                    addedByUser,
+                    addedBy: String(userId)
                 });
             });
         }
@@ -1413,6 +1473,9 @@ router.delete('/:groupId/members/:memberId', authenticateToken, async (req, res)
             return res.status(400).json({ error: 'User is not a member of this group' });
         }
 
+        const actor = await User.findById(requesterId).select('name _id __enc_name');
+        const removedUser = await User.findById(memberId).select('name _id __enc_name');
+
         handleMembershipExit(group, memberId);
         await group.save();
 
@@ -1421,7 +1484,12 @@ router.delete('/:groupId/members/:memberId', authenticateToken, async (req, res)
             sender_id: requesterId,
             type: 'system',
             is_system: true,
-            content: 'removed a member'
+            metadata: {
+                action: 'member_removed',
+                removedMemberId: String(memberId),
+                removedBy: String(requesterId)
+            },
+            content: `${actor?.name || 'Someone'} removed ${removedUser?.name || 'a member'}`
         });
 
         const populatedGroup = await Group.findById(group._id)
@@ -1450,6 +1518,14 @@ router.delete('/:groupId/members/:memberId', authenticateToken, async (req, res)
             req.io.to(String(memberId)).emit('group_member_removed', {
                 groupId: String(group._id),
                 memberId: String(memberId),
+                removedByUser: actor,
+                removedUser,
+                group: {
+                    ...populatedGroup.toObject(),
+                    isGroup: true,
+                    lastMessage: populatedRemovedMessage.toObject(),
+                    unreadCount: 0
+                },
                 message: `You were removed from ${group.name || 'this group'}`
             });
         }

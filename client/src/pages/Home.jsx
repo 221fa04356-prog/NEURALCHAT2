@@ -92,6 +92,8 @@ export default function Home() {
             const token = res.data.token;
             const normalizedUser = user ? {
                 ...user,
+                loginId: user.loginId || user.login_id,
+                login_id: user.login_id || user.loginId,
                 id: user.id || user._id,
                 _id: user._id || user.id
             } : user;
