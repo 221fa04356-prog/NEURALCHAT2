@@ -1,6 +1,13 @@
 const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
+const MISSING_MEDIA_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
+<rect width="320" height="180" fill="#0f1f33"/>
+<rect x="16" y="16" width="288" height="148" rx="10" fill="#102b42" stroke="#2b4b68" />
+<circle cx="125" cy="88" r="16" fill="#6f8aa1"/>
+<path d="M72 126l46-34 28 20 36-28 66 42H72z" fill="#36536d"/>
+<text x="160" y="152" fill="#b8cadd" font-family="Segoe UI, Arial, sans-serif" font-size="14" text-anchor="middle">Media unavailable</text>
+</svg>`;
 
 const BUCKET_NAME = 'voiceFiles';
 
@@ -74,7 +81,8 @@ const getContentTypeFromName = (name = '') => {
 const normalizeLegacyPath = (legacyPath = '') => {
     if (!legacyPath || typeof legacyPath !== 'string') return '';
     const withoutHost = legacyPath.replace(/^https?:\/\/[^/]+/i, '');
-    const stripped = withoutHost.replace(/^\/+/, '');
+    const withoutQuery = withoutHost.split('#')[0].split('?')[0];
+    const stripped = withoutQuery.replace(/^\/+/, '');
     return stripped.startsWith('uploads/') ? `/${stripped}` : `/${stripped.replace(/^uploads\/?/i, 'uploads/')}`;
 };
 
@@ -116,7 +124,18 @@ const streamGridFSFileWithRange = async (req, res, fileId) => {
     const { fileDoc, streamId } = await resolveGridFSFileDoc(bucket, fileId, fallbackName, fallbackLegacyPath);
 
     if (!fileDoc || !streamId) {
-        res.status(404).json({ error: 'Media not found' });
+        const accept = String(req.get('accept') || '').toLowerCase();
+        const wantsVideo = accept.includes('video/');
+        res.set('Cache-Control', 'private, max-age=300');
+        if (wantsVideo) {
+            res.status(204).end();
+            return;
+        }
+        const svgBuffer = Buffer.from(MISSING_MEDIA_SVG, 'utf8');
+        res.status(200);
+        res.set('Content-Type', 'image/svg+xml; charset=utf-8');
+        res.set('Content-Length', String(svgBuffer.length));
+        res.end(svgBuffer);
         return;
     }
 

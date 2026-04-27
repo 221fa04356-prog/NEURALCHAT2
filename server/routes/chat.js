@@ -184,13 +184,32 @@ const allowDevMediaBypass = (req) => {
 const safeResolveMediaPath = (rawPath) => {
     if (!rawPath || typeof rawPath !== 'string') return null;
     const uploadsRoot = path.resolve(__dirname, '../uploads');
+    let withoutQuery = rawPath;
+    try {
+        const parsed = new URL(rawPath, 'http://localhost');
+        withoutQuery = `${parsed.pathname || ''}`;
+    } catch (_) {
+        withoutQuery = String(rawPath).split('#')[0].split('?')[0];
+    }
     const normalized = rawPath
+        .replace(/^https?:\/\/[^/]+/i, '')
+        .replace(/[?#].*$/, '')
+        .replace(/^\/+uploads\/?/i, '')
+        .replace(/^\/+/, '');
+    if (!normalized) return null;
+    const resolved = path.resolve(uploadsRoot, normalized);
+    if (!resolved.startsWith(uploadsRoot)) return null;
+    if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) return resolved;
+
+    const fromParsed = String(withoutQuery || '')
         .replace(/^https?:\/\/[^/]+/i, '')
         .replace(/^\/+uploads\/?/i, '')
         .replace(/^\/+/, '');
-    const resolved = path.resolve(uploadsRoot, normalized);
-    if (!resolved.startsWith(uploadsRoot)) return null;
-    return resolved;
+    if (!fromParsed) return resolved;
+    const fallbackResolved = path.resolve(uploadsRoot, fromParsed);
+    if (!fallbackResolved.startsWith(uploadsRoot)) return null;
+    if (fs.existsSync(fallbackResolved) && fs.statSync(fallbackResolved).isFile()) return fallbackResolved;
+    return fallbackResolved;
 };
 
 const findByFilenameRecursive = (dir, filename) => {
@@ -263,6 +282,32 @@ const inferTypeFromUrl = (rawUrl = '') => {
     return 'file';
 };
 
+const MISSING_MEDIA_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
+<rect width="320" height="180" fill="#0f1f33"/>
+<rect x="16" y="16" width="288" height="148" rx="10" fill="#102b42" stroke="#2b4b68" />
+<circle cx="125" cy="88" r="16" fill="#6f8aa1"/>
+<path d="M72 126l46-34 28 20 36-28 66 42H72z" fill="#36536d"/>
+<text x="160" y="152" fill="#b8cadd" font-family="Segoe UI, Arial, sans-serif" font-size="14" text-anchor="middle">Media unavailable</text>
+</svg>`;
+
+const respondNoMedia = (req, res) => {
+    const accept = String(req.get('accept') || '').toLowerCase();
+    const wantsVideo = accept.includes('video/');
+
+    res.set('Cache-Control', 'private, max-age=300');
+
+    if (wantsVideo) {
+        // 204 avoids browser endlessly trying to decode an invalid empty video payload.
+        return res.status(204).end();
+    }
+
+    const svgBuffer = Buffer.from(MISSING_MEDIA_SVG, 'utf8');
+    res.status(200);
+    res.set('Content-Type', 'image/svg+xml; charset=utf-8');
+    res.set('Content-Length', String(svgBuffer.length));
+    return res.end(svgBuffer);
+};
+
 // Authenticated media endpoint with path recovery for legacy files.
 router.get('/media', (req, res) => {
     const decoded = verifyTokenFromRequest(req);
@@ -280,12 +325,12 @@ router.get('/media', (req, res) => {
     }
 
     if (!candidate || !fs.existsSync(candidate)) {
-        const fallbackName = requestedName || path.basename(String(requestedPath || ''));
+        const fallbackName = requestedName || path.basename(String(requestedPath || '').split('#')[0].split('?')[0]);
         if (!fallbackName) {
-            return res.status(404).json({ error: 'Media not found' });
+            return respondNoMedia(req, res);
         }
         const found = findByFilenameRecursive(uploadsRoot, fallbackName);
-        if (!found) return res.status(404).json({ error: 'Media not found' });
+        if (!found) return respondNoMedia(req, res);
         candidate = found;
     }
 
@@ -304,7 +349,28 @@ router.get('/media/file/:id', (req, res) => {
     }
     return streamGridFSFileWithRange(req, res, req.params.id).catch((err) => {
         console.error('[GRIDFS MEDIA STREAM ERROR]', err);
-        return res.status(500).json({ error: 'Media stream failed' });
+        const fallbackName = String(req.query.name || '');
+        const fallbackPath = String(req.query.legacyPath || req.query.path || '');
+        const uploadsRoot = path.resolve(__dirname, '../uploads');
+
+        let candidate = safeResolveMediaPath(fallbackPath);
+        if ((!candidate || !fs.existsSync(candidate)) && fallbackName) {
+            candidate = safeResolveMediaPath(`/uploads/${fallbackName}`);
+        }
+        if (!candidate || !fs.existsSync(candidate)) {
+            const fallbackLookupName = fallbackName || path.basename(String(fallbackPath || '').split('#')[0].split('?')[0]);
+            const found = findByFilenameRecursive(uploadsRoot, fallbackLookupName);
+            if (found) candidate = found;
+        }
+
+        if (candidate && fs.existsSync(candidate)) {
+            try {
+                return streamFileWithRange(req, res, candidate);
+            } catch (localErr) {
+                console.error('[LOCAL MEDIA FALLBACK ERROR]', localErr);
+            }
+        }
+        return respondNoMedia(req, res);
     });
 });
 
@@ -366,7 +432,7 @@ router.get('/media/message/:messageId', async (req, res) => {
             }
         }
 
-        if (!msg) return res.status(404).json({ error: 'Message not found' });
+        if (!msg) return respondNoMedia(req, res);
 
         if (isGroupMsg && currentUserId) {
             const group = await Group.findById(msg.group_id).select('members admin admins removedMembers');
@@ -392,7 +458,7 @@ router.get('/media/message/:messageId', async (req, res) => {
             const fallbackPath = String(req.query.legacyPath || req.query.path || '');
             const fallbackName = String(req.query.name || '');
             if (!fallbackPath && !fallbackName) {
-                return res.status(404).json({ error: 'Media path not found' });
+                return respondNoMedia(req, res);
             }
 
             let candidate = safeResolveMediaPath(fallbackPath);
@@ -400,8 +466,11 @@ router.get('/media/message/:messageId', async (req, res) => {
                 candidate = safeResolveMediaPath(`/uploads/${fallbackName}`);
             }
             if (!candidate || !fs.existsSync(candidate)) {
-                const found = findByFilenameRecursive(path.resolve(__dirname, '../uploads'), fallbackName || path.basename(fallbackPath));
-                if (!found) return res.status(404).json({ error: 'Media not found' });
+                const found = findByFilenameRecursive(
+                    path.resolve(__dirname, '../uploads'),
+                    fallbackName || path.basename(String(fallbackPath || '').split('#')[0].split('?')[0])
+                );
+                if (!found) return respondNoMedia(req, res);
                 candidate = found;
             }
             return streamFileWithRange(req, res, candidate);
@@ -440,16 +509,34 @@ router.get('/media/message/:messageId', async (req, res) => {
                 console.error('[MESSAGE MEDIA GRIDFS FALLBACK ERROR]', gridErr);
             }
 
-            const fallbackLookupName = String(req.query.name || fileName || path.basename(rawPath));
+            const fallbackLookupName = String(req.query.name || fileName || path.basename(String(rawPath || '').split('#')[0].split('?')[0]));
             const found = findByFilenameRecursive(path.resolve(__dirname, '../uploads'), fallbackLookupName);
-            if (!found) return res.status(404).json({ error: 'Media not found' });
+            if (!found) return respondNoMedia(req, res);
             candidate = found;
         }
 
         return streamFileWithRange(req, res, candidate);
     } catch (err) {
         console.error('[MESSAGE MEDIA ERROR]', err);
-        return res.status(500).json({ error: 'Media stream failed' });
+        const fallbackName = String(req.query.name || '');
+        const fallbackPath = String(req.query.legacyPath || req.query.path || '');
+        const uploadsRoot = path.resolve(__dirname, '../uploads');
+        let candidate = safeResolveMediaPath(fallbackPath);
+        if ((!candidate || !fs.existsSync(candidate)) && fallbackName) {
+            candidate = safeResolveMediaPath(`/uploads/${fallbackName}`);
+        }
+        if ((!candidate || !fs.existsSync(candidate)) && fallbackName) {
+            const found = findByFilenameRecursive(uploadsRoot, fallbackName);
+            if (found) candidate = found;
+        }
+        if (candidate && fs.existsSync(candidate)) {
+            try {
+                return streamFileWithRange(req, res, candidate);
+            } catch (localErr) {
+                console.error('[MESSAGE MEDIA LOCAL FALLBACK ERROR]', localErr);
+            }
+        }
+        return respondNoMedia(req, res);
     }
 });
 
@@ -1318,15 +1405,33 @@ router.get('/p2p/:userId/:otherUserId', authenticateToken, async (req, res) => {
         }
         // --- END GUARD ---
 
-        const messages = await Message.find({
+        const requestedLimit = Number.parseInt(req.query.limit, 10);
+        const pageLimit = Number.isFinite(requestedLimit) ? Math.max(20, Math.min(300, requestedLimit)) : 120;
+        const withMeta = String(req.query.withMeta || '') === '1';
+        const beforeRaw = String(req.query.before || '').trim();
+        const beforeDate = beforeRaw ? new Date(beforeRaw) : null;
+        const hasValidBefore = beforeDate && Number.isFinite(beforeDate.getTime());
+
+        const baseQuery = {
             $or: [
                 { user_id: new mongoose.Types.ObjectId(userId), receiver_id: new mongoose.Types.ObjectId(otherUserId) },
                 { user_id: new mongoose.Types.ObjectId(otherUserId), receiver_id: new mongoose.Types.ObjectId(userId) }
             ],
             deleted_for: { $ne: new mongoose.Types.ObjectId(req.user.id) }
-        })
-            .sort({ created_at: 1 })
+        };
+
+        if (hasValidBefore) {
+            baseQuery.created_at = { $lt: beforeDate };
+        }
+
+        const messagesDesc = await Message.find(baseQuery)
+            .sort({ created_at: -1 })
+            .limit(pageLimit + 1)
             .populate('reply_to', 'content type file_path user_id sender_id ciphertext session_header');
+
+        const hasMore = messagesDesc.length > pageLimit;
+        const pageMessages = hasMore ? messagesDesc.slice(0, pageLimit) : messagesDesc;
+        const messages = pageMessages.reverse();
 
         // Map messages to include user-specific is_starred boolean
         const enrichedMessages = messages.map(msg => {
@@ -1335,6 +1440,15 @@ router.get('/p2p/:userId/:otherUserId', authenticateToken, async (req, res) => {
             msgObj.is_edited = msg.is_edited || false;
             return msgObj;
         });
+
+        if (withMeta) {
+            const nextBefore = messages.length > 0 ? messages[0].created_at : null;
+            return res.json({
+                messages: enrichedMessages,
+                hasMore,
+                nextBefore
+            });
+        }
 
         res.json(enrichedMessages);
     } catch (err) {

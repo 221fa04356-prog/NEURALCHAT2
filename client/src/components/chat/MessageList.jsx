@@ -293,6 +293,7 @@ const MessageList = memo(({
     handleMsgDropdownOpen,
     longPressTimer,
     handleDownload,
+    onOpenMessageMedia,
     playingAudioId,
     handlePlayAudio,
     playbackSpeed,
@@ -334,17 +335,44 @@ const MessageList = memo(({
     isGroup,
     headerContent,
     onScroll,
-    isMobile
+    isMobile,
+    onViewOncePreviewOpenChange
 }) => {
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [failedMediaKeys, setFailedMediaKeys] = useState(() => new Set());
     const [failedMediaUrls, setFailedMediaUrls] = useState(() => new Set());
     const [mediaUrlOverrides, setMediaUrlOverrides] = useState(() => new Map());
-    const [videoDurationByKey, setVideoDurationByKey] = useState(() => new Map());
+    const [videoPlayingByKey, setVideoPlayingByKey] = useState(() => new Map());
+    const [videoPipKey, setVideoPipKey] = useState('');
+    const [videoPipPosterByKey, setVideoPipPosterByKey] = useState(() => new Map());
+    const [videoOverlayVisibleByKey, setVideoOverlayVisibleByKey] = useState(() => new Map());
+    const [activeVideoKey, setActiveVideoKey] = useState('');
+    const [locallyConsumedViewOnceIds, setLocallyConsumedViewOnceIds] = useState(() => new Set());
+    const [viewOncePreview, setViewOncePreview] = useState(null); // { url, type }
+    const videoRefs = useRef(new Map());
+    const videoOverlayTimersRef = useRef(new Map());
+    const videoTapTrackerRef = useRef(new Map());
     const virtuosoRef = useRef(null);
     const handledJumpNonceRef = useRef(null);
     const targetId = String(selectedUser?._id || '').toLowerCase();
     const typingSet = typingUsers[targetId];
+
+    useEffect(() => {
+        if (typeof onViewOncePreviewOpenChange === 'function') {
+            onViewOncePreviewOpenChange(!!viewOncePreview);
+        }
+        if (typeof document !== 'undefined') {
+            document.body.classList.toggle('wa-view-once-open', !!viewOncePreview);
+        }
+        return () => {
+            if (typeof onViewOncePreviewOpenChange === 'function') {
+                onViewOncePreviewOpenChange(false);
+            }
+            if (typeof document !== 'undefined') {
+                document.body.classList.remove('wa-view-once-open');
+            }
+        };
+    }, [viewOncePreview, onViewOncePreviewOpenChange]);
 
     const getMessageKey = useCallback((msg) => String(msg?._id || msg?.id || ''), []);
     const normalizeMediaCompareUrl = useCallback((url) => {
@@ -398,19 +426,217 @@ const MessageList = memo(({
         }
         markMediaFailed(msg, event);
     }, [getMessageKey, markMediaFailed, mediaUrlOverrides, normalizeMediaCompareUrl]);
-    const handleVideoMetadataLoaded = useCallback((msg, event) => {
+    const captureVideoPoster = useCallback((msg) => {
         const messageKey = getMessageKey(msg);
         if (!messageKey) return;
-        const duration = Number(event?.currentTarget?.duration || 0);
-        if (!Number.isFinite(duration) || duration <= 0) return;
-        const rounded = Math.max(1, Math.round(duration));
-        setVideoDurationByKey((prev) => {
-            if (prev.get(messageKey) === rounded) return prev;
+        const videoEl = videoRefs.current.get(messageKey);
+        if (!videoEl) return;
+        const width = Number(videoEl.videoWidth || 0);
+        const height = Number(videoEl.videoHeight || 0);
+        if (!width || !height) return;
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            ctx.drawImage(videoEl, 0, 0, width, height);
+            const poster = canvas.toDataURL('image/jpeg', 0.76);
+            if (!poster) return;
+            setVideoPipPosterByKey((prev) => {
+                if (prev.get(messageKey) === poster) return prev;
+                const next = new Map(prev);
+                next.set(messageKey, poster);
+                return next;
+            });
+        } catch (_) {}
+    }, [getMessageKey]);
+    const handleVideoRef = useCallback((msg, node) => {
+        const messageKey = getMessageKey(msg);
+        if (!messageKey) return;
+        if (node) {
+            if (!node.__waPipHandlers) {
+                const onEnter = () => {
+                    captureVideoPoster(msg);
+                    setVideoPipKey(messageKey);
+                };
+                const onLeave = () => setVideoPipKey('');
+                node.addEventListener('enterpictureinpicture', onEnter);
+                node.addEventListener('leavepictureinpicture', onLeave);
+                node.__waPipHandlers = { onEnter, onLeave };
+            }
+            videoRefs.current.set(messageKey, node);
+            return;
+        }
+        const existing = videoRefs.current.get(messageKey);
+        if (existing?.__waPipHandlers) {
+            const { onEnter, onLeave } = existing.__waPipHandlers;
+            existing.removeEventListener('enterpictureinpicture', onEnter);
+            existing.removeEventListener('leavepictureinpicture', onLeave);
+            existing.__waPipHandlers = null;
+        }
+        videoRefs.current.delete(messageKey);
+    }, [captureVideoPoster, getMessageKey]);
+    const setVideoPlayingState = useCallback((msg, isPlaying) => {
+        const messageKey = getMessageKey(msg);
+        if (!messageKey) return;
+        setVideoPlayingByKey((prev) => {
+            if (prev.get(messageKey) === isPlaying) return prev;
             const next = new Map(prev);
-            next.set(messageKey, rounded);
+            next.set(messageKey, isPlaying);
             return next;
         });
     }, [getMessageKey]);
+    const toggleVideoPlayback = useCallback((msg) => {
+        const messageKey = getMessageKey(msg);
+        if (!messageKey) return;
+        const videoEl = videoRefs.current.get(messageKey);
+        if (!videoEl) return;
+        if (videoEl.paused || videoEl.ended) {
+            videoEl.play().catch(() => {});
+            return;
+        }
+        videoEl.pause();
+    }, [getMessageKey]);
+    const seekVideoBySeconds = useCallback((msg, deltaSeconds) => {
+        const messageKey = getMessageKey(msg);
+        if (!messageKey) return;
+        const videoEl = videoRefs.current.get(messageKey);
+        if (!videoEl) return;
+        const duration = Number(videoEl.duration || 0);
+        const current = Number(videoEl.currentTime || 0);
+        const maxTarget = Number.isFinite(duration) && duration > 0 ? duration : Number.MAX_SAFE_INTEGER;
+        const target = Math.max(0, Math.min(maxTarget, current + deltaSeconds));
+        try {
+            videoEl.currentTime = target;
+        } catch (_) {}
+    }, [getMessageKey]);
+    useEffect(() => {
+        const handleWindowKeyDown = (event) => {
+            if (event.defaultPrevented) return;
+            const isSeekKey = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
+            const isToggleKey = event.key === ' ' || event.code === 'Space';
+            if (!isSeekKey && !isToggleKey) return;
+            const targetTag = String(event.target?.tagName || '').toUpperCase();
+            if (targetTag === 'INPUT' || targetTag === 'TEXTAREA' || event.target?.isContentEditable) return;
+            const videoEl = activeVideoKey ? videoRefs.current.get(activeVideoKey) : null;
+            if (!videoEl) return;
+            if (isToggleKey) {
+                if (videoEl.paused || videoEl.ended) {
+                    videoEl.play().catch(() => {});
+                } else {
+                    videoEl.pause();
+                }
+                event.preventDefault();
+                return;
+            }
+            const delta = event.key === 'ArrowLeft' ? -10 : 10;
+            const duration = Number(videoEl.duration || 0);
+            const current = Number(videoEl.currentTime || 0);
+            const maxTarget = Number.isFinite(duration) && duration > 0 ? duration : Number.MAX_SAFE_INTEGER;
+            const target = Math.max(0, Math.min(maxTarget, current + delta));
+            try {
+                videoEl.currentTime = target;
+                event.preventDefault();
+            } catch (_) {}
+        };
+        window.addEventListener('keydown', handleWindowKeyDown, { passive: false });
+        return () => window.removeEventListener('keydown', handleWindowKeyDown);
+    }, [activeVideoKey]);
+    const scheduleVideoOverlayHide = useCallback((msg, delayMs = 1000) => {
+        const messageKey = getMessageKey(msg);
+        if (!messageKey) return;
+        const existingTimer = videoOverlayTimersRef.current.get(messageKey);
+        if (existingTimer) clearTimeout(existingTimer);
+        const timer = setTimeout(() => {
+            const videoEl = videoRefs.current.get(messageKey);
+            const isPaused = !videoEl || videoEl.paused || videoEl.ended;
+            if (!isPaused) {
+                setVideoOverlayVisibleByKey((prev) => {
+                    if (prev.get(messageKey) === false) return prev;
+                    const next = new Map(prev);
+                    next.set(messageKey, false);
+                    return next;
+                });
+            }
+            videoOverlayTimersRef.current.delete(messageKey);
+        }, delayMs);
+        videoOverlayTimersRef.current.set(messageKey, timer);
+    }, [getMessageKey]);
+    const setVideoOverlayVisible = useCallback((msg, visible, autoHideIfPlaying = true) => {
+        const messageKey = getMessageKey(msg);
+        if (!messageKey) return;
+        setVideoOverlayVisibleByKey((prev) => {
+            if (prev.get(messageKey) === visible) return prev;
+            const next = new Map(prev);
+            next.set(messageKey, visible);
+            return next;
+        });
+        if (!visible) return;
+        if (autoHideIfPlaying) {
+            const videoEl = videoRefs.current.get(messageKey);
+            if (videoEl && !videoEl.paused && !videoEl.ended) {
+                scheduleVideoOverlayHide(msg, 1000);
+            }
+        }
+    }, [getMessageKey, scheduleVideoOverlayHide]);
+    const handleVideoDesktopDoubleClick = useCallback((msg, event) => {
+        const rect = event.currentTarget?.getBoundingClientRect?.();
+        if (!rect) return;
+        const localX = Number(event.clientX || 0) - rect.left;
+        if (!Number.isFinite(localX)) return;
+        const delta = localX < (rect.width / 2) ? -10 : 10;
+        seekVideoBySeconds(msg, delta);
+        setVideoOverlayVisible(msg, true, true);
+    }, [seekVideoBySeconds, setVideoOverlayVisible]);
+    const handleVideoMobileDoubleTap = useCallback((msg, event) => {
+        const touch = event.changedTouches?.[0];
+        if (!touch) return;
+        const messageKey = getMessageKey(msg);
+        if (!messageKey) return;
+        const rect = event.currentTarget?.getBoundingClientRect?.();
+        if (!rect) return;
+        const now = Date.now();
+        const prev = videoTapTrackerRef.current.get(messageKey);
+        const isDoubleTap = !!prev && (now - prev.time) < 320;
+        const localX = Number(touch.clientX || 0) - rect.left;
+        if (isDoubleTap) {
+            const delta = localX < (rect.width / 2) ? -10 : 10;
+            seekVideoBySeconds(msg, delta);
+            setVideoOverlayVisible(msg, true, true);
+            videoTapTrackerRef.current.delete(messageKey);
+            return;
+        }
+        videoTapTrackerRef.current.set(messageKey, { time: now });
+    }, [getMessageKey, seekVideoBySeconds, setVideoOverlayVisible]);
+    useEffect(() => {
+        const syncPiPState = (event) => {
+            const pipEl = event?.target || document.pictureInPictureElement || null;
+            if (!pipEl) {
+                setVideoPipKey('');
+                return;
+            }
+            for (const [key, el] of videoRefs.current.entries()) {
+                if (el === pipEl) {
+                    setVideoPipKey(key);
+                    return;
+                }
+            }
+        };
+        const clearPiPState = () => setVideoPipKey('');
+        document.addEventListener('enterpictureinpicture', syncPiPState, true);
+        document.addEventListener('leavepictureinpicture', clearPiPState, true);
+        return () => {
+            document.removeEventListener('enterpictureinpicture', syncPiPState, true);
+            document.removeEventListener('leavepictureinpicture', clearPiPState, true);
+        };
+    }, []);
+    useEffect(() => () => {
+        for (const timer of videoOverlayTimersRef.current.values()) {
+            clearTimeout(timer);
+        }
+        videoOverlayTimersRef.current.clear();
+    }, []);
 
     // 1. Prepare Flattened List for Virtuoso
     const flattenedItems = React.useMemo(() => {
@@ -508,6 +734,7 @@ const MessageList = memo(({
         const msgId = msg._id || msg.id;
         const messageKey = getMessageKey(msg);
         const isMe = isMeMsg(msg);
+        const isViewOnceConsumed = !!(msg.is_viewed || locallyConsumedViewOnceIds.has(messageKey));
         const isAudioPlaying = String(playingAudioId) === String(msg._id || msg.id);
         const activePlaybackDuration = Math.max(1, Number(playbackDuration || msg.duration || 1));
         const pendingSeekPercentForMsg = pendingVoiceSeekTargets?.[String(msg._id || msg.id)] ?? null;
@@ -920,6 +1147,7 @@ const MessageList = memo(({
                                 </div>
                                 <div className="wa-reply-context-text">
                                     {(() => {
+                                        if (msg.reply_to.is_view_once) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ViewOnceBadge size={14} /> <span>View once</span></span>;
                                         if (msg.reply_to.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
                                         if (msg.reply_to.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
                                         if (msg.reply_to.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>📊 <span>{msg.reply_to.poll?.question || 'Poll'}</span></span>;
@@ -953,8 +1181,8 @@ const MessageList = memo(({
                             </div>
                         ) : (
                             <>
-                                {msg.is_view_once && msg.is_viewed && !isMeMsg(msg) && msg.type !== 'audio' ? (
-                                    <div className="wa-spent-view-once-media" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', color: '#8696a0', fontSize: 14 }}>
+                                {msg.is_view_once && isViewOnceConsumed && msg.type !== 'audio' ? (
+                                    <div className="wa-spent-view-once-media" onClick={() => setSnackbar({ message: 'Already seen', type: 'info', variant: 'system' })} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', color: '#8696a0', fontSize: 14, cursor: 'pointer' }}>
                                         <ViewOnceBadge size={20} />
                                         <span>{msg.type === 'image' ? 'Photo' : msg.type === 'file' ? 'File' : 'Video'}</span>
                                     </div>
@@ -964,13 +1192,59 @@ const MessageList = memo(({
                                             <div className="wa-msg-image-container" onClick={(e) => {
                                                 if (isForwardingMode) return;
                                                 e.stopPropagation();
-                                                if (msg.is_view_once && !isMe) {
-                                                    markMessageViewed(msg._id);
+                                                if (msg.is_view_once) {
+                                                    if (isViewOnceConsumed) {
+                                                        setSnackbar({ message: 'Already seen', type: 'info', variant: 'system' });
+                                                        return;
+                                                    }
+                                                    if (isMe) {
+                                                        setLocallyConsumedViewOnceIds((prev) => {
+                                                            if (prev.has(messageKey)) return prev;
+                                                            const next = new Set(prev);
+                                                            next.add(messageKey);
+                                                            return next;
+                                                        });
+                                                        setSnackbar({ message: 'Viewed once. Marked as seen.', type: 'info', variant: 'system' });
+                                                    }
+                                                    if (!isMe) {
+                                                        markMessageViewed(msg._id || msg.id);
+                                                    }
+                                                    const openUrl = absoluteFileUrl || msg.file_path || msg.filePath;
+                                                    if (openUrl) {
+                                                        setViewOncePreview({ url: openUrl, type: 'image' });
+                                                    } else {
+                                                        setSnackbar({ message: 'Media unavailable', type: 'error', variant: 'system' });
+                                                    }
+                                                    return;
                                                 }
                                                 setViewingContact(null);
-                                                handleDownload(msg.file_path, msg.fileName, msg);
+                                                if (typeof onOpenMessageMedia === 'function') {
+                                                    onOpenMessageMedia(msg);
+                                                } else {
+                                                    handleDownload(msg.file_path, msg.fileName, msg);
+                                                }
                                             }}>
-                                                {absoluteFileUrl ? (
+                                                {msg.is_view_once && !isViewOnceConsumed ? (
+                                                    <div
+                                                        style={{
+                                                            minWidth: isMobile ? 150 : 180,
+                                                            minHeight: isMobile ? 54 : 60,
+                                                            borderRadius: 12,
+                                                            border: '1px solid rgba(56, 189, 248, 0.28)',
+                                                            background: 'linear-gradient(145deg, rgba(8, 35, 56, 0.95), rgba(8, 47, 73, 0.92))',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            gap: 6,
+                                                            color: '#cfe7f7',
+                                                            fontSize: 12,
+                                                            fontWeight: 600
+                                                        }}
+                                                    >
+                                                        <ViewOnceBadge size={14} />
+                                                        <span>View once photo</span>
+                                                    </div>
+                                                ) : absoluteFileUrl ? (
                                                     <img
                                                         key={`${messageKey}:${absoluteFileUrl}`}
                                                         src={absoluteFileUrl}
@@ -986,24 +1260,122 @@ const MessageList = memo(({
                                             </div>
                                         )}
                                         {(msg.type === 'video' || (msg.type === 'file' && isVideoByExt)) && (
-                                            <div className="wa-msg-image-container" 
-                                                style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#111b21', cursor: 'pointer' }}
+                                            <div className={`wa-msg-image-container ${videoPipKey === messageKey ? 'pip-active' : ''}`}
+                                                style={{
+                                                    position: 'relative',
+                                                    borderRadius: 10,
+                                                    overflow: 'hidden',
+                                                    background: videoPipKey === messageKey ? 'linear-gradient(145deg, #0f172a 0%, #082f49 55%, #0a4f6b 100%)' : '#111b21',
+                                                    cursor: 'pointer',
+                                                    boxShadow: videoPipKey === messageKey ? '0 0 0 1px rgba(56,189,248,0.35), 0 8px 20px rgba(8,47,73,0.45)' : undefined,
+                                                    transition: 'all 0.2s ease'
+                                                }}
                                                 onClick={(e) => {
-                                                    if (msg.is_view_once && !isMe) {
-                                                        markAsRead(msg);
+                                                    if (msg.is_view_once) {
+                                                        e.stopPropagation();
+                                                        if (isViewOnceConsumed) {
+                                                            setSnackbar({ message: 'Already seen', type: 'info', variant: 'system' });
+                                                            return;
+                                                        }
+                                                        if (isMe) {
+                                                            setLocallyConsumedViewOnceIds((prev) => {
+                                                                if (prev.has(messageKey)) return prev;
+                                                                const next = new Set(prev);
+                                                                next.add(messageKey);
+                                                                return next;
+                                                            });
+                                                            setSnackbar({ message: 'Viewed once. Marked as seen.', type: 'info', variant: 'system' });
+                                                        }
+                                                        if (!isMe) {
+                                                            markMessageViewed(msg._id || msg.id);
+                                                        }
+                                                        const openUrl = absoluteFileUrl || msg.file_path || msg.filePath;
+                                                        if (openUrl) {
+                                                            setViewOncePreview({ url: openUrl, type: 'video' });
+                                                        } else {
+                                                            setSnackbar({ message: 'Media unavailable', type: 'error', variant: 'system' });
+                                                        }
+                                                        return;
                                                     }
+                                                    setVideoOverlayVisible(msg, true, true);
                                                 }}
                                             >
-                                                {absoluteFileUrl ? (
+                                                {msg.is_view_once && !isViewOnceConsumed ? (
+                                                    <div
+                                                        style={{
+                                                            minWidth: isMobile ? 158 : 188,
+                                                            minHeight: isMobile ? 56 : 64,
+                                                            borderRadius: 12,
+                                                            border: '1px solid rgba(56, 189, 248, 0.28)',
+                                                            background: 'linear-gradient(145deg, rgba(8, 35, 56, 0.95), rgba(8, 47, 73, 0.92))',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            gap: 6,
+                                                            color: '#cfe7f7',
+                                                            fontSize: 12,
+                                                            fontWeight: 600
+                                                        }}
+                                                    >
+                                                        <ViewOnceBadge size={14} />
+                                                        <span>View once video</span>
+                                                    </div>
+                                                ) : absoluteFileUrl ? (
                                                     <>
+                                                        {videoPipKey === messageKey && videoPipPosterByKey.get(messageKey) && (
+                                                            <img
+                                                                src={videoPipPosterByKey.get(messageKey)}
+                                                                alt="PiP preview"
+                                                                style={{
+                                                                    position: 'absolute',
+                                                                    inset: 0,
+                                                                    width: '100%',
+                                                                    height: '100%',
+                                                                    objectFit: 'cover',
+                                                                    opacity: 0.95,
+                                                                    filter: 'saturate(1.02) contrast(1.02)'
+                                                                }}
+                                                            />
+                                                        )}
                                                         <video
+                                                            ref={(node) => handleVideoRef(msg, node)}
                                                             key={`${messageKey}:${absoluteFileUrl}`}
                                                             src={absoluteFileUrl}
                                                             playsInline
-                                                            preload="auto"
+                                                            preload="metadata"
                                                             controls
+                                                            controlsList="noremoteplayback"
+                                                            disableRemotePlayback
                                                             onError={(event) => handleMediaError(msg, retryFileUrl, event)}
-                                                            onLoadedMetadata={(event) => handleVideoMetadataLoaded(msg, event)}
+                                                            onMouseEnter={() => {
+                                                                setActiveVideoKey(messageKey);
+                                                                setVideoOverlayVisible(msg, true, true);
+                                                            }}
+                                                            onMouseMove={() => {
+                                                                setActiveVideoKey(messageKey);
+                                                                setVideoOverlayVisible(msg, true, true);
+                                                            }}
+                                                            onTouchEnd={(event) => handleVideoMobileDoubleTap(msg, event)}
+                                                            onDoubleClick={(event) => handleVideoDesktopDoubleClick(msg, event)}
+                                                            onPlay={() => {
+                                                                setActiveVideoKey(messageKey);
+                                                                setVideoPlayingState(msg, true);
+                                                                if (msg.is_view_once && !isMe) {
+                                                                    markMessageViewed(msg._id || msg.id);
+                                                                }
+                                                            }}
+                                                            onPause={() => {
+                                                                setVideoPlayingState(msg, false);
+                                                                setVideoOverlayVisible(msg, false, false);
+                                                            }}
+                                                            onLoadedMetadata={() => captureVideoPoster(msg)}
+                                                            onEnded={(event) => {
+                                                                const video = event.currentTarget;
+                                                                video.pause();
+                                                                video.currentTime = 0;
+                                                                setVideoPlayingState(msg, false);
+                                                                setVideoOverlayVisible(msg, false, false);
+                                                            }}
                                                             onClick={(event) => event.stopPropagation()}
                                                             style={{ 
                                                                 width: '100%', 
@@ -1012,9 +1384,73 @@ const MessageList = memo(({
                                                                 display: 'block', 
                                                                 background: '#000', 
                                                                 borderRadius: 8,
-                                                                objectFit: 'cover'
+                                                                objectFit: 'cover',
+                                                                opacity: videoPipKey === messageKey && videoPipPosterByKey.get(messageKey) ? 0.02 : 1
                                                             }}
                                                         />
+                                                        {videoPipKey === messageKey && (
+                                                            <div
+                                                                style={{
+                                                                    position: 'absolute',
+                                                                    right: 10,
+                                                                    bottom: 10,
+                                                                    padding: '3px 10px',
+                                                                    borderRadius: 999,
+                                                                    fontSize: 11,
+                                                                    fontWeight: 600,
+                                                                    background: 'rgba(2,132,199,0.28)',
+                                                                    border: '1px solid rgba(125,211,252,0.35)',
+                                                                    color: '#e0f2fe',
+                                                                    pointerEvents: 'none'
+                                                                }}
+                                                            >
+                                                                PiP Active
+                                                            </div>
+                                                        )}
+                                                        {videoOverlayVisibleByKey.get(messageKey) && videoPipKey !== messageKey && (
+                                                            <div
+                                                                onClick={(event) => event.stopPropagation()}
+                                                                style={{
+                                                                    position: 'absolute',
+                                                                    top: '50%',
+                                                                    left: '50%',
+                                                                    transform: 'translate(-50%, -50%)',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    gap: 14,
+                                                                    pointerEvents: 'auto',
+                                                                    background: 'transparent',
+                                                                    borderRadius: 999,
+                                                                    padding: 0
+                                                                }}
+                                                            >
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(event) => {
+                                                                        event.stopPropagation();
+                                                                        toggleVideoPlayback(msg);
+                                                                        setVideoOverlayVisible(msg, true, true);
+                                                                    }}
+                                                                    style={{
+                                                                        border: '1px solid rgba(56, 189, 248, 0.35)',
+                                                                        background: 'rgba(8, 47, 73, 0.62)',
+                                                                        color: '#e0f2fe',
+                                                                        cursor: 'pointer',
+                                                                        width: 56,
+                                                                        height: 56,
+                                                                        borderRadius: '50%',
+                                                                        display: 'inline-flex',
+                                                                        alignItems: 'center',
+                                                                        justifyContent: 'center',
+                                                                        backdropFilter: 'blur(6px)',
+                                                                        boxShadow: '0 8px 16px rgba(8, 47, 73, 0.45)'
+                                                                    }}
+                                                                    title="Pause or play"
+                                                                >
+                                                                    {videoPlayingByKey.get(messageKey) ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
+                                                                </button>
+                                                            </div>
+                                                        )}
                                                     </>
                                                 ) : (
                                                     <div className="wa-deleted-tag" style={{ padding: '16px' }}>
@@ -1027,8 +1463,8 @@ const MessageList = memo(({
                                 )}
                                 {msg.type === 'file' && !isVideoByExt && (
                                     <>
-                                        {msg.is_view_once && msg.is_viewed && !isMeMsg(msg) ? (
-                                            <div className="wa-spent-view-once-file" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', color: '#8696a0', fontSize: 14 }}>
+                                        {msg.is_view_once && isViewOnceConsumed ? (
+                                            <div className="wa-spent-view-once-file" onClick={() => setSnackbar({ message: 'Already seen', type: 'info', variant: 'system' })} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', color: '#8696a0', fontSize: 14, cursor: 'pointer' }}>
                                                 <ViewOnceBadge size={20} />
                                                 <span>File</span>
                                             </div>
@@ -1061,11 +1497,9 @@ const MessageList = memo(({
                                                             if (msg.is_view_once && !isMe) {
                                                                 markMessageViewed(msg._id);
                                                             }
-                                                            if (shouldUseSystemOpen && typeof handleOpenFile === 'function') {
-                                                                handleOpenFile(absoluteFileUrl, displayFileName, msg);
-                                                                return;
-                                                            }
-                                                            if (docOpenUrl) {
+                                                            if (typeof handleOpenFile === 'function') {
+                                                                handleOpenFile(docOpenUrl || absoluteFileUrl || msg.file_path || msg.filePath, displayFileName, msg);
+                                                            } else if (docOpenUrl) {
                                                                 window.open(docOpenUrl, '_blank', 'noopener,noreferrer');
                                                             }
                                                         }}
@@ -1092,8 +1526,8 @@ const MessageList = memo(({
                                 )}
                                 {msg.type === 'audio' && (
                                     <div id={`voice-${msg._id}`} className="wa-voice-card-container">
-                                        {msg.is_view_once && msg.is_viewed && !isMeMsg(msg) && String(playingAudioId) !== String(msg._id || msg.id) ? (
-                                            <div className="wa-voice-card spent" style={{ opacity: 0.7, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', minHeight: '72px', padding: '12px 16px' }}>
+                                        {msg.is_view_once && isViewOnceConsumed && String(playingAudioId) !== String(msg._id || msg.id) ? (
+                                            <div className="wa-voice-card spent" onClick={() => setSnackbar({ message: 'Already seen', type: 'info', variant: 'system' })} style={{ opacity: 0.7, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', minHeight: '72px', padding: '12px 16px', cursor: 'pointer' }}>
                                                 <ViewOnceBadge size={20} />
                                                 <span style={{ color: '#8696a0', fontSize: '13px', whiteSpace: 'nowrap', lineHeight: 1, display: 'flex', alignItems: 'center' }}>Voice message</span>
                                             </div>
@@ -1129,6 +1563,24 @@ const MessageList = memo(({
 
                                                 <button className="wa-voice-play-btn" onClick={(e) => {
                                                     e.stopPropagation();
+                                                    if (msg.is_view_once) {
+                                                        if (isViewOnceConsumed) {
+                                                            setSnackbar({ message: 'Already seen', type: 'info', variant: 'system' });
+                                                            return;
+                                                        }
+                                                        if (isMe) {
+                                                            setLocallyConsumedViewOnceIds((prev) => {
+                                                                if (prev.has(messageKey)) return prev;
+                                                                const next = new Set(prev);
+                                                                next.add(messageKey);
+                                                                return next;
+                                                            });
+                                                            setSnackbar({ message: 'Viewed once. Marked as seen.', type: 'info', variant: 'system' });
+                                                        }
+                                                        if (!isMe) {
+                                                            markMessageViewed(msg._id || msg.id);
+                                                        }
+                                                    }
                                                     const msgKey = String(msg._id || msg.id);
                                                     const pendingSeekPercentFromRef = pendingVoiceSeekRef?.current?.get(msgKey);
                                                     const pendingSeekPercentFromState = pendingVoiceSeekTargets?.[msgKey];
@@ -1294,7 +1746,11 @@ const MessageList = memo(({
                                     </div>
                                 )}
 
-                                {msg.content && msg.type !== 'contact' && msg.type !== 'poll' && msg.type !== 'event' && (
+                                {msg.content &&
+                                    msg.type !== 'contact' &&
+                                    msg.type !== 'poll' &&
+                                    msg.type !== 'event' &&
+                                    !(msg.is_view_once && (msg.type === 'image' || msg.type === 'video' || msg.type === 'audio' || (msg.type === 'file' && isVideoByExt))) && (
                                     <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{renderContent(msg.content)}</span>
                                 )}
                             </>
@@ -1369,8 +1825,67 @@ const MessageList = memo(({
         );
     };
 
+    const chatWrapperRect = (typeof window !== 'undefined')
+        ? document.querySelector('.wa-main-chat-wrapper')?.getBoundingClientRect()
+        : null;
+    const chatHeaderRect = (typeof window !== 'undefined')
+        ? document.querySelector('.wa-chat-header')?.getBoundingClientRect()
+        : null;
+    const overlayTop = Math.max(0, Math.floor((chatHeaderRect?.bottom || chatWrapperRect?.top || 0) - 1));
+    const overlayLeft = Math.max(0, Math.floor(chatWrapperRect?.left || 0));
+    const overlayWidth = Math.max(0, Math.floor(chatWrapperRect?.width || window.innerWidth || 0));
+    const overlayHeight = Math.max(0, Math.floor((window.innerHeight || 0) - overlayTop));
+
     return (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+            {viewOncePreview && (
+                <div
+                    onClick={() => setViewOncePreview(null)}
+                    style={{
+                        position: 'fixed',
+                        top: overlayTop,
+                        left: overlayLeft,
+                        width: overlayWidth || '100vw',
+                        height: overlayHeight,
+                        zIndex: 2147483000,
+                        background: 'linear-gradient(180deg, rgba(4, 22, 44, 0.985) 0%, rgba(2, 18, 36, 0.985) 100%)',
+                        backdropFilter: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: 18
+                    }}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                            style={{
+                                width: 'min(92vw, 760px)',
+                                maxHeight: '88vh',
+                                borderRadius: 12,
+                                overflow: 'hidden',
+                                border: '1px solid rgba(56, 189, 248, 0.3)',
+                                background: '#06243d',
+                                boxShadow: '0 10px 34px rgba(0,0,0,0.45)'
+                            }}
+                        >
+                        {viewOncePreview.type === 'video' ? (
+                            <video
+                                src={viewOncePreview.url}
+                                controls
+                                autoPlay
+                                playsInline
+                                style={{ width: '100%', maxHeight: '88vh', display: 'block', background: '#06243d' }}
+                            />
+                        ) : (
+                            <img
+                                src={viewOncePreview.url}
+                                alt="View once"
+                                style={{ width: '100%', maxHeight: '88vh', objectFit: 'contain', display: 'block', background: '#06243d' }}
+                            />
+                        )}
+                    </div>
+                </div>
+            )}
             <Virtuoso
                 ref={virtuosoRef}
                 style={{ height: '100%', width: '100%' }}
@@ -1406,7 +1921,3 @@ const MessageList = memo(({
 });
 
 export default MessageList;
-
-
-
-
