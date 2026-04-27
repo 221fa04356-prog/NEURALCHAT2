@@ -8,7 +8,7 @@ import ViewOnceBadge from '../components/chat/ViewOnceBadge';
 import {
     MessageSquare, CircleDashed, Users, MoreVertical, Plus, Megaphone,
     Search, Settings, Phone, Video, Paperclip, Smile, Send, Mic, MicOff, Pause, PauseCircle, PlayCircle, StopCircle,
-    ArrowLeft, CheckCheck, User as UserIcon, FileText, Calendar, X, Star, ChevronDown, ChevronRight, ChevronLeft, Bell,
+    ArrowLeft, CheckCheck, CheckCircle, User as UserIcon, FileText, Calendar, X, Star, ChevronDown, ChevronRight, ChevronLeft, Bell,
     Info, Reply, Copy, Forward, Pin, CheckSquare, Download, Trash2, Archive, BellOff, HeartOff, XCircle, Lock, List, Heart, ThumbsDown, Share, Pencil, Image, StarOff, Camera, Link2 as LinkIcon,
     LayoutGrid, UserPlus, ArrowRight, Share2, Crop, Check, RotateCcw, Minus, Delete, User, Play, MapPin, IndianRupee, Sticker, PlusCircle,
     ShieldCheck, Monitor, BellRing, Laptop, LogOut, Globe, Clock, Building2, Mail, Briefcase, ExternalLink,
@@ -190,7 +190,7 @@ import '../styles/Chat.css';
 import '../styles/PrivacySettings.css';
 import { formatDateForSeparator } from '../utils/dateUtils';
 import Snackbar from '../components/Snackbar';
-import { getTranslator, getLangCode } from '../utils/translations';
+import { getTranslator, getLangCode, LANGUAGE_CODE_MAP } from '../utils/translations';
 import { countryCodes } from '../utils/countryCodes';
 
 import MessageList from '../components/chat/MessageList';
@@ -214,6 +214,152 @@ const socket = io(SOCKET_URL, {
     reconnectionAttempts: 10,
     reconnectionDelay: 1000,
 });
+
+const LANGUAGE_NATIVE_NAME_OVERRIDES = {
+    'pt': 'Portugues (Brasil)',
+    'zh': '\u7b80\u4f53\u4e2d\u6587',
+    'zh-TW': '\u7e41\u9ad4\u4e2d\u6587',
+};
+
+const getNativeLanguageName = (languageCode) => {
+    const fallback = languageCode === 'pt' ? 'Portugues (Brasil)' : languageCode;
+    if (LANGUAGE_NATIVE_NAME_OVERRIDES[languageCode]) {
+        return LANGUAGE_NATIVE_NAME_OVERRIDES[languageCode];
+    }
+
+    try {
+        const locale = languageCode === 'pt' ? 'pt-BR' : languageCode;
+        const displayNames = new Intl.DisplayNames([locale], { type: 'language' });
+        return displayNames.of(languageCode === 'pt' ? 'pt' : languageCode) || fallback;
+    } catch (_) {
+        return fallback;
+    }
+};
+
+const DEFAULT_NOTIFICATION_SETTINGS = {
+    masterEnabled: true,
+    desktopNotifications: false,
+    notificationSound: true,
+    soundVolume: 70,
+    messagePreviews: true,
+    groupNotifications: true,
+    quietHoursEnabled: false,
+    quietHoursStart: '22:00',
+    quietHoursEnd: '07:00',
+};
+
+const getStoredNotificationSettings = () => {
+    try {
+        const saved = JSON.parse(localStorage.getItem('neuChat_notification_settings') || '{}');
+        return { ...DEFAULT_NOTIFICATION_SETTINGS, ...saved };
+    } catch {
+        return DEFAULT_NOTIFICATION_SETTINGS;
+    }
+};
+
+const parseStoredJson = (key, fallback) => {
+    try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+    } catch (_) {
+        return fallback;
+    }
+};
+
+const LANGUAGE_OPTIONS = Object.entries(LANGUAGE_CODE_MAP).map(([label, code]) => ({
+    code,
+    label,
+    value: `${label}, ${getNativeLanguageName(code)}`,
+}));
+
+const PRIVACY_VISIBILITY_FIELDS = [
+    { key: 'lastSeen', label: 'Last Seen Visibility', description: 'Choose who can view when you were last active.' },
+    { key: 'onlineStatus', label: 'Online Status Visibility', description: 'Choose who can view when you are online.' },
+    { key: 'profilePhoto', label: 'Profile Photo Visibility', description: 'Choose who can view your profile photo.' },
+    { key: 'about', label: 'About Visibility', description: 'Choose who can view your about text.' },
+    { key: 'status', label: 'Status Visibility', description: 'Choose who can view your status updates.' },
+];
+
+const createDefaultVisibilityRule = () => ({
+    mode: 'everyone',
+    exceptUserIds: [],
+});
+
+const createDefaultPrivacySettings = () => ({
+    lastSeen: createDefaultVisibilityRule(),
+    onlineStatus: createDefaultVisibilityRule(),
+    profilePhoto: createDefaultVisibilityRule(),
+    about: createDefaultVisibilityRule(),
+    status: createDefaultVisibilityRule(),
+    readReceipts: true,
+    typingIndicator: true,
+    whoCanMessageMe: 'Everyone',
+    messageRequestsRequired: true,
+    blockUnknown: false,
+    whoCanAddMeToGroups: 'Everyone',
+    requireConsentBeforeForward: false,
+    forwardLimit: 5,
+    notifyOnForward: false,
+    sensitiveDataScan: true,
+    autoRedact: false,
+    scamDetection: true,
+    phishingDetection: true,
+    threatAlertSensitivity: 'Medium',
+    screenshotDetection: true,
+    notifyOnScreenshot: true,
+    blurOnScreenshot: false,
+    addWatermark: false,
+    restrictApprovedDevices: false,
+    requireApprovalNewDevice: true,
+    autoLockLocationChange: false,
+    geoFencedMessages: false,
+    restrictedCountry: 'None',
+    hiddenChatsFolder: false,
+    decoyMode: false,
+    panicMode: false,
+    showPrivacyScore: true,
+    showEncryptionBadge: true,
+    showRiskAlerts: true
+});
+
+const normalizeVisibilityRule = (rule) => {
+    if (typeof rule === 'string') {
+        const normalized = rule.trim().toLowerCase();
+        if (normalized === 'no one') return { mode: 'no_one', exceptUserIds: [] };
+        if (normalized.startsWith('everyone except')) return { mode: 'everyone_except', exceptUserIds: [] };
+        return { mode: 'everyone', exceptUserIds: [] };
+    }
+
+    return {
+        mode: ['everyone', 'everyone_except', 'no_one'].includes(rule?.mode) ? rule.mode : 'everyone',
+        exceptUserIds: Array.isArray(rule?.exceptUserIds)
+            ? [...new Set(rule.exceptUserIds.map((id) => String(id || '').trim()).filter(Boolean))]
+            : [],
+    };
+};
+
+const normalizePrivacySettings = (rawSettings) => {
+    const defaults = createDefaultPrivacySettings();
+    const merged = { ...defaults, ...(rawSettings || {}) };
+
+    PRIVACY_VISIBILITY_FIELDS.forEach(({ key }) => {
+        merged[key] = normalizeVisibilityRule(rawSettings?.[key]);
+    });
+
+    merged.readReceipts = rawSettings?.readReceipts !== false;
+    merged.typingIndicator = rawSettings?.typingIndicator !== false;
+    merged.whoCanMessageMe = ['Everyone', 'My Contacts', 'No One'].includes(rawSettings?.whoCanMessageMe)
+        ? rawSettings.whoCanMessageMe
+        : defaults.whoCanMessageMe;
+    merged.whoCanAddMeToGroups = ['Everyone', 'My Contacts', 'No One'].includes(rawSettings?.whoCanAddMeToGroups)
+        ? rawSettings.whoCanAddMeToGroups
+        : defaults.whoCanAddMeToGroups;
+    merged.forwardLimit = [1, 3, 5, 10].includes(Number(rawSettings?.forwardLimit))
+        ? Number(rawSettings.forwardLimit)
+        : defaults.forwardLimit;
+
+    return merged;
+};
 
 const formatEventTimeString = (startDate, startTime, endDate, endTime) => {
     if (!startDate && !startTime) return '';
@@ -992,7 +1138,7 @@ export default function Chat() {
         return () => document.head.removeChild(style);
     }, []);
 
-    const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const storedUser = parseStoredJson('user', {});
     const user = {
         ...storedUser,
         id: storedUser?.id || storedUser?._id,
@@ -1225,11 +1371,85 @@ export default function Chat() {
     const infoMessageRef = useRef(null); // Keep ref in sync for socket handler closures
     useEffect(() => { infoMessageRef.current = infoMessage; }, [infoMessage]);
     const [snackbar, setSnackbarRaw] = useState(null); // For feedback
-    const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+    const [notificationSettings, setNotificationSettings] = useState(() => getStoredNotificationSettings());
+    const notificationSettingsRef = useRef(notificationSettings);
+    const [notificationsEnabled, setNotificationsEnabled] = useState(() => getStoredNotificationSettings().masterEnabled);
 
     const setSnackbar = (config) => {
         if (!config || notificationsEnabled || (config && config.forceShow)) {
             setSnackbarRaw(config);
+        }
+    };
+
+    useEffect(() => {
+        notificationSettingsRef.current = notificationSettings;
+        localStorage.setItem('neuChat_notification_settings', JSON.stringify(notificationSettings));
+        setNotificationsEnabled(notificationSettings.masterEnabled);
+    }, [notificationSettings]);
+
+    const updateNotificationSetting = async (key, value) => {
+        if (key === 'desktopNotifications' && value) {
+            if (!('Notification' in window)) {
+                setSnackbar({ message: 'Desktop notifications are not supported by this browser.', type: 'error', forceShow: true });
+                value = false;
+            } else if (Notification.permission === 'default') {
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') {
+                    setSnackbar({ message: 'Desktop notifications are blocked by your browser.', type: 'error', forceShow: true });
+                    value = false;
+                }
+            } else if (Notification.permission !== 'granted') {
+                setSnackbar({ message: 'Desktop notifications are blocked by your browser.', type: 'error', forceShow: true });
+                value = false;
+            }
+        }
+
+        setNotificationSettings(prev => ({ ...prev, [key]: value }));
+    };
+
+    const isQuietHoursActive = (settings = notificationSettingsRef.current) => {
+        if (!settings.quietHoursEnabled) return false;
+        const [startHour, startMinute] = settings.quietHoursStart.split(':').map(Number);
+        const [endHour, endMinute] = settings.quietHoursEnd.split(':').map(Number);
+        const now = new Date();
+        const current = now.getHours() * 60 + now.getMinutes();
+        const start = startHour * 60 + startMinute;
+        const end = endHour * 60 + endMinute;
+        return start <= end ? current >= start && current < end : current >= start || current < end;
+    };
+
+    const showIncomingNotification = ({ senderName, senderAvatar, message, type = 'info', duration = 6000, onReply, isGroup = false }) => {
+        const settings = notificationSettingsRef.current;
+        if (!settings.masterEnabled || isQuietHoursActive(settings)) return;
+        if (isGroup && !settings.groupNotifications) return;
+
+        const displayMessage = settings.messagePreviews ? message : 'New message';
+
+        setSnackbar({
+            senderName,
+            senderAvatar,
+            message: displayMessage,
+            type,
+            duration,
+            onReply
+        });
+
+        if (settings.notificationSound) {
+            try {
+                const audio = new Audio('/assets/notification.mp3');
+                audio.volume = Math.max(0, Math.min(1, Number(settings.soundVolume || 0) / 100));
+                audio.play().catch(() => { });
+            } catch { }
+        }
+
+        if (settings.desktopNotifications && 'Notification' in window && Notification.permission === 'granted') {
+            try {
+                new Notification(senderName || 'Neural Chat', {
+                    body: displayMessage,
+                    icon: senderAvatar || logo,
+                    tag: `neural-chat-${isGroup ? 'group' : 'user'}-${senderName || 'message'}`,
+                });
+            } catch { }
         }
     };
     const [reactionDetails, setReactionDetails] = useState(null); // { msg, isGroup }
@@ -1238,7 +1458,12 @@ export default function Chat() {
     const [msgToDelete, setMsgToDelete] = useState(null);
     const msgToDeleteRef = useRef(null);
     useEffect(() => { msgToDeleteRef.current = msgToDelete; }, [msgToDelete]);
-    const adminConfirmModal = useState(null)[0];
+    const [adminConfirmModal, setAdminConfirmModal] = useState(null);
+    const [groupMemberActionModal, setGroupMemberActionModal] = useState(null);
+    const [isClearChatConfirmOpen, setIsClearChatConfirmOpen] = useState(false);
+    const [isExitGroupConfirmOpen, setIsExitGroupConfirmOpen] = useState(false);
+    const [exitGroupTarget, setExitGroupTarget] = useState(null);
+    const [exitGroupTransferTarget, setExitGroupTransferTarget] = useState(null);
     const selectedUserRef = useRef(null);
     const messageCacheByUserRef = useRef({});
     const hasRestoredActiveChatRef = useRef(false);
@@ -1587,42 +1812,12 @@ export default function Chat() {
     const [isFontSizeDropdownOpen, setIsFontSizeDropdownOpen] = useState(false);
     const [pendingLanguage, setPendingLanguage] = useState(null); // language awaiting confirmation
     const [isLangConfirmOpen, setIsLangConfirmOpen] = useState(false);
-    const [privacySettings, setPrivacySettings] = useState({
-        lastSeen: 'Everyone',
-        onlineStatus: 'Everyone',
-        profilePhoto: 'Everyone',
-        about: 'Everyone',
-        status: 'Everyone',
-        readReceipts: true,
-        typingIndicator: true,
-        whoCanMessageMe: 'Everyone',
-        messageRequestsRequired: true,
-        blockUnknown: false,
-        whoCanAddMeToGroups: 'Everyone',
-        requireConsentBeforeForward: false,
-        forwardLimit: 5,
-        notifyOnForward: false,
-        sensitiveDataScan: true,
-        autoRedact: false,
-        scamDetection: true,
-        phishingDetection: true,
-        threatAlertSensitivity: 'Medium',
-        screenshotDetection: true,
-        notifyOnScreenshot: true,
-        blurOnScreenshot: false,
-        addWatermark: false,
-        restrictApprovedDevices: false,
-        requireApprovalNewDevice: true,
-        autoLockLocationChange: false,
-        geoFencedMessages: false,
-        restrictedCountry: 'None',
-        hiddenChatsFolder: false,
-        decoyMode: false,
-        panicMode: false,
-        showPrivacyScore: true,
-        showEncryptionBadge: true,
-        showRiskAlerts: true
-    });
+    const [privacySettings, setPrivacySettings] = useState(createDefaultPrivacySettings);
+    const [privacyDialog, setPrivacyDialog] = useState(null);
+    const [privacyDialogDraft, setPrivacyDialogDraft] = useState(createDefaultVisibilityRule);
+    const [privacyDialogSearch, setPrivacyDialogSearch] = useState('');
+    const [isSavingPrivacy, setIsSavingPrivacy] = useState(false);
+    const [isScreenshotPrivacyMaskActive, setIsScreenshotPrivacyMaskActive] = useState(false);
     const [isDeleteChatConfirmOpen, setIsDeleteChatConfirmOpen] = useState(false);
     const [isEncryptionInfoOpen, setIsEncryptionInfoOpen] = useState(false);
     const [encryptionVerifyData, setEncryptionVerifyData] = useState({
@@ -1656,6 +1851,7 @@ export default function Chat() {
     });
 
     const [browserScale, setBrowserScale] = useState(1);
+    const screenshotMaskTimerRef = useRef(null);
 
     useEffect(() => {
         const fetchProfile = async () => {
@@ -1682,6 +1878,55 @@ export default function Chat() {
         };
         fetchProfile();
     }, []);
+
+    const triggerScreenshotProtection = React.useCallback((source = 'shortcut') => {
+        if (!privacySettings.screenshotDetection) return;
+
+        if (privacySettings.blurOnScreenshot) {
+            setIsScreenshotPrivacyMaskActive(true);
+            if (screenshotMaskTimerRef.current) clearTimeout(screenshotMaskTimerRef.current);
+            screenshotMaskTimerRef.current = setTimeout(() => {
+                setIsScreenshotPrivacyMaskActive(false);
+                screenshotMaskTimerRef.current = null;
+            }, 4500);
+        }
+
+        if (privacySettings.notifyOnScreenshot) {
+            setSnackbar({
+                message: `Screenshot activity detected via ${source}. Sensitive chat content is now protected.`,
+                type: 'info',
+                variant: 'system'
+            });
+        }
+    }, [
+        privacySettings.screenshotDetection,
+        privacySettings.blurOnScreenshot,
+        privacySettings.notifyOnScreenshot,
+        setSnackbar
+    ]);
+
+    useEffect(() => {
+        const isScreenshotShortcut = (event) => {
+            const key = String(event.key || '').toLowerCase();
+            return key === 'printscreen'
+                || (event.metaKey && event.shiftKey && ['3', '4', '5'].includes(key))
+                || (event.ctrlKey && event.shiftKey && key === 's');
+        };
+
+        const handleScreenshotShortcut = (event) => {
+            if (!isScreenshotShortcut(event)) return;
+            triggerScreenshotProtection(event.key || 'shortcut');
+        };
+
+        window.addEventListener('keydown', handleScreenshotShortcut);
+        return () => {
+            window.removeEventListener('keydown', handleScreenshotShortcut);
+            if (screenshotMaskTimerRef.current) {
+                clearTimeout(screenshotMaskTimerRef.current);
+                screenshotMaskTimerRef.current = null;
+            }
+        };
+    }, [triggerScreenshotProtection]);
 
 
     // --- Utility Functions ---
@@ -2249,6 +2494,19 @@ export default function Chat() {
         }
 
         switch (msg.type) {
+            case 'community_link': {
+                const metadata = msg.metadata || {};
+                const action = String(metadata.action || '').toLowerCase() === 'removed' || String(msg.content || '').toLowerCase().includes('removed')
+                    ? 'removed'
+                    : 'added';
+                const groupName = metadata.groupName || 'Group';
+                return (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        {action === 'removed' ? <XCircle size={14} color="#667781" /> : <CheckCircle size={14} color="#667781" />}
+                        {`${groupName} ${action === 'removed' ? 'removed from' : 'added to'} community`}
+                    </span>
+                );
+            }
             case 'image':
                 return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Camera size={14} /> {isGroup ? 'Photo' : 'Image'}</span>;
             case 'video':
@@ -2451,6 +2709,129 @@ export default function Chat() {
         }
     };
 
+    const persistPrivacySettings = async (nextPrivacySettings, successMessage = 'Privacy settings updated') => {
+        const normalized = normalizePrivacySettings(nextPrivacySettings);
+        const previous = privacySettings;
+        const payload = {
+            userId: userData.id || userData._id || user.id || user._id,
+            privacySettings: normalized
+        };
+
+        setPrivacySettings(normalized);
+        setIsSavingPrivacy(true);
+
+        try {
+            const res = await axios.put('/api/auth/update-profile', payload);
+            if (res.data?.user) {
+                const updatedUser = { ...userData, ...res.data.user, privacySettings: normalized };
+                localStorage.setItem('user', JSON.stringify(updatedUser));
+                setUserData(updatedUser);
+            }
+            setSnackbar({ message: successMessage, type: 'success', variant: 'system' });
+            return true;
+        } catch (err) {
+            setPrivacySettings(previous);
+            const errorMsg = err.response?.data?.error || err.message || 'Unable to update privacy settings';
+            setSnackbar({ message: errorMsg, type: 'error' });
+            return false;
+        } finally {
+            setIsSavingPrivacy(false);
+        }
+    };
+
+    const getPrivacySummary = (rule) => {
+        const normalized = normalizeVisibilityRule(rule);
+        if (normalized.mode === 'no_one') return 'No one';
+        if (normalized.mode === 'everyone_except') {
+            const count = normalized.exceptUserIds.length;
+            return count > 0 ? `Everyone except ${count} contact${count === 1 ? '' : 's'}` : 'Everyone except...';
+        }
+        return 'Everyone';
+    };
+
+    const openPrivacyVisibilityDialog = (fieldKey) => {
+        const config = PRIVACY_VISIBILITY_FIELDS.find((field) => field.key === fieldKey);
+        if (!config) return;
+        setPrivacyDialog(config);
+        setPrivacyDialogDraft(normalizeVisibilityRule(privacySettings[fieldKey]));
+        setPrivacyDialogSearch('');
+    };
+
+    const closePrivacyVisibilityDialog = () => {
+        setPrivacyDialog(null);
+        setPrivacyDialogDraft(createDefaultVisibilityRule());
+        setPrivacyDialogSearch('');
+    };
+
+    const updatePrivacyDialogMode = (mode) => {
+        setPrivacyDialogDraft((prev) => ({
+            mode,
+            exceptUserIds: mode === 'everyone_except' ? prev.exceptUserIds : []
+        }));
+    };
+
+    const togglePrivacyExceptionUser = (contactId) => {
+        setPrivacyDialogDraft((prev) => {
+            const currentIds = new Set(prev.exceptUserIds || []);
+            if (currentIds.has(contactId)) currentIds.delete(contactId);
+            else currentIds.add(contactId);
+            return { ...prev, exceptUserIds: Array.from(currentIds) };
+        });
+    };
+
+    const savePrivacyVisibilityDialog = async () => {
+        if (!privacyDialog) return;
+        const next = {
+            ...privacySettings,
+            [privacyDialog.key]: normalizeVisibilityRule(privacyDialogDraft)
+        };
+        const didSave = await persistPrivacySettings(next, `${privacyDialog.label} updated`);
+        if (didSave) closePrivacyVisibilityDialog();
+    };
+
+    const togglePrivacyBooleanSetting = async (key) => {
+        const next = { ...privacySettings, [key]: !privacySettings[key] };
+        const labels = {
+            readReceipts: 'Read receipts',
+            typingIndicator: 'Typing indicator',
+            messageRequestsRequired: 'Message requests',
+            blockUnknown: 'Unknown account blocking',
+            requireConsentBeforeForward: 'Forwarding consent',
+            notifyOnForward: 'Forwarding notifications',
+            screenshotDetection: 'Screenshot detection',
+            notifyOnScreenshot: 'Screenshot notifications',
+            blurOnScreenshot: 'Screenshot blur protection',
+            addWatermark: 'Media watermark',
+        };
+        await persistPrivacySettings(next, `${labels[key] || 'Privacy setting'} updated`);
+    };
+
+    const currentViewerId = String(user.id || user._id || userData?._id || userData?.id || '');
+    const getTargetUserId = (targetUser) => String(targetUser?._id || targetUser?.id || '');
+
+    const canViewUserPrivacyField = (targetUser, fieldKey) => {
+        if (!targetUser || !fieldKey) return true;
+        const targetId = getTargetUserId(targetUser);
+        if (!targetId || targetId === currentViewerId) return true;
+
+        const targetSettings = normalizePrivacySettings(targetUser.privacySettings);
+        const rule = normalizeVisibilityRule(targetSettings[fieldKey]);
+        if (rule.mode === 'no_one') return false;
+        if (rule.mode === 'everyone_except') return !rule.exceptUserIds.includes(currentViewerId);
+        return true;
+    };
+
+    const getVisibleUserAbout = (targetUser) => {
+        if (!targetUser) return t('settings.profile.status_available');
+        if (!canViewUserPrivacyField(targetUser, 'about')) return 'Hidden by privacy settings';
+        return targetUser.about || t('settings.profile.status_available');
+    };
+
+    const getVisibleUserAvatar = (targetUser) => {
+        if (!targetUser || !canViewUserPrivacyField(targetUser, 'profilePhoto')) return '';
+        return targetUser.image || targetUser.profile_photo || targetUser.avatar || '';
+    };
+
     const handleEditMessageSubmit = async () => {
         if (!editInput.trim() || !editingMessage) return;
         try {
@@ -2570,7 +2951,7 @@ export default function Chat() {
 
         if (input.trim().length > 0) {
             // Throttle: only emit every 1.5 seconds if still typing
-            if (now - lastEmitRef.current > 1500) {
+            if (privacySettings.typingIndicator && now - lastEmitRef.current > 1500) {
                 socket.emit('typing', { receiverId: targetId, isGroup });
                 lastEmitRef.current = now;
             }
@@ -3808,7 +4189,7 @@ export default function Chat() {
 
                     if (previewText.length > 50) previewText = previewText.substring(0, 50) + '...';
 
-                    setSnackbar({
+                    showIncomingNotification({
                         senderName,
                         senderAvatar,
                         message: previewText,
@@ -4543,17 +4924,18 @@ export default function Chat() {
 
                     let previewText = data.message.content || 'Sent a message';
                     const incomingGroupFileName = getDisplayFileName(data.message || {});
-                    if (data.message.type === 'image') previewText = isGroup ? 'Photo' : 'Image';
+                    if (data.message.type === 'image') previewText = 'Photo';
                     else if (data.message.type === 'video') previewText = 'Video';
                     else if (data.message.type === 'file') previewText = incomingGroupFileName ? truncateFileName(incomingGroupFileName) : 'File';
 
-                    setSnackbar({
+                    showIncomingNotification({
                         senderName: `${senderName} @ ${groupName}`,
                         message: previewText,
                         senderAvatar: groupInfo?.icon || null, // Added icon to snackbar
                         type: 'info',
                         duration: 5000,
-                        onReply: (text) => handleGroupNotificationReply(text, data.groupId)
+                        onReply: (text) => handleGroupNotificationReply(text, data.groupId),
+                        isGroup: true
                     });
                 }
             }
@@ -4798,21 +5180,39 @@ export default function Chat() {
         socket.on('group_admin_updated', onGroupAdminUpdated);
 
         const onGroupMembersUpdated = (data) => {
-            const { groupId, members } = data;
-            setGroups(prev => prev.map(g => String(g._id || g.id) === String(groupId) ? { ...g, members } : g));
+            const { groupId, members, admin, admins } = data;
+            setGroups(prev => prev.map(g => String(g._id || g.id) === String(groupId) ? { ...g, members, ...(admin ? { admin } : {}), ...(admins ? { admins } : {}) } : g));
 
             const currentSelectedGroup = selectedGroupRef?.current;
             if (currentSelectedGroup && String(currentSelectedGroup._id || currentSelectedGroup.id) === String(groupId)) {
-                // Keep isAdmin flags if they were present or recalculate
-                const newAdmins = currentSelectedGroup.admins || [];
+                const nextAdmin = admin || currentSelectedGroup.admin;
+                const newAdmins = admins || currentSelectedGroup.admins || [];
                 const updatedMembers = members.map(m => ({
                     ...m,
                     isAdmin: newAdmins.some(adminId => String(adminId) === String(m._id || m.id))
                 }));
-                setSelectedGroup(prev => ({ ...prev, members: updatedMembers }));
+                setSelectedGroup(prev => ({ ...prev, members: updatedMembers, admin: nextAdmin, admins: newAdmins }));
             }
         };
         socket.on('group_members_updated', onGroupMembersUpdated);
+
+        const onGroupMemberRemoved = (data) => {
+            const { groupId, message } = data || {};
+            setGroups(prev => prev.filter(group => String(group._id || group.id) !== String(groupId)));
+
+            const currentSelectedGroup = selectedGroupRef?.current;
+            if (currentSelectedGroup && String(currentSelectedGroup._id || currentSelectedGroup.id) === String(groupId)) {
+                handleBackToChatList();
+            }
+
+            setSnackbar({
+                message: message || 'You were removed from the group',
+                type: 'info',
+                variant: 'system',
+                forceShow: true
+            });
+        };
+        socket.on('group_member_removed', onGroupMemberRemoved);
 
         return () => {
             socket.off('group_created', onGroupCreated);
@@ -4822,6 +5222,7 @@ export default function Chat() {
             socket.off('group_message_partial_read', onGroupMessagePartialRead);
             socket.off('group_admin_updated', onGroupAdminUpdated);
             socket.off('group_members_updated', onGroupMembersUpdated);
+            socket.off('group_member_removed', onGroupMemberRemoved);
             socket.off('connect', onConnect);
             socket.off('disconnect', onDisconnect);
             socket.off('connect_error', onConnectError);
@@ -5100,6 +5501,10 @@ export default function Chat() {
         }
     }, [isProfileOpen, isContactInfoOpen]); // trigger when profile or contact info opens
 
+    useEffect(() => {
+        setPrivacySettings(normalizePrivacySettings(userData?.privacySettings));
+    }, [userData?.privacySettings]);
+
 
     const fetchGroups = async () => {
         try {
@@ -5278,6 +5683,114 @@ export default function Chat() {
             if (err.response?.status === 403) {
                 setGroupMessages([]);
             }
+        }
+    };
+
+    const closeExitGroupModal = () => {
+        setIsExitGroupConfirmOpen(false);
+        setExitGroupTarget(null);
+        setExitGroupTransferTarget(null);
+    };
+
+    const requestExitGroup = (groupOverride = null) => {
+        const activeGroup = groupOverride || selectedGroupRef.current || selectedGroup;
+        if (!activeGroup) return;
+
+        setExitGroupTarget(activeGroup);
+        setExitGroupTransferTarget(null);
+        setIsExitGroupConfirmOpen(true);
+    };
+
+    const handleExitGroup = async (groupOverride = null, newAdminOverride = null) => {
+        const activeGroup = groupOverride || exitGroupTarget || selectedGroupRef.current || selectedGroup;
+        const groupId = activeGroup?._id || activeGroup?.id;
+
+        if (!groupId) return;
+
+        try {
+            const token = localStorage.getItem('token');
+            const myId = String(user.id || user._id);
+            const isOwner = String(activeGroup?.admin?._id || activeGroup?.admin || activeGroup?.creatorId || '') === myId;
+            const otherAdmins = (activeGroup?.admins || []).filter(admin => String(admin?._id || admin?.id || admin) !== myId);
+            const needsManualTransfer = isOwner && otherAdmins.length === 0;
+            const newAdminId = newAdminOverride?._id || newAdminOverride?.id || exitGroupTransferTarget?._id || exitGroupTransferTarget?.id || null;
+            if (needsManualTransfer) {
+                await axios.post(`/api/groups/${groupId}/transfer-ownership`, { newAdminId }, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+            }
+
+            const res = await axios.post(`/api/groups/${groupId}/exit`, needsManualTransfer ? {} : (isOwner && newAdminId ? { newAdminId } : {}), {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            setGroups(prev => prev.filter(group => String(group._id || group.id) !== String(groupId)));
+
+            const syncCommunityGroups = (community) => {
+                if (!community) return community;
+
+                const nextGroups = (community.groups || []).map(group => {
+                    if (!group || String(group._id || group.id || group) !== String(groupId)) return group;
+                    return res.data?.group ? { ...group, ...res.data.group } : group;
+                }).filter(Boolean);
+
+                const nextAnnouncements = String(community.announcements?._id || community.announcements?.id || community.announcements) === String(groupId)
+                    ? null
+                    : community.announcements;
+
+                return { ...community, groups: nextGroups, announcements: nextAnnouncements };
+            };
+
+            setCommunities(prev => prev.map(syncCommunityGroups));
+            setSelectedCommunity(prev => syncCommunityGroups(prev));
+
+            closeExitGroupModal();
+            handleBackToChatList();
+            setSnackbar({
+                message: res.data?.removed ? 'Group exited and closed.' : 'You exited the group.',
+                type: 'success',
+                variant: 'system'
+            });
+        } catch (err) {
+            console.error('Exit group error:', err);
+            setSnackbar({
+                message: err.response?.data?.error || 'Failed to exit group',
+                type: 'error',
+                variant: 'system'
+            });
+        }
+    };
+
+    const handleRemoveGroupMember = async (groupOverride, member) => {
+        const activeGroup = groupOverride || selectedGroupRef.current || selectedGroup;
+        const groupId = activeGroup?._id || activeGroup?.id;
+        const memberId = member?._id || member?.id;
+        if (!groupId || !memberId) return;
+
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.delete(`/api/groups/${groupId}/members/${memberId}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            const updatedGroup = res.data?.group;
+            if (updatedGroup) {
+                setGroups(prev => prev.map(group => String(group._id || group.id) === String(groupId) ? { ...group, ...updatedGroup } : group));
+                setSelectedGroup(prev => prev && String(prev._id || prev.id) === String(groupId) ? { ...prev, ...updatedGroup } : prev);
+            }
+
+            setSnackbar({
+                message: `Removed ${member.name || 'member'} from group`,
+                type: 'success',
+                variant: 'system'
+            });
+        } catch (err) {
+            console.error('Remove group member error:', err);
+            setSnackbar({
+                message: err.response?.data?.error || err.message || 'Failed to remove member',
+                type: 'error',
+                variant: 'system'
+            });
         }
     };
 
@@ -5661,6 +6174,7 @@ export default function Chat() {
 
     const markAsRead = async (idOrObj) => {
         if (!idOrObj) return;
+        if (!privacySettings.readReceipts) return;
         const targetSenderId = String(idOrObj._id || idOrObj.id || idOrObj);
         if (targetSenderId === "[object Object]") {
             console.error('[DEBUG] markAsRead: Received invalid object for senderId', idOrObj);
@@ -6528,6 +7042,15 @@ export default function Chat() {
         if (msg?.group_id) params.set('isGroup', 'true');
         const qs = params.toString();
         return `${apiOrigin}/api/chat/media/message/${encodeURIComponent(msgId)}${qs ? `?${qs}` : ''}`;
+    };
+
+    const resolveAudioStreamUrl = async (msg) => {
+        if (!msg) return '';
+        return (
+            getMediaUrl(msg.file_path || msg.audioUrl || msg.url || '') ||
+            resolveMessageMediaFallbackUrl(msg) ||
+            ''
+        );
     };
 
     const resolveGridFsFallbackUrl = (rawUrl, msg) => {
@@ -8582,8 +9105,12 @@ export default function Chat() {
 
     const renderUserStatus = (u) => {
         if (!u) return '';
-        if (u.isOnline) return t('chat_window.online');
-        if (!u.lastSeen) return t('chat_window.click_for_info');
+        const canSeeOnline = canViewUserPrivacyField(u, 'onlineStatus');
+        const canSeeLastSeen = canViewUserPrivacyField(u, 'lastSeen');
+
+        if (u.isOnline) return canSeeOnline ? t('chat_window.online') : 'Status hidden';
+        if (!u.lastSeen) return (canSeeOnline || canSeeLastSeen) ? t('chat_window.click_for_info') : 'Status hidden';
+        if (!canSeeLastSeen) return 'Status hidden';
 
         const lastSeenDate = new Date(u.lastSeen);
         const now = new Date();
@@ -8903,11 +9430,11 @@ export default function Chat() {
                                 {filtered.map(u => (
                                     <div key={u._id} className="wa-user-item" onClick={() => { setSelectedUser(u); setIsNewChatOpen(false); }}>
                                         <div className="wa-avatar">
-                                            {u.image ? <img src={u.image} alt={u.name} /> : <span>{u.name?.charAt(0).toUpperCase()}</span>}
+                                            {getVisibleUserAvatar(u) ? <img src={getVisibleUserAvatar(u)} alt={u.name} /> : <span>{u.name?.charAt(0).toUpperCase()}</span>}
                                         </div>
                                         <div className="wa-user-info">
                                             <div className="wa-user-name" style={{ fontWeight: 500 }}>{u.name}</div>
-                                            <div className="wa-user-last-msg" style={{ fontSize: 13, color: '#667781' }}>{u.about || t('settings.profile.status_available')}</div>
+                                            <div className="wa-user-last-msg" style={{ fontSize: 13, color: '#667781' }}>{getVisibleUserAbout(u)}</div>
                                         </div>
                                     </div>
                                 ))}
@@ -10820,11 +11347,11 @@ export default function Chat() {
 
             return (
                 <div className={`wa-contact-info-panel wa-group-info ${isContactInfoOpen ? 'active' : ''}`} style={{ background: bgColor, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                    <div className="wa-contact-info-header" style={{ position: 'relative', height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: headerBgColor, color: textColor, flexShrink: 0 }}>
-                        <button className="wa-contact-info-close-btn" onClick={() => setIsContactInfoOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 24, padding: '0 8px' }}>
+                    <div className="wa-contact-info-header" style={{ position: 'relative', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px', background: headerBgColor, color: textColor, flexShrink: 0 }}>
+                        <button className="wa-contact-info-close-btn" onClick={() => setIsContactInfoOpen(false)} style={{ position: 'absolute', left: 16, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0 8px' }}>
                             <span style={{ fontSize: 16, color: '#0EA5BE', fontWeight: 500 }}>Close</span>
-                            <span style={{ fontSize: 16, fontWeight: 500, color: textColor, whiteSpace: 'nowrap' }}>Group info</span>
                         </button>
+                        <span style={{ fontSize: 16, fontWeight: 500, color: textColor, whiteSpace: 'nowrap', textAlign: 'center' }}>Group info</span>
                     </div>
 
                     <div className="wa-contact-info-content" style={{ flex: 1, overflowY: 'auto', background: bgColor, paddingBottom: 40, height: 'calc(100% - 60px)' }}>
@@ -10983,11 +11510,28 @@ export default function Chat() {
                                 {activeTarget.members?.map(m => {
                                     const isMe = String(m._id) === String(user.id || user._id);
                                     let phoneValue = m.mobile ? `+${m.mobile}` : '';
+                                    const currentUserId = String(user.id || user._id);
+                                    const isCurrentUserOwner = String(activeTarget.admin?._id || activeTarget.admin || activeTarget.creatorId || '') === currentUserId;
+                                    const isCurrentUserAdmin = isCurrentUserOwner || (activeTarget.admins || []).some(a => String(a?._id || a) === currentUserId);
+                                    const isTargetOwner = String(activeTarget.admin?._id || activeTarget.admin || activeTarget.creatorId || '') === String(m._id || m.id);
                                     const isGroupAdmin = String(activeTarget.admin?._id || activeTarget.admin || activeTarget.creatorId || '') === String(m._id) || 
                                                        (activeTarget.admins || []).some(a => String(a?._id || a) === String(m._id));
+                                    const canManageThisMember = isCurrentUserAdmin && !isMe && !isTargetOwner;
 
                                     return (
-                                        <div key={m._id} className="wa-setting-item clickable" style={{ display: 'flex', alignItems: 'center', padding: '12px 30px', cursor: 'pointer', justifyContent: 'space-between' }}>
+                                        <div
+                                            key={m._id}
+                                            className="wa-setting-item clickable"
+                                            style={{ display: 'flex', alignItems: 'center', padding: '12px 30px', cursor: canManageThisMember ? 'pointer' : 'default', justifyContent: 'space-between' }}
+                                            onClick={() => {
+                                                if (!canManageThisMember) return;
+                                                setGroupMemberActionModal({
+                                                    member: m,
+                                                    isAdmin: isGroupAdmin,
+                                                    group: activeTarget
+                                                });
+                                            }}
+                                        >
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                                                 <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255, 255, 255, 0.05)', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
                                                     {m.image ? <img src={m.image} alt="mem" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#38bdf8', fontSize: 18, fontWeight: 600 }}>{m.name?.charAt(0).toUpperCase()}</span>}
@@ -10999,6 +11543,8 @@ export default function Chat() {
                                             </div>
                                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
                                                 {isGroupAdmin && <div style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', fontWeight: 500, border: '1px solid rgba(56, 189, 248, 0.2)' }}>Group admin</div>}
+                                                {canManageThisMember && !isGroupAdmin && <div style={{ fontSize: 11, color: '#94a3b8' }}>Tap for actions</div>}
+                                                {canManageThisMember && isGroupAdmin && <div style={{ fontSize: 11, color: '#94a3b8' }}>Tap for actions</div>}
                                                 {!isMe && phoneValue && <span style={{ color: subTextColor, fontSize: 13 }}>{phoneValue}</span>}
                                             </div>
                                         </div>
@@ -11010,13 +11556,9 @@ export default function Chat() {
                         <div style={{ width: '100%', borderBottom: thickDivider }}></div>
 
                         <div style={{ background: itemBgColor, padding: '14px 0' }}>
-                            <div className="wa-setting-item clickable danger" style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 24, cursor: 'pointer' }} onClick={() => { /* Exit logic */ }}>
+                            <div className="wa-setting-item clickable danger" style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 24, cursor: 'pointer' }} onClick={() => requestExitGroup(activeTarget)}>
                                 <LogOut size={24} color="#f87171" />
                                 <span style={{ color: '#f87171', fontSize: 16, width: '100%', fontWeight: 500 }}>Exit group</span>
-                            </div>
-                            <div className="wa-setting-item clickable danger" style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 24, cursor: 'pointer' }}>
-                                <ThumbsDown size={24} color="#f87171" />
-                                <span style={{ color: '#f87171', fontSize: 16, width: '100%', fontWeight: 500 }}>Report group</span>
                             </div>
                         </div>
 
@@ -11029,8 +11571,8 @@ export default function Chat() {
         const displayName = (isGroup || activeTarget?.is_community)
             ? (activeTarget.name || 'User')
             : getContactDisplayName(activeTarget);
-        const displayPhoto = activeTarget.image || null;
-        const displaySubtext = activeTarget.mobile || 'Available';
+        const displayPhoto = isGroup || activeTarget?.is_community ? (activeTarget.image || null) : getVisibleUserAvatar(activeTarget);
+        const displaySubtext = isGroup || activeTarget?.is_community ? (activeTarget.mobile || 'Available') : renderUserStatus(activeTarget);
 
         return (
             <div className={`wa-contact-info-panel ${isContactInfoOpen ? 'active' : ''}`}>
@@ -11103,7 +11645,7 @@ export default function Chat() {
                     {/* About Section */}
                     <div className="wa-contact-info-item">
                         <div className="wa-info-item-label" style={{ color: '#38bdf8' }}>{t('profile_drawer.about_label')}</div>
-                        <div className="wa-info-item-value" style={{ color: '#f8fafc' }}>{activeTarget.about || 'Available'}</div>
+                        <div className="wa-info-item-value" style={{ color: '#f8fafc' }}>{isGroup ? (activeTarget.about || 'Available') : getVisibleUserAbout(activeTarget)}</div>
                     </div>
 
                     <div className="wa-contact-section-divider" style={{ background: 'rgba(255, 255, 255, 0.08)' }}></div>
@@ -12832,7 +13374,7 @@ export default function Chat() {
         const senderAvatar = senderData?.image || senderData?.avatar || senderData?.avatarUrl;
 
         return (
-            <div className="wa-image-viewer-overlay" onClick={() => setViewingImage(null)}>
+            <div className={`wa-image-viewer-overlay ${privacySettings.addWatermark ? 'media-watermark-active' : ''}`} onClick={() => setViewingImage(null)}>
                 <div className="wa-viewer-header">
                     <div className="wa-viewer-user-info">
                         <div className="wa-avatar" style={{ width: 40, height: 40, marginRight: 12 }}>
@@ -13477,7 +14019,7 @@ export default function Chat() {
                                 <div className="wa-dropdown-item" onClick={() => { setIsClearChatConfirmOpen(true); setOpenDropdown(null); }}>
                                     <Trash2 size={18} style={{ marginRight: 12, color: '#54656f' }} /> Clear messages
                                 </div>
-                                <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => { setIsExitGroupConfirmOpen(true); setOpenDropdown(null); }}>
+                                <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => { requestExitGroup(selectedGroup); setOpenDropdown(null); }}>
                                     <LogOut size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Exit group
                                 </div>
                             </>
@@ -13510,7 +14052,7 @@ export default function Chat() {
                         {type === 'snackbar_menu' && (
                             <>
                                 <div className="wa-dropdown-item" onClick={() => {
-                                    setNotificationsEnabled(false);
+                                    updateNotificationSetting('masterEnabled', false);
                                     setOpenDropdown(null);
                                     // No snackbar here because they are now disabled! 
                                     // Just close the menu.
@@ -13884,30 +14426,47 @@ export default function Chat() {
                 </div>
 
                 <div className="wa-drawer-content custom-scrollbar" style={{ padding: 0, display: 'flex', flexDirection: 'column', background: '#0b141a', flex: 1 }}>
-                    <div style={{ padding: '40px 30px', textAlign: 'center' }}>
-                        <h2 style={{ fontSize: 24, fontWeight: 600, color: '#f8fafc', marginBottom: 20 }}>Add these groups to your community?</h2>
-                        <p style={{ fontSize: 14, color: '#94a3b8', lineHeight: '1.6', marginBottom: 20 }}>
-                            Community members can see and join these groups.
-                        </p>
-                        <p style={{ fontSize: 14, color: '#94a3b8', lineHeight: '1.6' }}>
-                            Admins of these groups can also join the community as members.
-                        </p>
+                    <div className="wa-confirm-add-hero">
+                        <div className="wa-confirm-add-icon-row">
+                            <div className="wa-confirm-add-icon source">
+                                <UserPlus size={30} />
+                            </div>
+                            <ArrowRight className="wa-confirm-add-arrow" size={28} />
+                            <div className="wa-confirm-add-icon target">
+                                <Users size={32} />
+                            </div>
+                        </div>
+                        <h2 className="wa-confirm-add-title">Add {selectedGroupsToAdd.length} group{selectedGroupsToAdd.length === 1 ? '' : 's'} to this community?</h2>
+                        <div className="wa-confirm-add-points">
+                            <div className="wa-confirm-add-point">
+                                <CheckCircle size={16} />
+                                <span>Members can discover and join these groups from the community.</span>
+                            </div>
+                            <div className="wa-confirm-add-point">
+                                <CheckCircle size={16} />
+                                <span>Group admins can also join the community as members.</span>
+                            </div>
+                            <div className="wa-confirm-add-point">
+                                <CheckCircle size={16} />
+                                <span>Your profile remains visible to community admins.</span>
+                            </div>
+                        </div>
                     </div>
 
-                    <div style={{ flex: 1, overflowY: 'auto' }}>
+                    <div className="wa-confirm-add-list custom-scrollbar">
                         {selectedGroupsToAdd.map(g => (
-                            <div key={g._id} style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 15 }}>
-                                <div style={{ width: 44, height: 44, borderRadius: '8px', background: 'rgba(255, 255, 255, 0.05)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
-                                    {g.icon ? <img src={g.icon} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Users size={22} color="#38bdf8" />}
+                            <div key={g._id} className="wa-confirm-add-group-row">
+                                <div className="wa-confirm-add-group-icon">
+                                    {g.icon ? <img src={g.icon} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Users size={22} />}
                                 </div>
-                                <span style={{ fontSize: 16, color: '#f8fafc' }}>{g.name}</span>
+                                <span className="wa-confirm-add-group-name">{g.name}</span>
                             </div>
                         ))}
                     </div>
 
-                    <div style={{ padding: '20px 30px', background: 'transparent', borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                    <div className="wa-confirm-add-footer">
                         <button
-                            style={{ width: '100%', background: '#0EA5BE', color: 'white', border: 'none', padding: '12px', borderRadius: '24px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                            className="wa-confirm-add-submit"
                             onClick={async () => {
                                 try {
                                     const token = localStorage.getItem('token');
@@ -14713,15 +15272,20 @@ export default function Chat() {
 
                                 const isTargetOwner = String(community.creator?._id || community.creator) === String(member._id || member.id);
                                 const isTargetAdmin = (community.admins || []).some(a => String(a._id || a) === String(member._id || member.id));
+                                const canManageAdminRole = amIAdminOrOwner && !isTargetOwner;
+                                const commId = community._id || community.id;
 
                                 return (
                                     <div
                                         key={member._id || member.id}
-                                        style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 15, borderRadius: 8 }}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 15, borderRadius: 8, cursor: canManageAdminRole ? 'pointer' : 'default' }}
+                                        onClick={() => {
+                                            if (!canManageAdminRole) return;
+                                            setAdminContextMenu({ member, communityId: commId, isAdmin: isTargetAdmin });
+                                        }}
                                         onContextMenu={(e) => {
-                                            if (!amIAdminOrOwner || isTargetOwner) return; // Owner cannot be context-menu'd for role changes here
+                                            if (!canManageAdminRole) return; // Owner cannot be context-menu'd for role changes here
                                             e.preventDefault();
-                                            const commId = community._id || community.id;
                                             setAdminContextMenu({ member, x: e.clientX, y: e.clientY, communityId: commId, isAdmin: isTargetAdmin });
                                         }}
                                     >
@@ -14750,7 +15314,10 @@ export default function Chat() {
                                                     )}
                                                     {(isMeOwner || (isMeAdmin && !isTargetOwner)) && !isTargetOwner && (
                                                         <button
-                                                            onClick={() => handleRemoveCommunityMember(community, member)}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleRemoveCommunityMember(community, member);
+                                                            }}
                                                             className="wa-remove-member-btn"
                                                             title="Remove member"
                                                             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%' }}
@@ -14764,6 +15331,9 @@ export default function Chat() {
                                                 <div style={{ fontSize: 13, color: subTextColor }}>{memberMobile}</div>
                                             )}
                                             <div style={{ fontSize: 13, color: subTextColor }}>{member.about || 'Available'}</div>
+                                            {canManageAdminRole && (
+                                                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>Tap for admin actions</div>
+                                            )}
                                         </div>
                                     </div>
                                 );
@@ -14815,7 +15385,7 @@ export default function Chat() {
                                 Back
                             </button>
                         </div>
-                        <span className="wa-contact-info-title" style={{ position: 'absolute', left: 0, right: 0, textAlign: 'center', fontSize: 17, fontWeight: 500, color: '#3b4a54', pointerEvents: 'none' }}>
+                        <span className="wa-contact-info-title" style={{ position: 'absolute', left: 0, right: 0, textAlign: 'center', fontSize: 17, fontWeight: 600, color: '#f8fafc', pointerEvents: 'none' }}>
                             Mute Notifications
                         </span>
                         <div style={{ width: 60 }} /> {/* Spacer */}
@@ -16614,9 +17184,13 @@ export default function Chat() {
                                                     <Users size={22} color="#38bdf8" />
                                                 )
                                             ) : (
-                                                <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#38bdf8' }}>
-                                                    {displayName.charAt(0).toUpperCase()}
-                                                </span>
+                                                getVisibleUserAvatar(item) ? (
+                                                    <img src={getVisibleUserAvatar(item)} alt={displayName} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                                                ) : (
+                                                    <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#38bdf8' }}>
+                                                        {displayName.charAt(0).toUpperCase()}
+                                                    </span>
+                                                )
                                             )}
                                         </div>
                                         <div className="wa-chat-info">
@@ -17002,6 +17576,7 @@ export default function Chat() {
         setIsAddExistingGroupsOpen(false);
         setIsCommunityAddMemberOpen(false);
         setIsGroupAddMemberOpen(false);
+        setIsContactInfoOpen(false);
     };
 
     const toggleForwardContact = (contact) => {
@@ -17494,7 +18069,7 @@ export default function Chat() {
             }}
         >
             <div
-                className={`wa-main-chat ${(!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? 'wa-main-chat-with-panel' : ''}`}
+                className={`wa-main-chat ${(!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? 'wa-main-chat-with-panel' : ''} ${privacySettings.addWatermark ? 'media-watermark-active' : ''}`}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 style={{
@@ -17522,7 +18097,11 @@ export default function Chat() {
                                     setIsStarredMessagesOpen(false);
                                 }}>
                                     <div className="wa-avatar" style={{ width: 40, height: 40, marginRight: 10 }}>
-                                        <span style={{ fontSize: 16 }}>{getContactDisplayName(selectedUser)?.charAt(0).toUpperCase()}</span>
+                                        {getVisibleUserAvatar(selectedUser) ? (
+                                            <img src={getVisibleUserAvatar(selectedUser)} alt={getContactDisplayName(selectedUser)} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                                        ) : (
+                                            <span style={{ fontSize: 16 }}>{getContactDisplayName(selectedUser)?.charAt(0).toUpperCase()}</span>
+                                        )}
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
                                         <span style={{ fontWeight: 'bold', fontSize: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedUser.name}</span>
@@ -17761,7 +18340,7 @@ export default function Chat() {
 
                         {/* Messages */}
                         <div
-                            className="wa-chat-messages-area" style={{ overflow: "hidden" }}
+                            className={`wa-chat-messages-area ${isScreenshotPrivacyMaskActive ? 'privacy-mask-active' : ''}`} style={{ overflow: "hidden" }}
                             onContextMenu={(e) => {
                                 e.preventDefault();
                                 setChatContextMenu({ x: e.clientX, y: e.clientY });
@@ -17819,6 +18398,7 @@ export default function Chat() {
                                 navigateToMessage={navigateToMessage}
                                 isChatSelectionMode={isChatSelectionMode}
                                 setViewingContact={setViewingContact}
+                                setReactionDetails={setReactionDetails}
                                 setShowScrollBtn={setShowScrollBtn}
                                 clearPendingUnread={clearPendingUnread}
                                 markAsRead={markAsRead}
@@ -18302,7 +18882,7 @@ export default function Chat() {
                         })()}
 
                         <div
-                            className="wa-chat-messages-area" style={{ overflow: "hidden" }}
+                            className={`wa-chat-messages-area ${isScreenshotPrivacyMaskActive ? 'privacy-mask-active' : ''}`} style={{ overflow: "hidden" }}
                             onContextMenu={(e) => {
                                 e.preventDefault();
                                 setChatContextMenu({ x: e.clientX, y: e.clientY });
@@ -19805,6 +20385,7 @@ export default function Chat() {
 
     const renderSelectOwnerPanel = () => {
         if (!isSelectOwnerPanelOpen) return null;
+        const textColor = '#111b21';
 
         const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
         if (!community) return null;
@@ -20150,7 +20731,6 @@ export default function Chat() {
             { id: 'privacy', label: t('settings.tabs.privacy.label'), icon: Lock, description: t('settings.tabs.privacy.description') },
             { id: 'chats', label: t('settings.tabs.chats.label'), icon: MessageSquare, description: t('settings.tabs.chats.description') },
             { id: 'notifications', label: t('settings.tabs.notifications.label'), icon: BellRing, description: t('settings.tabs.notifications.description') },
-            { id: 'devices', label: t('settings.tabs.devices.label'), icon: Laptop, description: t('settings.tabs.devices.description') },
         ];
 
         const renderTabContent = () => {
@@ -20174,7 +20754,7 @@ export default function Chat() {
                                                 <div className="wa-settings-status-dot pulse" /> {t('settings.profile.status_available')}
                                             </span>
                                         </div>
-                                        <p className="wa-settings-title">{userData.designation || "Lead Systems Architect"} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â <span>Enterprise Core</span></p>
+                                        <p className="wa-settings-title">{userData.designation || "Lead Systems Architect"} - <span>Enterprise Core</span></p>
                                         <div className="wa-settings-meta-row">
                                             <div className="wa-settings-meta-item"><Building2 size={14} /> HQ - San Francisco</div>
                                             <div className="wa-settings-meta-item"><Clock size={14} /> (GMT-7) Pacific Time</div>
@@ -20254,7 +20834,8 @@ export default function Chat() {
                     );
 
                 case 'general': {
-                    const languages = [
+                    const languages = LANGUAGE_OPTIONS;
+                    /*
                         'Albanian, Shqip', 'Arabic, ÃƒËœÃ‚Â§Ãƒâ„¢Ã¢â‚¬Å¾ÃƒËœÃ‚Â¹ÃƒËœÃ‚Â±ÃƒËœÃ‚Â¨Ãƒâ„¢Ã…Â ÃƒËœÃ‚Â©', 'Azerbaijani, AzÃƒâ€°Ã¢â€žÂ¢rbaycan',
                         'Bangla, ÃƒÂ Ã‚Â¦Ã‚Â¬ÃƒÂ Ã‚Â¦Ã‚Â¾ÃƒÂ Ã‚Â¦Ã¢â‚¬Å¡ÃƒÂ Ã‚Â¦Ã‚Â²ÃƒÂ Ã‚Â¦Ã‚Â¾', 'Brazilian Portuguese, PortuguÃƒÆ’Ã‚Âªs (Brasil)',
                         'British English, British English', 'Bulgarian, ÃƒÂÃ¢â‚¬ËœÃƒâ€˜Ã…Â ÃƒÂÃ‚Â»ÃƒÂÃ‚Â³ÃƒÂÃ‚Â°Ãƒâ€˜Ã¢â€šÂ¬Ãƒâ€˜Ã‚ÂÃƒÂÃ‚ÂºÃƒÂÃ‚Â¸', 'Catalan, CatalÃƒÆ’Ã‚Â ',
@@ -20272,7 +20853,7 @@ export default function Chat() {
                         'Tamil, ÃƒÂ Ã‚Â®Ã‚Â¤ÃƒÂ Ã‚Â®Ã‚Â®ÃƒÂ Ã‚Â®Ã‚Â¿ÃƒÂ Ã‚Â®Ã‚Â´ÃƒÂ Ã‚Â¯Ã‚Â', 'Telugu, ÃƒÂ Ã‚Â°Ã‚Â¤ÃƒÂ Ã‚Â±Ã¢â‚¬Â ÃƒÂ Ã‚Â°Ã‚Â²ÃƒÂ Ã‚Â±Ã‚ÂÃƒÂ Ã‚Â°Ã¢â‚¬â€ÃƒÂ Ã‚Â±Ã‚Â', 'Thai, ÃƒÂ Ã‚Â¹Ã¢â‚¬Å¾ÃƒÂ Ã‚Â¸Ã¢â‚¬â€ÃƒÂ Ã‚Â¸Ã‚Â¢',
                         'Turkish, TÃƒÆ’Ã‚Â¼rkÃƒÆ’Ã‚Â§e', 'Ukrainian, ÃƒÂÃ‚Â£ÃƒÂÃ‚ÂºÃƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚Â°Ãƒâ€˜Ã¢â‚¬â€ÃƒÂÃ‚Â½Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã…â€™ÃƒÂÃ‚ÂºÃƒÂÃ‚Â°', 'Urdu, ÃƒËœÃ‚Â§ÃƒËœÃ‚Â±ÃƒËœÃ‚Â¯Ãƒâ„¢Ã‹â€ ',
                         'Vietnamese, TiÃƒÂ¡Ã‚ÂºÃ‚Â¿ng ViÃƒÂ¡Ã‚Â»Ã¢â‚¬Â¡t'
-                    ];
+                    */
 
                     return (
                         <div className="wa-settings-tab-content fade-in">
@@ -20289,20 +20870,20 @@ export default function Chat() {
                                 </div>
                                 {isLanguageDropdownOpen && (
                                     <div className="wa-general-dropdown-list custom-scrollbar">
-                                        {languages.map(lang => (
+                                        {languages.map((option) => (
                                             <div
-                                                key={lang}
-                                                className={`wa-general-dropdown-option ${selectedLanguage === lang ? 'selected' : ''}`}
+                                                key={option.code}
+                                                className={`wa-general-dropdown-option ${getLangCode(selectedLanguage) === option.code ? 'selected' : ''}`}
                                                 onClick={() => {
-                                                    if (lang !== selectedLanguage) {
-                                                        setPendingLanguage(lang);
+                                                    if (getLangCode(selectedLanguage) !== option.code) {
+                                                        setPendingLanguage(option.value);
                                                         setIsLangConfirmOpen(true);
                                                     }
                                                     setIsLanguageDropdownOpen(false);
                                                 }}
                                             >
-                                                <span>{lang}</span>
-                                                {selectedLanguage === lang && <Check size={16} className="wa-general-selected-check" />}
+                                                <span>{option.value}</span>
+                                                {getLangCode(selectedLanguage) === option.code && <Check size={16} className="wa-general-selected-check" />}
                                             </div>
                                         ))}
                                     </div>
@@ -20345,48 +20926,44 @@ export default function Chat() {
                 }
 
                 case 'privacy': {
-                    const toggleSetting = (key) => {
-                        setPrivacySettings(prev => ({ ...prev, [key]: !prev[key] }));
-                    };
-
                     return (
                         <div className="wa-settings-tab-content fade-in">
                             <div className="wa-settings-grid privacy-grid">
                                 {/* ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â 1. Personal Info Visibility */}
                                 <div className="wa-settings-section">
                                     <h4 className="wa-settings-section-title">Personal Info Visibility</h4>
-                                    <button className="wa-settings-list-action">
+                                    <button className="wa-settings-list-action" onClick={() => openPrivacyVisibilityDialog('lastSeen')}>
                                         <div className="wa-settings-item-info">
                                             <p className="wa-settings-item-label">Last Seen Visibility</p>
-                                            <p className="wa-settings-item-desc">{privacySettings.lastSeen}</p>
+                                            <p className="wa-settings-item-desc">{getPrivacySummary(privacySettings.lastSeen)}</p>
                                         </div>
                                         <ChevronRight size={16} />
                                     </button>
-                                    <button className="wa-settings-list-action">
+                                    <button className="wa-settings-list-action" onClick={() => openPrivacyVisibilityDialog('onlineStatus')}>
                                         <div className="wa-settings-item-info">
                                             <p className="wa-settings-item-label">Online Status Visibility</p>
-                                            <p className="wa-settings-item-desc">{privacySettings.onlineStatus}</p>
+                                            <p className="wa-settings-item-desc">{getPrivacySummary(privacySettings.onlineStatus)}</p>
                                         </div>
                                         <ChevronRight size={16} />
                                     </button>
-                                    <button className="wa-settings-list-action">
+                                    <button className="wa-settings-list-action" onClick={() => openPrivacyVisibilityDialog('profilePhoto')}>
                                         <div className="wa-settings-item-info">
                                             <p className="wa-settings-item-label">Profile Photo Visibility</p>
-                                            <p className="wa-settings-item-desc">{privacySettings.profilePhoto}</p>
+                                            <p className="wa-settings-item-desc">{getPrivacySummary(privacySettings.profilePhoto)}</p>
                                         </div>
                                         <ChevronRight size={16} />
                                     </button>
-                                    <button className="wa-settings-list-action">
+                                    <button className="wa-settings-list-action" onClick={() => openPrivacyVisibilityDialog('about')}>
                                         <div className="wa-settings-item-info">
                                             <p className="wa-settings-item-label">About Visibility</p>
-                                            <p className="wa-settings-item-desc">{privacySettings.about}</p>
+                                            <p className="wa-settings-item-desc">{getPrivacySummary(privacySettings.about)}</p>
                                         </div>
                                         <ChevronRight size={16} />
                                     </button>
-                                    <button className="wa-settings-list-action">
+                                    <button className="wa-settings-list-action" onClick={() => openPrivacyVisibilityDialog('status')}>
                                         <div className="wa-settings-item-info">
                                             <p className="wa-settings-item-label">Status Visibility</p>
-                                            <p className="wa-settings-item-desc">{privacySettings.status}</p>
+                                            <p className="wa-settings-item-desc">{getPrivacySummary(privacySettings.status)}</p>
                                         </div>
                                         <ChevronRight size={16} />
                                     </button>
@@ -20396,7 +20973,7 @@ export default function Chat() {
                                             <p className="wa-settings-item-desc">Control who can see when you read messages</p>
                                         </div>
                                         <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.readReceipts} onChange={() => toggleSetting('readReceipts')} />
+                                            <input type="checkbox" checked={privacySettings.readReceipts} onChange={() => togglePrivacyBooleanSetting('readReceipts')} />
                                             <span className="wa-settings-toggle-slider" />
                                         </label>
                                     </div>
@@ -20406,120 +20983,10 @@ export default function Chat() {
                                             <p className="wa-settings-item-desc">Show when you are typing a message</p>
                                         </div>
                                         <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.typingIndicator} onChange={() => toggleSetting('typingIndicator')} />
+                                            <input type="checkbox" checked={privacySettings.typingIndicator} onChange={() => togglePrivacyBooleanSetting('typingIndicator')} />
                                             <span className="wa-settings-toggle-slider" />
                                         </label>
                                     </div>
-                                </div>
-
-                                {/* ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ¢â‚¬â„¢ 2. Messaging & Forwarding Control */}
-                                <div className="wa-settings-section">
-                                    <h4 className="wa-settings-section-title">Messaging & Forwarding Control</h4>
-                                    <button className="wa-settings-list-action">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Who Can Message Me</p>
-                                            <p className="wa-settings-item-desc">{privacySettings.whoCanMessageMe}</p>
-                                        </div>
-                                        <ChevronRight size={16} />
-                                    </button>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Message Requests Required</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.messageRequestsRequired} onChange={() => toggleSetting('messageRequestsRequired')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Block Unknown Account Messages</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.blockUnknown} onChange={() => toggleSetting('blockUnknown')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <button className="wa-settings-list-action">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Who Can Add Me to Groups</p>
-                                            <p className="wa-settings-item-desc">{privacySettings.whoCanAddMeToGroups}</p>
-                                        </div>
-                                        <ChevronRight size={16} />
-                                    </button>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Require Consent Before Forwarding</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.requireConsentBeforeForward} onChange={() => toggleSetting('requireConsentBeforeForward')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <button className="wa-settings-list-action">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Limit Message Forward Count</p>
-                                            <p className="wa-settings-item-desc">{privacySettings.forwardLimit} messages</p>
-                                        </div>
-                                        <ChevronRight size={16} />
-                                    </button>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Notify Me when Forwarded</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.notifyOnForward} onChange={() => toggleSetting('notifyOnForward')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                </div>
-
-                                {/* ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Â  3. AI Privacy Protection */}
-                                <div className="wa-settings-section">
-                                    <h4 className="wa-settings-section-title">AI Privacy Protection</h4>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Enable Sensitive Data Scan</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.sensitiveDataScan} onChange={() => toggleSetting('sensitiveDataScan')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Auto-Redact Sensitive Information</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.autoRedact} onChange={() => toggleSetting('autoRedact')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Enable Scam & Threat Detection</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.scamDetection} onChange={() => toggleSetting('scamDetection')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Phishing Link Detection</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.phishingDetection} onChange={() => toggleSetting('phishingDetection')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <button className="wa-settings-list-action">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Threat Alert Sensitivity</p>
-                                            <p className="wa-settings-item-desc">{privacySettings.threatAlertSensitivity}</p>
-                                        </div>
-                                        <ChevronRight size={16} />
-                                    </button>
                                 </div>
 
                                 {/* ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â¸ 4. Screenshot & Media Protection */}
@@ -20528,158 +20995,45 @@ export default function Chat() {
                                     <div className="wa-settings-item">
                                         <div className="wa-settings-item-info">
                                             <p className="wa-settings-item-label">Screenshot Detection</p>
+                                            <p className="wa-settings-item-desc">Detect common screenshot shortcuts and trigger protection rules in chat.</p>
                                         </div>
                                         <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.screenshotDetection} onChange={() => toggleSetting('screenshotDetection')} />
+                                            <input type="checkbox" checked={privacySettings.screenshotDetection} onChange={() => togglePrivacyBooleanSetting('screenshotDetection')} />
                                             <span className="wa-settings-toggle-slider" />
                                         </label>
                                     </div>
                                     <div className="wa-settings-item">
                                         <div className="wa-settings-item-info">
                                             <p className="wa-settings-item-label">Notify Me on Screenshot</p>
+                                            <p className="wa-settings-item-desc">Show an in-app alert when screenshot shortcut activity is detected.</p>
                                         </div>
                                         <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.notifyOnScreenshot} onChange={() => toggleSetting('notifyOnScreenshot')} />
+                                            <input type="checkbox" checked={privacySettings.notifyOnScreenshot} onChange={() => togglePrivacyBooleanSetting('notifyOnScreenshot')} />
                                             <span className="wa-settings-toggle-slider" />
                                         </label>
                                     </div>
                                     <div className="wa-settings-item">
                                         <div className="wa-settings-item-info">
                                             <p className="wa-settings-item-label">Blur Messages After Screenshot</p>
+                                            <p className="wa-settings-item-desc">Temporarily blur the active chat after a screenshot shortcut is detected.</p>
                                         </div>
                                         <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.blurOnScreenshot} onChange={() => toggleSetting('blurOnScreenshot')} />
+                                            <input type="checkbox" checked={privacySettings.blurOnScreenshot} onChange={() => togglePrivacyBooleanSetting('blurOnScreenshot')} />
                                             <span className="wa-settings-toggle-slider" />
                                         </label>
                                     </div>
                                     <div className="wa-settings-item">
                                         <div className="wa-settings-item-info">
                                             <p className="wa-settings-item-label">Add Watermark to Shared Media</p>
+                                            <p className="wa-settings-item-desc">Overlay a visible privacy watermark on shared image and video surfaces.</p>
                                         </div>
                                         <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.addWatermark} onChange={() => toggleSetting('addWatermark')} />
+                                            <input type="checkbox" checked={privacySettings.addWatermark} onChange={() => togglePrivacyBooleanSetting('addWatermark')} />
                                             <span className="wa-settings-toggle-slider" />
                                         </label>
                                     </div>
                                 </div>
 
-                                {/* ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â 5. Device & Access Privacy */}
-                                <div className="wa-settings-section">
-                                    <h4 className="wa-settings-section-title">Device & Access Privacy</h4>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Restrict to Approved Devices Only</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.restrictApprovedDevices} onChange={() => toggleSetting('restrictApprovedDevices')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Require Approval for New Device</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.requireApprovalNewDevice} onChange={() => toggleSetting('requireApprovalNewDevice')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Auto-Lock on Suspicious Location</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.autoLockLocationChange} onChange={() => toggleSetting('autoLockLocationChange')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Enable Geo-Fenced Messages</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.geoFencedMessages} onChange={() => toggleSetting('geoFencedMessages')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <button className="wa-settings-list-action">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Restrict Messages to Country</p>
-                                            <p className="wa-settings-item-desc">{privacySettings.restrictedCountry}</p>
-                                        </div>
-                                        <ChevronRight size={16} />
-                                    </button>
-                                </div>
-
-                                {/* ÃƒÂ°Ã…Â¸Ã…Â½Ã‚Â­ 6. Hidden & Decoy Mode */}
-                                <div className="wa-settings-section">
-                                    <h4 className="wa-settings-section-title">Hidden & Decoy Mode</h4>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Enable Hidden Chats Folder</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.hiddenChatsFolder} onChange={() => toggleSetting('hiddenChatsFolder')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Enable Decoy Mode</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.decoyMode} onChange={() => toggleSetting('decoyMode')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <button className="wa-settings-list-action">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Set / Change Decoy PIN</p>
-                                        </div>
-                                        <ChevronRight size={16} />
-                                    </button>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Panic Mode</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.panicMode} onChange={() => toggleSetting('panicMode')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                </div>
-
-                                {/* ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã…Â  7. Privacy Score & Monitoring */}
-                                <div className="wa-settings-section">
-                                    <h4 className="wa-settings-section-title">Privacy Score & Monitoring</h4>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Show Privacy Score</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.showPrivacyScore} onChange={() => toggleSetting('showPrivacyScore')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Show Encryption Level Badge</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.showEncryptionBadge} onChange={() => toggleSetting('showEncryptionBadge')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Show Risk Alerts</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.showRiskAlerts} onChange={() => toggleSetting('showRiskAlerts')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                </div>
                             </div>
                         </div>
                     );
@@ -20687,12 +21041,13 @@ export default function Chat() {
 
                 case 'chats':
                     return (
-                        <div className="wa-settings-tab-content fade-in">
+                        <div className="wa-settings-tab-content wa-settings-theme-tab fade-in">
                             <h3 className="wa-settings-content-title">Workspace Appearance</h3>
                             <div className="wa-settings-theme-grid">
                                 {['Dark', 'Light', 'System Default'].map(theme => (
-                                    <div
+                                    <button
                                         key={theme}
+                                        type="button"
                                         className={`wa-settings-theme-card ${selectedTheme === theme ? 'active' : ''}`}
                                         onClick={() => {
                                             setSelectedTheme(theme);
@@ -20701,7 +21056,7 @@ export default function Chat() {
                                     >
                                         <div className={`wa-settings-theme-preview ${theme.toLowerCase().replace(' ', '-')}`} />
                                         <p>{theme}</p>
-                                    </div>
+                                    </button>
                                 ))}
                             </div>
                             <div className="wa-settings-section mt-8">
@@ -20723,6 +21078,153 @@ export default function Chat() {
                                         </div>
                                         <ChevronRight size={16} />
                                     </button>
+                                </div>
+                            </div>
+                        </div>
+                    );
+
+                case 'notifications':
+                    return (
+                        <div className="wa-settings-tab-content wa-settings-notifications-tab fade-in">
+                            <div className="wa-settings-grid">
+                                <div className="wa-settings-section">
+                                    <h4 className="wa-settings-section-title">Notification Delivery</h4>
+                                    <div className="wa-settings-list">
+                                        {[
+                                            {
+                                                key: 'masterEnabled',
+                                                label: 'Enable Notifications',
+                                                desc: 'Show Neural Chat alerts for new unread messages.',
+                                                value: notificationSettings.masterEnabled,
+                                            },
+                                            {
+                                                key: 'desktopNotifications',
+                                                label: 'Desktop Notifications',
+                                                desc: 'Use browser notifications when Neural Chat is in the background.',
+                                                value: notificationSettings.desktopNotifications,
+                                                disabled: !notificationSettings.masterEnabled,
+                                            },
+                                            {
+                                                key: 'groupNotifications',
+                                                label: 'Group Notifications',
+                                                desc: 'Notify you for unread group messages.',
+                                                value: notificationSettings.groupNotifications,
+                                                disabled: !notificationSettings.masterEnabled,
+                                            },
+                                        ].map((item) => (
+                                            <div className={`wa-settings-item ${item.disabled ? 'disabled' : ''}`} key={item.key}>
+                                                <div className="wa-settings-item-info">
+                                                    <p className="wa-settings-item-label">{item.label}</p>
+                                                    <p className="wa-settings-item-desc">{item.desc}</p>
+                                                </div>
+                                                <label className="wa-settings-toggle">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={item.value}
+                                                        disabled={item.disabled}
+                                                        onChange={(e) => updateNotificationSetting(item.key, e.target.checked)}
+                                                    />
+                                                    <span className="wa-settings-toggle-slider" />
+                                                </label>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="wa-settings-section">
+                                    <h4 className="wa-settings-section-title">Sound & Preview</h4>
+                                    <div className="wa-settings-list">
+                                        <div className={`wa-settings-item ${!notificationSettings.masterEnabled ? 'disabled' : ''}`}>
+                                            <div className="wa-settings-item-info">
+                                                <p className="wa-settings-item-label">Notification Sound</p>
+                                                <p className="wa-settings-item-desc">Play a short tone when a new alert arrives.</p>
+                                            </div>
+                                            <label className="wa-settings-toggle">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={notificationSettings.notificationSound}
+                                                    disabled={!notificationSettings.masterEnabled}
+                                                    onChange={(e) => updateNotificationSetting('notificationSound', e.target.checked)}
+                                                />
+                                                <span className="wa-settings-toggle-slider" />
+                                            </label>
+                                        </div>
+
+                                        <div className={`wa-settings-item wa-settings-slider-item ${!notificationSettings.masterEnabled || !notificationSettings.notificationSound ? 'disabled' : ''}`}>
+                                            <div className="wa-settings-item-info">
+                                                <p className="wa-settings-item-label">Sound Volume</p>
+                                                <p className="wa-settings-item-desc">{notificationSettings.soundVolume}%</p>
+                                            </div>
+                                            <input
+                                                className="wa-settings-range"
+                                                type="range"
+                                                min="0"
+                                                max="100"
+                                                step="5"
+                                                value={notificationSettings.soundVolume}
+                                                disabled={!notificationSettings.masterEnabled || !notificationSettings.notificationSound}
+                                                onChange={(e) => updateNotificationSetting('soundVolume', Number(e.target.value))}
+                                            />
+                                        </div>
+
+                                        <div className={`wa-settings-item ${!notificationSettings.masterEnabled ? 'disabled' : ''}`}>
+                                            <div className="wa-settings-item-info">
+                                                <p className="wa-settings-item-label">Message Previews</p>
+                                                <p className="wa-settings-item-desc">Show message text in alerts instead of a generic label.</p>
+                                            </div>
+                                            <label className="wa-settings-toggle">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={notificationSettings.messagePreviews}
+                                                    disabled={!notificationSettings.masterEnabled}
+                                                    onChange={(e) => updateNotificationSetting('messagePreviews', e.target.checked)}
+                                                />
+                                                <span className="wa-settings-toggle-slider" />
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="wa-settings-section wa-settings-section-wide">
+                                    <h4 className="wa-settings-section-title">Focused Hours</h4>
+                                    <div className="wa-settings-list">
+                                        <div className={`wa-settings-item ${!notificationSettings.masterEnabled ? 'disabled' : ''}`}>
+                                            <div className="wa-settings-item-info">
+                                                <p className="wa-settings-item-label">Do Not Disturb</p>
+                                                <p className="wa-settings-item-desc">Silence new message alerts during the selected time window.</p>
+                                            </div>
+                                            <label className="wa-settings-toggle">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={notificationSettings.quietHoursEnabled}
+                                                    disabled={!notificationSettings.masterEnabled}
+                                                    onChange={(e) => updateNotificationSetting('quietHoursEnabled', e.target.checked)}
+                                                />
+                                                <span className="wa-settings-toggle-slider" />
+                                            </label>
+                                        </div>
+
+                                        <div className={`wa-settings-time-row ${!notificationSettings.masterEnabled || !notificationSettings.quietHoursEnabled ? 'disabled' : ''}`}>
+                                            <label>
+                                                <span>Start</span>
+                                                <input
+                                                    type="time"
+                                                    value={notificationSettings.quietHoursStart}
+                                                    disabled={!notificationSettings.masterEnabled || !notificationSettings.quietHoursEnabled}
+                                                    onChange={(e) => updateNotificationSetting('quietHoursStart', e.target.value)}
+                                                />
+                                            </label>
+                                            <label>
+                                                <span>End</span>
+                                                <input
+                                                    type="time"
+                                                    value={notificationSettings.quietHoursEnd}
+                                                    disabled={!notificationSettings.masterEnabled || !notificationSettings.quietHoursEnabled}
+                                                    onChange={(e) => updateNotificationSetting('quietHoursEnd', e.target.value)}
+                                                />
+                                            </label>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -20837,6 +21339,119 @@ export default function Chat() {
             }
         };
 
+        const filteredPrivacyContacts = [...users]
+            .filter((contact) => String(contact._id || contact.id) !== currentViewerId)
+            .filter((contact) => {
+                const query = privacyDialogSearch.trim().toLowerCase();
+                if (!query) return true;
+                const name = String(getContactDisplayName(contact) || '').toLowerCase();
+                const mobile = String(contact.mobile || '').toLowerCase();
+                const email = String(contact.email || '').toLowerCase();
+                return name.includes(query) || mobile.includes(query) || email.includes(query);
+            })
+            .sort((a, b) => String(getContactDisplayName(a) || '').localeCompare(String(getContactDisplayName(b) || '')));
+
+        const renderPrivacyVisibilityDialog = () => {
+            if (!privacyDialog) return null;
+
+            return (
+                <div className="wa-privacy-modal-backdrop" onClick={closePrivacyVisibilityDialog}>
+                    <div className="wa-privacy-modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="wa-privacy-modal-header">
+                            <div>
+                                <h3 className="wa-privacy-modal-title">{privacyDialog.label}</h3>
+                                <p className="wa-privacy-modal-subtitle">{privacyDialog.description}</p>
+                            </div>
+                            <button className="wa-privacy-modal-close" onClick={closePrivacyVisibilityDialog}>
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div className="wa-privacy-modal-body">
+                            {[
+                                { value: 'everyone', label: 'Everyone', description: 'Visible to every contact in the application.' },
+                                { value: 'everyone_except', label: 'Everyone except...', description: 'Visible to all contacts except the ones you choose.' },
+                                { value: 'no_one', label: 'No one', description: 'Hidden from everyone in the application.' },
+                            ].map((option) => (
+                                <button
+                                    key={option.value}
+                                    className={`wa-privacy-option ${privacyDialogDraft.mode === option.value ? 'active' : ''}`}
+                                    onClick={() => updatePrivacyDialogMode(option.value)}
+                                >
+                                    <div className="wa-privacy-option-copy">
+                                        <span className="wa-privacy-option-title">{option.label}</span>
+                                        <span className="wa-privacy-option-desc">{option.description}</span>
+                                    </div>
+                                    <div className={`wa-privacy-option-radio ${privacyDialogDraft.mode === option.value ? 'active' : ''}`} />
+                                </button>
+                            ))}
+
+                            {privacyDialogDraft.mode === 'everyone_except' && (
+                                <div className="wa-privacy-exceptions">
+                                    <div className="wa-privacy-exceptions-header">
+                                        <div>
+                                            <p className="wa-privacy-exceptions-title">Excluded contacts</p>
+                                            <p className="wa-privacy-exceptions-subtitle">Select one or more contacts to hide this field from.</p>
+                                        </div>
+                                        <span className="wa-privacy-exceptions-count">{privacyDialogDraft.exceptUserIds.length} selected</span>
+                                    </div>
+
+                                    <div className="wa-privacy-search">
+                                        <Search size={16} />
+                                        <input
+                                            value={privacyDialogSearch}
+                                            onChange={(e) => setPrivacyDialogSearch(e.target.value)}
+                                            placeholder="Search contacts"
+                                        />
+                                    </div>
+
+                                    <div className="wa-privacy-contact-list custom-scrollbar">
+                                        {filteredPrivacyContacts.length === 0 ? (
+                                            <div className="wa-privacy-empty-state">No contacts found.</div>
+                                        ) : filteredPrivacyContacts.map((contact) => {
+                                            const contactId = String(contact._id || contact.id);
+                                            const isSelected = privacyDialogDraft.exceptUserIds.includes(contactId);
+                                            const avatarSrc = getVisibleUserAvatar(contact);
+                                            const contactName = getContactDisplayName(contact);
+                                            return (
+                                                <button
+                                                    key={contactId}
+                                                    className={`wa-privacy-contact ${isSelected ? 'active' : ''}`}
+                                                    onClick={() => togglePrivacyExceptionUser(contactId)}
+                                                >
+                                                    <div className="wa-privacy-contact-avatar">
+                                                        {avatarSrc ? (
+                                                            <img src={avatarSrc} alt={contactName} />
+                                                        ) : (
+                                                            <span>{contactName?.charAt(0)?.toUpperCase() || 'U'}</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="wa-privacy-contact-copy">
+                                                        <span className="wa-privacy-contact-name">{contactName}</span>
+                                                        <span className="wa-privacy-contact-meta">{contact.mobile || contact.email || 'Contact'}</span>
+                                                    </div>
+                                                    <div className={`wa-privacy-contact-check ${isSelected ? 'active' : ''}`}>
+                                                        {isSelected && <Check size={14} />}
+                                                    </div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="wa-privacy-modal-actions">
+                            <button className="wa-settings-btn-cancel" onClick={closePrivacyVisibilityDialog}>Cancel</button>
+                            <button className="wa-settings-btn-commit" onClick={savePrivacyVisibilityDialog} disabled={isSavingPrivacy}>
+                                {isSavingPrivacy ? 'Saving...' : 'Save'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
         return (
             <div className="wa-settings-overlay modal-animate-in">
                 <div className="wa-settings-container">
@@ -20920,6 +21535,7 @@ export default function Chat() {
                         </div>
                     </div>
                 </div>
+                {renderPrivacyVisibilityDialog()}
             </div>
         );
     };
@@ -21418,6 +22034,50 @@ export default function Chat() {
                     </div>
                 </div>
             )}
+            {groupMemberActionModal && (
+                <div className="wa-mute-modal-overlay" onClick={() => setGroupMemberActionModal(null)}>
+                    <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ width: 420, padding: 0, borderRadius: 16, overflow: 'hidden' }}>
+                        <div style={{ background: '#F3FDFE', padding: '18px 20px', borderBottom: '1px solid #e9edef' }}>
+                            <div style={{ fontSize: 11, color: '#54656f', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 4 }}>Member actions</div>
+                            <div style={{ fontSize: 17, fontWeight: 600, color: '#111b21' }}>{groupMemberActionModal.member?.name}</div>
+                        </div>
+
+                        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            <button
+                                onClick={() => {
+                                    setAdminConfirmModal({
+                                        member: groupMemberActionModal.member,
+                                        type: groupMemberActionModal.isAdmin ? 'remove' : 'add'
+                                    });
+                                    setGroupMemberActionModal(null);
+                                }}
+                                style={{ width: '100%', padding: '12px 16px', borderRadius: 12, border: '1px solid #dfe5e7', background: 'white', color: '#111b21', cursor: 'pointer', textAlign: 'left', fontWeight: 500 }}
+                            >
+                                {groupMemberActionModal.isAdmin ? 'Remove group admin role' : 'Make group admin'}
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    const target = groupMemberActionModal;
+                                    setGroupMemberActionModal(null);
+                                    await handleRemoveGroupMember(target.group, target.member);
+                                }}
+                                style={{ width: '100%', padding: '12px 16px', borderRadius: 12, border: '1px solid rgba(248, 113, 113, 0.35)', background: 'rgba(248, 113, 113, 0.08)', color: '#f87171', cursor: 'pointer', textAlign: 'left', fontWeight: 500 }}
+                            >
+                                Remove from group
+                            </button>
+                        </div>
+
+                        <div style={{ padding: '0 20px 18px', display: 'flex', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={() => setGroupMemberActionModal(null)}
+                                style={{ padding: '9px 22px', borderRadius: 24, border: '1px solid #d1d7db', background: 'transparent', color: '#0EA5BE', cursor: 'pointer', fontWeight: 500 }}
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {pinMessageModal && (
                 <div className="wa-mute-modal-overlay" onClick={() => setPinMessageModal(null)}>
@@ -21459,6 +22119,92 @@ export default function Chat() {
                     </div>
                 </div>
             )}
+            {isExitGroupConfirmOpen && (() => {
+                const activeGroup = exitGroupTarget || selectedGroup;
+                const myId = String(user.id || user._id);
+                const isOwner = String(activeGroup?.admin?._id || activeGroup?.admin || activeGroup?.creatorId || '') === myId;
+                const otherAdmins = (activeGroup?.admins || []).filter(admin => String(admin?._id || admin?.id || admin) !== myId);
+                const needsManualTransfer = isOwner && otherAdmins.length === 0;
+                const candidateMembers = (activeGroup?.members || []).filter(member => String(member._id || member.id || member) !== myId);
+
+                return (
+                    <div className="wa-mute-modal-overlay" onClick={closeExitGroupModal}>
+                        <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()}>
+                            <div className="wa-mute-modal-content">
+                                <div className="wa-mute-header-centered">
+                                    <div className="wa-mute-icon-wrapper">
+                                        <LogOut size={28} color="#f87171" />
+                                    </div>
+                                    <h3>{needsManualTransfer ? 'Assign a new group admin' : 'Exit this group?'}</h3>
+                                </div>
+
+                                <div className="wa-mute-body">
+                                    <div className="wa-mute-description-centered">
+                                        {needsManualTransfer
+                                            ? 'Before you exit, choose another group member to become the new admin.'
+                                            : 'You will stop receiving messages from this group until someone adds you again.'}
+                                    </div>
+
+                                    {needsManualTransfer && (
+                                        <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 220, overflowY: 'auto' }}>
+                                            {candidateMembers.length === 0 ? (
+                                                <div style={{ textAlign: 'center', color: '#667781', fontSize: 14, lineHeight: 1.5 }}>
+                                                    No other members are available.<br />
+                                                    Add someone to the group before exiting.
+                                                </div>
+                                            ) : (
+                                                candidateMembers.map(member => {
+                                                    const memberId = member._id || member.id;
+                                                    const isSelected = String(exitGroupTransferTarget?._id || exitGroupTransferTarget?.id) === String(memberId);
+                                                    return (
+                                                        <button
+                                                            key={memberId}
+                                                            onClick={() => setExitGroupTransferTarget(member)}
+                                                            style={{
+                                                                width: '100%',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                gap: 12,
+                                                                padding: '12px 14px',
+                                                                borderRadius: 12,
+                                                                border: isSelected ? '1px solid #0EA5BE' : '1px solid #dfe5e7',
+                                                                background: isSelected ? 'rgba(14, 165, 190, 0.08)' : '#fff',
+                                                                cursor: 'pointer',
+                                                                textAlign: 'left'
+                                                            }}
+                                                        >
+                                                            <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(56, 189, 248, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#38bdf8', fontWeight: 600, flexShrink: 0 }}>
+                                                                {(member.name || 'U').charAt(0).toUpperCase()}
+                                                            </div>
+                                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                                <div style={{ color: '#111b21', fontSize: 15, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{member.name || 'Member'}</div>
+                                                                <div style={{ color: '#667781', fontSize: 13 }}>{member.about || 'Available'}</div>
+                                                            </div>
+                                                            {isSelected && <Check size={18} color="#0EA5BE" />}
+                                                        </button>
+                                                    );
+                                                })
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="wa-mute-footer-centered">
+                                    <button className="wa-mute-btn-cancel" onClick={closeExitGroupModal}>Cancel</button>
+                                    <button
+                                        className="wa-mute-btn-confirm"
+                                        onClick={() => handleExitGroup(activeGroup)}
+                                        disabled={needsManualTransfer && (!exitGroupTransferTarget || candidateMembers.length === 0)}
+                                        style={{ background: '#f87171', opacity: needsManualTransfer && (!exitGroupTransferTarget || candidateMembers.length === 0) ? 0.6 : 1, cursor: needsManualTransfer && (!exitGroupTransferTarget || candidateMembers.length === 0) ? 'not-allowed' : 'pointer' }}
+                                    >
+                                        {needsManualTransfer ? 'Assign and exit' : 'Exit group'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
             {isRemoveGroupConfirmOpen && (
                 <div
                     className="wa-mute-modal-overlay"

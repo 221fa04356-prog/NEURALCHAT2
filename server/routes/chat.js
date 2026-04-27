@@ -614,7 +614,7 @@ router.get('/history/:userId', async (req, res) => {
 // GET Current User Profile - Secured with Auth
 router.get('/me', authenticateToken, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).select('name email mobile designation about role isOnline lastSeen bannedUntil rejectionCount adminLock messagingBlocked unblockRequested nameOverrides __enc_name __enc_email __enc_mobile __enc_designation __enc_about');
+        const user = await User.findById(req.user.id).select('name email mobile designation about role isOnline lastSeen bannedUntil rejectionCount adminLock messagingBlocked unblockRequested nameOverrides privacySettings __enc_name __enc_email __enc_mobile __enc_designation __enc_about');
         if (!user) return res.status(404).json({ error: 'User not found' });
         
         // Convert to plain object to modify response without affecting DB
@@ -661,7 +661,7 @@ router.get('/users', authenticateToken, async (req, res) => {
             query.role = { $ne: 'admin' };
         }
 
-        const users = await User.find(query).select('name email mobile _id role about isOnline lastSeen messagingBlocked __enc_name __enc_email __enc_mobile __enc_about __enc_designation');
+        const users = await User.find(query).select('name email mobile _id role about isOnline lastSeen messagingBlocked privacySettings __enc_name __enc_email __enc_mobile __enc_about __enc_designation');
         console.log(`[DEBUG] /users: Found ${users.length} raw users for requester ${currentUserId} (Role: ${currentUserRole})`);
 
         if (!currentUserId) {
@@ -895,7 +895,7 @@ router.post('/custom-lists/sync', authenticateToken, async (req, res) => {
         const user = await User.findByIdAndUpdate(
             req.user.id,
             { $set: { customLists: customLists || [] } },
-            { new: true }
+            { returnDocument: 'after' }
         ).select('customLists');
 
         if (!user) return res.status(404).json({ error: 'User not found' });
@@ -924,7 +924,7 @@ router.post('/signal/upload-keys', authenticateToken, async (req, res) => {
                 signedPreKey,
                 oneTimePreKeys
             }
-        }, { new: true });
+        }, { returnDocument: 'after' });
         res.json({ status: 'success', message: 'Keys uploaded' });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -1063,7 +1063,7 @@ router.post('/user/update', authenticateToken, async (req, res) => {
                 updatedUser = await User.findByIdAndUpdate(
                     targetUserId,
                     updateData,
-                    { new: true }
+                    { returnDocument: 'after' }
                 );
 
                 if (req.io && updatedUser) {
@@ -1319,7 +1319,7 @@ router.post('/request-unblock', authenticateToken, async (req, res) => {
         const user = await User.findByIdAndUpdate(userId, {
             unblockRequested: true,
             unblockRequestReason: reason || 'Please unblock my messaging.'
-        }, { new: true });
+        }, { returnDocument: 'after' });
 
         if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -1736,7 +1736,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
             // Log violation and increment count
             const updatedUser = await User.findByIdAndUpdate(userId, {
                 $inc: { unethicalCount: 1 }
-            }, { new: true });
+            }, { returnDocument: 'after' });
 
             // Create entry for admin dashboard
             await UnethicalLog.create({

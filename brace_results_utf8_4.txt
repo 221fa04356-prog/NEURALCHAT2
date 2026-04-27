@@ -1,4 +1,4 @@
-﻿L1200 [Level 4]: 
+L1200 [Level 4]: 
 L1201 [Level 4]: setSelectedForwardContacts(prev => [...prev, contact]);
 L1202 [Level 4]: setShowForwardLimitWarning(false);
 L1203 [Level 3]: }

@@ -1,4 +1,4 @@
-﻿Lines with unclosed template literals: 2
+Lines with unclosed template literals: 2
   Line 17: ...const searchSlideStyles = `\n@keyframes wa-slide-left {
            next: from { transform: translateX(20px); opacity: 0; }
 

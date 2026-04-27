@@ -786,16 +786,27 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
         const isRemoved = (group.removedMembers || []).some(m => String(m) === String(senderId));
         const isOwner = String(group.admin) === String(senderId);
         const isAdmin = (group.admins || []).some(a => String(a) === String(senderId));
+        let isCommunityAnnouncementAdmin = false;
 
-        if (isRemoved && !isMem && !isOwner && !isAdmin) {
+        if (group.isAnnouncementGroup && !isOwner && !isAdmin) {
+            const Community = require('../models/Community');
+            const linkedCommunity = await Community.findOne({ announcements: group._id }).select('creator admins');
+            if (linkedCommunity) {
+                const isCommunityOwner = String(linkedCommunity.creator) === String(senderId);
+                const isCommunityAdmin = (linkedCommunity.admins || []).some(a => String(a) === String(senderId));
+                isCommunityAnnouncementAdmin = isCommunityOwner || isCommunityAdmin;
+            }
+        }
+
+        if (isRemoved && !isMem && !isOwner && !isAdmin && !isCommunityAnnouncementAdmin) {
             return res.status(403).json({ error: 'You have been removed from this group and cannot send messages.' });
         }
 
-        if (group.isAnnouncementGroup && !isOwner && !isAdmin) {
+        if (group.isAnnouncementGroup && !isOwner && !isAdmin && !isCommunityAnnouncementAdmin) {
             return res.status(403).json({ error: 'Only admins can send messages to this announcement group.' });
         }
 
-        if (!isMem && !isOwner && !isAdmin) {
+        if (!isMem && !isOwner && !isAdmin && !isCommunityAnnouncementAdmin) {
             return res.status(403).json({ error: 'Not a group member' });
         }
 
@@ -1374,6 +1385,86 @@ router.patch('/:groupId/members', authenticateToken, async (req, res) => {
     }
 });
 
+// DELETE /api/groups/:groupId/members/:memberId - remove member from group
+router.delete('/:groupId/members/:memberId', authenticateToken, async (req, res) => {
+    try {
+        const { groupId, memberId } = req.params;
+        const requesterId = req.user.id;
+
+        const group = await Group.findById(groupId);
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+
+        const isRequesterAdmin = String(group.admin) === String(requesterId)
+            || (group.admins || []).some(admin => String(admin) === String(requesterId));
+        if (!isRequesterAdmin) {
+            return res.status(403).json({ error: 'Only group admins can remove members' });
+        }
+
+        if (String(memberId) === String(requesterId)) {
+            return res.status(400).json({ error: 'Use exit group if you want to leave this group' });
+        }
+
+        if (String(memberId) === String(group.admin)) {
+            return res.status(400).json({ error: 'The main group admin cannot be removed' });
+        }
+
+        const isMember = (group.members || []).some(member => String(member) === String(memberId));
+        if (!isMember) {
+            return res.status(400).json({ error: 'User is not a member of this group' });
+        }
+
+        handleMembershipExit(group, memberId);
+        await group.save();
+
+        const removedMessage = await GroupMessage.create({
+            group_id: group._id,
+            sender_id: requesterId,
+            type: 'system',
+            is_system: true,
+            content: 'removed a member'
+        });
+
+        const populatedGroup = await Group.findById(group._id)
+            .populate('members', 'name email _id isOnline lastSeen about mobile image __enc_name __enc_email __enc_about __enc_mobile')
+            .populate('admin', 'name _id __enc_name')
+            .populate('admins', 'name _id __enc_name');
+
+        const populatedRemovedMessage = await GroupMessage.findById(removedMessage._id)
+            .populate('sender_id', 'name _id __enc_name');
+
+        if (req.io) {
+            (populatedGroup.members || []).forEach(member => {
+                const activeMemberId = String(member._id || member);
+                req.io.to(activeMemberId).emit('group_members_updated', {
+                    groupId: String(group._id),
+                    members: populatedGroup.members,
+                    admin: populatedGroup.admin,
+                    admins: populatedGroup.admins || []
+                });
+                req.io.to(activeMemberId).emit('group_message', {
+                    groupId: String(group._id),
+                    message: populatedRemovedMessage.toObject()
+                });
+            });
+
+            req.io.to(String(memberId)).emit('group_member_removed', {
+                groupId: String(group._id),
+                memberId: String(memberId),
+                message: `You were removed from ${group.name || 'this group'}`
+            });
+        }
+
+        res.json({
+            status: 'removed',
+            memberId: String(memberId),
+            group: populatedGroup
+        });
+    } catch (err) {
+        console.error('[GROUP REMOVE MEMBER ERROR]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // POST /api/groups/:groupId/join - Join a group (if permited, e.g. community member)
 router.post('/:groupId/join', authenticateToken, async (req, res) => {
     try {
@@ -1459,6 +1550,163 @@ router.post('/:groupId/join', authenticateToken, async (req, res) => {
         res.json({ status: 'success', group: populatedGroup });
     } catch (err) {
         console.error('[GROUP JOIN ERROR]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/groups/:groupId/transfer-ownership - transfer group ownership
+router.post('/:groupId/transfer-ownership', authenticateToken, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const { newAdminId } = req.body || {};
+        const userId = req.user.id;
+
+        const group = await Group.findById(groupId);
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+
+        if (String(group.admin) !== String(userId)) {
+            return res.status(403).json({ error: 'Only the current group admin can transfer ownership' });
+        }
+
+        const memberIds = (group.members || []).map(member => String(member));
+        if (!newAdminId) {
+            return res.status(400).json({ error: 'Please choose a new group admin' });
+        }
+        if (String(newAdminId) === String(userId)) {
+            return res.status(400).json({ error: 'Please choose another member as the new group admin' });
+        }
+        if (!memberIds.includes(String(newAdminId))) {
+            return res.status(400).json({ error: 'Selected member is not eligible to become group admin' });
+        }
+
+        group.admin = newAdminId;
+        group.admins = (group.admins || [])
+            .map(adminId => String(adminId))
+            .filter(adminId => adminId !== String(newAdminId) && adminId !== String(userId));
+
+        await group.save();
+
+        const populatedGroup = await Group.findById(group._id)
+            .populate('members', 'name email _id isOnline lastSeen about mobile image __enc_name __enc_email __enc_about __enc_mobile')
+            .populate('admin', 'name _id __enc_name')
+            .populate('admins', 'name _id __enc_name');
+
+        if (req.io) {
+            (populatedGroup.members || []).forEach(member => {
+                const memberId = String(member._id || member);
+                req.io.to(memberId).emit('group_members_updated', {
+                    groupId: String(group._id),
+                    members: populatedGroup.members,
+                    admin: populatedGroup.admin,
+                    admins: populatedGroup.admins || []
+                });
+            });
+        }
+
+        res.json({
+            status: 'success',
+            group: populatedGroup,
+            groupId: String(group._id)
+        });
+    } catch (err) {
+        console.error('[GROUP TRANSFER OWNERSHIP ERROR]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/groups/:groupId/exit - Exit a group
+router.post('/:groupId/exit', authenticateToken, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const userId = req.user.id;
+        const { newAdminId } = req.body || {};
+
+        const group = await Group.findById(groupId);
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+
+        const isMember = (group.members || []).some(member => String(member) === String(userId));
+        if (!isMember) {
+            return res.status(403).json({ error: 'You are not a member of this group' });
+        }
+
+        const remainingMemberIds = (group.members || [])
+            .map(member => String(member))
+            .filter(memberId => memberId !== String(userId));
+
+        if (String(group.admin) === String(userId)) {
+            const survivingAdmins = (group.admins || [])
+                .map(admin => String(admin))
+                .filter(admin => remainingMemberIds.includes(admin));
+
+            if (newAdminId) {
+                if (String(newAdminId) === String(userId)) {
+                    return res.status(400).json({ error: 'Please choose another member as the new group admin' });
+                }
+                if (!remainingMemberIds.includes(String(newAdminId))) {
+                    return res.status(400).json({ error: 'Selected member is not eligible to become group admin' });
+                }
+                group.admin = newAdminId;
+                group.admins = survivingAdmins.filter(admin => admin !== String(newAdminId));
+            } else if (survivingAdmins.length > 0) {
+                group.admin = survivingAdmins[0];
+                group.admins = survivingAdmins.slice(1);
+            } else {
+                return res.status(400).json({ error: 'Group admin must assign a new admin before exiting' });
+            }
+        }
+
+        if (remainingMemberIds.length === 0) {
+            const Community = require('../models/Community');
+
+            await GroupMessage.deleteMany({ group_id: group._id });
+            await Group.deleteOne({ _id: group._id });
+            await Community.updateMany({ groups: group._id }, { $pull: { groups: group._id } });
+
+            return res.json({ status: 'success', removed: true, groupId: String(group._id) });
+        }
+
+        handleMembershipExit(group, userId);
+        await group.save();
+
+        const exitMessage = await GroupMessage.create({
+            group_id: group._id,
+            sender_id: userId,
+            type: 'system',
+            is_system: true,
+            content: 'left the group'
+        });
+
+        const populatedGroup = await Group.findById(group._id)
+            .populate('members', 'name email _id isOnline lastSeen about mobile image __enc_name __enc_email __enc_about __enc_mobile')
+            .populate('admin', 'name _id __enc_name')
+            .populate('admins', 'name _id __enc_name');
+
+        const populatedExitMessage = await GroupMessage.findById(exitMessage._id)
+            .populate('sender_id', 'name _id __enc_name');
+
+        if (req.io) {
+            (populatedGroup.members || []).forEach(member => {
+                const memberId = String(member._id || member);
+                req.io.to(memberId).emit('group_members_updated', {
+                    groupId: String(group._id),
+                    members: populatedGroup.members,
+                    admin: populatedGroup.admin,
+                    admins: populatedGroup.admins || []
+                });
+                req.io.to(memberId).emit('group_message', {
+                    groupId: String(group._id),
+                    message: populatedExitMessage.toObject()
+                });
+            });
+        }
+
+        res.json({
+            status: 'success',
+            group: populatedGroup,
+            groupId: String(group._id)
+        });
+    } catch (err) {
+        console.error('[GROUP EXIT ERROR]', err);
         res.status(500).json({ error: err.message });
     }
 });

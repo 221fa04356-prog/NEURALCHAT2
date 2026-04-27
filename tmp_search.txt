@@ -1,4 +1,4 @@
-﻿42|    transports: ['websocket', 'polling'], //  Try WebSocket first, then polling
+42|    transports: ['websocket', 'polling'], //  Try WebSocket first, then polling
 802|    // --- Poll States ---
 803|    const [isPollModalOpen, setIsPollModalOpen] = useState(false);
 804|    const [pollQuestion, setPollQuestion] = useState('');

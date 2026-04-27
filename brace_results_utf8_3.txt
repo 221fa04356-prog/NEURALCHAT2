@@ -1,4 +1,4 @@
-﻿L1250 [Level 6]: // Optimistic update if we are forwarding to the user we are currently viewing
+L1250 [Level 6]: // Optimistic update if we are forwarding to the user we are currently viewing
 L1251 [Level 7]: if (selectedUser && contact._id === selectedUser._id) {
 L1252 [Level 8]: setMessages(prev => [...prev, {
 L1253 [Level 8]: ...sentMsg,

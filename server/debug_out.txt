@@ -1,4 +1,4 @@
-﻿[dotenv@17.2.3] injecting env (11) from .env -- tip: ≡ƒöÉ prevent building .env in docker: https://dotenvx.com/prebuild
+[dotenv@17.2.3] injecting env (11) from .env -- tip: ≡ƒöÉ prevent building .env in docker: https://dotenvx.com/prebuild
 Connected to DB
 Total Resets in DB: 29
 

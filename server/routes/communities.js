@@ -544,9 +544,17 @@ router.patch('/:communityId/groups', authenticateToken, async (req, res) => {
                     const annMsg = await GroupMessage.create({
                         group_id: community.announcements,
                         sender_id: req.user.id,
-                        type: 'system',
+                        type: 'community_link',
                         is_system: true,
-                        content: `Group "${group.name}" was added`
+                        content: `Group "${group.name}" was added`,
+                        metadata: {
+                            kind: 'community_group_update',
+                            action: 'added',
+                            communityId: community._id,
+                            communityName: community.name,
+                            groupId: group._id,
+                            groupName: group.name
+                        }
                     });
 
                     // Log in the Group itself (Special Card)
@@ -557,8 +565,12 @@ router.patch('/:communityId/groups', authenticateToken, async (req, res) => {
                         is_system: true,
                         content: `added this group to the community: ${community.name}`,
                         metadata: {
+                            kind: 'community_group_update',
+                            action: 'added',
                             communityId: community._id,
-                            communityName: community.name
+                            communityName: community.name,
+                            groupId: group._id,
+                            groupName: group.name
                         }
                     });
 
@@ -726,13 +738,43 @@ router.delete('/:communityId/groups/:groupId', authenticateToken, async (req, re
             const group = await Group.findById(groupId);
             const groupName = group ? group.name : 'Group';
 
-            const sysMsg = await GroupMessage.create({
+            const annMsg = await GroupMessage.create({
                 group_id: community.announcements,
                 sender_id: req.user.id,
-                type: 'system',
+                type: 'community_link',
                 is_system: true,
-                content: `Group "${groupName}" was removed`
+                content: `Group "${groupName}" was removed`,
+                metadata: {
+                    kind: 'community_group_update',
+                    action: 'removed',
+                    communityId: community._id,
+                    communityName: community.name,
+                    groupId: groupId,
+                    groupName
+                }
             });
+
+            const populatedAnnMsg = await GroupMessage.findById(annMsg._id).populate('sender_id', 'name _id __enc_name');
+
+            let populatedGroupMsg = null;
+            if (group) {
+                const groupMsg = await GroupMessage.create({
+                    group_id: groupId,
+                    sender_id: req.user.id,
+                    type: 'community_link',
+                    is_system: true,
+                    content: `removed this group from the community: ${community.name}`,
+                    metadata: {
+                        kind: 'community_group_update',
+                        action: 'removed',
+                        communityId: community._id,
+                        communityName: community.name,
+                        groupId: group._id,
+                        groupName
+                    }
+                });
+                populatedGroupMsg = await GroupMessage.findById(groupMsg._id).populate('sender_id', 'name _id __enc_name');
+            }
 
             if (req.io) {
                 const annGroup = await Group.findById(community.announcements);
@@ -740,9 +782,18 @@ router.delete('/:communityId/groups/:groupId', authenticateToken, async (req, re
                 toNotify.forEach(uid => {
                     req.io.to(String(uid)).emit('group_message', {
                         groupId: community.announcements.toString(),
-                        message: sysMsg
+                        message: populatedAnnMsg
                     });
                 });
+
+                if (group && populatedGroupMsg) {
+                    (group.members || []).forEach(uid => {
+                        req.io.to(String(uid)).emit('group_message', {
+                            groupId: groupId.toString(),
+                            message: populatedGroupMsg
+                        });
+                    });
+                }
             }
         }
 

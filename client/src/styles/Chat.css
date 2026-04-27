@@ -1577,6 +1577,33 @@ html {
     justify-content: flex-end;
 }
 
+.wa-chat-messages-area.privacy-mask-active .wa-message-scroller {
+    filter: blur(16px);
+    pointer-events: none;
+    user-select: none;
+    transition: filter 0.18s ease;
+}
+
+.wa-chat-messages-area.privacy-mask-active::after {
+    content: "Screenshot privacy mode active";
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    text-align: center;
+    color: #f8fafc;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    background: rgba(7, 12, 18, 0.28);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 3;
+}
+
 .wa-message-scroller {
     scrollbar-width: thin;
     scrollbar-color: rgba(84, 101, 111, 0.45) transparent;
@@ -2838,6 +2865,7 @@ html {
     margin-bottom: 5px;
     border-radius: 8px;
     overflow: hidden;
+    position: relative;
 }
 
 .wa-msg-image {
@@ -2856,6 +2884,31 @@ html {
 /* While PiP is active, hide captions control button in native controls (WebKit browsers). */
 .wa-msg-image-container.pip-active video::-webkit-media-controls-toggle-closed-captions-button {
     display: none !important;
+}
+
+.wa-main-chat.media-watermark-active .wa-msg-image-container::after,
+.wa-main-chat.media-watermark-active .wa-media-grid-item::after,
+.wa-main-chat.media-watermark-active .wa-media-thumb::after,
+.wa-image-viewer-overlay.media-watermark-active .wa-viewer-content::after {
+    content: "NEURALCHAT PRIVATE";
+    position: absolute;
+    inset: auto 10px 10px auto;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(3, 7, 18, 0.58);
+    color: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(14, 165, 190, 0.42);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.wa-main-chat.media-watermark-active .wa-media-grid-item,
+.wa-main-chat.media-watermark-active .wa-media-thumb,
+.wa-image-viewer-overlay.media-watermark-active .wa-viewer-content {
+    position: relative;
 }
 
 /* File Card Styling */
@@ -5592,8 +5645,11 @@ html {
 
 /* Notification Settings Panel Styles */
 .notification-settings-panel .wa-contact-info-content {
-    background-color: #f0f2f5;
-    /* Light grey background like WhatsApp */
+    background-color: #111b32;
+}
+
+.notification-settings-panel .wa-contact-info-title {
+    color: #f8fafc !important;
 }
 
 .wa-notification-section {
@@ -5603,14 +5659,15 @@ html {
 .wa-section-header {
     padding: 20px 30px 10px;
     font-size: 14px;
-    color: #027EB5;
-    /* WhatsApp Green */
-    font-weight: 500;
+    color: #38bdf8;
+    font-weight: 650;
 }
 
 .wa-settings-list {
-    background-color: white;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    background-color: rgba(255, 255, 255, 0.045);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: none;
 }
 
 .wa-setting-row {
@@ -5618,13 +5675,14 @@ html {
     justify-content: space-between;
     align-items: center;
     padding: 15px 30px;
-    border-bottom: 1px solid #f0f2f5;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     transition: background 0.2s;
 }
 
 .wa-setting-label {
     font-size: 16px;
-    color: #111b21;
+    color: #f8fafc;
+    font-weight: 500;
 }
 
 /* Toggle Switch Styles */
@@ -6690,6 +6748,262 @@ html {
     text-align: center;
 }
 
+.wa-community-update-wrap {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 20px;
+    padding: 0 12px;
+}
+
+.wa-community-update-card {
+    width: min(100%, 520px);
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 16px 18px;
+    border-radius: 16px;
+    border: 1px solid var(--wa-community-update-border, rgba(20, 184, 166, 0.32));
+    background:
+        radial-gradient(circle at 12% 18%, var(--wa-community-update-glow, rgba(45, 212, 191, 0.22)), transparent 32%),
+        linear-gradient(135deg, rgba(248, 250, 252, 0.98), rgba(236, 254, 255, 0.94));
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.2), 0 1px 0 rgba(255, 255, 255, 0.85) inset;
+    position: relative;
+    overflow: hidden;
+}
+
+.wa-community-update-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--wa-community-update-accent, #0f766e), transparent 42%);
+    opacity: 0.08;
+}
+
+.wa-community-update-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--wa-community-update-accent, #0f766e);
+    background: var(--wa-community-update-bg, rgba(20, 184, 166, 0.14));
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.12);
+    position: relative;
+    z-index: 1;
+}
+
+.wa-community-update-copy {
+    min-width: 0;
+    flex: 1;
+    position: relative;
+    z-index: 1;
+}
+
+.wa-community-update-title {
+    color: #0f172a;
+    font-size: 14.5px;
+    font-weight: 800;
+    line-height: 1.3;
+    margin-bottom: 5px;
+}
+
+.wa-community-update-text {
+    color: #334155;
+    font-size: 13.5px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.wa-community-update-meta {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.4;
+    font-weight: 600;
+}
+
+.wa-community-update-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 999px;
+    background: #94a3b8;
+}
+
+@media (max-width: 768px) {
+    .wa-community-update-wrap {
+        padding: 0 8px;
+        margin-bottom: 16px;
+    }
+
+    .wa-community-update-card {
+        width: 100%;
+        padding: 12px 13px;
+        gap: 10px;
+        border-radius: 12px;
+    }
+
+    .wa-community-update-icon {
+        width: 28px;
+        height: 28px;
+    }
+
+    .wa-community-update-title {
+        font-size: 13px;
+    }
+
+    .wa-community-update-text {
+        font-size: 12.5px;
+    }
+
+    .wa-community-update-meta {
+        font-size: 11.5px;
+    }
+}
+
+.wa-confirm-add-hero {
+    padding: 34px 28px 24px;
+    text-align: center;
+}
+
+.wa-confirm-add-icon-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 18px;
+}
+
+.wa-confirm-add-icon {
+    width: 62px;
+    height: 62px;
+    border-radius: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #f8fafc;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 18px 34px rgba(0, 0, 0, 0.28);
+}
+
+.wa-confirm-add-icon.source {
+    background: linear-gradient(135deg, rgba(236, 72, 153, 0.34), rgba(168, 85, 247, 0.18));
+}
+
+.wa-confirm-add-icon.target {
+    background: linear-gradient(135deg, rgba(20, 184, 166, 0.3), rgba(14, 165, 190, 0.18));
+}
+
+.wa-confirm-add-arrow {
+    color: #94a3b8;
+}
+
+.wa-confirm-add-title {
+    margin: 0 0 16px;
+    color: #f8fafc;
+    font-size: 21px;
+    font-weight: 800;
+    line-height: 1.25;
+}
+
+.wa-confirm-add-points {
+    display: grid;
+    gap: 10px;
+    margin: 0 auto;
+    max-width: 360px;
+    text-align: left;
+}
+
+.wa-confirm-add-point {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    color: #cbd5e1;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.wa-confirm-add-point svg {
+    color: #22c55e;
+    flex: 0 0 auto;
+    margin-top: 2px;
+}
+
+.wa-confirm-add-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 16px 18px;
+}
+
+.wa-confirm-add-group-row {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 12px;
+    margin-bottom: 10px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wa-confirm-add-group-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: rgba(14, 165, 190, 0.12);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.2);
+    flex: 0 0 auto;
+}
+
+.wa-confirm-add-group-name {
+    min-width: 0;
+    flex: 1;
+    color: #f8fafc;
+    font-size: 15px;
+    font-weight: 650;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wa-confirm-add-footer {
+    padding: 18px 24px 22px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(15, 23, 42, 0.38);
+}
+
+.wa-confirm-add-submit {
+    width: 100%;
+    border: none;
+    border-radius: 14px;
+    padding: 13px 16px;
+    color: #03131a;
+    background: linear-gradient(135deg, #67e8f9, #22c55e);
+    font-size: 14px;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 14px 30px rgba(14, 165, 190, 0.22);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.wa-confirm-add-submit:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 18px 36px rgba(14, 165, 190, 0.28);
+}
+
 /* --- CoreX Settings Dashboard (Integrated Workspace) --- */
 .wa-settings-overlay {
     flex: 1;
@@ -6843,6 +7157,16 @@ html {
     display: flex;
     flex-direction: column;
     background: #0b0b0d;
+}
+
+@media (min-width: 769px) {
+    .wa-settings-sidebar.hide-mobile {
+        display: none;
+    }
+
+    .wa-settings-main.show-detail {
+        width: 100%;
+    }
 }
 
 .wa-settings-header {
@@ -8387,70 +8711,69 @@ html {
 /* Reaction Badges on Messages */
 .wa-reaction-badges {
     position: absolute;
-    bottom: -16px;
-    /* Moved lower so it does not touch text */
+    bottom: -12px;
     display: flex;
-    gap: 4px;
-    z-index: 2;
+    align-items: center;
+    gap: 6px;
+    z-index: 3;
     background: transparent;
-    border-radius: 12px;
+    border-radius: 999px;
+    pointer-events: auto;
 }
 
 .wa-reaction-badges-sent {
-    left: 5px;
-    /* User specifically requested left side */
-    right: auto;
+    right: 8px;
+    left: auto;
 }
 
 .wa-reaction-badges-recv {
-    left: 5px;
+    left: 8px;
     right: auto;
 }
 
 .wa-reaction-badge {
-    border: none;
-    /* Removed the outline */
     border-radius: 50px;
-    padding: 2px 5px;
-    font-size: 13px;
+    padding: 3px 7px;
+    font-size: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
-    min-width: 24px;
-    height: 24px;
-    gap: 3px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-    /* Shadow defines it instead of outline */
+    min-width: 28px;
+    height: 22px;
+    gap: 4px;
+    box-shadow: 0 6px 14px rgba(2, 6, 23, 0.22);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease;
     user-select: none;
     box-sizing: border-box;
     line-height: 1;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
 }
 
-/* Inherit bubble colors */
 .wa-reaction-badges-sent .wa-reaction-badge {
-    background: #E1F5FE;
+    background: rgba(226, 248, 255, 0.95);
 }
 
 .wa-reaction-badges-recv .wa-reaction-badge {
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.96);
 }
 
 .wa-reaction-badge:hover {
-    filter: brightness(0.96);
-    transform: scale(1.05);
+    filter: brightness(0.98);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px rgba(2, 6, 23, 0.28);
 }
 
 .wa-reaction-badge.reacted {
-    /* No outline, keeps the background matching the bubble */
-    border: none;
+    border-color: rgba(14, 165, 190, 0.45);
 }
 
 .wa-reaction-count {
     color: #54656f;
-    font-size: 11px;
-    font-weight: 500;
+    font-size: 10px;
+    font-weight: 700;
 }
 
 .wa-reaction-badge.reacted .wa-reaction-count {

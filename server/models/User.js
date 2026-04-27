@@ -1,6 +1,18 @@
 const mongoose = require('mongoose');
 const { fieldEncryption } = require('mongoose-field-encryption');
 
+const privacyVisibilitySchema = new mongoose.Schema({
+    mode: {
+        type: String,
+        enum: ['everyone', 'everyone_except', 'no_one'],
+        default: 'everyone'
+    },
+    exceptUserIds: {
+        type: [String],
+        default: []
+    }
+}, { _id: false });
+
 const userSchema = new mongoose.Schema({
     name: { type: String, required: true },
     email: { type: String, unique: true, required: true },
@@ -53,6 +65,53 @@ const userSchema = new mongoose.Schema({
         type: Map,
         of: String,
         default: () => new Map()
+    },
+    privacySettings: {
+        lastSeen: {
+            type: privacyVisibilitySchema,
+            default: () => ({ mode: 'everyone', exceptUserIds: [] })
+        },
+        onlineStatus: {
+            type: privacyVisibilitySchema,
+            default: () => ({ mode: 'everyone', exceptUserIds: [] })
+        },
+        profilePhoto: {
+            type: privacyVisibilitySchema,
+            default: () => ({ mode: 'everyone', exceptUserIds: [] })
+        },
+        about: {
+            type: privacyVisibilitySchema,
+            default: () => ({ mode: 'everyone', exceptUserIds: [] })
+        },
+        status: {
+            type: privacyVisibilitySchema,
+            default: () => ({ mode: 'everyone', exceptUserIds: [] })
+        },
+        readReceipts: { type: Boolean, default: true },
+        typingIndicator: { type: Boolean, default: true },
+        whoCanMessageMe: {
+            type: String,
+            enum: ['Everyone', 'My Contacts', 'No One'],
+            default: 'Everyone'
+        },
+        messageRequestsRequired: { type: Boolean, default: true },
+        blockUnknown: { type: Boolean, default: false },
+        whoCanAddMeToGroups: {
+            type: String,
+            enum: ['Everyone', 'My Contacts', 'No One'],
+            default: 'Everyone'
+        },
+        requireConsentBeforeForward: { type: Boolean, default: false },
+        forwardLimit: {
+            type: Number,
+            enum: [1, 3, 5, 10],
+            default: 5
+        },
+        notifyOnForward: { type: Boolean, default: false },
+        screenshotDetection: { type: Boolean, default: true },
+        notifyOnScreenshot: { type: Boolean, default: true },
+        blurOnScreenshot: { type: Boolean, default: false },
+        addWatermark: { type: Boolean, default: false }
     }
 }, {
     toJSON: { virtuals: true },
