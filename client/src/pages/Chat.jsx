@@ -206,7 +206,9 @@ import EmojiPicker from '../components/EmojiPicker';
 const SOCKET_URL = isLanOrLocalHost ? '/' : (import.meta.env.VITE_API_URL || '/');
 const socket = io(SOCKET_URL, {
     autoConnect: false, // Don't connect until we have a token
-    transports: ['websocket'], // Changed to websocket only to perfectly match user's previous folder
+    transports: ['polling', 'websocket'],
+    upgrade: true,
+    timeout: 10000,
     auth: (cb) => {
         cb({ token: localStorage.getItem('token') });
     },
@@ -1802,6 +1804,21 @@ export default function Chat() {
     const [pinMessageModal, setPinMessageModal] = useState(null);
     const [pinMessageDuration, setPinMessageDuration] = useState('30 days');
     const [currentPinnedIndex, setCurrentPinnedIndex] = useState(0);
+
+    const openSettingsPanel = (initialTab = null) => {
+        setIsProfileOpen(false);
+        setIsSettingsEditing(false);
+        setSettingsSearchQuery('');
+        setActiveSettingsTab(initialTab);
+        setIsSettingsOpen(true);
+    };
+
+    const closeSettingsPanel = () => {
+        setIsSettingsEditing(false);
+        setSettingsSearchQuery('');
+        setActiveSettingsTab(null);
+        setIsSettingsOpen(false);
+    };
 
     // --- General Settings State ---
     const [selectedLanguage, setSelectedLanguage] = useState(() => localStorage.getItem('neuChat_language') || 'British English, British English');
@@ -5769,9 +5786,19 @@ export default function Chat() {
     const handleRemoveCommunityMember = async (community, member) => {
         try {
             const token = localStorage.getItem('token');
-            const res = await axios.delete(`/api/communities/${community.id || community._id}/members/${member._id || member.id}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const communityId = community.id || community._id;
+            const memberId = member._id || member.id;
+            let res;
+            try {
+                res = await axios.delete(`/api/communities/${communityId}/members/${memberId}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+            } catch (err) {
+                if (err?.response?.status !== 404) throw err;
+                res = await axios.post(`/api/communities/${communityId}/members/${memberId}/remove`, {}, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+            }
             if (res.data.status === 'removed') {
                 const refreshed = communities.map(c => {
                     const cId = c.id || c._id;
@@ -5791,6 +5818,7 @@ export default function Chat() {
                         members: selectedCommunity.members.filter(m => String(m._id || m.id) !== String(member._id || member.id))
                     });
                 }
+                await fetchCommunities();
                 setSnackbar({ message: `Removed ${member.name} from community`, type: 'success', variant: 'system' });
             }
         } catch (err) {
@@ -5940,14 +5968,27 @@ export default function Chat() {
 
         try {
             const token = localStorage.getItem('token');
-            const res = await axios.delete(`/api/groups/${groupId}/members/${memberId}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            let res;
+            try {
+                res = await axios.delete(`/api/groups/${groupId}/members/${memberId}`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+            } catch (err) {
+                if (err?.response?.status !== 404) throw err;
+                res = await axios.post(`/api/groups/${groupId}/members/${memberId}/remove`, {}, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+            }
 
             const updatedGroup = res.data?.group;
             if (updatedGroup) {
                 setGroups(prev => prev.map(group => String(group._id || group.id) === String(groupId) ? { ...group, ...updatedGroup } : group));
                 setSelectedGroup(prev => prev && String(prev._id || prev.id) === String(groupId) ? { ...prev, ...updatedGroup } : prev);
+            }
+
+            await fetchGroups();
+            if (selectedGroupRef.current && String(selectedGroupRef.current._id || selectedGroupRef.current.id) === String(groupId)) {
+                await fetchGroupMessages(groupId);
             }
 
             setSnackbar({
@@ -9359,7 +9400,7 @@ export default function Chat() {
                     className={`wa-nav-icon-btn ${(!isProfileOpen && !isSettingsOpen) ? 'active' : ''}`}
                     onClick={() => {
                         setIsProfileOpen(false);
-                        setIsSettingsOpen(false);
+                        closeSettingsPanel();
                     }}
                     title={t('sidebar.chats')}
                 >
@@ -9372,8 +9413,7 @@ export default function Chat() {
                     className={`wa-nav-icon-btn ${isSettingsOpen ? 'active' : ''}`}
                     title={t('sidebar.settings')}
                     onClick={() => {
-                        setIsSettingsOpen(true);
-                        setIsProfileOpen(false);
+                        openSettingsPanel();
                     }}
                 >
                     <Settings size={24} />
@@ -9382,7 +9422,7 @@ export default function Chat() {
                     className={`wa-nav-icon-btn wa-profile-btn ${isProfileOpen ? 'active' : ''}`}
                     onClick={() => {
                         setIsProfileOpen(true);
-                        setIsSettingsOpen(false);
+                        closeSettingsPanel();
                     }}
                     title={t('sidebar.profile')}
                 >
@@ -14907,13 +14947,18 @@ export default function Chat() {
 
                                 try {
                                     const token = localStorage.getItem('token');
+                                    const targetGroupId = selectedGroup._id || selectedGroup.id;
                                     const memberIds = selectedGroupMembersToAdd.map(m => m._id || m.id).filter(Boolean);
-                                    await axios.patch(`/api/groups/${selectedGroup._id || selectedGroup.id}/members`, {
+                                    await axios.patch(`/api/groups/${targetGroupId}/members`, {
                                         memberIds
                                     }, {
                                         headers: { 'Authorization': `Bearer ${token}` }
                                     });
 
+                                    await fetchGroups();
+                                    if (selectedGroupRef.current && String(selectedGroupRef.current._id || selectedGroupRef.current.id) === String(targetGroupId)) {
+                                        await fetchGroupMessages(targetGroupId);
+                                    }
                                     setSelectedGroupMembersToAdd([]);
                                     setSnackbar({ message: 'Members added successfully', type: 'success' });
                                 } catch (err) {
@@ -17161,7 +17206,7 @@ export default function Chat() {
             )}
 
             {/* Chat List: Groups + Users combined */}
-            <div className="wa-user-list" onScroll={() => { setOpenDropdown(null); }} style={{ paddingBottom: isMobile ? '60px' : '0' }}>
+            <div className="wa-user-list" onScroll={() => { setOpenDropdown(null); }} style={{ paddingBottom: isMobile ? '12px' : '0' }}>
                 {!isDataLoaded ? (
                     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0' }}>
                         <CircleDashed size={24} className="wa-spinner" style={{ animation: 'waSpinner 1s linear infinite' }} />
@@ -17483,6 +17528,18 @@ export default function Chat() {
                         style={{ background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', color: !isRemindersModalOpen && filterType === 'communities' ? '#38bdf8' : '#94a3b8', gap: '4px', cursor: 'pointer', flex: 1 }}>
                         <Users size={24} color={!isRemindersModalOpen && filterType === 'communities' ? '#38bdf8' : '#94a3b8'} />
                         <span style={{ fontSize: '12px', fontWeight: !isRemindersModalOpen && filterType === 'communities' ? 600 : 400 }}>Communities</span>
+                    </button>
+
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setIsRemindersModalOpen(false);
+                            setFilterType('all');
+                            openSettingsPanel();
+                        }}
+                        style={{ background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', color: isSettingsOpen ? '#38bdf8' : '#94a3b8', gap: '4px', cursor: 'pointer', flex: 1 }}>
+                        <Settings size={24} color={isSettingsOpen ? '#38bdf8' : '#94a3b8'} />
+                        <span style={{ fontSize: '12px', fontWeight: isSettingsOpen ? 600 : 400 }}>Settings</span>
                     </button>
                 </div>
             )}
@@ -21641,7 +21698,12 @@ export default function Chat() {
                     {/* Navigation Sidebar */}
                     <div className={`wa-settings-sidebar ${activeSettingsTab ? 'hide-mobile' : ''}`}>
                         <div className="wa-settings-sidebar-header">
-                            <h2 className="wa-settings-sidebar-title">{t('settings.title')}</h2>
+                            <div className="wa-settings-sidebar-title-row">
+                                <h2 className="wa-settings-sidebar-title">{t('settings.title')}</h2>
+                                <button className="wa-settings-close-btn" onClick={closeSettingsPanel} title="Close settings">
+                                    <X size={18} />
+                                </button>
+                            </div>
                             <div className="wa-settings-search">
                                 <Search size={16} />
                                 <input

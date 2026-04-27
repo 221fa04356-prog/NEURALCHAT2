@@ -390,8 +390,7 @@ router.patch('/:communityId/members', authenticateToken, async (req, res) => {
     }
 });
 
-// DELETE /api/communities/:communityId/members/:memberId - remove member (move to removedMembers)
-router.delete('/:communityId/members/:memberId', authenticateToken, async (req, res) => {
+const removeCommunityMember = async (req, res) => {
     try {
         const { communityId, memberId } = req.params;
         const community = await Community.findById(communityId);
@@ -482,7 +481,12 @@ router.delete('/:communityId/members/:memberId', authenticateToken, async (req, 
         console.error('[COMMUNITY REMOVE MEMBER ERROR]', err);
         res.status(500).json({ error: err.message });
     }
-});
+};
+
+// DELETE /api/communities/:communityId/members/:memberId - remove member (move to removedMembers)
+router.delete('/:communityId/members/:memberId', authenticateToken, removeCommunityMember);
+// POST fallback for deployments/proxies that do not preserve DELETE routing reliably
+router.post('/:communityId/members/:memberId/remove', authenticateToken, removeCommunityMember);
 
 // PATCH /api/communities/:communityId/groups - add groups to community
 router.patch('/:communityId/groups', authenticateToken, async (req, res) => {

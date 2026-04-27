@@ -1445,8 +1445,7 @@ router.patch('/:groupId/members', authenticateToken, async (req, res) => {
     }
 });
 
-// DELETE /api/groups/:groupId/members/:memberId - remove member from group
-router.delete('/:groupId/members/:memberId', authenticateToken, async (req, res) => {
+const removeGroupMember = async (req, res) => {
     try {
         const { groupId, memberId } = req.params;
         const requesterId = req.user.id;
@@ -1539,7 +1538,12 @@ router.delete('/:groupId/members/:memberId', authenticateToken, async (req, res)
         console.error('[GROUP REMOVE MEMBER ERROR]', err);
         res.status(500).json({ error: err.message });
     }
-});
+};
+
+// DELETE /api/groups/:groupId/members/:memberId - remove member from group
+router.delete('/:groupId/members/:memberId', authenticateToken, removeGroupMember);
+// POST fallback for deployments/proxies that do not preserve DELETE routing reliably
+router.post('/:groupId/members/:memberId/remove', authenticateToken, removeGroupMember);
 
 // POST /api/groups/:groupId/join - Join a group (if permited, e.g. community member)
 router.post('/:groupId/join', authenticateToken, async (req, res) => {
