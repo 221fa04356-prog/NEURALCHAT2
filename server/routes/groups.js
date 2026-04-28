@@ -1542,7 +1542,8 @@ const removeGroupMember = async (req, res) => {
 
 // DELETE /api/groups/:groupId/members/:memberId - remove member from group
 router.delete('/:groupId/members/:memberId', authenticateToken, removeGroupMember);
-// POST fallback for deployments/proxies that do not preserve DELETE routing reliably
+// POST fallbacks for deployments/proxies that do not preserve DELETE routing reliably
+router.post('/:groupId/members/:memberId', authenticateToken, removeGroupMember);
 router.post('/:groupId/members/:memberId/remove', authenticateToken, removeGroupMember);
 
 // POST /api/groups/:groupId/join - Join a group (if permited, e.g. community member)

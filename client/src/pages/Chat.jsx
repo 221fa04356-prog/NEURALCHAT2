@@ -5970,12 +5970,14 @@ export default function Chat() {
             const token = localStorage.getItem('token');
             let res;
             try {
-                res = await axios.delete(`/api/groups/${groupId}/members/${memberId}`, {
+                // Prefer the POST action route for deployed environments where DELETE
+                // handling can be unreliable through proxies/platform routing.
+                res = await axios.post(`/api/groups/${groupId}/members/${memberId}/remove`, {}, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
             } catch (err) {
                 if (err?.response?.status !== 404) throw err;
-                res = await axios.post(`/api/groups/${groupId}/members/${memberId}/remove`, {}, {
+                res = await axios.delete(`/api/groups/${groupId}/members/${memberId}`, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
             }

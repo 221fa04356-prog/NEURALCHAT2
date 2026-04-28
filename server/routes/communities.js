@@ -485,7 +485,8 @@ const removeCommunityMember = async (req, res) => {
 
 // DELETE /api/communities/:communityId/members/:memberId - remove member (move to removedMembers)
 router.delete('/:communityId/members/:memberId', authenticateToken, removeCommunityMember);
-// POST fallback for deployments/proxies that do not preserve DELETE routing reliably
+// POST fallbacks for deployments/proxies that do not preserve DELETE routing reliably
+router.post('/:communityId/members/:memberId', authenticateToken, removeCommunityMember);
 router.post('/:communityId/members/:memberId/remove', authenticateToken, removeCommunityMember);
 
 // PATCH /api/communities/:communityId/groups - add groups to community
