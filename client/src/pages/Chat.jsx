@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, memo } from 'react';
+import { flushSync } from 'react-dom';
 import axios from 'axios';
 import ImageEditorModal from '../components/ImageEditorModal';
 import logo from '../assets/logo.png';
@@ -27,6 +28,13 @@ const isLanOrLocalHost =
 const isChatDebugEnabled = import.meta.env.DEV && localStorage.getItem('chat_debug') === '1';
 const debugLog = (...args) => {
     if (isChatDebugEnabled) console.info(...args);
+};
+
+const SCREENSHOT_PROTECTION_CLASS = 'wa-screenshot-protection-active';
+
+const setScreenshotProtectionDomState = (active) => {
+    document.documentElement.classList.toggle(SCREENSHOT_PROTECTION_CLASS, active);
+    document.body.classList.toggle(SCREENSHOT_PROTECTION_CLASS, active);
 };
 
 const appendMediaToken = (url) => {
@@ -278,6 +286,7 @@ const PRIVACY_VISIBILITY_FIELDS = [
     { key: 'lastSeen', label: 'Last Seen Visibility', description: 'Choose who can view when you were last active.' },
     { key: 'onlineStatus', label: 'Online Status Visibility', description: 'Choose who can view when you are online.' },
     { key: 'about', label: 'About Visibility', description: 'Choose who can view your about text.' },
+    { key: 'readReceipts', label: 'Read Receipts', description: 'Choose who can see when you read their messages.' },
 ];
 
 const createDefaultVisibilityRule = () => ({
@@ -291,7 +300,7 @@ const createDefaultPrivacySettings = () => ({
     profilePhoto: createDefaultVisibilityRule(),
     about: createDefaultVisibilityRule(),
     status: createDefaultVisibilityRule(),
-    readReceipts: true,
+    readReceipts: createDefaultVisibilityRule(),
     typingIndicator: true,
     whoCanMessageMe: 'Everyone',
     messageRequestsRequired: true,
@@ -346,7 +355,7 @@ const normalizePrivacySettings = (rawSettings) => {
         merged[key] = normalizeVisibilityRule(rawSettings?.[key]);
     });
 
-    merged.readReceipts = rawSettings?.readReceipts !== false;
+    merged.readReceipts = normalizeVisibilityRule(rawSettings?.readReceipts);
     merged.typingIndicator = rawSettings?.typingIndicator !== false;
     merged.whoCanMessageMe = ['Everyone', 'My Contacts', 'No One'].includes(rawSettings?.whoCanMessageMe)
         ? rawSettings.whoCanMessageMe
@@ -1868,6 +1877,17 @@ export default function Chat() {
 
     const [browserScale, setBrowserScale] = useState(1);
     const screenshotMaskTimerRef = useRef(null);
+    const screenshotShortcutLastTriggerRef = useRef(0);
+    const screenshotMaskDismissAfterRef = useRef(0);
+    const clearScreenshotProtection = React.useCallback(() => {
+        setScreenshotProtectionDomState(false);
+        setIsScreenshotPrivacyMaskActive(false);
+        screenshotMaskDismissAfterRef.current = 0;
+        if (screenshotMaskTimerRef.current) {
+            clearTimeout(screenshotMaskTimerRef.current);
+            screenshotMaskTimerRef.current = null;
+        }
+    }, []);
 
     useEffect(() => {
         const fetchProfile = async () => {
@@ -1897,52 +1917,86 @@ export default function Chat() {
 
     const triggerScreenshotProtection = React.useCallback((source = 'shortcut') => {
         if (!privacySettings.screenshotDetection) return;
-
-        if (privacySettings.blurOnScreenshot) {
+        setScreenshotProtectionDomState(true);
+        screenshotMaskDismissAfterRef.current = Date.now() + 450;
+        flushSync(() => {
             setIsScreenshotPrivacyMaskActive(true);
-            if (screenshotMaskTimerRef.current) clearTimeout(screenshotMaskTimerRef.current);
-            screenshotMaskTimerRef.current = setTimeout(() => {
-                setIsScreenshotPrivacyMaskActive(false);
-                screenshotMaskTimerRef.current = null;
-            }, 4500);
-        }
+        });
+        if (screenshotMaskTimerRef.current) clearTimeout(screenshotMaskTimerRef.current);
+        screenshotMaskTimerRef.current = setTimeout(() => {
+            clearScreenshotProtection();
+        }, 2200);
 
-        if (privacySettings.notifyOnScreenshot) {
-            setSnackbar({
-                message: `Screenshot activity detected via ${source}. Sensitive chat content is now protected.`,
-                type: 'info',
-                variant: 'system'
-            });
-        }
+        setSnackbar({
+            message: `Screenshot activity detected via ${source}. Sensitive chat content is now protected.`,
+            type: 'info',
+            variant: 'system'
+        });
     }, [
+        clearScreenshotProtection,
         privacySettings.screenshotDetection,
-        privacySettings.blurOnScreenshot,
-        privacySettings.notifyOnScreenshot,
         setSnackbar
     ]);
 
     useEffect(() => {
         const isScreenshotShortcut = (event) => {
             const key = String(event.key || '').toLowerCase();
+            const code = String(event.code || '').toLowerCase();
+            const keyCode = Number(event.keyCode || event.which || 0);
             return key === 'printscreen'
+                || key === 'prtsc'
+                || key === 'snapshot'
+                || code === 'printscreen'
+                || keyCode === 44
                 || (event.metaKey && event.shiftKey && ['3', '4', '5'].includes(key))
                 || (event.ctrlKey && event.shiftKey && key === 's');
         };
 
         const handleScreenshotShortcut = (event) => {
             if (!isScreenshotShortcut(event)) return;
+            const now = Date.now();
+            if (now - screenshotShortcutLastTriggerRef.current < 700) return;
+            screenshotShortcutLastTriggerRef.current = now;
             triggerScreenshotProtection(event.key || 'shortcut');
         };
 
         window.addEventListener('keydown', handleScreenshotShortcut);
+        window.addEventListener('keyup', handleScreenshotShortcut);
         return () => {
             window.removeEventListener('keydown', handleScreenshotShortcut);
-            if (screenshotMaskTimerRef.current) {
-                clearTimeout(screenshotMaskTimerRef.current);
-                screenshotMaskTimerRef.current = null;
-            }
+            window.removeEventListener('keyup', handleScreenshotShortcut);
+            clearScreenshotProtection();
         };
-    }, [triggerScreenshotProtection]);
+    }, [clearScreenshotProtection, triggerScreenshotProtection]);
+
+    useEffect(() => {
+        if (!isScreenshotPrivacyMaskActive) return undefined;
+
+        const dismissMask = () => clearScreenshotProtection();
+        const dismissMaskOnMouseMove = () => {
+            if (Date.now() < screenshotMaskDismissAfterRef.current) return;
+            dismissMask();
+        };
+        const dismissMaskOnEscape = (event) => {
+            if (String(event.key || '') === 'Escape') dismissMask();
+        };
+
+        window.addEventListener('mousemove', dismissMaskOnMouseMove, true);
+        window.addEventListener('keydown', dismissMaskOnEscape, true);
+
+        return () => {
+            window.removeEventListener('mousemove', dismissMaskOnMouseMove, true);
+            window.removeEventListener('keydown', dismissMaskOnEscape, true);
+        };
+    }, [clearScreenshotProtection, isScreenshotPrivacyMaskActive]);
+
+    useEffect(() => () => {
+        setScreenshotProtectionDomState(false);
+        if (screenshotMaskTimerRef.current) {
+            clearTimeout(screenshotMaskTimerRef.current);
+            screenshotMaskTimerRef.current = null;
+        }
+    }, []);
 
 
     // --- Utility Functions ---
@@ -2879,7 +2933,6 @@ export default function Chat() {
     const togglePrivacyBooleanSetting = async (key) => {
         const next = { ...privacySettings, [key]: !privacySettings[key] };
         const labels = {
-            readReceipts: 'Read receipts',
             typingIndicator: 'Typing indicator',
             messageRequestsRequired: 'Message requests',
             blockUnknown: 'Unknown account blocking',
@@ -2905,6 +2958,24 @@ export default function Chat() {
         const rule = normalizeVisibilityRule(targetSettings[fieldKey]);
         if (rule.mode === 'no_one') return false;
         if (rule.mode === 'everyone_except') return !rule.exceptUserIds.includes(currentViewerId);
+        return true;
+    };
+
+    const canViewerSeeReadReceiptFromMember = (readerId, senderId) => {
+        const normalizedReaderId = String(readerId || '');
+        const normalizedSenderId = String(senderId || '');
+        if (!normalizedReaderId || !normalizedSenderId || normalizedReaderId === normalizedSenderId) return true;
+
+        const groupMember =
+            selectedGroup?.members?.find(member => String(member?._id || member?.id || member) === normalizedReaderId) ||
+            selectedCommunity?.members?.find(member => String(member?._id || member?.id || member) === normalizedReaderId) ||
+            users?.find(member => String(member?._id || member?.id || member) === normalizedReaderId);
+
+        if (!groupMember?.privacySettings) return true;
+
+        const rule = normalizeVisibilityRule(normalizePrivacySettings(groupMember.privacySettings).readReceipts);
+        if (rule.mode === 'no_one') return false;
+        if (rule.mode === 'everyone_except') return !rule.exceptUserIds.includes(normalizedSenderId);
         return true;
     };
 
@@ -4597,13 +4668,86 @@ export default function Chat() {
 
             setUsers(prev => prev.map(u =>
                 String(u._id) === String(data.userId)
-                    ? { ...u, name: data.name || u.name, mobile: data.mobile, about: data.about }
+                    ? { ...u, name: data.name || u.name, mobile: data.mobile, about: data.about, privacySettings: data.privacySettings ?? u.privacySettings }
                     : u
             ));
 
             if (selectedUserRef.current && String(selectedUserRef.current._id) === String(data.userId)) {
-                setSelectedUser(prev => ({ ...prev, name: data.name || prev?.name, mobile: data.mobile, about: data.about }));
+                setSelectedUser(prev => ({ ...prev, name: data.name || prev?.name, mobile: data.mobile, about: data.about, privacySettings: data.privacySettings ?? prev?.privacySettings }));
             }
+
+            const patchMember = (member) => {
+                if (String(member?._id || member?.id || member) !== String(data.userId)) return member;
+                if (typeof member !== 'object' || member === null) return member;
+                return {
+                    ...member,
+                    name: data.name || member.name,
+                    mobile: data.mobile ?? member.mobile,
+                    about: data.about ?? member.about,
+                    privacySettings: data.privacySettings ?? member.privacySettings
+                };
+            };
+
+            setGroups(prev => prev.map(group => ({
+                ...group,
+                members: Array.isArray(group.members) ? group.members.map(patchMember) : group.members,
+                admin: patchMember(group.admin),
+                admins: Array.isArray(group.admins) ? group.admins.map(patchMember) : group.admins
+            })));
+
+            setSelectedGroup(prev => prev ? ({
+                ...prev,
+                members: Array.isArray(prev.members) ? prev.members.map(patchMember) : prev.members,
+                admin: patchMember(prev.admin),
+                admins: Array.isArray(prev.admins) ? prev.admins.map(patchMember) : prev.admins
+            }) : prev);
+
+            const patchCommunity = (community) => ({
+                ...community,
+                creator: patchMember(community.creator),
+                members: Array.isArray(community.members) ? community.members.map(patchMember) : community.members,
+                admins: Array.isArray(community.admins) ? community.admins.map(patchMember) : community.admins,
+                announcements: community.announcements ? {
+                    ...community.announcements,
+                    members: Array.isArray(community.announcements.members) ? community.announcements.members.map(patchMember) : community.announcements.members
+                } : community.announcements,
+                groups: Array.isArray(community.groups) ? community.groups.map(group => ({
+                    ...group,
+                    members: Array.isArray(group.members) ? group.members.map(patchMember) : group.members,
+                    admin: patchMember(group.admin),
+                    admins: Array.isArray(group.admins) ? group.admins.map(patchMember) : group.admins
+                })) : community.groups
+            });
+
+            setCommunities(prev => prev.map(patchCommunity));
+            setSelectedCommunity(prev => prev ? patchCommunity(prev) : prev);
+
+            setGroupMessages(prev => prev.map(msg => ({
+                ...msg,
+                read_details: Array.isArray(msg.read_details) ? msg.read_details.map(detail => {
+                    if (String(detail?.user_id?._id || detail?.user_id) !== String(data.userId)) return detail;
+                    if (typeof detail.user_id !== 'object' || detail.user_id === null) return detail;
+                    return {
+                        ...detail,
+                        user_id: {
+                            ...detail.user_id,
+                            name: data.name || detail.user_id.name,
+                            image: detail.user_id.image,
+                            privacySettings: data.privacySettings ?? detail.user_id.privacySettings
+                        }
+                    };
+                }) : msg.read_details,
+                read_by: Array.isArray(msg.read_by) ? msg.read_by.map(reader => {
+                    if (String(reader?._id || reader) !== String(data.userId)) return reader;
+                    if (typeof reader !== 'object' || reader === null) return reader;
+                    return {
+                        ...reader,
+                        name: data.name || reader.name,
+                        image: reader.image,
+                        privacySettings: data.privacySettings ?? reader.privacySettings
+                    };
+                }) : msg.read_by
+            })));
         };
 
         const onReconnectAttempt = (attempt) => {
@@ -5226,10 +5370,12 @@ export default function Chat() {
             }
 
             const incomingIds = data.messageIds || [];
+            const visibleIds = data.visibleMessageIds || incomingIds;
             let updatedInfoMsg = null;
 
             setGroupMessages(prev => prev.map(msg => {
                 if (!incomingIds.includes(String(msg._id))) return msg;
+                if (!visibleIds.includes(String(msg._id))) return msg;
 
                 const newReadDetails = [...(msg.read_details || [])];
                 const alreadyExists = newReadDetails.some(rd =>
@@ -6388,12 +6534,14 @@ export default function Chat() {
 
     const markAsRead = async (idOrObj) => {
         if (!idOrObj) return;
-        if (!privacySettings.readReceipts) return;
         const targetSenderId = String(idOrObj._id || idOrObj.id || idOrObj);
         if (targetSenderId === "[object Object]") {
             console.error('[DEBUG] markAsRead: Received invalid object for senderId', idOrObj);
             return;
         }
+        const readReceiptRule = normalizeVisibilityRule(privacySettings.readReceipts);
+        if (readReceiptRule.mode === 'no_one') return;
+        if (readReceiptRule.mode === 'everyone_except' && readReceiptRule.exceptUserIds.includes(targetSenderId)) return;
 
         // Throttling: Don't mark the same user read more than once every 500ms
         const now = Date.now();
@@ -12940,6 +13088,7 @@ export default function Chat() {
                             <div className="wa-info-stat-card group-stats">
                                 {(() => {
                                     const myId = user?.id || user?._id;
+                                    const messageSenderId = String(infoMessage.sender_id?._id || infoMessage.sender_id || '');
                                     const members = selectedGroup?.members?.filter(m => String(m._id) !== String(myId)) || [];
                                     const readDetails = infoMessage.read_details || [];
                                     const oldReadBy = infoMessage.read_by || [];
@@ -12954,7 +13103,8 @@ export default function Chat() {
                                             id: userIdStr,
                                             name: memInfo ? memInfo.name : (rd.user_id?.name || 'Unknown'),
                                             image: memInfo ? memInfo.image : (rd.user_id?.image || null),
-                                            time: rd.read_at
+                                            time: rd.read_at,
+                                            privacySettings: memInfo?.privacySettings || rd.user_id?.privacySettings || null
                                         });
                                     });
 
@@ -12968,11 +13118,21 @@ export default function Chat() {
                                             id: userIdStr,
                                             name: memInfo ? memInfo.name : (rb.name || 'Unknown'),
                                             image: memInfo ? memInfo.image : (rb.image || null),
-                                            time: infoMessage.created_at // Fallback time for old reads
+                                            time: infoMessage.created_at, // Fallback time for old reads
+                                            privacySettings: memInfo?.privacySettings || rb.privacySettings || null
                                         });
                                     });
 
-                                    const readMems = readMemsRaw.filter(rm => rm.name !== 'Unknown');
+                                    const readMems = readMemsRaw.filter(rm => {
+                                        if (rm.name === 'Unknown') return false;
+                                        if (rm.privacySettings) {
+                                            const rule = normalizeVisibilityRule(normalizePrivacySettings(rm.privacySettings).readReceipts);
+                                            if (rule.mode === 'no_one') return false;
+                                            if (rule.mode === 'everyone_except') return !rule.exceptUserIds.includes(messageSenderId);
+                                            return true;
+                                        }
+                                        return canViewerSeeReadReceiptFromMember(rm.id, messageSenderId);
+                                    });
 
                                     const deliveredMems = members.filter(m => !readMems.some(rm => String(rm.id) === String(m._id))).map(m => ({
                                         id: m._id,
@@ -18575,7 +18735,7 @@ export default function Chat() {
 
                         {/* Messages */}
                         <div
-                            className={`wa-chat-messages-area ${isScreenshotPrivacyMaskActive ? 'privacy-mask-active' : ''}`} style={{ overflow: "hidden" }}
+                            className="wa-chat-messages-area" style={{ overflow: "hidden" }}
                             onContextMenu={(e) => {
                                 e.preventDefault();
                                 setChatContextMenu({ x: e.clientX, y: e.clientY });
@@ -19117,7 +19277,7 @@ export default function Chat() {
                         })()}
 
                         <div
-                            className={`wa-chat-messages-area ${isScreenshotPrivacyMaskActive ? 'privacy-mask-active' : ''}`} style={{ overflow: "hidden" }}
+                            className="wa-chat-messages-area" style={{ overflow: "hidden" }}
                             onContextMenu={(e) => {
                                 e.preventDefault();
                                 setChatContextMenu({ x: e.clientX, y: e.clientY });
@@ -21209,16 +21369,13 @@ export default function Chat() {
                                         </div>
                                         <ChevronRight size={16} />
                                     </button>
-                                    <div className="wa-settings-item">
+                                    <button className="wa-settings-list-action" onClick={() => openPrivacyVisibilityDialog('readReceipts')}>
                                         <div className="wa-settings-item-info">
                                             <p className="wa-settings-item-label">Read Receipts</p>
-                                            <p className="wa-settings-item-desc">Control who can see when you read messages</p>
+                                            <p className="wa-settings-item-desc">{getPrivacySummary(privacySettings.readReceipts)}</p>
                                         </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.readReceipts} onChange={() => togglePrivacyBooleanSetting('readReceipts')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
+                                        <ChevronRight size={16} />
+                                    </button>
                                     <div className="wa-settings-item">
                                         <div className="wa-settings-item-info">
                                             <p className="wa-settings-item-label">Typing Indicator</p>
@@ -21241,36 +21398,6 @@ export default function Chat() {
                                         </div>
                                         <label className="wa-settings-toggle">
                                             <input type="checkbox" checked={privacySettings.screenshotDetection} onChange={() => togglePrivacyBooleanSetting('screenshotDetection')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Notify Me on Screenshot</p>
-                                            <p className="wa-settings-item-desc">Show an in-app alert when screenshot shortcut activity is detected.</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.notifyOnScreenshot} onChange={() => togglePrivacyBooleanSetting('notifyOnScreenshot')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Blur Messages After Screenshot</p>
-                                            <p className="wa-settings-item-desc">Temporarily blur the active chat after a screenshot shortcut is detected.</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.blurOnScreenshot} onChange={() => togglePrivacyBooleanSetting('blurOnScreenshot')} />
-                                            <span className="wa-settings-toggle-slider" />
-                                        </label>
-                                    </div>
-                                    <div className="wa-settings-item">
-                                        <div className="wa-settings-item-info">
-                                            <p className="wa-settings-item-label">Add Watermark to Shared Media</p>
-                                            <p className="wa-settings-item-desc">Overlay a visible privacy watermark on shared image and video surfaces.</p>
-                                        </div>
-                                        <label className="wa-settings-toggle">
-                                            <input type="checkbox" checked={privacySettings.addWatermark} onChange={() => togglePrivacyBooleanSetting('addWatermark')} />
                                             <span className="wa-settings-toggle-slider" />
                                         </label>
                                     </div>
@@ -21889,7 +22016,7 @@ export default function Chat() {
                 .wa-pinned-messages-banner span { color: #f8fafc !important; }
             `}</style>
 
-            <div className={`wa-app-container ${(selectedUser || selectedGroup) ? 'chat-active' : 'list-active'}`} style={{ position: 'relative', background: 'transparent' }}>
+            <div className={`wa-app-container ${(selectedUser || selectedGroup) ? 'chat-active' : 'list-active'} ${isScreenshotPrivacyMaskActive ? 'wa-app-container-screenshot-protected' : ''}`} style={{ position: 'relative', background: 'transparent' }}>
 
                 {renderLeftSidebar()}
                 {isSettingsOpen ? (
@@ -21991,6 +22118,12 @@ export default function Chat() {
                             )}
                         </div>
                     </>
+                )}
+
+                {isScreenshotPrivacyMaskActive && (
+                    <div className="wa-global-privacy-mask" aria-hidden="true">
+                        <div className="wa-global-privacy-mask__message">Screenshot privacy mode active</div>
+                    </div>
                 )}
             </div>
 

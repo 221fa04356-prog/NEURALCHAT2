@@ -1086,6 +1086,22 @@ router.post('/messages/mark-read', authenticateToken, async (req, res) => {
         const readAt = new Date();
         const senderObjId = new mongoose.Types.ObjectId(senderId);
         const readerObjId = new mongoose.Types.ObjectId(userId);
+        const normalizeVisibilityRule = (rule) => {
+            if (typeof rule === 'boolean') {
+                return rule ? { mode: 'everyone', exceptUserIds: [] } : { mode: 'no_one', exceptUserIds: [] };
+            }
+            return {
+                mode: ['everyone', 'everyone_except', 'no_one'].includes(rule?.mode) ? rule.mode : 'everyone',
+                exceptUserIds: Array.isArray(rule?.exceptUserIds)
+                    ? [...new Set(rule.exceptUserIds.map(id => String(id || '').trim()).filter(Boolean))]
+                    : []
+            };
+        };
+        const reader = await User.findById(userId).select('privacySettings');
+        const readReceiptRule = normalizeVisibilityRule(reader?.privacySettings?.readReceipts);
+        const canShareReadReceipt =
+            readReceiptRule.mode === 'everyone'
+            || (readReceiptRule.mode === 'everyone_except' && !readReceiptRule.exceptUserIds.includes(String(senderId)));
 
         // Using $in with both ObjectId and String forms to be 100% sure we hit the records
         const updateResult = await Message.updateMany(
@@ -1099,25 +1115,29 @@ router.post('/messages/mark-read', authenticateToken, async (req, res) => {
 
         console.log(`[DEBUG] mark-read: Reader ${userId} (Object: ${readerObjId}) processed messages from ${senderId}. Updated: ${updateResult.modifiedCount}`);
 
-        // Notify the sender that their messages were read
+        // Notify the sender that their messages were read only if allowed by the reader's privacy settings.
         if (req.io) {
-            console.log(`[DEBUG] mark-read: BROADCASTING messages_read for reader ${userId} to sender ${senderId}`);
-            // Target the specific sender room for efficiency
-            req.io.to(senderId).emit('messages_read', {
-                reader_id: userId,
-                read_at: readAt
-            });
+            if (canShareReadReceipt) {
+                console.log(`[DEBUG] mark-read: BROADCASTING messages_read for reader ${userId} to sender ${senderId}`);
+                req.io.to(senderId).emit('messages_read', {
+                    reader_id: userId,
+                    read_at: readAt
+                });
+            } else {
+                console.log(`[DEBUG] mark-read: Reader ${userId} has hidden read receipts from ${senderId}`);
+            }
             // Also notify the reader's other sessions
             req.io.to(userId).emit('messages_read', {
                 reader_id: userId,
                 read_at: readAt
             });
-            // Broadcast as backup to ensure no session is missed due to room issues
-            req.io.emit('messages_read_broadcast', {
-                reader_id: userId,
-                sender_id: senderId,
-                read_at: readAt
-            });
+            if (canShareReadReceipt) {
+                req.io.emit('messages_read_broadcast', {
+                    reader_id: userId,
+                    sender_id: senderId,
+                    read_at: readAt
+                });
+            }
         }
 
         res.json({ status: 'success', modifiedCount: updateResult.modifiedCount });

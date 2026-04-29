@@ -200,7 +200,7 @@ router.post('/create', authenticateToken, async (req, res) => {
 
         // Populate members for response
         const populatedGroup = await Group.findById(group._id)
-            .populate('members', 'name email _id isOnline lastSeen __enc_name __enc_email')
+            .populate('members', 'name email _id isOnline lastSeen privacySettings __enc_name __enc_email')
             .populate('admin', 'name _id __enc_name')
             .populate('userHistory.addedBy', 'name _id __enc_name');
 
@@ -330,7 +330,7 @@ router.get('/:groupId', authenticateToken, async (req, res) => {
         const userId = req.user.id;
 
         const group = await Group.findById(groupId)
-            .populate('members', 'name email _id isOnline lastSeen about mobile countryCode __enc_name __enc_email __enc_about __enc_mobile')
+            .populate('members', 'name email _id isOnline lastSeen about mobile countryCode privacySettings __enc_name __enc_email __enc_about __enc_mobile')
             .populate('admin', 'name _id __enc_name')
             .populate('admins', 'name _id __enc_name')
             .populate('userHistory.addedBy', 'name _id __enc_name');
@@ -395,8 +395,8 @@ router.get('/:groupId/messages', authenticateToken, async (req, res) => {
 
         const messagesDesc = await GroupMessage.find(baseQuery)
             .populate('sender_id', 'name _id __enc_name')
-            .populate('read_by', 'name image _id')
-            .populate('read_details.user_id', 'name image _id')
+            .populate('read_by', 'name image _id privacySettings')
+            .populate('read_details.user_id', 'name image _id privacySettings')
             .sort({ created_at: -1 })
             .limit(pageLimit + 1);
 
@@ -1113,6 +1113,17 @@ router.post('/:groupId/messages/mark-read', authenticateToken, async (req, res) 
     try {
         const { groupId } = req.params;
         const userId = req.user.id;
+        const normalizeVisibilityRule = (rule) => {
+            if (typeof rule === 'boolean') {
+                return rule ? { mode: 'everyone', exceptUserIds: [] } : { mode: 'no_one', exceptUserIds: [] };
+            }
+            return {
+                mode: ['everyone', 'everyone_except', 'no_one'].includes(rule?.mode) ? rule.mode : 'everyone',
+                exceptUserIds: Array.isArray(rule?.exceptUserIds)
+                    ? [...new Set(rule.exceptUserIds.map(id => String(id || '').trim()).filter(Boolean))]
+                    : []
+            };
+        };
 
         const group = await Group.findById(groupId);
         if (!group) return res.status(404).json({ error: 'Group not found' });
@@ -1126,32 +1137,51 @@ router.post('/:groupId/messages/mark-read', authenticateToken, async (req, res) 
 
         // Find unread group messages not sent by the current user
         const userIdObj = new mongoose.Types.ObjectId(userId);
+        const reader = await User.findById(userId).select('privacySettings');
+        const readReceiptRule = normalizeVisibilityRule(reader?.privacySettings?.readReceipts);
         const messagesToUpdate = await GroupMessage.find({
             group_id: groupId,
             sender_id: { $ne: userIdObj },
             read_by: { $ne: userIdObj }
-        });
+        }).select('_id sender_id');
 
         if (messagesToUpdate.length > 0) {
             const messageIds = messagesToUpdate.map(m => m._id);
+            const visibleMessageIds = messagesToUpdate
+                .filter((message) => {
+                    const senderId = String(message.sender_id?._id || message.sender_id || '');
+                    if (!senderId) return false;
+                    if (readReceiptRule.mode === 'no_one') return false;
+                    if (readReceiptRule.mode === 'everyone_except') {
+                        return !readReceiptRule.exceptUserIds.includes(senderId);
+                    }
+                    return true;
+                })
+                .map(m => m._id);
 
-            await GroupMessage.updateMany(
-                { _id: { $in: messageIds } },
-                {
-                    $addToSet: { read_by: userIdObj },
-                    $push: { read_details: { user_id: userIdObj, read_at: new Date() } }
-                }
-            );
+            const readAt = new Date();
+
+            if (visibleMessageIds.length > 0) {
+                await GroupMessage.updateMany(
+                    { _id: { $in: visibleMessageIds } },
+                    {
+                        $addToSet: { read_by: userIdObj },
+                        $push: { read_details: { user_id: userIdObj, read_at: readAt } }
+                    }
+                );
+            }
 
             // Emit partial read to all members
             const messageIdStrings = messageIds.map(id => id.toString());
+            const visibleMessageIdStrings = visibleMessageIds.map(id => id.toString());
             if (req.io) {
                 group.members.forEach(memberId => {
                     req.io.to(memberId.toString()).emit('group_message_partial_read', {
                         groupId: groupId.toString(),
                         messageIds: messageIdStrings,
+                        visibleMessageIds: visibleMessageIdStrings,
                         readerId: userId.toString(),
-                        readAt: new Date().toISOString()
+                        readAt: readAt.toISOString()
                     });
                 });
             }
@@ -1159,8 +1189,8 @@ router.post('/:groupId/messages/mark-read', authenticateToken, async (req, res) 
             // Now check if any of these messages have been read by ALL members (except the sender)
             const requiredReads = group.members.length - 1;
 
-            if (requiredReads > 0) {
-                const updatedMessages = await GroupMessage.find({ _id: { $in: messageIds } });
+            if (requiredReads > 0 && visibleMessageIds.length > 0) {
+                const updatedMessages = await GroupMessage.find({ _id: { $in: visibleMessageIds } });
                 const fullyReadMsgIds = updatedMessages
                     .filter(m => m.read_by && m.read_by.length >= requiredReads)
                     .map(m => m._id);

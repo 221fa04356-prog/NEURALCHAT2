@@ -656,7 +656,7 @@ router.put('/update-profile', async (req, res) => {
         }
 
         if (privacySettings !== undefined) {
-            const visibilityKeys = ['lastSeen', 'onlineStatus', 'profilePhoto', 'about', 'status'];
+            const visibilityKeys = ['lastSeen', 'onlineStatus', 'profilePhoto', 'about', 'status', 'readReceipts'];
             const sanitizeChoice = (value, allowed, fallback) => allowed.includes(value) ? value : fallback;
             const sanitizeNumberChoice = (value, allowed, fallback) => {
                 const normalized = Number(value);
@@ -672,7 +672,6 @@ router.put('/update-profile', async (req, res) => {
 
             updateData.privacySettings = {
                 ...(Object.fromEntries(visibilityKeys.map((key) => [key, sanitizeVisibilityRule(privacySettings?.[key])]))),
-                readReceipts: privacySettings?.readReceipts !== false,
                 typingIndicator: privacySettings?.typingIndicator !== false,
                 whoCanMessageMe: sanitizeChoice(privacySettings?.whoCanMessageMe, ['Everyone', 'My Contacts', 'No One'], 'Everyone'),
                 messageRequestsRequired: privacySettings?.messageRequestsRequired !== false,
@@ -700,6 +699,14 @@ router.put('/update-profile', async (req, res) => {
 
         if (req.io) {
             req.io.to(updatedUser._id.toString()).emit('user_profile_updated', {
+                userId: updatedUser._id,
+                name: updatedUser.name,
+                displayName: updatedUser.displayName || updatedUser.name,
+                mobile: updatedUser.mobile,
+                about: updatedUser.about,
+                privacySettings: updatedUser.privacySettings
+            });
+            req.io.emit('user_profile_updated', {
                 userId: updatedUser._id,
                 name: updatedUser.name,
                 displayName: updatedUser.displayName || updatedUser.name,

@@ -88,7 +88,10 @@ const userSchema = new mongoose.Schema({
             type: privacyVisibilitySchema,
             default: () => ({ mode: 'everyone', exceptUserIds: [] })
         },
-        readReceipts: { type: Boolean, default: true },
+        readReceipts: {
+            type: mongoose.Schema.Types.Mixed,
+            default: () => ({ mode: 'everyone', exceptUserIds: [] })
+        },
         typingIndicator: { type: Boolean, default: true },
         whoCanMessageMe: {
             type: String,
