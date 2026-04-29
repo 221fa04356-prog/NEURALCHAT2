@@ -125,25 +125,40 @@ const upload = multer({
     storage,
     fileFilter: (req, file, cb) => {
         const allowedTypes = [
-            'image/jpeg', 'image/png', // Images
-            'application/pdf',         // PDF
-            'application/msword',      // .doc
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
-            'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm', // Videos
-            'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/webm', 'audio/wav', 'audio/x-m4a' // Audio
+            'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.ms-powerpoint',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'text/plain', 'text/csv',
+            'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/webm', 'audio/wav', 'audio/x-m4a', 'audio/opus'
         ];
         const ext = path.extname(file.originalname).toLowerCase();
-        const allowedExts = ['.jpg', '.jpeg', '.png', '.doc', '.docx', '.pdf', '.mp4', '.avi', '.mkv', '.mov', '.mp3', '.m4a', '.ogg', '.wav', '.webm'];
+        const allowedExts = [
+            '.jpg', '.jpeg', '.png', '.gif', '.webp',
+            '.doc', '.docx', '.docm', '.dot', '.dotx', '.rtf', '.odt',
+            '.pdf', '.txt', '.csv',
+            '.xls', '.xlsx', '.xlsm', '.xlsb', '.xlt', '.xltx', '.ods',
+            '.ppt', '.pptx', '.pptm', '.pot', '.potx', '.pps', '.ppsx', '.odp',
+            '.mp3', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.flac',
+            '.mp4', '.avi', '.mkv', '.mov', '.webm', '.m4v'
+        ];
 
-        const isAllowedType = allowedTypes.includes(file.mimetype) ||
+        const mime = (file.mimetype || '').toLowerCase();
+        const isAllowedType = allowedTypes.includes(mime) ||
             file.mimetype.startsWith('video/') ||
             file.mimetype.startsWith('image/') ||
-            file.mimetype.startsWith('audio/');
+            file.mimetype.startsWith('audio/') ||
+            mime === 'application/octet-stream';
 
-        if (isAllowedType && allowedExts.includes(ext)) {
+        const isAllowedExt = allowedExts.includes(ext);
+        if (isAllowedExt || isAllowedType) {
             cb(null, true);
         } else {
-            cb(new Error(`Invalid file type (${file.mimetype}, ext: ${ext}). Only Images, PDFs, Word, Video, and Audio files are allowed.`));
+            cb(new Error(`Invalid file type (${file.mimetype}, ext: ${ext}). This file type is not supported.`));
         }
     }
 });
