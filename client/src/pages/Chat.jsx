@@ -20133,15 +20133,53 @@ export default function Chat() {
 
                                 if (!typingSet || typingSet.size === 0) return null;
 
+                                const typingUserIds = Array.from(typingSet).map((id) => String(id || ''));
+                                const primaryTypingUserId = typingUserIds[0] || '';
+                                const primaryTypingUser =
+                                    selectedGroup?.members?.find(member => String(member?._id || member?.id || member) === primaryTypingUserId) ||
+                                    selectedCommunity?.members?.find(member => String(member?._id || member?.id || member) === primaryTypingUserId) ||
+                                    users?.find(member => String(member?._id || member?.id || member) === primaryTypingUserId) ||
+                                    null;
+                                const typingAvatar = primaryTypingUser ? getVisibleUserAvatar(primaryTypingUser) : '';
+                                const typingInitial = (getContactDisplayName(primaryTypingUser || {}) || 'U').charAt(0).toUpperCase();
+
                                 return (
                                     <div className="wa-typing-bubble-container" style={{
                                         display: 'flex',
+                                        alignItems: 'flex-end',
+                                        gap: 8,
                                         padding: '6px 12px',
                                         margin: '4px 0',
                                         animation: 'wa-slide-left 0.3s ease-out',
                                         position: 'relative',
                                         zIndex: 1000
                                     }}>
+                                        <div
+                                            title={primaryTypingUser ? getContactDisplayName(primaryTypingUser) : 'Someone'}
+                                            style={{
+                                                width: 34,
+                                                height: 34,
+                                                borderRadius: '50%',
+                                                overflow: 'hidden',
+                                                flexShrink: 0,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.22) 0%, rgba(79, 70, 229, 0.22) 100%)',
+                                                border: '1px solid rgba(56, 189, 248, 0.35)',
+                                                boxShadow: '0 1px 2px rgba(0,0,0,0.12)'
+                                            }}
+                                        >
+                                            {typingAvatar ? (
+                                                <img
+                                                    src={typingAvatar}
+                                                    alt={primaryTypingUser ? getContactDisplayName(primaryTypingUser) : 'Typing user'}
+                                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                />
+                                            ) : (
+                                                <span style={{ fontSize: 14, fontWeight: 700, color: '#38bdf8' }}>{typingInitial}</span>
+                                            )}
+                                        </div>
                                         <div className="wa-typing-indicator" style={{
                                             display: 'flex',
                                             gap: 4,
