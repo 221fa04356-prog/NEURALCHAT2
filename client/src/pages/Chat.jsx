@@ -332,10 +332,16 @@ const createDefaultPrivacySettings = () => ({
 });
 
 const normalizeVisibilityRule = (rule) => {
+    if (typeof rule === 'boolean') {
+        return rule ? { mode: 'everyone', exceptUserIds: [] } : { mode: 'no_one', exceptUserIds: [] };
+    }
+
     if (typeof rule === 'string') {
-        const normalized = rule.trim().toLowerCase();
-        if (normalized === 'no one') return { mode: 'no_one', exceptUserIds: [] };
-        if (normalized.startsWith('everyone except')) return { mode: 'everyone_except', exceptUserIds: [] };
+        const normalized = rule.trim().toLowerCase().replace(/[\s-]+/g, '_');
+        if (normalized === 'no_one' || normalized === 'nobody') return { mode: 'no_one', exceptUserIds: [] };
+        if (normalized === 'everyone_except' || normalized.startsWith('everyone_except_')) {
+            return { mode: 'everyone_except', exceptUserIds: [] };
+        }
         return { mode: 'everyone', exceptUserIds: [] };
     }
 
@@ -9881,7 +9887,7 @@ export default function Chat() {
 
                     {/* Me Section */}
                     {user && (
-                        <div className="wa-user-item" onClick={() => { setSelectedUser(user); setIsNewChatOpen(false); }}>
+                        <div className="wa-user-item" onClick={() => { handleUserSelect(user); setIsNewChatOpen(false); }}>
                             <div className="wa-avatar">
                                 {user.image ? <img src={user.image} alt="You" /> : <span>{user.name?.charAt(0).toUpperCase()}</span>}
                             </div>
@@ -9906,7 +9912,7 @@ export default function Chat() {
                             <div key={letter} className="wa-contact-group">
                                 <div style={{ padding: '15px 16px 5px', color: '#667781', fontSize: 14, fontWeight: 500 }}>{letter}</div>
                                 {filtered.map(u => (
-                                    <div key={u._id} className="wa-user-item" onClick={() => { setSelectedUser(u); setIsNewChatOpen(false); }}>
+                                    <div key={u._id} className="wa-user-item" onClick={() => { handleUserSelect(u); setIsNewChatOpen(false); }}>
                                         <div className="wa-avatar">
                                             {getVisibleUserAvatar(u) ? <img src={getVisibleUserAvatar(u)} alt={u.name} /> : <span>{u.name?.charAt(0).toUpperCase()}</span>}
                                         </div>

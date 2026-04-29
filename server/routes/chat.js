@@ -839,7 +839,10 @@ router.post('/toggle-favorite', authenticateToken, async (req, res) => {
         const currentUser = await User.findById(currentUserId);
         if (!currentUser) return res.status(404).json({ error: 'User not found' });
 
-        const index = currentUser.favorites.indexOf(targetUserId);
+        const normalizedTargetId = String(targetUserId);
+        const index = (currentUser.favorites || []).findIndex(
+            (favoriteId) => String(favoriteId) === normalizedTargetId
+        );
         if (index > -1) {
             currentUser.favorites.splice(index, 1);
         } else {
@@ -1089,6 +1092,16 @@ router.post('/messages/mark-read', authenticateToken, async (req, res) => {
         const normalizeVisibilityRule = (rule) => {
             if (typeof rule === 'boolean') {
                 return rule ? { mode: 'everyone', exceptUserIds: [] } : { mode: 'no_one', exceptUserIds: [] };
+            }
+            if (typeof rule === 'string') {
+                const normalized = rule.trim().toLowerCase().replace(/[\s-]+/g, '_');
+                if (normalized === 'no_one' || normalized === 'nobody') {
+                    return { mode: 'no_one', exceptUserIds: [] };
+                }
+                if (normalized === 'everyone_except' || normalized.startsWith('everyone_except_')) {
+                    return { mode: 'everyone_except', exceptUserIds: [] };
+                }
+                return { mode: 'everyone', exceptUserIds: [] };
             }
             return {
                 mode: ['everyone', 'everyone_except', 'no_one'].includes(rule?.mode) ? rule.mode : 'everyone',
