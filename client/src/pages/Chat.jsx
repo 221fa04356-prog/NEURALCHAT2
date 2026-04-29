@@ -10,7 +10,7 @@ import {
     Search, Settings, Phone, Video, Paperclip, Smile, Send, Mic, MicOff, Pause, PauseCircle, PlayCircle, StopCircle,
     ArrowLeft, CheckCheck, CheckCircle, User as UserIcon, FileText, Calendar, X, Star, ChevronDown, ChevronRight, ChevronLeft, Bell,
     Info, Reply, Copy, Forward, Pin, CheckSquare, Download, Trash2, Archive, BellOff, HeartOff, XCircle, Lock, List, Heart, ThumbsDown, Share, Pencil, Image, StarOff, Camera, Link2 as LinkIcon,
-    LayoutGrid, UserPlus, ArrowRight, Share2, Crop, Check, RotateCcw, Minus, Delete, User, Play, MapPin, IndianRupee, Sticker, PlusCircle,
+    LayoutGrid, UserPlus, ArrowRight, Share2, Crop, Check, RotateCcw, Undo2, Minus, Delete, User, Play, MapPin, IndianRupee, Sticker, PlusCircle,
     ShieldCheck, Monitor, BellRing, Laptop, LogOut, Globe, Clock, Mail, Briefcase, ExternalLink,
     ShieldAlert, Fingerprint, HardDrive, Keyboard, HelpCircle, Settings2, Volume2, MonitorSmartphone, Shield,
     AlertCircle, UserCheck, Loader2, Ban, ChevronUp, Headphones
@@ -1163,11 +1163,64 @@ export default function Chat() {
     const [selectedFiles, setSelectedFiles] = useState([]);
     const fileInputRef = useRef(null);
     const filePreviewUrlCacheRef = useRef(new Map());
+    const MAX_UPLOAD_BYTES = 1073741824;
+    const DOCUMENT_EXTENSIONS = ['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt', 'pdf', 'txt', 'csv', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods', 'ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'];
+    const MEDIA_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'avi', 'mkv', 'mov', 'webm', 'm4v'];
+    const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'ogg', 'opus', 'wav', 'aac', 'flac'];
+    const ALL_ATTACHMENT_EXTENSIONS = Array.from(new Set([...DOCUMENT_EXTENSIONS, ...MEDIA_EXTENSIONS, ...AUDIO_EXTENSIONS]));
+    const extensionListToAcceptAttr = (extensions) => extensions.map((ext) => `.${ext}`).join(',');
+    const DOCUMENT_ACCEPT_ATTR = extensionListToAcceptAttr(DOCUMENT_EXTENSIONS);
+    const MEDIA_ACCEPT_ATTR = `${extensionListToAcceptAttr(MEDIA_EXTENSIONS)},video/*,image/*`;
+    const AUDIO_ACCEPT_ATTR = `${extensionListToAcceptAttr(AUDIO_EXTENSIONS)},audio/*`;
+    const ALL_ATTACHMENT_ACCEPT_ATTR = `${extensionListToAcceptAttr(ALL_ATTACHMENT_EXTENSIONS)},video/*,image/*,audio/*`;
 
     const [showViewOnceModal, setShowViewOnceModal] = useState(false);
     const [viewOnceMsg, setViewOnceMsg] = useState(null);
     const [isViewOnceVoice, setIsViewOnceVoice] = useState(false);
     const [isViewOnceMedia, setIsViewOnceMedia] = useState(false);
+    const [inlineImageEditMode, setInlineImageEditMode] = useState(false);
+    const [inlineImageRotation, setInlineImageRotation] = useState(0);
+    const [inlineImageNaturalSize, setInlineImageNaturalSize] = useState({ width: 0, height: 0 });
+    const [inlineCropActive, setInlineCropActive] = useState(false);
+    const [inlineCropRect, setInlineCropRect] = useState(null); // normalized 0..1
+    const [inlineCropDragMode, setInlineCropDragMode] = useState(null); // draw | move | resize
+    const [inlineCropResizeHandle, setInlineCropResizeHandle] = useState(null); // n|s|e|w|ne|nw|se|sw
+    const [inlineCropStart, setInlineCropStart] = useState(null); // normalized point
+    const [inlineCropMoveOffset, setInlineCropMoveOffset] = useState(null); // normalized delta
+    const inlineImageStageRef = useRef(null);
+
+    useEffect(() => {
+        if (!file) return;
+        const ext = String(file.name || '').split('.').pop().toLowerCase();
+        if (DOCUMENT_EXTENSIONS.includes(ext)) {
+            setIsViewOnceMedia(false);
+        }
+    }, [file]);
+
+    useEffect(() => {
+        setInlineImageEditMode(false);
+        setInlineImageRotation(0);
+        setInlineImageNaturalSize({ width: 0, height: 0 });
+        setInlineCropActive(false);
+        setInlineCropRect(null);
+        setInlineCropDragMode(null);
+        setInlineCropResizeHandle(null);
+        setInlineCropStart(null);
+        setInlineCropMoveOffset(null);
+    }, [file]);
+
+    useEffect(() => {
+        if (!inlineCropDragMode) return;
+        const stopDrag = () => handleInlineCropPointerUp();
+        window.addEventListener('mouseup', stopDrag);
+        window.addEventListener('touchend', stopDrag);
+        window.addEventListener('touchcancel', stopDrag);
+        return () => {
+            window.removeEventListener('mouseup', stopDrag);
+            window.removeEventListener('touchend', stopDrag);
+            window.removeEventListener('touchcancel', stopDrag);
+        };
+    }, [inlineCropDragMode]);
 
     const [selfPlayedMsgs, setSelfPlayedMsgs] = useState(() => {
         const saved = localStorage.getItem(`selfPlayedMsgs_${user.id || user._id}`);
@@ -7817,12 +7870,15 @@ export default function Chat() {
 
     const getAllowedExtensionsForAttachmentType = () => {
         if (attachmentTypeRef.current === 'document') {
-            return ['doc', 'docx', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx'];
+            return DOCUMENT_EXTENSIONS;
         }
         if (attachmentTypeRef.current === 'media') {
-            return ['jpg', 'jpeg', 'png', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
+            return MEDIA_EXTENSIONS;
         }
-        return ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
+        if (attachmentTypeRef.current === 'audio') {
+            return AUDIO_EXTENSIONS;
+        }
+        return ALL_ATTACHMENT_EXTENSIONS;
     };
 
     const isAllowedFile = (selectedFile, allowedExtensions) => {
@@ -7831,14 +7887,41 @@ export default function Chat() {
         if (allowedExtensions.includes(extension)) return true;
 
         const mime = (selectedFile.type || '').toLowerCase();
+        const canUseImageMime = allowedExtensions.some((ext) => ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext));
+        const canUseVideoMime = allowedExtensions.some((ext) => ['mp4', 'avi', 'mkv', 'mov', 'webm', 'm4v'].includes(ext));
+        const canUseAudioMime = allowedExtensions.some((ext) => ['mp3', 'm4a', 'ogg', 'opus', 'wav', 'aac', 'flac'].includes(ext));
+        if (canUseImageMime && mime.startsWith('image/')) return true;
+        if (canUseVideoMime && mime.startsWith('video/')) return true;
+        if (canUseAudioMime && mime.startsWith('audio/')) return true;
+
         const officeMimeAllowed = {
             'ppt': ['application/vnd.ms-powerpoint'],
             'pptx': ['application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+            'pptm': ['application/vnd.ms-powerpoint.presentation.macroenabled.12'],
+            'pot': ['application/vnd.ms-powerpoint'],
+            'potx': ['application/vnd.openxmlformats-officedocument.presentationml.template'],
+            'pps': ['application/vnd.ms-powerpoint'],
+            'ppsx': ['application/vnd.openxmlformats-officedocument.presentationml.slideshow'],
+            'odp': ['application/vnd.oasis.opendocument.presentation'],
             'doc': ['application/msword'],
             'docx': ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+            'docm': ['application/vnd.ms-word.document.macroenabled.12'],
+            'dot': ['application/msword'],
+            'dotx': ['application/vnd.openxmlformats-officedocument.wordprocessingml.template'],
+            'rtf': ['application/rtf', 'text/rtf'],
+            'odt': ['application/vnd.oasis.opendocument.text'],
             'xls': ['application/vnd.ms-excel'],
             'xlsx': ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-            'pdf': ['application/pdf']
+            'xlsm': ['application/vnd.ms-excel.sheet.macroenabled.12'],
+            'xlsb': ['application/vnd.ms-excel.sheet.binary.macroenabled.12'],
+            'xlt': ['application/vnd.ms-excel'],
+            'xltx': ['application/vnd.openxmlformats-officedocument.spreadsheetml.template'],
+            'ods': ['application/vnd.oasis.opendocument.spreadsheet'],
+            'pdf': ['application/pdf'],
+            'txt': ['text/plain'],
+            'csv': ['text/csv', 'application/vnd.ms-excel'],
+            'm4a': ['audio/mp4', 'audio/x-m4a'],
+            'ogg': ['audio/ogg', 'application/ogg']
         };
         return allowedExtensions.some(ext => officeMimeAllowed[ext]?.includes(mime));
     };
@@ -7854,21 +7937,12 @@ export default function Chat() {
         if (e.target.files && e.target.files.length > 0) {
             const newFiles = Array.from(e.target.files);
             const validFiles = [];
-            
-            let allowedExtensions;
-            if (attachmentTypeRef.current === 'document') {
-                allowedExtensions = ['doc', 'docx', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv'];
-            } else if (attachmentTypeRef.current === 'media') {
-                allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            } else {
-                allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            }
+            const allowedExtensions = getAllowedExtensionsForAttachmentType();
 
             newFiles.forEach(selectedFile => {
-                const extension = selectedFile.name.split('.').pop().toLowerCase();
-                if (allowedExtensions.includes(extension)) {
-                    if (selectedFile.size > 1073741824) { // 1GB
-                        setSnackbar({ message: `${selectedFile.name} is too large (>1GB)`, type: 'error', variant: 'system' });
+                if (isAllowedFile(selectedFile, allowedExtensions)) {
+                    if (selectedFile.size > MAX_UPLOAD_BYTES) {
+                        setSnackbar({ message: `${selectedFile.name} is too large (>1GB).`, type: 'error', variant: 'system' });
                     } else {
                         validFiles.push(selectedFile);
                     }
@@ -8396,7 +8470,23 @@ export default function Chat() {
             }
             return;
         }
-        const targetFile = fileOverride || voiceFile || file || (selectedFiles.length > 0 ? selectedFiles[0] : null);
+        let targetFile = fileOverride || voiceFile || file || (selectedFiles.length > 0 ? selectedFiles[0] : null);
+        const normalizedImageRotation = normalizeRotationDegrees(inlineImageRotation);
+        const normalizedInlineCropRect = normalizeCropRect(inlineCropRect);
+        if (
+            targetFile &&
+            targetFile.type?.startsWith('image/') &&
+            normalizedImageRotation !== 0
+        ) {
+            targetFile = await rotateImageFile(targetFile, normalizedImageRotation);
+        }
+        if (
+            targetFile &&
+            targetFile.type?.startsWith('image/') &&
+            normalizedInlineCropRect
+        ) {
+            targetFile = await cropImageFileByRect(targetFile, normalizedInlineCropRect);
+        }
         const isVoiceMessage = !!voiceFile && !fileOverride;
         const isCloudAudioMessage = !!cloudAudio;
         const targetExt = String(targetFile?.name || '').split('.').pop().toLowerCase();
@@ -8472,11 +8562,13 @@ export default function Chat() {
         setFile(null); // Clear file immediately from UI
         setSelectedFiles([]); // Clear selected files immediately from UI
         setIsViewOnceMedia(false);
-        setReplyingTo(null); // Clear reply context immediately
-        setTypingLinkPreview(null); // Clear typing preview immediately
-        setSuggestionApplied(false); // Reset correction state for next message
-        setIsViewOnceVoice(false); // Reset view-once state for next message
-        setIsViewOnceMedia(false); // Reset media view-once state for next message
+            setReplyingTo(null); // Clear reply context immediately
+            setTypingLinkPreview(null); // Clear typing preview immediately
+            setSuggestionApplied(false); // Reset correction state for next message
+            setIsViewOnceVoice(false); // Reset view-once state for next message
+            setIsViewOnceMedia(false); // Reset media view-once state for next message
+            setInlineImageEditMode(false);
+            setInlineImageRotation(0);
 
         try {
             const formData = new FormData();
@@ -9806,7 +9898,7 @@ export default function Chat() {
                 icon: FileText, label: t('chat_window.document'), color: '#7c5cfc', onClick: () => {
                     attachmentTypeRef.current = 'document';
                     if (fileInputRef.current) {
-                        fileInputRef.current.accept = ".doc,.docx,.pdf,.xls,.xlsx";
+                        fileInputRef.current.accept = DOCUMENT_ACCEPT_ATTR;
                         fileInputRef.current.click();
                     }
                     setIsAttachmentMenuOpen(false);
@@ -9816,7 +9908,7 @@ export default function Chat() {
                 icon: Image, label: t('chat_window.photos_videos'), color: '#0084ff', onClick: () => {
                     attachmentTypeRef.current = 'media';
                     if (fileInputRef.current) {
-                        fileInputRef.current.accept = ".jpg,.jpeg,.png,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*";
+                        fileInputRef.current.accept = MEDIA_ACCEPT_ATTR;
                         fileInputRef.current.click();
                     }
                     setIsAttachmentMenuOpen(false);
@@ -9829,7 +9921,7 @@ export default function Chat() {
                 icon: Headphones, label: t('chat_window.audio'), color: '#ff7866', onClick: () => {
                     attachmentTypeRef.current = 'audio';
                     if (fileInputRef.current) {
-                        fileInputRef.current.accept = ".mp3,.wav,.ogg,.m4a,audio/*";
+                        fileInputRef.current.accept = AUDIO_ACCEPT_ATTR;
                         fileInputRef.current.click();
                     }
                     setIsAttachmentMenuOpen(false);
@@ -10619,6 +10711,338 @@ export default function Chat() {
         return created;
     };
 
+    const normalizeRotationDegrees = (value) => {
+        const numeric = Number(value || 0);
+        return ((numeric % 360) + 360) % 360;
+    };
+
+    const rotateImageFile = async (sourceFile, rotationDegrees) => {
+        if (!sourceFile || !sourceFile.type?.startsWith('image/')) return sourceFile;
+        const normalized = normalizeRotationDegrees(rotationDegrees);
+        if (normalized === 0) return sourceFile;
+
+        const objectUrl = URL.createObjectURL(sourceFile);
+        try {
+            const imageEl = await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error('Failed to load image for rotation'));
+                img.src = objectUrl;
+            });
+
+            const swapDimensions = normalized === 90 || normalized === 270;
+            const canvas = document.createElement('canvas');
+            canvas.width = swapDimensions ? imageEl.height : imageEl.width;
+            canvas.height = swapDimensions ? imageEl.width : imageEl.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return sourceFile;
+
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate((normalized * Math.PI) / 180);
+            ctx.drawImage(imageEl, -imageEl.width / 2, -imageEl.height / 2);
+
+            const outMime = sourceFile.type || 'image/png';
+            const outBlob = await new Promise((resolve, reject) => {
+                canvas.toBlob((blob) => {
+                    if (blob) resolve(blob);
+                    else reject(new Error('Failed to render rotated image'));
+                }, outMime, 0.92);
+            });
+
+            return new File([outBlob], sourceFile.name || `image_${Date.now()}.png`, {
+                type: outBlob.type || outMime,
+                lastModified: Date.now()
+            });
+        } catch (_) {
+            return sourceFile;
+        } finally {
+            URL.revokeObjectURL(objectUrl);
+        }
+    };
+
+    const clampUnit = (value) => Math.max(0, Math.min(1, Number(value || 0)));
+
+    const normalizeCropRect = (rect) => {
+        if (!rect) return null;
+        const x = clampUnit(rect.x);
+        const y = clampUnit(rect.y);
+        const maxW = Math.max(0, 1 - x);
+        const maxH = Math.max(0, 1 - y);
+        const w = Math.max(0, Math.min(maxW, Number(rect.w || 0)));
+        const h = Math.max(0, Math.min(maxH, Number(rect.h || 0)));
+        if (w <= 0 || h <= 0) return null;
+        return { x, y, w, h };
+    };
+
+    const cropImageFileByRect = async (sourceFile, normalizedRect) => {
+        if (!sourceFile || !sourceFile.type?.startsWith('image/')) return sourceFile;
+        const rect = normalizeCropRect(normalizedRect);
+        if (!rect) return sourceFile;
+        if (rect.x <= 0.0001 && rect.y <= 0.0001 && rect.w >= 0.9999 && rect.h >= 0.9999) {
+            return sourceFile;
+        }
+
+        const objectUrl = URL.createObjectURL(sourceFile);
+        try {
+            const imageEl = await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error('Failed to load image for crop'));
+                img.src = objectUrl;
+            });
+
+            const sx = Math.round(rect.x * imageEl.width);
+            const sy = Math.round(rect.y * imageEl.height);
+            const sw = Math.max(1, Math.round(rect.w * imageEl.width));
+            const sh = Math.max(1, Math.round(rect.h * imageEl.height));
+
+            const canvas = document.createElement('canvas');
+            canvas.width = sw;
+            canvas.height = sh;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return sourceFile;
+            ctx.drawImage(imageEl, sx, sy, sw, sh, 0, 0, sw, sh);
+
+            const outMime = sourceFile.type || 'image/png';
+            const outBlob = await new Promise((resolve, reject) => {
+                canvas.toBlob((blob) => {
+                    if (blob) resolve(blob);
+                    else reject(new Error('Failed to render cropped image'));
+                }, outMime, 0.92);
+            });
+
+            return new File([outBlob], sourceFile.name || `image_${Date.now()}.png`, {
+                type: outBlob.type || outMime,
+                lastModified: Date.now()
+            });
+        } catch (_) {
+            return sourceFile;
+        } finally {
+            URL.revokeObjectURL(objectUrl);
+        }
+    };
+
+    const getFileSignature = (candidate) => {
+        if (!candidate) return '';
+        return `${candidate.name}|${candidate.size}|${candidate.lastModified}|${candidate.type}`;
+    };
+
+    const replaceActivePreviewFile = (nextFile) => {
+        if (!nextFile) return;
+        const currentSig = getFileSignature(file);
+        if (!currentSig) {
+            setFile(nextFile);
+            return;
+        }
+        setSelectedFiles((prev) => {
+            if (!prev.length) return prev;
+            return prev.map((entry) => (getFileSignature(entry) === currentSig ? nextFile : entry));
+        });
+        setFile(nextFile);
+    };
+
+    const applyInlineRotateStep = (degrees) => {
+        if (!file || !file.type?.startsWith('image/')) return;
+        setInlineImageRotation((prev) => normalizeRotationDegrees(prev + Number(degrees || 0)));
+        setInlineImageEditMode(true);
+    };
+
+    const getInlineStageMetrics = () => {
+        const stage = inlineImageStageRef.current;
+        if (!stage) return null;
+        const rect = stage.getBoundingClientRect();
+        if (!rect.width || !rect.height) return null;
+        return rect;
+    };
+
+    const getInlineCropPoint = (event) => {
+        const rect = getInlineStageMetrics();
+        if (!rect) return null;
+        const x = clampUnit((event.clientX - rect.left) / rect.width);
+        const y = clampUnit((event.clientY - rect.top) / rect.height);
+        return { x, y };
+    };
+
+    const isPointInsideCropRect = (point, rect) => {
+        if (!point || !rect) return false;
+        return (
+            point.x >= rect.x &&
+            point.x <= (rect.x + rect.w) &&
+            point.y >= rect.y &&
+            point.y <= (rect.y + rect.h)
+        );
+    };
+
+    const getCropResizeHandle = (point, rect) => {
+        if (!point || !rect) return null;
+        const threshold = 0.045;
+        const left = rect.x;
+        const right = rect.x + rect.w;
+        const top = rect.y;
+        const bottom = rect.y + rect.h;
+        const nearLeft = Math.abs(point.x - left) <= threshold;
+        const nearRight = Math.abs(point.x - right) <= threshold;
+        const nearTop = Math.abs(point.y - top) <= threshold;
+        const nearBottom = Math.abs(point.y - bottom) <= threshold;
+
+        if (nearTop && nearLeft) return 'nw';
+        if (nearTop && nearRight) return 'ne';
+        if (nearBottom && nearLeft) return 'sw';
+        if (nearBottom && nearRight) return 'se';
+        if (nearTop) return 'n';
+        if (nearBottom) return 's';
+        if (nearLeft) return 'w';
+        if (nearRight) return 'e';
+        return null;
+    };
+
+    const activateInlineCropMode = () => {
+        setInlineImageEditMode(true);
+        setInlineCropActive(true);
+        setInlineCropRect((prev) => normalizeCropRect(prev) || { x: 0, y: 0, w: 1, h: 1 });
+    };
+
+    const getInlinePreviewRotateScale = () => {
+        const normalizedRotation = normalizeRotationDegrees(inlineImageRotation);
+        if (normalizedRotation % 180 === 0) return 1;
+
+        const stage = inlineImageStageRef.current;
+        const naturalWidth = inlineImageNaturalSize?.width || 0;
+        const naturalHeight = inlineImageNaturalSize?.height || 0;
+        if (!stage || !naturalWidth || !naturalHeight) return 1;
+
+        const stageRect = stage.getBoundingClientRect();
+        const stageWidth = stageRect.width || 0;
+        const stageHeight = stageRect.height || 0;
+        if (!stageWidth || !stageHeight) return 1;
+
+        const imageAspect = naturalWidth / naturalHeight;
+        const stageAspect = stageWidth / stageHeight;
+
+        let displayWidth = stageWidth;
+        let displayHeight = stageHeight;
+        if (imageAspect > stageAspect) {
+            displayWidth = stageWidth;
+            displayHeight = stageWidth / imageAspect;
+        } else {
+            displayHeight = stageHeight;
+            displayWidth = stageHeight * imageAspect;
+        }
+
+        const rotatedWidth = displayHeight;
+        const rotatedHeight = displayWidth;
+        const fitScale = Math.min(stageWidth / rotatedWidth, stageHeight / rotatedHeight, 1);
+        return Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1;
+    };
+
+    const handleInlineCropPointerDown = (event) => {
+        if (!inlineCropActive) return;
+        const point = getInlineCropPoint(event);
+        if (!point) return;
+        event.currentTarget?.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+        event.stopPropagation();
+
+        const currentRect = normalizeCropRect(inlineCropRect) || { x: 0, y: 0, w: 1, h: 1 };
+        const resizeHandle = getCropResizeHandle(point, currentRect);
+        if (resizeHandle) {
+            setInlineCropDragMode('resize');
+            setInlineCropResizeHandle(resizeHandle);
+            setInlineCropStart(point);
+            setInlineCropRect(currentRect);
+            return;
+        }
+        const isFullRect =
+            currentRect.x <= 0.001 &&
+            currentRect.y <= 0.001 &&
+            currentRect.w >= 0.999 &&
+            currentRect.h >= 0.999;
+        if (isFullRect) {
+            setInlineCropDragMode('draw');
+            setInlineCropStart(point);
+            setInlineCropRect({ x: point.x, y: point.y, w: 0.001, h: 0.001 });
+            return;
+        }
+        if (isPointInsideCropRect(point, currentRect)) {
+            setInlineCropDragMode('move');
+            setInlineCropMoveOffset({
+                x: point.x - currentRect.x,
+                y: point.y - currentRect.y
+            });
+            setInlineCropRect(currentRect);
+            return;
+        }
+
+        setInlineCropDragMode('draw');
+        setInlineCropStart(point);
+        setInlineCropRect({ x: point.x, y: point.y, w: 0.001, h: 0.001 });
+    };
+
+    const handleInlineCropPointerMove = (event) => {
+        if (!inlineCropActive || !inlineCropDragMode) return;
+        const point = getInlineCropPoint(event);
+        if (!point) return;
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (inlineCropDragMode === 'draw' && inlineCropStart) {
+            const x1 = Math.min(inlineCropStart.x, point.x);
+            const y1 = Math.min(inlineCropStart.y, point.y);
+            const x2 = Math.max(inlineCropStart.x, point.x);
+            const y2 = Math.max(inlineCropStart.y, point.y);
+            setInlineCropRect(normalizeCropRect({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 }) || { x: x1, y: y1, w: 0.001, h: 0.001 });
+            return;
+        }
+
+        if (inlineCropDragMode === 'move' && inlineCropMoveOffset && inlineCropRect) {
+            const nextX = clampUnit(point.x - inlineCropMoveOffset.x);
+            const nextY = clampUnit(point.y - inlineCropMoveOffset.y);
+            const safeRect = normalizeCropRect(inlineCropRect) || { x: 0, y: 0, w: 1, h: 1 };
+            const clampedX = Math.min(nextX, Math.max(0, 1 - safeRect.w));
+            const clampedY = Math.min(nextY, Math.max(0, 1 - safeRect.h));
+            setInlineCropRect({ ...safeRect, x: clampedX, y: clampedY });
+            return;
+        }
+
+        if (inlineCropDragMode === 'resize' && inlineCropResizeHandle && inlineCropRect) {
+            const minSize = 0.06;
+            const safeRect = normalizeCropRect(inlineCropRect) || { x: 0, y: 0, w: 1, h: 1 };
+            let left = safeRect.x;
+            let top = safeRect.y;
+            let right = safeRect.x + safeRect.w;
+            let bottom = safeRect.y + safeRect.h;
+
+            if (inlineCropResizeHandle.includes('w')) {
+                left = Math.min(Math.max(0, point.x), right - minSize);
+            }
+            if (inlineCropResizeHandle.includes('e')) {
+                right = Math.max(Math.min(1, point.x), left + minSize);
+            }
+            if (inlineCropResizeHandle.includes('n')) {
+                top = Math.min(Math.max(0, point.y), bottom - minSize);
+            }
+            if (inlineCropResizeHandle.includes('s')) {
+                bottom = Math.max(Math.min(1, point.y), top + minSize);
+            }
+
+            setInlineCropRect({
+                x: left,
+                y: top,
+                w: right - left,
+                h: bottom - top
+            });
+        }
+    };
+
+    const handleInlineCropPointerUp = () => {
+        if (!inlineCropActive) return;
+        setInlineCropDragMode(null);
+        setInlineCropResizeHandle(null);
+        setInlineCropStart(null);
+        setInlineCropMoveOffset(null);
+        setInlineCropRect((prev) => normalizeCropRect(prev) || { x: 0, y: 0, w: 1, h: 1 });
+    };
+
     const downloadPreviewFile = () => {
         if (!file) return;
         const link = document.createElement('a');
@@ -10639,7 +11063,7 @@ export default function Chat() {
     const openAllFilesPickerFromPreview = () => {
         attachmentTypeRef.current = 'all';
         if (fileInputRef.current) {
-            fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*,*/*";
+            fileInputRef.current.accept = ALL_ATTACHMENT_ACCEPT_ATTR;
             fileInputRef.current.click();
         }
     };
@@ -10665,7 +11089,6 @@ export default function Chat() {
         const imagePreviewCardWidth = 'min(900px, calc(100% - 44px))';
         const hasCaptionText = !!(input || '').trim();
         const isPreviewSendBlockedByAI = hasCaptionText && (!suggestionApplied || isGrammarLoading || isGarbageMessage);
-
         return (
         <div className="wa-file-preview-overlay" style={{
             height: '100%',
@@ -10679,56 +11102,117 @@ export default function Chat() {
                 <div style={{
                     height: 56,
                     padding: '0 18px',
-                    background: '#102b42',
-                    borderBottom: '1px solid rgba(148, 163, 184, 0.2)',
+                    background: 'transparent',
+                    borderBottom: 'none',
                     display: 'grid',
-                    gridTemplateColumns: '1fr auto 1fr',
+                    gridTemplateColumns: 'auto 1fr auto',
                     alignItems: 'center',
                     flexShrink: 0
                 }}>
-                    <button
-                        onClick={() => {
-                            setFile(null);
-                            setSelectedFiles([]);
-                            setIsViewOnceMedia(false);
-                        }}
-                        style={{ justifySelf: 'start', background: 'none', border: 'none', color: '#c1d2e2', cursor: 'pointer', display: 'flex', padding: 4 }}
-                        title="Close preview"
-                    >
-                        <X size={22} />
-                    </button>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 18, color: '#c1d2e2', justifySelf: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifySelf: 'start' }}>
+                        <button
+                            onClick={() => {
+                                setFile(null);
+                                setSelectedFiles([]);
+                                setIsViewOnceMedia(false);
+                            }}
+                            style={{ width: 32, height: 32, background: 'none', border: 'none', color: '#c1d2e2', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+                            title="Close preview"
+                        >
+                            <X size={22} strokeWidth={2.2} />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setInlineImageRotation(0);
+                                setInlineCropRect({ x: 0, y: 0, w: 1, h: 1 });
+                                setInlineCropActive(false);
+                                setInlineCropResizeHandle(null);
+                            }}
+                            style={{ width: 32, height: 32, background: 'none', border: 'none', color: '#c1d2e2', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+                            title="Undo edit"
+                        >
+                            <Undo2 size={22} strokeWidth={2.2} />
+                        </button>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16, color: '#c1d2e2', justifySelf: 'center' }}>
                         <button
                             type="button"
                             title="Crop & Rotate"
-                            onClick={() => {
-                                setCapturedImage(getFilePreviewUrl(file));
-                                setEditorStartInCropMode(true);
-                                setCameraModal('editor');
-                            }}
+                            onClick={activateInlineCropMode}
                             style={{
-                                width: 40,
-                                height: 40,
-                                borderRadius: '50%',
-                                border: '1px solid #cbd5e1',
-                                background: '#e5e7eb',
-                                color: '#6b7280',
+                                width: 32,
+                                height: 32,
+                                borderRadius: 0,
+                                border: 'none',
+                                background: 'transparent',
+                                color: inlineCropActive ? '#22d3ee' : '#c1d2e2',
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 cursor: 'pointer'
                             }}
                         >
-                            <Crop size={18} />
+                            <span style={{ display: 'inline-flex' }}>
+                                <Crop size={21} strokeWidth={2.1} />
+                            </span>
                         </button>
-                        <Sticker size={20} style={{ cursor: 'pointer' }} />
-                        <Pencil size={20} style={{ cursor: 'pointer' }} onClick={() => { setCapturedImage(getFilePreviewUrl(file)); setEditorStartInCropMode(false); setCameraModal('editor'); }} />
-                        <span style={{ fontSize: 20, fontWeight: 500, cursor: 'pointer', lineHeight: 1 }}>Aa</span>
-                        <CheckSquare size={20} style={{ cursor: 'pointer' }} />
-                        <CircleDashed size={20} style={{ cursor: 'pointer' }} />
-                        <Smile size={20} style={{ cursor: 'pointer' }} />
+                        <button
+                            type="button"
+                            title="Brush"
+                            style={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: 0,
+                                border: 'none',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                color: inlineImageEditMode ? '#22d3ee' : '#c1d2e2',
+                                background: 'transparent'
+                            }}
+                            onClick={() => setInlineImageEditMode(true)}
+                        >
+                            <span style={{ display: 'inline-flex' }}>
+                                <Pencil size={21} strokeWidth={2.1} />
+                            </span>
+                        </button>
+                        <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Text">
+                            <span style={{ fontSize: 20, fontWeight: 400, lineHeight: 1, color: '#c1d2e2' }}>Aa</span>
+                        </button>
+                        <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Sticker">
+                            <CheckSquare size={22} strokeWidth={2.2} />
+                        </button>
+                        <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Draw">
+                            <CircleDashed size={22} strokeWidth={2.2} />
+                        </button>
+                        <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Emoji">
+                            <Smile size={22} strokeWidth={2.2} />
+                        </button>
                     </div>
-                    <Download size={20} style={{ cursor: 'pointer', color: '#c1d2e2', justifySelf: 'end' }} onClick={(e) => { e.stopPropagation(); handleDownload(getFilePreviewUrl(file), file.name || 'download'); }} />
+                    <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'end', gap: 14 }}>
+                        {inlineImageEditMode && (
+                            <button
+                                type="button"
+                                onClick={() => setInlineImageEditMode(false)}
+                                style={{
+                                    border: 'none',
+                                    background: 'transparent',
+                                    color: '#dbeafe',
+                                    fontSize: 16,
+                                    fontWeight: 500,
+                                    lineHeight: 1.2,
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Done
+                            </button>
+                        )}
+                        <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDownload(getFilePreviewUrl(file), file.name || 'download'); }} title="Download">
+                            <Download size={22} strokeWidth={2.2} />
+                        </button>
+                    </div>
                 </div>
             )}
             {/* Header (non-image preview only) */}
@@ -10770,28 +11254,189 @@ export default function Chat() {
                 flex: 1,
                 minHeight: 0,
                 display: 'flex',
+                flexDirection: 'column',
                 justifyContent: 'center',
                 alignItems: 'center',
                 overflow: 'hidden',
-                padding: '20px 40px',
+                padding: '26px 40px 20px',
                 position: 'relative',
-                background: isMediaThemePreview ? '#041b2d' : '#0b141a',
+                background: isImagePreview ? 'transparent' : (isMediaThemePreview ? '#041b2d' : '#0b141a'),
                 width: isMediaThemePreview ? imagePreviewCardWidth : '100%',
-                margin: isMediaThemePreview ? '14px auto 0' : '0',
+                margin: isMediaThemePreview ? '20px auto 0' : '0',
                 borderTopLeftRadius: isMediaThemePreview ? 6 : 0,
                 borderTopRightRadius: isMediaThemePreview ? 6 : 0
             }}>
+                {isDocumentPreview && (
+                    <div style={{
+                        width: '100%',
+                        maxWidth: 640,
+                        marginBottom: 16,
+                        fontSize: 16,
+                        fontWeight: 600,
+                        color: '#dbeafe',
+                        textAlign: 'center',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                    }}>
+                        {file?.name || 'Document'}
+                    </div>
+                )}
                 {file && file.type?.startsWith('image/') ? (
-                    <div style={{ width: '100%', maxWidth: 760, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <img
-                            src={getFilePreviewUrl(file)}
-                            alt="Preview"
+                    <div style={{ width: '100%', maxWidth: 760, height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
+                        <div
+                            ref={inlineImageStageRef}
                             style={{
-                                maxWidth: '100%',
-                                maxHeight: '100%',
-                                objectFit: 'contain'
+                                position: 'relative',
+                                display: 'inline-block',
+                                width: '100%',
+                                height: '100%',
+                                transform: inlineImageEditMode
+                                    ? `rotate(${normalizeRotationDegrees(inlineImageRotation)}deg) scale(${getInlinePreviewRotateScale()})`
+                                    : 'none',
+                                transformOrigin: 'center center',
+                                transition: 'transform 140ms ease'
                             }}
-                        />
+                        >
+                            <img
+                                src={getFilePreviewUrl(file)}
+                                alt="Preview"
+                                onLoad={(event) => {
+                                    const target = event.currentTarget;
+                                    setInlineImageNaturalSize({
+                                        width: target.naturalWidth || 0,
+                                        height: target.naturalHeight || 0
+                                    });
+                                }}
+                                style={{
+                                    display: 'block',
+                                    width: '100%',
+                                    height: '100%',
+                                    objectFit: 'contain'
+                                }}
+                            />
+                            {inlineImageEditMode && inlineCropActive && (
+                                <div
+                                    style={{
+                                        position: 'absolute',
+                                        inset: 0,
+                                        cursor: inlineCropDragMode === 'move'
+                                            ? 'move'
+                                            : inlineCropDragMode === 'resize'
+                                                ? 'nwse-resize'
+                                                : 'crosshair',
+                                        touchAction: 'none'
+                                    }}
+                                    onPointerDown={handleInlineCropPointerDown}
+                                    onPointerMove={handleInlineCropPointerMove}
+                                    onPointerUp={handleInlineCropPointerUp}
+                                    onPointerCancel={handleInlineCropPointerUp}
+                                >
+                                    {(() => {
+                                        const rect = normalizeCropRect(inlineCropRect) || { x: 0, y: 0, w: 1, h: 1 };
+                                        const left = `${rect.x * 100}%`;
+                                        const top = `${rect.y * 100}%`;
+                                        const width = `${rect.w * 100}%`;
+                                        const height = `${rect.h * 100}%`;
+                                        const handleStyle = {
+                                            position: 'absolute',
+                                            width: 12,
+                                            height: 12,
+                                            borderRadius: '50%',
+                                            background: '#f8fafc',
+                                            border: '2px solid #0f172a'
+                                        };
+                                        return (
+                                            <div
+                                                style={{
+                                                    position: 'absolute',
+                                                    left,
+                                                    top,
+                                                    width,
+                                                    height,
+                                                    border: '1.5px solid rgba(71, 85, 105, 0.95)',
+                                                    borderRadius: 2,
+                                                    boxShadow: inlineCropDragMode ? 'none' : '0 0 0 9999px rgba(2, 12, 24, 0.32)',
+                                                    pointerEvents: 'none',
+                                                    cursor: 'move',
+                                                    willChange: 'left, top, width, height'
+                                                }}
+                                            >
+                                                <span style={{ ...handleStyle, left: -7, top: -7 }} />
+                                                <span style={{ ...handleStyle, left: '50%', top: -7, transform: 'translateX(-50%)' }} />
+                                                <span style={{ ...handleStyle, right: -7, top: -7 }} />
+                                                <span style={{ ...handleStyle, left: -7, top: '50%', transform: 'translateY(-50%)' }} />
+                                                <span style={{ ...handleStyle, right: -7, top: '50%', transform: 'translateY(-50%)' }} />
+                                                <span style={{ ...handleStyle, left: -7, bottom: -7 }} />
+                                                <span style={{ ...handleStyle, left: '50%', bottom: -7, transform: 'translateX(-50%)' }} />
+                                                <span style={{ ...handleStyle, right: -7, bottom: -7 }} />
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            )}
+                        </div>
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 22,
+                            flexWrap: 'nowrap',
+                            padding: '8px 0 0',
+                            color: '#94a3b8',
+                            whiteSpace: 'nowrap'
+                        }}>
+                            <button
+                                type="button"
+                                onClick={() => applyInlineRotateStep(-90)}
+                                style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: '#94a3b8',
+                                    padding: 0,
+                                    cursor: 'pointer'
+                                }}
+                                title="Rotate left"
+                            >
+                                <RotateCcw size={22} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => applyInlineRotateStep(90)}
+                                style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: '#94a3b8',
+                                    padding: 0,
+                                    cursor: 'pointer'
+                                }}
+                                title="Rotate right"
+                            >
+                                <RotateCcw size={22} style={{ transform: 'scaleX(-1)' }} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setInlineImageRotation(0);
+                                    setInlineCropRect({ x: 0, y: 0, w: 1, h: 1 });
+                                    setInlineCropActive(false);
+                                    setInlineCropResizeHandle(null);
+                                    setInlineCropDragMode(null);
+                                    setInlineCropStart(null);
+                                    setInlineCropMoveOffset(null);
+                                }}
+                                style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: '#94a3b8',
+                                    padding: 0,
+                                    fontSize: 14,
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Reset
+                            </button>
+                        </div>
                     </div>
                 ) : file && file.type?.startsWith('video/') ? (
                     <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
@@ -10854,14 +11499,14 @@ export default function Chat() {
             {/* Footer / Caption Input Tray */}
             <div style={{
                 padding: '20px 24px 30px',
-                background: isMediaThemePreview ? '#041b2d' : '#0b141a',
+                background: isImagePreview ? 'transparent' : (isMediaThemePreview ? '#041b2d' : '#0b141a'),
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 20,
                 position: 'relative',
-                borderTop: isMediaThemePreview ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(255, 255, 255, 0.1)',
+                borderTop: isImagePreview ? 'none' : (isMediaThemePreview ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(255, 255, 255, 0.1)'),
                 width: isMediaThemePreview ? imagePreviewCardWidth : '100%',
-                margin: isMediaThemePreview ? '0 auto 22px' : '0',
+                margin: isMediaThemePreview ? '0 auto 26px' : '0',
                 borderBottomLeftRadius: isMediaThemePreview ? 6 : 0,
                 borderBottomRightRadius: isMediaThemePreview ? 6 : 0
             }}>
@@ -17717,24 +18362,65 @@ export default function Chat() {
         }
     };
 
-    const handlePaste = (e) => {
-        if (e.clipboardData.files && e.clipboardData.files.length > 0) {
-            e.preventDefault();
-            const pastedFile = e.clipboardData.files[0];
-            const allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            const extension = pastedFile.name.split('.').pop().toLowerCase();
+    const ingestIncomingFiles = (incomingFiles, options = {}) => {
+        const filesList = Array.isArray(incomingFiles) ? incomingFiles : [];
+        if (!filesList.length) return false;
+        if (!(selectedUser || selectedGroup)) return false;
 
-            if (allowedExtensions.includes(extension)) {
-                if (pastedFile.size > 1073741824) {
-                    setSnackbar({ message: 'File must be less than 1GB', type: 'error', variant: 'system' });
-                } else {
-                    setFile(pastedFile);
-                    setSelectedFiles([pastedFile]);
-                    setIsViewOnceMedia(false);
-                }
-            } else {
-                setSnackbar({ message: 'Only JPG, JPEG, PNG, DOC, DOCX, PDF, Excel, and Video files are allowed.', type: 'error', variant: 'system' });
+        const { replaceExisting = false } = options;
+        const allowedExtensions = getAllowedExtensionsForAttachmentType();
+        const accepted = [];
+        const rejectedNames = [];
+
+        filesList.forEach((candidate) => {
+            if (!candidate) return;
+            if (!isAllowedFile(candidate, allowedExtensions)) {
+                rejectedNames.push(candidate.name || 'File');
+                return;
             }
+            if (candidate.size > MAX_UPLOAD_BYTES) {
+                setSnackbar({ message: `${candidate.name || 'File'} is too large (>1GB).`, type: 'error', variant: 'system' });
+                return;
+            }
+            accepted.push(candidate);
+        });
+
+        if (rejectedNames.length > 0) {
+            const label = rejectedNames.slice(0, 2).join(', ');
+            const suffix = rejectedNames.length > 2 ? ` and ${rejectedNames.length - 2} more` : '';
+            setSnackbar({ message: `${label}${suffix} ${rejectedNames.length > 1 ? 'are' : 'is'} unsupported format.`, type: 'error', variant: 'system' });
+        }
+
+        if (accepted.length === 0) return false;
+
+        setIsViewOnceMedia(false);
+        setSelectedFiles((prev) => {
+            const base = replaceExisting ? [] : prev;
+            const merged = [...base, ...accepted];
+            const seen = new Set();
+            const deduped = merged.filter((f) => {
+                const sig = `${f.name}|${f.size}|${f.lastModified}|${f.type}`;
+                if (seen.has(sig)) return false;
+                seen.add(sig);
+                return true;
+            });
+            const focused = deduped[deduped.length - 1] || null;
+            setFile(focused);
+            return deduped;
+        });
+        attachmentTypeRef.current = 'all';
+        if (fileInputRef.current) {
+            fileInputRef.current.accept = ALL_ATTACHMENT_ACCEPT_ATTR;
+        }
+        return true;
+    };
+
+    const handlePaste = (e) => {
+        const clipboardFiles = Array.from(e.clipboardData?.files || []);
+        if (!clipboardFiles.length) return;
+        if (ingestIncomingFiles(clipboardFiles)) {
+            e.preventDefault();
+            e.stopPropagation();
         }
     };
 
@@ -17747,38 +18433,48 @@ export default function Chat() {
         e.preventDefault();
         e.stopPropagation();
 
-        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            const droppedFile = e.dataTransfer.files[0];
-            const extension = droppedFile.name.split('.').pop().toLowerCase();
-
-            let allowedExtensions;
-            if (attachmentTypeRef.current === 'document') {
-                allowedExtensions = ['doc', 'docx', 'pdf', 'xls', 'xlsx'];
-            } else if (attachmentTypeRef.current === 'media') {
-                allowedExtensions = ['jpg', 'jpeg', 'png', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            } else {
-                allowedExtensions = ['jpg', 'jpeg', 'png', 'doc', 'docx', 'pdf', 'xls', 'xlsx', 'mp4', 'avi', 'mkv', 'mov', 'webm'];
-            }
-
-            if (allowedExtensions.includes(extension)) {
-                if (droppedFile.size > 1073741824) {
-                    setSnackbar({ message: 'File must be less than 1GB', type: 'error', variant: 'system' });
-                } else {
-                    setFile(droppedFile);
-                    setSelectedFiles([droppedFile]);
-                    setIsViewOnceMedia(false);
-                }
-            } else {
-                setSnackbar({ message: 'Unsupported file format.', type: 'error', variant: 'system' });
-            }
-
-            // reset to all after drop attempt
-            attachmentTypeRef.current = 'all';
-            if (fileInputRef.current) {
-                fileInputRef.current.accept = ".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.mp4,.avi,.mkv,.mov,.webm,video/*,image/*,*/*";
-            }
+        const droppedFiles = Array.from(e.dataTransfer?.files || []);
+        if (droppedFiles.length > 0) {
+            ingestIncomingFiles(droppedFiles);
         }
     };
+
+    useEffect(() => {
+        if (!(selectedUser || selectedGroup)) return;
+
+        const onWindowPaste = (event) => {
+            if (event.defaultPrevented) return;
+            const files = Array.from(event.clipboardData?.files || []);
+            if (!files.length) return;
+            if (ingestIncomingFiles(files)) {
+                event.preventDefault();
+            }
+        };
+
+        const onWindowDragOver = (event) => {
+            const fileList = event.dataTransfer?.files;
+            if (fileList && fileList.length > 0) {
+                event.preventDefault();
+            }
+        };
+
+        const onWindowDrop = (event) => {
+            if (event.defaultPrevented) return;
+            const files = Array.from(event.dataTransfer?.files || []);
+            if (!files.length) return;
+            event.preventDefault();
+            ingestIncomingFiles(files);
+        };
+
+        window.addEventListener('paste', onWindowPaste);
+        window.addEventListener('dragover', onWindowDragOver);
+        window.addEventListener('drop', onWindowDrop);
+        return () => {
+            window.removeEventListener('paste', onWindowPaste);
+            window.removeEventListener('dragover', onWindowDragOver);
+            window.removeEventListener('drop', onWindowDrop);
+        };
+    }, [selectedUser, selectedGroup]);
 
     const handleBackToChatList = () => {
         if (showUnblockModal) return; // Prevent navigation while modal is active
@@ -18851,14 +19547,14 @@ export default function Chat() {
                                                                     className="wa-attachment-floating-hint"
                                                                     style={{ left: `${attachmentHintPos.x}px`, top: `${attachmentHintPos.y}px` }}
                                                                 >
-                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PPTX, PDF, Excel, Video (up to 1GB)
+                                                                    Allowed files: docs, sheets, slides, PDF, images, video, audio (up to 1GB)
                                                                 </div>
                                                             )}
                                                             <input
                                                                 type="file"
                                                                 ref={fileInputRef}
                                                                 style={{ display: 'none' }}
-                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.mp4,.avi,.mkv,.mov,.webm,video/*,*/*"
+                                                                accept={ALL_ATTACHMENT_ACCEPT_ATTR}
                                                                 onChange={handleFileSelect}
                                                             />
                                                             <button
@@ -19602,14 +20298,14 @@ export default function Chat() {
                                                                     className="wa-attachment-floating-hint"
                                                                     style={{ left: `${attachmentHintPos.x}px`, top: `${attachmentHintPos.y}px` }}
                                                                 >
-                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PPTX, PDF, Excel, Video (up to 1GB)
+                                                                    Allowed files: docs, sheets, slides, PDF, images, video, audio (up to 1GB)
                                                                 </div>
                                                             )}
                                                             <input
                                                                 type="file"
                                                                 ref={fileInputRef}
                                                                 style={{ display: 'none' }}
-                                                                accept=".jpg,.jpeg,.png,.doc,.docx,.ppt,.pptx,.pdf,.xls,.xlsx,.mp4,.avi,.mkv,.mov,.webm,video/*,*/*"
+                                                                accept={ALL_ATTACHMENT_ACCEPT_ATTR}
                                                                 onChange={handleFileSelect}
                                                             />
                                                             <button
@@ -21983,7 +22679,19 @@ export default function Chat() {
 
                             {/* File Preview Overlay (Restricted to Chat Area) */}
                             {(file || selectedFiles.length > 0) && (
-                                <div style={{ position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', flexDirection: 'column', background: '#061a2d' }}>
+                                <div style={{
+                                    position: 'absolute',
+                                    top: (selectedUser || selectedGroup) ? 56 : 0,
+                                    left: 0,
+                                    right: (!isMobile && (!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen))
+                                        ? `${rightPanelWidth}px`
+                                        : 0,
+                                    bottom: 0,
+                                    zIndex: 1100,
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    background: '#061a2d'
+                                }}>
                                     {renderFilePreview()}
                                 </div>
                             )}
