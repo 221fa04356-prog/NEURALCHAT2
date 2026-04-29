@@ -1534,6 +1534,7 @@ export default function Chat() {
     const [exitGroupTransferTarget, setExitGroupTransferTarget] = useState(null);
     const selectedUserRef = useRef(null);
     const messageCacheByUserRef = useRef({});
+    const activeP2PFetchRef = useRef(0);
     const hasRestoredActiveChatRef = useRef(false);
     const userRef = useRef(user);
     const groupsRef = useRef([]);
@@ -2204,7 +2205,7 @@ export default function Chat() {
         const myId = userRef.current?._id || userRef.current?.id || user?._id || user?.id;
         if (!myId) return false;
 
-        if (accountLocked || isAccountBanned() || isMessagingBlocked) return true;
+        if (accountLocked || isMessagingBlocked) return true;
 
         if (selectedUser) {
             const isRejected = selectedUser?.requestStatus === 'rejected';
@@ -6334,9 +6335,7 @@ export default function Chat() {
         setSelectedCommunity(null);
         setSelectedGroup(null);
         setIsCommunityHomeOpen(false);
-        setSelectedUser(targetUser);
-        if (selectedUserRef) selectedUserRef.current = targetUser;
-        fetchP2PRequest(requestUserId);
+        handleUserSelect(targetUser);
     };
 
     const handleEventRespond = async (msg, status) => {
@@ -6657,6 +6656,7 @@ export default function Chat() {
     const fetchP2PRequest = async (otherId) => {
         try {
             const cacheKey = String(otherId);
+            const fetchToken = ++activeP2PFetchRef.current;
             const cachedMessages = messageCacheByUserRef.current[cacheKey];
             if (Array.isArray(cachedMessages)) {
                 setMessages(cachedMessages);
@@ -6699,6 +6699,11 @@ export default function Chat() {
                 return msg;
             }));
 
+            const stillSelectedUserId = String(selectedUserRef.current?._id || selectedUserRef.current?.id || '');
+            if (fetchToken !== activeP2PFetchRef.current || stillSelectedUserId !== cacheKey) {
+                return;
+            }
+
             setMessages(decryptedMessages);
             messageCacheByUserRef.current[cacheKey] = decryptedMessages;
             scrollChatToLatest('auto');
@@ -6708,7 +6713,16 @@ export default function Chat() {
     };
 
     const handleUserSelect = (u) => {
-        if (!selectedUser || selectedUser._id !== u._id) {
+        const targetUser = {
+            ...u,
+            _id: u?._id || u?.id
+        };
+        const targetUserId = String(targetUser?._id || '');
+        const currentSelectedUserId = String(selectedUser?._id || selectedUser?.id || '');
+
+        if (!targetUserId) return;
+
+        if (!currentSelectedUserId || currentSelectedUserId !== targetUserId) {
             setInput('');
             setFile(null);
             setTypingLinkPreview(null);
@@ -6730,8 +6744,10 @@ export default function Chat() {
             setIsNotificationSettingsOpen(false);
             setIsEventDetailsOpen(false);
         }
-        setSelectedUser(u);
-        const cachedMessages = messageCacheByUserRef.current[String(u._id)];
+        setSelectedUser(targetUser);
+        selectedUserRef.current = targetUser;
+        const cacheKey = targetUserId;
+        const cachedMessages = messageCacheByUserRef.current[cacheKey];
         if (Array.isArray(cachedMessages)) {
             setMessages(cachedMessages);
             scrollChatToLatest('auto');
@@ -6739,8 +6755,8 @@ export default function Chat() {
             // Avoid showing previous contact messages while loading first time.
             setMessages([]);
         }
-        fetchP2PRequest(u._id);
-        markAsRead(u._id);
+        fetchP2PRequest(cacheKey);
+        markAsRead(cacheKey);
     };
 
     useEffect(() => {
@@ -19588,10 +19604,6 @@ export default function Chat() {
                                         <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
                                             Account Permanently Locked. Please contact the administrator.
                                         </div>
-                                    ) : isAccountBanned() ? (
-                                        <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
-                                            Messaging is temporarily restricted.
-                                        </div>
                                     ) : isMessagingBlocked ? (
                                         <div
                                             onClick={() => setShowUnblockModal(true)}
@@ -20228,10 +20240,6 @@ export default function Chat() {
                                     {accountLocked ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
                                             Account Permanently Locked. Please contact the administrator.
-                                        </div>
-                                    ) : isAccountBanned() ? (
-                                        <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
-                                            Messaging is temporarily restricted.
                                         </div>
                                     ) : isMessagingBlocked ? (
                                         <div
