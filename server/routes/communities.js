@@ -42,14 +42,14 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
             $or: [{ creator: userObjId }, { members: userObjId }, { removedMembers: userObjId }]
         })
             .populate('creator', 'name mobile countryCode _id __enc_name __enc_mobile')
-            .populate('members', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
-            .populate('admins', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
+            .populate('members', 'name mobile countryCode _id about privacySettings __enc_name __enc_mobile __enc_about')
+            .populate('admins', 'name mobile countryCode _id about privacySettings __enc_name __enc_mobile __enc_about')
             .populate({
                 path: 'announcements',
                 select: 'name icon _id members admin admins removedMembers isAnnouncementGroup userHistory',
                 populate: {
                     path: 'members',
-                    select: 'name about mobile image __enc_name __enc_about __enc_mobile _id'
+                    select: 'name about mobile image privacySettings __enc_name __enc_about __enc_mobile _id'
                 }
             })
             .populate({
@@ -57,7 +57,7 @@ router.get('/my-communities', authenticateToken, async (req, res) => {
                 select: 'name icon _id members admin admins removedMembers community_id userHistory',
                 populate: {
                     path: 'members',
-                    select: 'name about mobile image __enc_name __enc_about __enc_mobile _id'
+                    select: 'name about mobile image privacySettings __enc_name __enc_about __enc_mobile _id'
                 }
             })
             .sort({ created_at: -1 })

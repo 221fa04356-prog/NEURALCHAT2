@@ -1577,31 +1577,47 @@ html {
     justify-content: flex-end;
 }
 
-.wa-chat-messages-area.privacy-mask-active .wa-message-scroller {
-    filter: blur(16px);
-    pointer-events: none;
-    user-select: none;
-    transition: filter 0.18s ease;
-}
-
-.wa-chat-messages-area.privacy-mask-active::after {
-    content: "Screenshot privacy mode active";
+.wa-global-privacy-mask {
     position: absolute;
     inset: 0;
+    z-index: 50000;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 24px;
-    text-align: center;
+    padding: 32px;
+    background:
+        radial-gradient(circle at center, rgba(56, 189, 248, 0.14), transparent 28%),
+        rgba(4, 10, 18, 0.38);
+    backdrop-filter: blur(20px) saturate(110%);
+    -webkit-backdrop-filter: blur(20px) saturate(110%);
+    pointer-events: none;
+}
+
+.wa-global-privacy-mask__message {
     color: #f8fafc;
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
-    background: rgba(7, 12, 18, 0.28);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    z-index: 3;
+    text-align: center;
+    padding: 24px 32px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(8, 15, 26, 0.52);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.28);
+}
+
+body.wa-screenshot-protection-active .wa-app-container > *:not(.wa-global-privacy-mask),
+html.wa-screenshot-protection-active .wa-app-container > *:not(.wa-global-privacy-mask) {
+    filter: blur(22px) saturate(0.3) brightness(0.72);
+    transform: scale(1.012);
+    transform-origin: center;
+    transition: filter 0.08s linear, transform 0.08s linear;
+}
+
+body.wa-screenshot-protection-active .wa-app-container,
+html.wa-screenshot-protection-active .wa-app-container {
+    background: #050b14 !important;
 }
 
 .wa-message-scroller {
