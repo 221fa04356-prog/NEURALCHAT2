@@ -703,11 +703,15 @@ html {
 }
 
 .wa-forward-names-preview {
-    background: white;
+    background: rgba(248, 250, 252, 0.98);
+    color: #0f172a;
     padding: 6px 12px;
     border-radius: 8px;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(15, 23, 42, 0.08);
     font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
     max-width: 200px;
     white-space: nowrap;
     overflow: hidden;
@@ -9591,22 +9595,18 @@ svg.wa-back-icon,
     color: #cbd5e1 !important;
 }
 
-.wa-info-panel .wa-contact-msg-card,
-.wa-info-panel .wa-poll-card,
 .wa-info-panel .wa-event-card {
     background: rgba(30, 41, 59, 0.9) !important;
     border: 1px solid rgba(255, 255, 255, 0.1) !important;
     box-shadow: none !important;
 }
 
-.wa-info-panel .wa-contact-msg-card *,
-.wa-info-panel .wa-poll-card *,
 .wa-info-panel .wa-event-card * {
     color: #f8fafc !important;
 }
 
-.wa-info-panel .wa-poll-card [style*="background: #ffffff"],
 .wa-info-panel .wa-event-card [style*="background: white"],
+
 .wa-info-panel .wa-event-card [style*="background: #ffffff"] {
     background: rgba(15, 23, 42, 0.7) !important;
 }
@@ -10032,3 +10032,4 @@ svg.wa-back-icon,
 body.wa-view-once-open .wa-footer-wrapper {
     display: none !important;
 }
+

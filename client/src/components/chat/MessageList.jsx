@@ -307,6 +307,7 @@ const MessageList = memo(({
     pendingVoiceSeekRef,
     audioInstanceRef,
     renderContent,
+    renderContactMessageCard,
     formatTime,
     formatVoiceTime,
     user,
@@ -356,6 +357,20 @@ const MessageList = memo(({
     const handledJumpNonceRef = useRef(null);
     const targetId = String(selectedUser?._id || '').toLowerCase();
     const typingSet = typingUsers[targetId];
+    const formatInlineEventTime = (event) => {
+        const startDate = event?.startDate;
+        if (!startDate) return 'Event';
+        const startTime = event?.startTime || '00:00';
+        const startValue = new Date(`${String(startDate).split('T')[0]}T${startTime}:00`);
+        if (Number.isNaN(startValue.getTime())) return 'Event';
+        const now = new Date();
+        const isToday = startValue.toDateString() === now.toDateString();
+        const dateLabel = isToday
+            ? 'Today'
+            : startValue.toLocaleDateString([], { month: 'numeric', day: 'numeric', year: 'numeric' });
+        const timeLabel = startValue.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        return `${dateLabel}, ${timeLabel}`;
+    };
 
     useEffect(() => {
         if (typeof onViewOncePreviewOpenChange === 'function') {
@@ -1122,7 +1137,6 @@ const MessageList = memo(({
                                 fontWeight: '600',
                                 fontSize: '13px',
                                 color: senderColor,
-                                marginBottom: '4px',
                                 cursor: 'default'
                             }}>
                                 {senderName}
@@ -1161,7 +1175,7 @@ const MessageList = memo(({
                                         if (msg.reply_to.is_view_once) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ViewOnceBadge size={14} /> <span>View once</span></span>;
                                         if (msg.reply_to.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
                                         if (msg.reply_to.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
-                                        if (msg.reply_to.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>📊 <span>{msg.reply_to.poll?.question || 'Poll'}</span></span>;
+                                        if (msg.reply_to.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><List size={14} color="#027EB5" /> <span>{msg.reply_to.poll?.question || 'Poll'}</span></span>;
                                         if (msg.reply_to.type === 'voice' || msg.reply_to.type === 'audio') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mic size={14} color="#027EB5" /> <span>Voice message</span></span>;
                                         if (msg.reply_to.type === 'contact') {
                                             try {
@@ -1656,22 +1670,24 @@ const MessageList = memo(({
                                     );
                                 })()}
 
-                                {msg.type === 'contact' && (
+                                {msg.type === 'contact' && typeof renderContactMessageCard === 'function' && renderContactMessageCard(msg.content, { tone: 'light' })}
+                                {msg.type === 'contact' && !renderContactMessageCard && (
                                     <div className="wa-contact-msg-card" style={{ padding: 12, background: 'white', borderRadius: 12, border: '1px solid #e9edef' }}>
                                         <UserIcon size={24} color="#0EA5BE" />
                                         <span>Contact Message</span>
                                     </div>
-                                )}                                {msg.type === 'poll' && msg.poll && (
+                                )}
+                                {msg.type === 'poll' && msg.poll && (
                                     <div className="wa-poll-card-v3" style={{
                                         background: 'rgba(2, 132, 199, 0.15)',
                                         borderRadius: '12px',
-                                        padding: isMobile ? '12px' : '16px',
-                                        width: '100%',
-                                        maxWidth: isMobile ? '280px' : '360px',
+                                        padding: isMobile ? '10px' : '12px',
+                                        width: isMobile ? '260px' : '300px',
+                                        maxWidth: '100%',
                                         boxSizing: 'border-box',
                                         display: 'flex',
                                         flexDirection: 'column',
-                                        gap: '14px',
+                                        gap: '10px',
                                         border: '1px solid rgba(56, 189, 248, 0.2)',
                                         backdropFilter: 'blur(8px)',
                                         margin: '4px 0',
@@ -1701,7 +1717,7 @@ const MessageList = memo(({
                                                             background: isVoted ? 'rgba(14, 165, 190, 0.2)' : 'rgba(255, 255, 255, 0.05)',
                                                             border: `1px solid ${isVoted ? '#0EA5BE' : 'rgba(255, 255, 255, 0.1)'}`,
                                                             borderRadius: '10px',
-                                                            padding: isMobile ? '10px 12px' : '12px 16px',
+                                                            padding: isMobile ? '8px 10px' : '10px 12px',
                                                             display: 'flex',
                                                             alignItems: 'center',
                                                             gap: '10px',
@@ -1725,7 +1741,7 @@ const MessageList = memo(({
                                                         }}>
                                                             {isVoted && <Check size={12} color="white" strokeWidth={3} />}
                                                         </div>
-                                                        <span style={{ fontSize: isMobile ? '14px' : '16px', color: '#ffffff', fontWeight: '500', flex: 1, wordBreak: 'break-word' }}>{opt.text}</span>
+                                                        <span style={{ fontSize: isMobile ? '14px' : '15px', color: '#ffffff', fontWeight: '500', flex: 1, wordBreak: 'break-word' }}>{opt.text}</span>
                                                         <span style={{ fontSize: '13px', color: isVoted ? '#0EA5BE' : 'rgba(255, 255, 255, 0.6)', flexShrink: 0 }}>{voters.length}</span>
                                                     </div>
                                                 );
@@ -1738,12 +1754,12 @@ const MessageList = memo(({
                                             onClick={(e) => { e.stopPropagation(); setPollDetails(msg.poll); setIsPollDetailsOpen(true); }}
                                             style={{
                                                 width: '100%',
-                                                padding: '8px',
+                                                padding: '6px 8px',
                                                 border: 'none',
                                                 background: 'transparent',
                                                 color: '#0EA5BE',
                                                 fontWeight: '600',
-                                                fontSize: isMobile ? '14px' : '15px',
+                                                fontSize: isMobile ? '14px' : '14px',
                                                 cursor: 'pointer',
                                                 textAlign: 'center',
                                                 opacity: 0.9,
@@ -1754,6 +1770,44 @@ const MessageList = memo(({
                                         >
                                             View votes
                                         </button>
+                                    </div>
+                                )}
+                                {msg.type === 'event' && msg.event && (
+                                    <div
+                                        className="wa-event-card"
+                                        onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }}
+                                        style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: isMobile ? '240px' : '260px', maxWidth: '100%', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}
+                                    >
+                                        <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative' }}>
+                                            <div style={{ display: 'flex', gap: '14px' }}>
+                                                <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                    <Calendar size={24} color="#0EA5BE" />
+                                                </div>
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>
+                                                        {msg.event.name || 'Event'}
+                                                    </div>
+                                                    <div style={{ fontSize: '14px', color: '#667781' }}>
+                                                        {formatInlineEventTime(msg.event)}
+                                                    </div>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+                                                        <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
+                                                            <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                                                <UserIcon size={12} color="#8696a0" style={{ marginTop: '1px' }} />
+                                                            </div>
+                                                        </div>
+                                                        <span style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500 }}>
+                                                            {msg.event.participants?.length || 0} going
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div style={{ padding: '12px 0', margin: '0 16px', borderTop: '1px solid #f0f2f5', textAlign: 'center' }}>
+                                            <span style={{ color: msg.event.cancelled ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
+                                                {msg.event.cancelled ? 'Event cancelled' : 'View event'}
+                                            </span>
+                                        </div>
                                     </div>
                                 )}
 
