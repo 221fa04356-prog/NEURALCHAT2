@@ -13,7 +13,7 @@ import {
     Info, Reply, Copy, Forward, Pin, CheckSquare, Download, Trash2, Archive, BellOff, HeartOff, XCircle, Lock, List, Heart, ThumbsDown, Share, Pencil, Image, StarOff, Camera, Link2 as LinkIcon,
     LayoutGrid, UserPlus, ArrowRight, Share2, Crop, Check, RotateCcw, Undo2, Minus, Delete, User, Play, MapPin, IndianRupee, Sticker, PlusCircle,
     ShieldCheck, Monitor, BellRing, Laptop, LogOut, Globe, Clock, Mail, Briefcase, ExternalLink,
-    ShieldAlert, Fingerprint, HardDrive, Keyboard, HelpCircle, Settings2, Volume2, MonitorSmartphone, Shield,
+    ShieldAlert, Fingerprint, HardDrive, Keyboard, HelpCircle, Settings2, Volume2, MonitorSmartphone, Shield, SlidersHorizontal,
     AlertCircle, UserCheck, Loader2, Ban, ChevronUp, Headphones
 } from 'lucide-react';
 
@@ -1193,6 +1193,7 @@ export default function Chat() {
     const [viewOnceMsg, setViewOnceMsg] = useState(null);
     const [isViewOnceVoice, setIsViewOnceVoice] = useState(false);
     const [isViewOnceMedia, setIsViewOnceMedia] = useState(false);
+    const [isDiscardPreviewConfirmOpen, setIsDiscardPreviewConfirmOpen] = useState(false);
     const [inlineImageEditMode, setInlineImageEditMode] = useState(false);
     const [inlineImageRotation, setInlineImageRotation] = useState(0);
     const [inlineImageNaturalSize, setInlineImageNaturalSize] = useState({ width: 0, height: 0 });
@@ -1202,6 +1203,9 @@ export default function Chat() {
     const [inlineCropResizeHandle, setInlineCropResizeHandle] = useState(null); // n|s|e|w|ne|nw|se|sw
     const [inlineCropStart, setInlineCropStart] = useState(null); // normalized point
     const [inlineCropMoveOffset, setInlineCropMoveOffset] = useState(null); // normalized delta
+    const [inlineCropCursor, setInlineCropCursor] = useState('default');
+    const [inlineFilterActive, setInlineFilterActive] = useState(false);
+    const [inlineImageFilter, setInlineImageFilter] = useState('none');
     const inlineImageStageRef = useRef(null);
 
     useEffect(() => {
@@ -1222,6 +1226,9 @@ export default function Chat() {
         setInlineCropResizeHandle(null);
         setInlineCropStart(null);
         setInlineCropMoveOffset(null);
+        setInlineCropCursor('default');
+        setInlineFilterActive(false);
+        setInlineImageFilter('none');
     }, [file]);
 
     useEffect(() => {
@@ -8673,6 +8680,13 @@ export default function Chat() {
         ) {
             targetFile = await cropImageFileByRect(targetFile, normalizedInlineCropRect);
         }
+        if (
+            targetFile &&
+            targetFile.type?.startsWith('image/') &&
+            inlineImageFilter !== 'none'
+        ) {
+            targetFile = await filterImageFile(targetFile, inlineImageFilter);
+        }
         const isVoiceMessage = !!voiceFile && !fileOverride;
         const isCloudAudioMessage = !!cloudAudio;
         const targetExt = String(targetFile?.name || '').split('.').pop().toLowerCase();
@@ -8755,6 +8769,10 @@ export default function Chat() {
             setIsViewOnceMedia(false); // Reset media view-once state for next message
             setInlineImageEditMode(false);
             setInlineImageRotation(0);
+            setInlineCropActive(false);
+            setInlineCropRect(null);
+            setInlineFilterActive(false);
+            setInlineImageFilter('none');
 
         try {
             const formData = new FormData();
@@ -8822,12 +8840,28 @@ export default function Chat() {
                 return;
             }
 
-            const sentMsg = res.data.message;
+            const sentMsg = res.data?.message;
+            if (!sentMsg) {
+                const fallbackMsg = {
+                    ...tempMsg,
+                    pending: false,
+                    upload_warning: true
+                };
+                if (selectedGroup) {
+                    setGroupMessages(prev => prev.map(msg => msg?._id === tempId ? fallbackMsg : msg));
+                } else {
+                    setMessages(prev => prev.map(msg => msg?._id === tempId ? fallbackMsg : msg));
+                }
+                setSnackbar({ message: 'Message sent, but the server response was incomplete. Reloading messages...', type: 'info', variant: 'system' });
+                if (selectedGroup) fetchGroupMessages(selectedGroup._id);
+                else if (selectedUser) fetchP2PRequest(selectedUser._id);
+                return;
+            }
 
             // UPDATE LOCAL STATE WITH REAL MESSAGE
             if (selectedGroup) {
                 setGroupMessages(prev => prev.map(msg =>
-                    msg._id === tempId ? { ...sentMsg, reply_to: tempMsg.reply_to, is_read: msg.is_read || sentMsg.is_read, read_at: msg.read_at || sentMsg.read_at } : msg
+                    msg?._id === tempId ? { ...sentMsg, reply_to: tempMsg.reply_to, is_read: !!(msg?.is_read || sentMsg?.is_read), read_at: msg?.read_at || sentMsg?.read_at || null } : msg
                 ));
 
                 // EMIT SOCKET FOR GROUP
@@ -8843,7 +8877,7 @@ export default function Chat() {
                 fetchGroups(); // Refresh group lists for last message sync
             } else {
                 setMessages(prev => prev.map(msg =>
-                    msg._id === tempId ? { ...sentMsg, reply_to: tempMsg.reply_to, is_read: msg.is_read || sentMsg.is_read, read_at: msg.read_at || sentMsg.read_at } : msg
+                    msg?._id === tempId ? { ...sentMsg, reply_to: tempMsg.reply_to, is_read: !!(msg?.is_read || sentMsg?.is_read), read_at: msg?.read_at || sentMsg?.read_at || null } : msg
                 ));
 
                 // critically: EMIT SOCKET NOW with the REAL server file_path and reply context
@@ -9341,7 +9375,7 @@ export default function Chat() {
             // Update local message with real server ID once received
             const stillOpenWithTarget = selectedUserRef.current && String(selectedUserRef.current._id) === String(targetUserId);
             if (stillOpenWithTarget && res.data.message) {
-                setMessages(prev => prev.map(m => m._id === tempId ? { ...res.data.message, role: 'user', is_read: m.is_read || res.data.message.is_read, read_at: m.read_at || res.data.message.read_at } : m));
+                setMessages(prev => prev.map(m => m?._id === tempId ? { ...res.data.message, role: 'user', is_read: !!(m?.is_read || res.data.message?.is_read), read_at: m?.read_at || res.data.message?.read_at || null } : m));
             }
         } catch (err) {
             console.error('[DEBUG] handleNotificationReply: Error sending message:', err);
@@ -9395,7 +9429,7 @@ export default function Chat() {
 
             if (isChatOpenWithTarget) {
                 const updatedMsg = res.data.message || res.data;
-                setGroupMessages(prev => prev.map(m => m._id === tempId ? { ...updatedMsg, is_read: m.is_read || updatedMsg.is_read, read_at: m.read_at || updatedMsg.read_at } : m));
+                setGroupMessages(prev => prev.map(m => m?._id === tempId ? { ...updatedMsg, is_read: !!(m?.is_read || updatedMsg?.is_read), read_at: m?.read_at || updatedMsg?.read_at || null } : m));
             }
         } catch (err) {
             console.error("[DEBUG] handleGroupNotificationReply: Error sending message:", err);
@@ -10902,6 +10936,19 @@ export default function Chat() {
         return ((numeric % 360) + 360) % 360;
     };
 
+    const INLINE_IMAGE_FILTERS = [
+        { id: 'none', label: 'None', css: 'none' },
+        { id: 'pop', label: 'Pop', css: 'saturate(1.45) contrast(1.12) brightness(1.03)' },
+        { id: 'bw', label: 'B&W', css: 'grayscale(1) contrast(1.08)' },
+        { id: 'cool', label: 'Cool', css: 'sepia(0.08) saturate(1.15) hue-rotate(175deg) contrast(1.05)' },
+        { id: 'chrome', label: 'Chrome', css: 'saturate(1.35) contrast(1.2) brightness(1.05)' },
+        { id: 'film', label: 'Film', css: 'sepia(0.22) contrast(1.08) saturate(0.9) brightness(0.98)' }
+    ];
+
+    const getInlineImageFilterCss = (filterId = inlineImageFilter) => (
+        INLINE_IMAGE_FILTERS.find((entry) => entry.id === filterId)?.css || 'none'
+    );
+
     const rotateImageFile = async (sourceFile, rotationDegrees) => {
         if (!sourceFile || !sourceFile.type?.startsWith('image/')) return sourceFile;
         const normalized = normalizeRotationDegrees(rotationDegrees);
@@ -10947,6 +10994,7 @@ export default function Chat() {
     };
 
     const clampUnit = (value) => Math.max(0, Math.min(1, Number(value || 0)));
+    const INLINE_CROP_MIN_SIZE = 0.08;
 
     const normalizeCropRect = (rect) => {
         if (!rect) return null;
@@ -11008,6 +11056,46 @@ export default function Chat() {
         }
     };
 
+    const filterImageFile = async (sourceFile, filterId) => {
+        const filterCss = getInlineImageFilterCss(filterId);
+        if (!sourceFile || !sourceFile.type?.startsWith('image/') || filterCss === 'none') return sourceFile;
+
+        const objectUrl = URL.createObjectURL(sourceFile);
+        try {
+            const imageEl = await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error('Failed to load image for filter'));
+                img.src = objectUrl;
+            });
+
+            const canvas = document.createElement('canvas');
+            canvas.width = imageEl.width;
+            canvas.height = imageEl.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return sourceFile;
+            ctx.filter = filterCss;
+            ctx.drawImage(imageEl, 0, 0, canvas.width, canvas.height);
+
+            const outMime = sourceFile.type || 'image/png';
+            const outBlob = await new Promise((resolve, reject) => {
+                canvas.toBlob((blob) => {
+                    if (blob) resolve(blob);
+                    else reject(new Error('Failed to render filtered image'));
+                }, outMime, 0.92);
+            });
+
+            return new File([outBlob], sourceFile.name || `image_${Date.now()}.png`, {
+                type: outBlob.type || outMime,
+                lastModified: Date.now()
+            });
+        } catch (_) {
+            return sourceFile;
+        } finally {
+            URL.revokeObjectURL(objectUrl);
+        }
+    };
+
     const getFileSignature = (candidate) => {
         if (!candidate) return '';
         return `${candidate.name}|${candidate.size}|${candidate.lastModified}|${candidate.type}`;
@@ -11029,8 +11117,10 @@ export default function Chat() {
 
     const applyInlineRotateStep = (degrees) => {
         if (!file || !file.type?.startsWith('image/')) return;
-        setInlineImageRotation((prev) => normalizeRotationDegrees(prev + Number(degrees || 0)));
+        setInlineImageRotation((prev) => prev + Number(degrees || 0));
         setInlineImageEditMode(true);
+        setInlineCropActive(true);
+        setInlineCropRect((prev) => normalizeCropRect(prev) || { x: 0, y: 0, w: 1, h: 1 });
     };
 
     const getInlineStageMetrics = () => {
@@ -11082,10 +11172,81 @@ export default function Chat() {
         return null;
     };
 
+    const getInlineCropCursorForHandle = (handle) => {
+        if (handle === 'n' || handle === 's') return 'ns-resize';
+        if (handle === 'e' || handle === 'w') return 'ew-resize';
+        if (handle === 'nw' || handle === 'se') return 'nwse-resize';
+        if (handle === 'ne' || handle === 'sw') return 'nesw-resize';
+        return 'default';
+    };
+
+    const buildInlineCropRectFromPoints = (start, end) => {
+        const minSize = INLINE_CROP_MIN_SIZE;
+        let left = Math.min(start.x, end.x);
+        let right = Math.max(start.x, end.x);
+        let top = Math.min(start.y, end.y);
+        let bottom = Math.max(start.y, end.y);
+
+        if (right - left < minSize) {
+            if (end.x >= start.x) {
+                left = start.x;
+                right = Math.min(1, start.x + minSize);
+                if (right - left < minSize) left = Math.max(0, right - minSize);
+            } else {
+                right = start.x;
+                left = Math.max(0, start.x - minSize);
+                if (right - left < minSize) right = Math.min(1, left + minSize);
+            }
+        }
+
+        if (bottom - top < minSize) {
+            if (end.y >= start.y) {
+                top = start.y;
+                bottom = Math.min(1, start.y + minSize);
+                if (bottom - top < minSize) top = Math.max(0, bottom - minSize);
+            } else {
+                bottom = start.y;
+                top = Math.max(0, start.y - minSize);
+                if (bottom - top < minSize) bottom = Math.min(1, top + minSize);
+            }
+        }
+
+        return normalizeCropRect({ x: left, y: top, w: right - left, h: bottom - top }) || {
+            x: left,
+            y: top,
+            w: minSize,
+            h: minSize
+        };
+    };
+
+    const clearInlineCropMode = () => {
+        setInlineCropActive(false);
+        setInlineCropDragMode(null);
+        setInlineCropResizeHandle(null);
+        setInlineCropStart(null);
+        setInlineCropMoveOffset(null);
+        setInlineCropCursor('default');
+    };
+
+    const clearInlineFilterMode = () => {
+        setInlineFilterActive(false);
+    };
+
     const activateInlineCropMode = () => {
+        if (inlineCropActive) {
+            clearInlineCropMode();
+            return;
+        }
         setInlineImageEditMode(true);
+        clearInlineFilterMode();
         setInlineCropActive(true);
         setInlineCropRect((prev) => normalizeCropRect(prev) || { x: 0, y: 0, w: 1, h: 1 });
+    };
+
+    const activateInlineFilterMode = () => {
+        setInlineImageEditMode(true);
+        clearInlineCropMode();
+        setInlineFilterActive((prev) => !prev);
     };
 
     const getInlinePreviewRotateScale = () => {
@@ -11097,27 +11258,16 @@ export default function Chat() {
         const naturalHeight = inlineImageNaturalSize?.height || 0;
         if (!stage || !naturalWidth || !naturalHeight) return 1;
 
-        const stageRect = stage.getBoundingClientRect();
-        const stageWidth = stageRect.width || 0;
-        const stageHeight = stageRect.height || 0;
-        if (!stageWidth || !stageHeight) return 1;
+        const stageWidth = stage.offsetWidth || 0;
+        const stageHeight = stage.offsetHeight || 0;
+        const parent = stage.parentElement;
+        const parentWidth = parent?.clientWidth || stageWidth;
+        const parentHeight = parent?.clientHeight || stageHeight;
+        if (!stageWidth || !stageHeight || !parentWidth || !parentHeight) return 1;
 
-        const imageAspect = naturalWidth / naturalHeight;
-        const stageAspect = stageWidth / stageHeight;
-
-        let displayWidth = stageWidth;
-        let displayHeight = stageHeight;
-        if (imageAspect > stageAspect) {
-            displayWidth = stageWidth;
-            displayHeight = stageWidth / imageAspect;
-        } else {
-            displayHeight = stageHeight;
-            displayWidth = stageHeight * imageAspect;
-        }
-
-        const rotatedWidth = displayHeight;
-        const rotatedHeight = displayWidth;
-        const fitScale = Math.min(stageWidth / rotatedWidth, stageHeight / rotatedHeight, 1);
+        const rotatedWidth = stageHeight;
+        const rotatedHeight = stageWidth;
+        const fitScale = Math.min(parentWidth / rotatedWidth, parentHeight / rotatedHeight, 1);
         return Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1;
     };
 
@@ -11134,6 +11284,7 @@ export default function Chat() {
         if (resizeHandle) {
             setInlineCropDragMode('resize');
             setInlineCropResizeHandle(resizeHandle);
+            setInlineCropCursor(getInlineCropCursorForHandle(resizeHandle));
             setInlineCropStart(point);
             setInlineCropRect(currentRect);
             return;
@@ -11146,11 +11297,13 @@ export default function Chat() {
         if (isFullRect) {
             setInlineCropDragMode('draw');
             setInlineCropStart(point);
-            setInlineCropRect({ x: point.x, y: point.y, w: 0.001, h: 0.001 });
+            setInlineCropCursor('default');
+            setInlineCropRect(buildInlineCropRectFromPoints(point, point));
             return;
         }
         if (isPointInsideCropRect(point, currentRect)) {
             setInlineCropDragMode('move');
+            setInlineCropCursor('move');
             setInlineCropMoveOffset({
                 x: point.x - currentRect.x,
                 y: point.y - currentRect.y
@@ -11161,22 +11314,31 @@ export default function Chat() {
 
         setInlineCropDragMode('draw');
         setInlineCropStart(point);
-        setInlineCropRect({ x: point.x, y: point.y, w: 0.001, h: 0.001 });
+        setInlineCropCursor('default');
+        setInlineCropRect(buildInlineCropRectFromPoints(point, point));
     };
 
     const handleInlineCropPointerMove = (event) => {
-        if (!inlineCropActive || !inlineCropDragMode) return;
+        if (!inlineCropActive) return;
         const point = getInlineCropPoint(event);
         if (!point) return;
+        if (!inlineCropDragMode) {
+            const safeRect = normalizeCropRect(inlineCropRect) || { x: 0, y: 0, w: 1, h: 1 };
+            const hoverHandle = getCropResizeHandle(point, safeRect);
+            setInlineCropCursor(
+                hoverHandle
+                    ? getInlineCropCursorForHandle(hoverHandle)
+                    : isPointInsideCropRect(point, safeRect)
+                        ? 'move'
+                        : 'default'
+            );
+            return;
+        }
         event.preventDefault();
         event.stopPropagation();
 
         if (inlineCropDragMode === 'draw' && inlineCropStart) {
-            const x1 = Math.min(inlineCropStart.x, point.x);
-            const y1 = Math.min(inlineCropStart.y, point.y);
-            const x2 = Math.max(inlineCropStart.x, point.x);
-            const y2 = Math.max(inlineCropStart.y, point.y);
-            setInlineCropRect(normalizeCropRect({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 }) || { x: x1, y: y1, w: 0.001, h: 0.001 });
+            setInlineCropRect(buildInlineCropRectFromPoints(inlineCropStart, point));
             return;
         }
 
@@ -11191,7 +11353,7 @@ export default function Chat() {
         }
 
         if (inlineCropDragMode === 'resize' && inlineCropResizeHandle && inlineCropRect) {
-            const minSize = 0.06;
+            const minSize = INLINE_CROP_MIN_SIZE;
             const safeRect = normalizeCropRect(inlineCropRect) || { x: 0, y: 0, w: 1, h: 1 };
             let left = safeRect.x;
             let top = safeRect.y;
@@ -11226,6 +11388,7 @@ export default function Chat() {
         setInlineCropResizeHandle(null);
         setInlineCropStart(null);
         setInlineCropMoveOffset(null);
+        setInlineCropCursor('default');
         setInlineCropRect((prev) => normalizeCropRect(prev) || { x: 0, y: 0, w: 1, h: 1 });
     };
 
@@ -11237,6 +11400,24 @@ export default function Chat() {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+    };
+
+    const discardFilePreview = () => {
+        setFile(null);
+        setSelectedFiles([]);
+        setIsViewOnceMedia(false);
+        setInlineImageEditMode(false);
+        setInlineImageRotation(0);
+        setInlineCropActive(false);
+        setInlineCropRect(null);
+        setInlineCropDragMode(null);
+        setInlineCropResizeHandle(null);
+        setInlineCropStart(null);
+        setInlineCropMoveOffset(null);
+        setInlineCropCursor('default');
+        setInlineFilterActive(false);
+        setInlineImageFilter('none');
+        setIsDiscardPreviewConfirmOpen(false);
     };
 
     useEffect(() => {
@@ -11297,11 +11478,7 @@ export default function Chat() {
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifySelf: 'start' }}>
                         <button
-                            onClick={() => {
-                                setFile(null);
-                                setSelectedFiles([]);
-                                setIsViewOnceMedia(false);
-                            }}
+                            onClick={() => setIsDiscardPreviewConfirmOpen(true)}
                             style={{ width: 32, height: 32, background: 'none', border: 'none', color: '#c1d2e2', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
                             title="Close preview"
                         >
@@ -11314,6 +11491,8 @@ export default function Chat() {
                                 setInlineCropRect({ x: 0, y: 0, w: 1, h: 1 });
                                 setInlineCropActive(false);
                                 setInlineCropResizeHandle(null);
+                                setInlineFilterActive(false);
+                                setInlineImageFilter('none');
                             }}
                             style={{ width: 32, height: 32, background: 'none', border: 'none', color: '#c1d2e2', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
                             title="Undo edit"
@@ -11332,7 +11511,7 @@ export default function Chat() {
                                 borderRadius: 0,
                                 border: 'none',
                                 background: 'transparent',
-                                color: inlineCropActive ? '#22d3ee' : '#c1d2e2',
+                                color: inlineImageEditMode && inlineCropActive ? '#22d3ee' : '#c1d2e2',
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -11341,6 +11520,27 @@ export default function Chat() {
                         >
                             <span style={{ display: 'inline-flex' }}>
                                 <Crop size={21} strokeWidth={2.1} />
+                            </span>
+                        </button>
+                        <button
+                            type="button"
+                            title="Filters"
+                            onClick={activateInlineFilterMode}
+                            style={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: 0,
+                                border: 'none',
+                                background: 'transparent',
+                                color: inlineImageEditMode && inlineFilterActive ? '#22d3ee' : '#c1d2e2',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            <span style={{ display: 'inline-flex' }}>
+                                <SlidersHorizontal size={21} strokeWidth={2.1} />
                             </span>
                         </button>
                         <button
@@ -11355,10 +11555,14 @@ export default function Chat() {
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 cursor: 'pointer',
-                                color: inlineImageEditMode ? '#22d3ee' : '#c1d2e2',
+                                color: '#c1d2e2',
                                 background: 'transparent'
                             }}
-                            onClick={() => setInlineImageEditMode(true)}
+                            onClick={() => {
+                                setInlineImageEditMode(true);
+                                clearInlineCropMode();
+                                clearInlineFilterMode();
+                            }}
                         >
                             <span style={{ display: 'inline-flex' }}>
                                 <Pencil size={21} strokeWidth={2.1} />
@@ -11378,10 +11582,14 @@ export default function Chat() {
                         </button>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'end', gap: 14 }}>
-                        {inlineImageEditMode && (
+                        {inlineImageEditMode && (inlineCropActive || inlineFilterActive) && (
                             <button
                                 type="button"
-                                onClick={() => setInlineImageEditMode(false)}
+                                onClick={() => {
+                                    setInlineImageEditMode(false);
+                                    clearInlineCropMode();
+                                    clearInlineFilterMode();
+                                }}
                                 style={{
                                     border: 'none',
                                     background: 'transparent',
@@ -11417,9 +11625,7 @@ export default function Chat() {
                 }}>
                     <button
                         onClick={() => {
-                            setFile(null);
-                            setSelectedFiles([]);
-                            setIsViewOnceMedia(false);
+                            setIsDiscardPreviewConfirmOpen(true);
                         }}
                         style={{ background: 'none', border: 'none', color: (isVideoPreview || isDocumentPreview) ? '#c1d2e2' : '#aebac1', cursor: 'pointer', display: 'flex', padding: 4, zIndex: 2 }}
                         title="Close preview"
@@ -11444,13 +11650,13 @@ export default function Chat() {
                 justifyContent: 'center',
                 alignItems: 'center',
                 overflow: 'hidden',
-                padding: '26px 40px 20px',
+                padding: isImagePreview ? (isMobile ? '16px 12px 12px' : '24px 28px 18px') : '26px 40px 20px',
                 position: 'relative',
                 background: isImagePreview ? 'transparent' : (isMediaThemePreview ? '#041b2d' : '#0b141a'),
-                width: isMediaThemePreview ? imagePreviewCardWidth : '100%',
-                margin: isMediaThemePreview ? '20px auto 0' : '0',
-                borderTopLeftRadius: isMediaThemePreview ? 6 : 0,
-                borderTopRightRadius: isMediaThemePreview ? 6 : 0
+                width: isImagePreview ? '100%' : (isMediaThemePreview ? imagePreviewCardWidth : '100%'),
+                margin: isImagePreview ? 0 : (isMediaThemePreview ? '20px auto 0' : '0'),
+                borderTopLeftRadius: isImagePreview ? 0 : (isMediaThemePreview ? 6 : 0),
+                borderTopRightRadius: isImagePreview ? 0 : (isMediaThemePreview ? 6 : 0)
             }}>
                 {isDocumentPreview && (
                     <div style={{
@@ -11469,98 +11675,192 @@ export default function Chat() {
                     </div>
                 )}
                 {file && file.type?.startsWith('image/') ? (
-                    <div style={{ width: '100%', maxWidth: 760, height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
-                        <div
-                            ref={inlineImageStageRef}
-                            style={{
-                                position: 'relative',
-                                display: 'inline-block',
-                                width: '100%',
-                                height: '100%',
-                                transform: inlineImageEditMode
-                                    ? `rotate(${normalizeRotationDegrees(inlineImageRotation)}deg) scale(${getInlinePreviewRotateScale()})`
-                                    : 'none',
-                                transformOrigin: 'center center',
-                                transition: 'transform 140ms ease'
-                            }}
-                        >
-                            <img
-                                src={getFilePreviewUrl(file)}
-                                alt="Preview"
-                                onLoad={(event) => {
-                                    const target = event.currentTarget;
-                                    setInlineImageNaturalSize({
-                                        width: target.naturalWidth || 0,
-                                        height: target.naturalHeight || 0
-                                    });
-                                }}
-                                style={{
-                                    display: 'block',
-                                    width: '100%',
-                                    height: '100%',
-                                    objectFit: 'contain'
-                                }}
-                            />
-                            {inlineImageEditMode && inlineCropActive && (
-                                <div
-                                    style={{
-                                        position: 'absolute',
-                                        inset: 0,
-                                        cursor: inlineCropDragMode === 'move'
-                                            ? 'move'
-                                            : inlineCropDragMode === 'resize'
-                                                ? 'nwse-resize'
-                                                : 'crosshair',
-                                        touchAction: 'none'
-                                    }}
-                                    onPointerDown={handleInlineCropPointerDown}
-                                    onPointerMove={handleInlineCropPointerMove}
-                                    onPointerUp={handleInlineCropPointerUp}
-                                    onPointerCancel={handleInlineCropPointerUp}
-                                >
-                                    {(() => {
-                                        const rect = normalizeCropRect(inlineCropRect) || { x: 0, y: 0, w: 1, h: 1 };
-                                        const left = `${rect.x * 100}%`;
-                                        const top = `${rect.y * 100}%`;
-                                        const width = `${rect.w * 100}%`;
-                                        const height = `${rect.h * 100}%`;
-                                        const handleStyle = {
-                                            position: 'absolute',
-                                            width: 12,
-                                            height: 12,
-                                            borderRadius: '50%',
-                                            background: '#f8fafc',
-                                            border: '2px solid #0f172a'
-                                        };
-                                        return (
-                                            <div
+                    <div style={{ width: '100%', maxWidth: isMobile ? 'calc(100vw - 24px)' : 760, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: isMobile ? 10 : 14, background: 'transparent' }}>
+                        <div style={{
+                            width: '100%',
+                            minHeight: isMobile ? 76 : 86,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: isMobile ? 12 : 22,
+                            flexWrap: 'nowrap',
+                            overflowX: inlineFilterActive ? 'auto' : 'hidden',
+                            scrollbarWidth: 'none',
+                            visibility: inlineImageEditMode && inlineFilterActive ? 'visible' : 'hidden',
+                            pointerEvents: inlineImageEditMode && inlineFilterActive ? 'auto' : 'none',
+                            background: 'transparent',
+                            flexShrink: 0
+                        }}>
+                            {INLINE_IMAGE_FILTERS.map((filterOption) => {
+                                const isSelected = inlineImageFilter === filterOption.id;
+                                return (
+                                    <button
+                                        key={filterOption.id}
+                                        type="button"
+                                        onClick={() => setInlineImageFilter(filterOption.id)}
+                                        style={{
+                                            width: isMobile ? 58 : 74,
+                                            minWidth: isMobile ? 58 : 74,
+                                            border: 'none',
+                                            background: 'transparent',
+                                            color: isSelected ? '#22d3ee' : '#dbeafe',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            alignItems: 'center',
+                                            gap: 7,
+                                            padding: 0,
+                                            cursor: 'pointer',
+                                            fontWeight: isSelected ? 700 : 600
+                                        }}
+                                        title={filterOption.label}
+                                    >
+                                        <span style={{
+                                            width: isMobile ? 48 : 60,
+                                            height: isMobile ? 44 : 58,
+                                            borderRadius: 7,
+                                            overflow: 'hidden',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            border: isSelected ? '2px solid #22d3ee' : '1px solid rgba(148, 163, 184, 0.35)',
+                                            background: '#071f33',
+                                            position: 'relative'
+                                        }}>
+                                            <img
+                                                src={getFilePreviewUrl(file)}
+                                                alt=""
                                                 style={{
-                                                    position: 'absolute',
-                                                    left,
-                                                    top,
-                                                    width,
-                                                    height,
-                                                    border: '1.5px solid rgba(71, 85, 105, 0.95)',
-                                                    borderRadius: 2,
-                                                    boxShadow: inlineCropDragMode ? 'none' : '0 0 0 9999px rgba(2, 12, 24, 0.32)',
-                                                    pointerEvents: 'none',
-                                                    cursor: 'move',
-                                                    willChange: 'left, top, width, height'
+                                                    width: '100%',
+                                                    height: '100%',
+                                                    objectFit: 'cover',
+                                                    filter: filterOption.css
                                                 }}
-                                            >
-                                                <span style={{ ...handleStyle, left: -7, top: -7 }} />
-                                                <span style={{ ...handleStyle, left: '50%', top: -7, transform: 'translateX(-50%)' }} />
-                                                <span style={{ ...handleStyle, right: -7, top: -7 }} />
-                                                <span style={{ ...handleStyle, left: -7, top: '50%', transform: 'translateY(-50%)' }} />
-                                                <span style={{ ...handleStyle, right: -7, top: '50%', transform: 'translateY(-50%)' }} />
-                                                <span style={{ ...handleStyle, left: -7, bottom: -7 }} />
-                                                <span style={{ ...handleStyle, left: '50%', bottom: -7, transform: 'translateX(-50%)' }} />
-                                                <span style={{ ...handleStyle, right: -7, bottom: -7 }} />
-                                            </div>
-                                        );
-                                    })()}
-                                </div>
-                            )}
+                                            />
+                                            {isSelected && (
+                                                <span style={{
+                                                    position: 'absolute',
+                                                    inset: 0,
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    background: 'rgba(14, 165, 190, 0.48)',
+                                                    color: '#e5faff'
+                                                }}>
+                                                    <Check size={18} strokeWidth={2.6} />
+                                                </span>
+                                            )}
+                                        </span>
+                                        <span style={{
+                                            fontSize: isMobile ? 12 : 16,
+                                            lineHeight: 1.1,
+                                            maxWidth: '100%',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis'
+                                        }}>
+                                            {filterOption.label}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <div style={{ width: '100%', flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'visible' }}>
+                            <div
+                                ref={inlineImageStageRef}
+                                style={{
+                                    position: 'relative',
+                                    display: 'inline-block',
+                                    maxWidth: '100%',
+                                    maxHeight: '100%',
+                                    transform: inlineImageEditMode
+                                        ? `rotate(${inlineImageRotation}deg) scale(${getInlinePreviewRotateScale()})`
+                                        : 'none',
+                                    transformOrigin: 'center center',
+                                    transition: 'transform 140ms ease'
+                                }}
+                            >
+                                <img
+                                    src={getFilePreviewUrl(file)}
+                                    alt="Preview"
+                                    onLoad={(event) => {
+                                        const target = event.currentTarget;
+                                        setInlineImageNaturalSize({
+                                            width: target.naturalWidth || 0,
+                                            height: target.naturalHeight || 0
+                                        });
+                                    }}
+                                    style={{
+                                        display: 'block',
+                                        maxWidth: '100%',
+                                        maxHeight: isMobile ? 'min(100%, calc(100vh - 250px))' : 'min(100%, calc(100vh - 300px))',
+                                        width: 'auto',
+                                        height: 'auto',
+                                        objectFit: 'contain',
+                                        filter: getInlineImageFilterCss()
+                                    }}
+                                />
+                            {inlineImageEditMode && inlineCropActive && (
+                                    <div
+                                        style={{
+                                            position: 'absolute',
+                                            inset: 0,
+                                            cursor: inlineCropDragMode === 'resize'
+                                                ? getInlineCropCursorForHandle(inlineCropResizeHandle)
+                                                : inlineCropCursor,
+                                            touchAction: 'none'
+                                        }}
+                                        onPointerDown={handleInlineCropPointerDown}
+                                        onPointerMove={handleInlineCropPointerMove}
+                                        onPointerUp={handleInlineCropPointerUp}
+                                        onPointerCancel={handleInlineCropPointerUp}
+                                        onPointerLeave={() => {
+                                            if (!inlineCropDragMode) setInlineCropCursor('default');
+                                        }}
+                                    >
+                                        {(() => {
+                                            const rect = normalizeCropRect(inlineCropRect) || { x: 0, y: 0, w: 1, h: 1 };
+                                            const left = `${rect.x * 100}%`;
+                                            const top = `${rect.y * 100}%`;
+                                            const width = `${rect.w * 100}%`;
+                                            const height = `${rect.h * 100}%`;
+                                            const handleStyle = {
+                                                position: 'absolute',
+                                                width: isMobile ? 10 : 12,
+                                                height: isMobile ? 10 : 12,
+                                                borderRadius: '50%',
+                                                background: '#102b42',
+                                                border: '2px solid #22d3ee',
+                                                boxShadow: '0 0 0 1px rgba(2, 12, 24, 0.85)'
+                                            };
+                                            return (
+                                                <div
+                                                    style={{
+                                                        position: 'absolute',
+                                                        left,
+                                                        top,
+                                                        width,
+                                                        height,
+                                                        border: '1.5px solid rgba(34, 211, 238, 0.85)',
+                                                        borderRadius: 2,
+                                                        boxShadow: 'none',
+                                                        pointerEvents: 'none',
+                                                        cursor: inlineCropCursor,
+                                                        willChange: 'left, top, width, height'
+                                                    }}
+                                                >
+                                                    <span style={{ ...handleStyle, left: -7, top: -7 }} />
+                                                    <span style={{ ...handleStyle, left: '50%', top: -7, transform: 'translateX(-50%)' }} />
+                                                    <span style={{ ...handleStyle, right: -7, top: -7 }} />
+                                                    <span style={{ ...handleStyle, left: -7, top: '50%', transform: 'translateY(-50%)' }} />
+                                                    <span style={{ ...handleStyle, right: -7, top: '50%', transform: 'translateY(-50%)' }} />
+                                                    <span style={{ ...handleStyle, left: -7, bottom: -7 }} />
+                                                    <span style={{ ...handleStyle, left: '50%', bottom: -7, transform: 'translateX(-50%)' }} />
+                                                    <span style={{ ...handleStyle, right: -7, bottom: -7 }} />
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                         <div style={{
                             display: 'flex',
@@ -11570,58 +11870,73 @@ export default function Chat() {
                             flexWrap: 'nowrap',
                             padding: '8px 0 0',
                             color: '#94a3b8',
-                            whiteSpace: 'nowrap'
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
+                            position: 'relative',
+                            zIndex: 2,
+                            minHeight: isMobile ? 32 : 34,
+                            maxWidth: '100%',
+                            overflowX: 'visible',
+                            scrollbarWidth: 'none',
+                            visibility: inlineImageEditMode && inlineCropActive ? 'visible' : 'hidden',
+                            pointerEvents: inlineImageEditMode && inlineCropActive ? 'auto' : 'none',
+                            background: 'transparent'
                         }}>
-                            <button
-                                type="button"
-                                onClick={() => applyInlineRotateStep(-90)}
-                                style={{
-                                    background: 'transparent',
-                                    border: 'none',
-                                    color: '#94a3b8',
-                                    padding: 0,
-                                    cursor: 'pointer'
-                                }}
-                                title="Rotate left"
-                            >
-                                <RotateCcw size={22} />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => applyInlineRotateStep(90)}
-                                style={{
-                                    background: 'transparent',
-                                    border: 'none',
-                                    color: '#94a3b8',
-                                    padding: 0,
-                                    cursor: 'pointer'
-                                }}
-                                title="Rotate right"
-                            >
-                                <RotateCcw size={22} style={{ transform: 'scaleX(-1)' }} />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setInlineImageRotation(0);
-                                    setInlineCropRect({ x: 0, y: 0, w: 1, h: 1 });
-                                    setInlineCropActive(false);
-                                    setInlineCropResizeHandle(null);
-                                    setInlineCropDragMode(null);
-                                    setInlineCropStart(null);
-                                    setInlineCropMoveOffset(null);
-                                }}
-                                style={{
-                                    background: 'transparent',
-                                    border: 'none',
-                                    color: '#94a3b8',
-                                    padding: 0,
-                                    fontSize: 14,
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                Reset
-                            </button>
+                            <>
+                                    <button
+                                        type="button"
+                                        onClick={() => applyInlineRotateStep(-90)}
+                                        style={{
+                                            background: 'transparent',
+                                            border: 'none',
+                                            color: '#94a3b8',
+                                            padding: 0,
+                                            cursor: 'pointer'
+                                        }}
+                                        title="Rotate left"
+                                    >
+                                        <RotateCcw size={22} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => applyInlineRotateStep(90)}
+                                        style={{
+                                            background: 'transparent',
+                                            border: 'none',
+                                            color: '#94a3b8',
+                                            padding: 0,
+                                            cursor: 'pointer'
+                                        }}
+                                        title="Rotate right"
+                                    >
+                                        <RotateCcw size={22} style={{ transform: 'scaleX(-1)' }} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setInlineImageRotation(0);
+                                            setInlineCropRect({ x: 0, y: 0, w: 1, h: 1 });
+                                            setInlineCropActive(true);
+                                            setInlineImageEditMode(true);
+                                            setInlineCropResizeHandle(null);
+                                            setInlineCropDragMode(null);
+                                            setInlineCropStart(null);
+                                            setInlineCropMoveOffset(null);
+                                            setInlineFilterActive(false);
+                                            setInlineImageFilter('none');
+                                        }}
+                                        style={{
+                                            background: 'transparent',
+                                            border: 'none',
+                                            color: '#94a3b8',
+                                            padding: 0,
+                                            fontSize: 14,
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        Reset
+                                    </button>
+                            </>
                         </div>
                     </div>
                 ) : file && file.type?.startsWith('video/') ? (
@@ -23010,6 +23325,17 @@ export default function Chat() {
                     </div>
                 </div>
             )}
+
+            <ConfirmModal
+                isOpen={isDiscardPreviewConfirmOpen}
+                title="Discard media?"
+                message="Your selected media and any edits will be removed from this message."
+                confirmText="Discard"
+                cancelText="Keep editing"
+                confirmVariant="danger"
+                onConfirm={discardFilePreview}
+                onCancel={() => setIsDiscardPreviewConfirmOpen(false)}
+            />
 
             <ConfirmModal
                 isOpen={isDeleteChatConfirmOpen}
