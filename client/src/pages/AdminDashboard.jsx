@@ -356,6 +356,7 @@ export default function AdminDashboard() {
     const chatEndRef = useRef(null);
     const chartScrollRef = useRef(null);
     const mainScrollRef = useRef(null);
+    const reviewScrollRef = useRef(null);
 
     // Sidebar & UI State
     const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 1024);
@@ -368,6 +369,10 @@ export default function AdminDashboard() {
     const [showScrollControl, setShowScrollControl] = useState(false);
     const [scrollControlTop, setScrollControlTop] = useState(50);
     const [isDraggingScrollControl, setIsDraggingScrollControl] = useState(false);
+    const [reviewCanScrollUp, setReviewCanScrollUp] = useState(false);
+    const [reviewCanScrollDown, setReviewCanScrollDown] = useState(false);
+    const [reviewScrollControlTop, setReviewScrollControlTop] = useState(50);
+    const [isDraggingReviewScrollControl, setIsDraggingReviewScrollControl] = useState(false);
     const scrollHideTimerRef = useRef(null);
 
     const normalizedStats = useMemo(() => {
@@ -438,6 +443,16 @@ export default function AdminDashboard() {
         root.scrollBy({ top: step * direction, behavior: 'smooth' });
     };
 
+    const handleReviewFloatingScroll = () => {
+        if (isDraggingReviewScrollControl) return;
+        const root = reviewScrollRef.current;
+        if (!root) return;
+
+        const step = Math.max(root.clientHeight * 0.7, 260);
+        const direction = reviewCanScrollDown ? 1 : -1;
+        root.scrollBy({ top: step * direction, behavior: 'smooth' });
+    };
+
     useEffect(() => {
         const handleResize = () => {
             const width = window.innerWidth;
@@ -484,7 +499,7 @@ export default function AdminDashboard() {
         const handlePointerMove = (event) => {
             const root = mainScrollRef.current;
             const viewportHeight = window.innerHeight;
-            const controlSize = 48;
+            const controlSize = isMobile ? 42 : 48;
             const nextTop = Math.max(12, Math.min(viewportHeight - (controlSize + 12), event.clientY - (controlSize / 2)));
             setScrollControlTop((nextTop / viewportHeight) * 100);
 
@@ -505,7 +520,67 @@ export default function AdminDashboard() {
             window.removeEventListener('pointermove', handlePointerMove);
             window.removeEventListener('pointerup', handlePointerUp);
         };
-    }, [isDraggingScrollControl]);
+    }, [isDraggingScrollControl, isMobile]);
+
+    useEffect(() => {
+        const root = reviewScrollRef.current;
+        if (!viewChat || !root) {
+            setReviewCanScrollUp(false);
+            setReviewCanScrollDown(false);
+            setReviewScrollControlTop(50);
+            return;
+        }
+
+        const updateReviewScrollState = () => {
+            const maxScrollTop = Math.max(0, root.scrollHeight - root.clientHeight);
+            setReviewCanScrollUp(root.scrollTop > 16);
+            setReviewCanScrollDown(root.scrollTop < maxScrollTop - 16);
+        };
+
+        updateReviewScrollState();
+        root.addEventListener('scroll', updateReviewScrollState);
+        window.addEventListener('resize', updateReviewScrollState);
+
+        return () => {
+            root.removeEventListener('scroll', updateReviewScrollState);
+            window.removeEventListener('resize', updateReviewScrollState);
+        };
+    }, [viewChat, chatStep, viewChat?.messages?.length, chatDates.length, chatContacts.length, dateSearchQuery]);
+
+    useEffect(() => {
+        setIsDraggingReviewScrollControl(false);
+        setReviewScrollControlTop(50);
+    }, [chatStep, viewChat?.user?.id, viewChat?.user?._id]);
+
+    useEffect(() => {
+        if (!isDraggingReviewScrollControl) return;
+
+        const handlePointerMove = (event) => {
+            const root = reviewScrollRef.current;
+            if (!root) return;
+
+            const rect = root.getBoundingClientRect();
+            const controlSize = isMobile ? 38 : 44;
+            const minTrackTop = 12;
+            const maxTrackTop = Math.max(minTrackTop, rect.height - (controlSize + 12));
+            const nextTop = Math.max(minTrackTop, Math.min(maxTrackTop, event.clientY - rect.top - (controlSize / 2)));
+            setReviewScrollControlTop((nextTop / rect.height) * 100);
+
+            const maxScrollTop = Math.max(0, root.scrollHeight - root.clientHeight);
+            const ratio = maxTrackTop === minTrackTop ? 0 : (nextTop - minTrackTop) / (maxTrackTop - minTrackTop);
+            root.scrollTop = maxScrollTop * ratio;
+        };
+
+        const handlePointerUp = () => setIsDraggingReviewScrollControl(false);
+
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', handlePointerUp);
+
+        return () => {
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', handlePointerUp);
+        };
+    }, [isDraggingReviewScrollControl, isMobile]);
 
     useEffect(() => {
         if (activeTab === 'overview' && chartScrollRef.current && stats?.chartData) {
@@ -1395,15 +1470,15 @@ export default function AdminDashboard() {
 
         return (
             <div
-                style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}
+                style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(2, 6, 23, 0.72)', backdropFilter: 'blur(8px)', zIndex: 12000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}
                 onClick={() => setSelectedReactionMsg(null)}
             >
                 <div
-                    style={{ background: 'white', width: '95%', maxWidth: '420px', borderRadius: '1.2rem', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', animation: 'slideUp 0.3s ease-out' }}
+                    style={{ background: '#0f172a', width: '95%', maxWidth: '420px', borderRadius: '1.2rem', overflow: 'hidden', boxShadow: '0 28px 70px rgba(2, 6, 23, 0.55)', animation: 'slideUp 0.3s ease-out', border: '1px solid rgba(148, 163, 184, 0.16)' }}
                     onClick={e => e.stopPropagation()}
                 >
                     {/* Header */}
-                    <div style={{ padding: '1.2rem 1.5rem', background: 'linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}>
+                    <div style={{ padding: '1.2rem 1.5rem', background: ADMIN_PILL_GRADIENT, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: '0 0 auto' }}>
                             <div style={{ background: 'rgba(255,255,255,0.2)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <History size={16} />
@@ -1437,9 +1512,9 @@ export default function AdminDashboard() {
                     </div>
 
                     {/* Content */}
-                    <div style={{ padding: '1.2rem', maxHeight: '60vh', overflowY: 'auto', background: '#f8f9fe' }}>
+                    <div style={{ padding: '1.2rem', maxHeight: '60vh', overflowY: 'auto', background: '#111827' }}>
                         {history.length === 0 ? (
-                            <div style={{ textAlign: 'center', padding: '2rem', color: '#8898aa' }}>
+                            <div style={{ textAlign: 'center', padding: '2rem', color: OFFICIAL_TEXT_MUTED }}>
                                 No history recorded for this message.
                             </div>
                         ) : (
@@ -1450,18 +1525,18 @@ export default function AdminDashboard() {
                                     acc[key].logs.push(log);
                                     return acc;
                                 }, {})).map((group, idx) => (
-                                    <div key={idx} style={{ background: 'white', padding: '12px 16px', borderRadius: '12px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', border: '1px solid #e9ecef', display: 'flex', alignItems: 'center', gap: '15px' }}>
-                                        <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', flexShrink: 0 }}>
+                                    <div key={idx} style={{ background: '#172033', padding: '12px 16px', borderRadius: '12px', boxShadow: '0 10px 28px rgba(2, 6, 23, 0.22)', border: '1px solid rgba(148, 163, 184, 0.16)', display: 'flex', alignItems: 'center', gap: '15px' }}>
+                                        <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: ADMIN_PILL_GRADIENT, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', flexShrink: 0 }}>
                                             {group.user?.name?.charAt(0) || '?'}
                                         </div>
                                         <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                             <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                                                <span style={{ fontWeight: '700', color: '#32325d', fontSize: '0.95rem' }}>{group.user?.name || 'Unknown User'}</span>
+                                                <span style={{ fontWeight: '700', color: OFFICIAL_TEXT_PRIMARY, fontSize: '0.95rem' }}>{group.user?.name || 'Unknown User'}</span>
                                                 <div style={{ fontSize: '1.2rem', marginTop: '2px' }}>{group.emoji}</div>
                                             </div>
                                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                                                 {group.logs.map((L, i) => (
-                                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.65rem', color: '#8898aa', whiteSpace: 'nowrap' }}>
+                                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.65rem', color: OFFICIAL_TEXT_MUTED, whiteSpace: 'nowrap' }}>
                                                         <span style={{ fontWeight: '800', color: L.action === 'added' ? '#2dce89' : '#f5365c', textTransform: 'capitalize' }}>{L.action}:</span>
                                                         <span>
                                                             {new Date(L.timestamp).toLocaleDateString([], { month: 'short', day: '2-digit' })}, {new Date(L.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -1477,7 +1552,7 @@ export default function AdminDashboard() {
                     </div>
 
                     {/* Footer */}
-                    <div style={{ padding: '1rem 1.2rem', background: 'white', borderTop: '1px solid #e9ecef', display: 'flex', justifyContent: 'center' }}>
+                    <div style={{ padding: '1rem 1.2rem', background: '#0f172a', borderTop: '1px solid rgba(148, 163, 184, 0.14)', display: 'flex', justifyContent: 'center' }}>
                         <button
                             onClick={() => setSelectedReactionMsg(null)}
                             style={{
@@ -1485,7 +1560,7 @@ export default function AdminDashboard() {
                                 padding: '12px 24px',
                                 borderRadius: '12px',
                                 border: 'none',
-                                background: 'linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)',
+                                background: ADMIN_PILL_GRADIENT,
                                 color: 'white',
                                 fontWeight: '800',
                                 fontSize: '1rem',
@@ -1800,20 +1875,20 @@ export default function AdminDashboard() {
         return (
             <div className="admin-notification-dropdown" style={{
                 position: isMobile ? 'fixed' : 'absolute',
-                top: isMobile ? '78px' : '55px',
-                right: isMobile ? '12px' : '60px',
+                top: isMobile ? '66px' : '78px',
+                right: isMobile ? '10px' : '16px',
                 left: isMobile ? '12px' : 'auto',
                 width: isMobile ? 'auto' : '360px',
                 maxWidth: isMobile ? 'none' : '360px',
-                background: '#111827',
+                background: OFFICIAL_PANEL_SURFACE,
                 borderRadius: '18px', boxShadow: '0 24px 60px rgba(2, 6, 23, 0.4)',
                 zIndex: 6000, overflow: 'hidden', border: '1px solid rgba(148, 163, 184, 0.14)',
                 animation: 'slideUp 0.3s ease-out'
             }}>
-                <div style={{
+                <div className="admin-notification-dropdown-header" style={{
                     padding: '16px 18px', borderBottom: '1px solid rgba(148, 163, 184, 0.12)',
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    background: '#172033'
+                    background: 'rgba(20, 152, 255, 0.12)'
                 }}>
                     <span style={{ fontWeight: '700', color: OFFICIAL_TEXT_PRIMARY, fontSize: '0.95rem' }}>Review Box</span>
                     <span style={{
@@ -1931,6 +2006,17 @@ export default function AdminDashboard() {
 
     const renderMsgDropdown = () => {
         if (!msgDropdown) return null;
+        const menuWidth = isMobile ? 210 : 220;
+        const menuHeight = 116;
+        const viewportWidth = window.innerWidth || 1024;
+        const viewportHeight = window.innerHeight || 768;
+        const preferredLeft = msgDropdown.x - menuWidth + 18;
+        const preferredTop = msgDropdown.y + 12;
+        const dropdownLeft = Math.max(12, Math.min(viewportWidth - menuWidth - 12, preferredLeft));
+        const dropdownTop = preferredTop + menuHeight > viewportHeight - 12
+            ? Math.max(12, msgDropdown.y - menuHeight - 12)
+            : Math.max(isMobile ? 76 : 88, preferredTop);
+
         return (
             <>
                 <div
@@ -1940,21 +2026,27 @@ export default function AdminDashboard() {
                 <div
                     onClick={() => setMsgDropdown(null)}
                     style={{
-                        position: 'fixed', top: msgDropdown.y - 10, left: msgDropdown.x,
-                        transform: 'translate(-100%, -100%)', // Move up and left to sit above the trigger
-                        background: 'white', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
-                        zIndex: 2005, padding: '4px', border: '1px solid #e9ecef', minWidth: '150px'
+                        position: 'fixed',
+                        top: dropdownTop,
+                        left: dropdownLeft,
+                        width: menuWidth,
+                        background: '#172033',
+                        borderRadius: '14px',
+                        boxShadow: '0 18px 46px rgba(2, 6, 23, 0.45)',
+                        zIndex: 2005,
+                        padding: '6px',
+                        border: '1px solid rgba(148, 163, 184, 0.16)'
                     }}
                 >
                     <div
                         onClick={() => enterSelectionMode(msgDropdown.id)}
                         style={{
-                            padding: '10px 16px', borderRadius: '6px', cursor: 'pointer',
+                            padding: '12px 14px', borderRadius: '10px', cursor: 'pointer',
                             display: 'flex', alignItems: 'center', gap: '8px',
-                            color: '#32325d', fontSize: '0.85rem', fontWeight: '600',
+                            color: OFFICIAL_TEXT_PRIMARY, fontSize: '0.85rem', fontWeight: '700',
                             transition: 'background 0.2s', marginBottom: '4px'
                         }}
-                        onMouseOver={(e) => e.currentTarget.style.background = '#f8f9fe'}
+                        onMouseOver={(e) => e.currentTarget.style.background = 'rgba(56, 189, 248, 0.12)'}
                         onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
                     >
                         <Check size={16} /> Select Messages
@@ -1962,12 +2054,12 @@ export default function AdminDashboard() {
                     <div
                         onClick={() => handleDeleteSingleMessage(msgDropdown.id)}
                         style={{
-                            padding: '10px 16px', borderRadius: '6px', cursor: 'pointer',
+                            padding: '12px 14px', borderRadius: '10px', cursor: 'pointer',
                             display: 'flex', alignItems: 'center', gap: '8px',
                             color: '#f5365c', fontSize: '0.85rem', fontWeight: '600',
                             transition: 'background 0.2s'
                         }}
-                        onMouseOver={(e) => e.currentTarget.style.background = '#fef1f2'}
+                        onMouseOver={(e) => e.currentTarget.style.background = 'rgba(245, 54, 92, 0.12)'}
                         onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
                     >
                         <Trash2 size={16} /> Delete
@@ -3004,33 +3096,34 @@ export default function AdminDashboard() {
 
                 {/* Top Header */}
                 <header className="admin-top-header admin-top-header-glass" style={{
-                     height: '68px',
+                     height: isMobile ? '58px' : '64px',
                      background: 'transparent',
-                     borderBottom: '1px solid transparent',
+                     borderBottom: 'none',
                      display: 'flex',
                      alignItems: 'center',
-                     justifyContent: isMobile ? 'space-between' : 'flex-end',
-                     padding: isMobile ? '0 0.55rem' : '0 0.45rem 0 1.25rem',
+                     justifyContent: 'center',
+                     padding: isMobile ? '0 0.55rem' : '0 2.5rem',
                      boxShadow: 'none',
                      borderRadius: isMobile ? '0 0 18px 18px' : '0',
+                     marginTop: isMobile ? '14px' : '20px',
                      marginLeft: 0,
                      marginRight: 0,
                      transition: 'none'
                  }}>
-                    {isMobile && (
-                        <div
-                            onClick={() => setMobileSidebarOpen(true)}
-                            style={{
-                                display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', minWidth: 0, flexShrink: 1
-                            }}
-                        >
-                            <div style={{ width: '40px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <img src={logo} alt="Neural Chat Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                    <div style={{ width: '100%', maxWidth: '1200px', display: 'flex', alignItems: 'center', justifyContent: isMobile ? 'space-between' : 'flex-end', minWidth: 0 }}>
+                        {isMobile && (
+                            <div
+                                onClick={() => setMobileSidebarOpen(true)}
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', minWidth: 0, flexShrink: 1
+                                }}
+                            >
+                                <div style={{ width: '40px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <img src={logo} alt="Neural Chat Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                                </div>
                             </div>
-                            {!isMobile && <h2 style={{ fontSize: '0.9rem', fontWeight: '800', color: '#9ed6ff', margin: 0, fontFamily: 'Public Sans, sans-serif', whiteSpace: 'nowrap', minWidth: 0 }}>Neural Chat</h2>}
-                        </div>
-                    )}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.6rem' : '0.85rem', marginLeft: isMobile ? '0.5rem' : 'auto', justifyContent: 'flex-end', flexShrink: 0, flex: isMobile ? 1 : 'unset', minWidth: 0 }}>
+                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.6rem' : '0.85rem', marginLeft: isMobile ? '0.5rem' : 'auto', justifyContent: 'flex-end', flexShrink: 0, flex: isMobile ? 1 : 'unset', minWidth: 0 }}>
 
                         <div style={{ position: 'relative', width: isMobile ? 'auto' : '320px', marginLeft: 0, flexShrink: 0, flex: isMobile ? 1 : 'unset', minWidth: isMobile ? 0 : 'unset' }}>
                             <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
@@ -3117,6 +3210,7 @@ export default function AdminDashboard() {
                                     </div>
                                 )}
                             </div>
+                            </div>
                         </div>
                     </div>
                 </header>
@@ -3202,10 +3296,14 @@ export default function AdminDashboard() {
                                 gap: '0px',
                                 color: '#cbd5e1',
                                 cursor: isDraggingScrollControl ? 'grabbing' : 'grab',
-                                zIndex: 80
+                                zIndex: 80,
+                                touchAction: 'none',
+                                userSelect: 'none'
                             }}
+                            className="admin-page-scroll-button"
                             onPointerDown={(event) => {
                                 event.preventDefault();
+                                event.currentTarget.setPointerCapture?.(event.pointerId);
                                 setIsDraggingScrollControl(true);
                                 setShowScrollControl(true);
                             }}
@@ -3216,8 +3314,6 @@ export default function AdminDashboard() {
                     )}
                 </main>
                 {renderNotificationDropdown()}
-                {renderReactionAuditModal()}
-                {renderEventAuditModal()}
                 {renderMediaLightbox()}
             </div>
 
@@ -3286,7 +3382,10 @@ export default function AdminDashboard() {
                             </div>
                         </div>
 
-                        <div style={{ flex: 1, padding: '1.5rem', overflowY: 'auto', background: '#111827' }}>
+                        <div
+                            ref={reviewScrollRef}
+                            style={{ flex: 1, padding: isMobile ? '1rem 0.75rem 1rem 1rem' : '1.5rem', overflowY: 'auto', background: '#111827', position: 'relative' }}
+                        >
                             {loadingChat ? (
                                 <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>Loading logs...</div>
                             ) : (
@@ -3307,8 +3406,8 @@ export default function AdminDashboard() {
                                                 .filter(y => y.includes(dateSearchQuery))
                                                 .sort((a, b) => a - b)
                                                 .map(year => (
-                                                    <div key={year} onClick={() => handleSelectYear(year)} style={{ background: 'white', padding: '1.5rem 1rem', borderRadius: '1.2rem', border: '1px solid #e9ecef', cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center' }} className="hover-card">
-                                                        <div style={{ fontSize: '1.2rem', fontWeight: '700', color: '#32325d' }}>{year}</div>
+                                                    <div key={year} onClick={() => handleSelectYear(year)} style={{ background: '#172033', padding: '1.5rem 1rem', borderRadius: '1.2rem', border: '1px solid rgba(148, 163, 184, 0.14)', cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center' }} className="hover-card">
+                                                        <div style={{ fontSize: '1.2rem', fontWeight: '700', color: '#f8fafc' }}>{year}</div>
                                                     </div>
                                                 ))}
                                         </div>
@@ -3324,9 +3423,9 @@ export default function AdminDashboard() {
                                                 .map(m => {
                                                     const monthName = new Date(selectedYear, parseInt(m) - 1).toLocaleString('default', { month: 'long' });
                                                     return (
-                                                        <div key={m} onClick={() => handleSelectMonth(m)} style={{ background: 'white', padding: '1.5rem 1rem', borderRadius: '1.2rem', border: '1px solid #e9ecef', cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s' }} className="hover-card">
-                                                            <div style={{ fontSize: '1.1rem', fontWeight: '700', color: '#32325d' }}>{monthName}</div>
-                                                            <div style={{ fontSize: '0.75rem', color: '#8898aa', marginTop: '4px' }}>{selectedYear}</div>
+                                                        <div key={m} onClick={() => handleSelectMonth(m)} style={{ background: '#172033', padding: '1.5rem 1rem', borderRadius: '1.2rem', border: '1px solid rgba(148, 163, 184, 0.14)', cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s' }} className="hover-card">
+                                                            <div style={{ fontSize: '1.1rem', fontWeight: '700', color: '#f8fafc' }}>{monthName}</div>
+                                                            <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '4px' }}>{selectedYear}</div>
                                                         </div>
                                                     );
                                                 })}
@@ -3345,9 +3444,9 @@ export default function AdminDashboard() {
                                                     const [year, month, day] = d.split('-');
                                                     const formattedDate = `${day}-${month}-${year}`;
                                                     return (
-                                                        <div key={d} onClick={() => handleSelectDate(d)} style={{ background: 'white', padding: '1rem', borderRadius: '1rem', border: '1px solid #e9ecef', cursor: 'pointer', textAlign: 'center' }}>
-                                                            <Calendar size={20} color="#0A7C8F" style={{ marginBottom: '0.5rem' }} />
-                                                            <div style={{ fontSize: '0.875rem', fontWeight: '600' }}>{formattedDate}</div>
+                                                        <div key={d} onClick={() => handleSelectDate(d)} style={{ background: '#172033', padding: '1rem', borderRadius: '1rem', border: '1px solid rgba(148, 163, 184, 0.14)', cursor: 'pointer', textAlign: 'center' }}>
+                                                            <Calendar size={20} color="#8ed2ff" style={{ marginBottom: '0.5rem' }} />
+                                                            <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#e2e8f0' }}>{formattedDate}</div>
                                                         </div>
                                                     );
                                                 })}
@@ -3390,14 +3489,14 @@ export default function AdminDashboard() {
                                                                     zIndex: 1
                                                                 }}></div>
                                                                 <div style={{
-                                                                    background: '#f8f9fa',
+                                                                    background: '#172033',
                                                                     padding: '4px 16px',
                                                                     borderRadius: '20px',
                                                                     fontSize: '0.75rem',
-                                                                    color: '#8898aa',
+                                                                    color: '#94a3b8',
                                                                     fontWeight: '600',
                                                                     zIndex: 2,
-                                                                    border: '1px solid #e9ecef',
+                                                                    border: '1px solid rgba(148, 163, 184, 0.14)',
                                                                     textTransform: 'uppercase',
                                                                     letterSpacing: '0.5px'
                                                                 }}>
@@ -3447,10 +3546,10 @@ export default function AdminDashboard() {
                                                                         className="wa-message-bubble"
                                                                         style={{
                                                                             padding: '0.8rem 1.1rem', borderRadius: '1.25rem',
-                                                                            background: msg.type === 'audio' ? 'transparent' : (isMe ? 'linear-gradient(135deg, #0A7C8F 0%, #0FB5D0 100%)' : '#ffffff'),
-                                                                            color: isMe ? '#ffffff' : '#32325d',
+                                                                            background: msg.type === 'audio' ? 'transparent' : (isMe ? 'linear-gradient(135deg, #1498ff 0%, #0FB5D0 100%)' : '#172033'),
+                                                                            color: isMe ? '#ffffff' : '#e2e8f0',
                                                                             boxShadow: isSelected ? '0 0 0 3px rgba(15, 181, 208, 0.35)' : (isMe ? '0 4px 15px rgba(10, 124, 143, 0.2)' : '0 2px 8px rgba(0,0,0,0.06)'),
-                                                                            border: isMe ? 'none' : '1px solid rgba(15, 181, 208, 0.12)',
+                                                                            border: isMe ? 'none' : '1px solid rgba(148, 163, 184, 0.16)',
                                                                             borderBottomRightRadius: isMe ? '0' : '1.2rem',
                                                                             borderBottomLeftRadius: isMe ? '1.2rem' : '0',
                                                                             position: 'relative',
@@ -3475,7 +3574,7 @@ export default function AdminDashboard() {
                                                                                 }}
                                                                                 style={{
                                                                                     position: 'absolute', top: '8px', right: '8px',
-                                                                                    left: 'auto', color: isMe ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.6)',
+                                                                                    left: 'auto', color: 'rgba(255,255,255,0.65)',
                                                                                     cursor: 'pointer', opacity: 0, transition: 'opacity 0.2s'
                                                                                 }}
                                                                             >
@@ -3489,7 +3588,7 @@ export default function AdminDashboard() {
                                                                             </div>
                                                                         )}
                                                                         {msg.is_flagged && !isDeleted && (
-                                                                            <div style={{ fontSize: '0.75rem', marginBottom: '6px', display: 'flex', alignItems: 'center', color: isMe ? '#fff176' : '#7D1802', fontWeight: '700', whiteSpace: 'nowrap' }}>
+                                                                            <div style={{ fontSize: '0.75rem', marginBottom: '6px', display: 'flex', alignItems: 'center', color: isMe ? '#fff176' : '#ffb4a3', fontWeight: '700', whiteSpace: 'nowrap' }}>
                                                                                 <AlertTriangle size={12} style={{ marginRight: '4px' }} /> Unethical: {msg.flag_reason || 'Flagged'}
                                                                             </div>
                                                                         )}
@@ -3823,6 +3922,45 @@ export default function AdminDashboard() {
                                 </>
                             )}
                         </div>
+                        {(reviewCanScrollUp || reviewCanScrollDown) && (
+                            <button
+                                type="button"
+                                className="admin-review-scroll-button"
+                                onClick={handleReviewFloatingScroll}
+                                aria-label={reviewCanScrollDown ? 'Scroll review down' : 'Scroll review up'}
+                                style={{
+                                    position: 'absolute',
+                                    right: isMobile ? '8px' : '12px',
+                                    top: `clamp(${isMobile ? '82px' : '96px'}, ${reviewScrollControlTop}%, calc(100% - ${isMobile ? '28px' : '34px'}))`,
+                                    transform: 'translateY(-50%)',
+                                    width: isMobile ? '38px' : '44px',
+                                    height: isMobile ? '38px' : '44px',
+                                    borderRadius: '50%',
+                                    border: '1px solid rgba(148, 163, 184, 0.16)',
+                                    background: 'linear-gradient(180deg, rgba(30, 41, 59, 0.94) 0%, rgba(15, 23, 42, 0.94) 100%)',
+                                    backdropFilter: 'blur(16px)',
+                                    WebkitBackdropFilter: 'blur(16px)',
+                                    boxShadow: '0 16px 34px rgba(2, 6, 23, 0.35)',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: '#cbd5e1',
+                                    cursor: isDraggingReviewScrollControl ? 'grabbing' : 'grab',
+                                    zIndex: 3,
+                                    touchAction: 'none',
+                                    userSelect: 'none'
+                                }}
+                                onPointerDown={(event) => {
+                                    event.preventDefault();
+                                    event.currentTarget.setPointerCapture?.(event.pointerId);
+                                    setIsDraggingReviewScrollControl(true);
+                                }}
+                            >
+                                <ChevronDown size={isMobile ? 12 : 14} style={{ transform: 'rotate(180deg)', opacity: reviewCanScrollUp ? 1 : 0.45 }} />
+                                <ChevronDown size={isMobile ? 12 : 14} style={{ opacity: reviewCanScrollDown ? 1 : 0.45, marginTop: '-2px' }} />
+                            </button>
+                        )}
                         {renderSelectionBar()}
                     </div>
                 </div>
@@ -3830,6 +3968,8 @@ export default function AdminDashboard() {
             }
 
             {/* Global Confirms & Notifications */}
+            {renderReactionAuditModal()}
+            {renderEventAuditModal()}
             {renderMsgDropdown()}
             {snackbar && <Snackbar message={snackbar.message} type={snackbar.type} senderName={snackbar.senderName} onClose={closeSnackbar} />}
             <ConfirmModal isOpen={!!confirmConfig} {...confirmConfig} onCancel={closeConfirm} />

@@ -643,7 +643,8 @@ const MessageList = memo(({
         const items = [];
         let currentGroupDate = null;
 
-        const filteredMessages = messages.filter(msg => {
+        const filteredMessages = (messages || []).filter(msg => {
+            if (!msg) return false;
             if (!messageSearchQuery) return true;
             return (msg.content || '').toLowerCase().includes(messageSearchQuery.toLowerCase());
         });
@@ -730,6 +731,7 @@ const MessageList = memo(({
         }
 
         const msg = item.data;
+        if (!msg) return null;
         const isLastItem = index === flattenedItems.length - 1;
         const msgId = msg._id || msg.id;
         const messageKey = getMessageKey(msg);
