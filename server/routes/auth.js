@@ -663,6 +663,21 @@ router.put('/update-profile', async (req, res) => {
                 return allowed.includes(normalized) ? normalized : fallback;
             };
             const sanitizeVisibilityRule = (rule) => {
+                if (typeof rule === 'boolean') {
+                    return rule ? { mode: 'everyone', exceptUserIds: [] } : { mode: 'no_one', exceptUserIds: [] };
+                }
+
+                if (typeof rule === 'string') {
+                    const normalized = rule.trim().toLowerCase().replace(/[\s-]+/g, '_');
+                    if (normalized === 'no_one' || normalized === 'nobody') {
+                        return { mode: 'no_one', exceptUserIds: [] };
+                    }
+                    if (normalized === 'everyone_except' || normalized.startsWith('everyone_except_')) {
+                        return { mode: 'everyone_except', exceptUserIds: [] };
+                    }
+                    return { mode: 'everyone', exceptUserIds: [] };
+                }
+
                 const mode = ['everyone', 'everyone_except', 'no_one'].includes(rule?.mode) ? rule.mode : 'everyone';
                 const exceptUserIds = Array.isArray(rule?.exceptUserIds)
                     ? [...new Set(rule.exceptUserIds.map(id => String(id || '').trim()).filter(Boolean))]
