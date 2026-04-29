@@ -1347,7 +1347,15 @@ export default function Chat() {
     const [messageSearchQuery, setMessageSearchQuery] = useState('');
     const [filterType, setFilterType] = useState('all'); // 'all' | 'unread' | 'favorites'
     const [openDropdown, setOpenDropdown] = useState(null); // { type: 'msg'|'contact', id: string, data: any }
-    const [customLists, setCustomLists] = useState(() => JSON.parse(localStorage.getItem('wa-custom-lists') || '[]'));
+    const getCustomListsStorageKey = (ownerId) => `wa-custom-lists-${String(ownerId || 'anonymous')}`;
+    const getStoredCustomLists = (ownerId) => {
+        try {
+            return JSON.parse(localStorage.getItem(getCustomListsStorageKey(ownerId)) || '[]');
+        } catch (_) {
+            return [];
+        }
+    };
+    const [customLists, setCustomLists] = useState(() => getStoredCustomLists(user?.id || user?._id));
     const customListSyncRef = useRef({ lastAttemptAt: 0, pauseUntil: 0, timer: null });
     const [isCreateListOpen, setIsCreateListOpen] = useState(false);
     const [isAddToListModalOpen, setIsAddToListModalOpen] = useState(false);
@@ -1380,7 +1388,13 @@ export default function Chat() {
         if (!isAttachmentMenuOpen) setShowAttachmentHint(false);
     }, [isAttachmentMenuOpen]);
 
-    // Fetch custom lists from backend on mount
+    const customListsOwnerId = user?.id || user?._id;
+
+    useEffect(() => {
+        setCustomLists(getStoredCustomLists(customListsOwnerId));
+    }, [customListsOwnerId]);
+
+    // Fetch custom lists from backend on mount / account change
     useEffect(() => {
         const fetchCustomLists = async () => {
             try {
@@ -1389,21 +1403,21 @@ export default function Chat() {
                 const res = await axios.get('/api/chat/custom-lists', {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
-                if (res.data && res.data.length > 0) {
-                    setCustomLists(res.data);
-                }
+                setCustomLists(Array.isArray(res.data) ? res.data : []);
             } catch (err) {
                 console.error('[FETCH CUSTOM LISTS ERROR]', err);
             }
         };
         fetchCustomLists();
-    }, []);
+    }, [customListsOwnerId]);
 
     // Sync custom lists to backend whenever they change
     useEffect(() => {
         const syncCustomLists = async () => {
             try {
-                localStorage.setItem('wa-custom-lists', JSON.stringify(customLists));
+                if (customListsOwnerId) {
+                    localStorage.setItem(getCustomListsStorageKey(customListsOwnerId), JSON.stringify(customLists));
+                }
                 const now = Date.now();
                 if (now < (customListSyncRef.current.pauseUntil || 0)) return;
                 if (now - (customListSyncRef.current.lastAttemptAt || 0) < 30000) return;
@@ -1428,7 +1442,7 @@ export default function Chat() {
         return () => {
             if (customListSyncRef.current.timer) clearTimeout(customListSyncRef.current.timer);
         };
-    }, [customLists]);
+    }, [customLists, customListsOwnerId]);
     const [dropdownPos, setDropdownPos] = useState({ x: 0, y: 0 });
     const [fullEmojiPicker, setFullEmojiPicker] = useState(null); // { msgId, isGroup, pos }
     const [showInputEmojiPicker, setShowInputEmojiPicker] = useState(false);
