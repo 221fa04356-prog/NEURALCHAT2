@@ -3923,7 +3923,7 @@ export default function Chat() {
 
         const texts = selectedMediaMsgs.map(m => {
             if (m.type === 'text') return m.content;
-            const url = getMediaUrl(m.file_path);
+            const url = getMessageMediaUrl(m);
             if (url) return `${m.content || ''}\n${url}`.trim();
             return m.content || '';
         }).join('\n---\n');
@@ -4026,7 +4026,7 @@ export default function Chat() {
 
         const texts = forwardSelectedMsgs.map(m => {
             if (m.type === 'text') return m.content;
-            const rawUrl = getMediaUrl(m.file_path);
+            const rawUrl = getMessageMediaUrl(m);
             const url = encodeURI(rawUrl);
             if (url) {
                 // If there's a caption, include it
@@ -7712,6 +7712,18 @@ export default function Chat() {
         return `${apiOrigin}/api/chat/media/message/${encodeURIComponent(msgId)}${qs ? `?${qs}` : ''}`;
     };
 
+    const getMessageMediaUrl = (msg) => {
+        if (!msg) return null;
+
+        const fallbackUrl = resolveMessageMediaFallbackUrl(msg);
+        const rawPath = String(msg.file_path || msg.filePath || '');
+        const directUrl = rawPath ? getMediaUrl(rawPath) : '';
+
+        if (!rawPath) return fallbackUrl || directUrl || null;
+        if (/(^|\/)uploads\//i.test(rawPath)) return fallbackUrl || directUrl || null;
+        return directUrl || fallbackUrl || null;
+    };
+
     const resolveAudioStreamUrl = async (msg) => {
         if (!msg) return '';
         return (
@@ -10623,7 +10635,7 @@ export default function Chat() {
                                                 )}
                                                 {msg.type === 'video' && msg.file_path && (
                                                     <div onClick={(e) => { e.stopPropagation(); setViewingImage(msg); }} style={{ position: 'relative', maxWidth: '100%', borderRadius: '4px', overflow: 'hidden', background: '#000', marginBottom: '4px', cursor: 'pointer' }}>
-                                                        <video src={getMediaUrl(msg.file_path)} style={{ width: '100%', maxHeight: '200px', display: 'block', objectFit: 'cover' }} />
+                                                        <video src={getMessageMediaUrl(msg)} style={{ width: '100%', maxHeight: '200px', display: 'block', objectFit: 'cover' }} />
                                                         <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: 'rgba(0,0,0,0.5)', borderRadius: '50%', padding: '4px' }}>
                                                             <Play size={20} color="white" fill="white" />
                                                         </div>
@@ -12995,7 +13007,7 @@ export default function Chat() {
                                             if (m.type === 'image' || m.type === 'video') {
                                                 return (
                                                     <div key={i} onClick={(e) => { e.stopPropagation(); setViewingImage(m); }} style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }}>
-                                                        <img src={getMediaUrl(m.file_path)} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                        <img src={getMessageMediaUrl(m)} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                     </div>
                                                 );
                                             }
@@ -13263,7 +13275,7 @@ export default function Chat() {
                         <div className="wa-media-preview-row">
                                     <>
                                         {previewItems.map((m, i) => {
-                                            const previewUrl = getMediaUrl(m.file_path);
+                                            const previewUrl = getMessageMediaUrl(m);
                                             if (m.type === 'image' || m.type === 'video') {
                                                 return (
                                                     <div key={i} className="wa-media-thumb" onClick={(e) => { e.stopPropagation(); setViewingImage(m); }} style={{ cursor: 'pointer', flexShrink: 0 }}>
@@ -13745,7 +13757,7 @@ export default function Chat() {
                                             <div className="wa-starred-content">
                                                 {msg.type === 'image' && msg.file_path && (
                                                     <div className="wa-starred-image-container" onClick={(e) => { e.stopPropagation(); setViewingImage(msg); }} style={{ cursor: 'pointer' }}>
-                                                        <img src={getMediaUrl(msg.file_path)} alt="Starred" className="wa-starred-image" />
+                                                        <img src={getMessageMediaUrl(msg)} alt="Starred" className="wa-starred-image" />
                                                     </div>
                                                 )}
                                                 {msg.type === 'video' && msg.file_path && (
@@ -16508,7 +16520,7 @@ export default function Chat() {
                                             if (m.type === 'image' || m.type === 'video') {
                                                 return (
                                                     <div key={i} className="wa-media-thumb" onClick={(e) => { e.stopPropagation(); setViewingImage(m); }} style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }}>
-                                                        <img src={getMediaUrl(m.file_path)} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                        <img src={getMessageMediaUrl(m)} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                     </div>
                                                 );
                                             }
@@ -17361,7 +17373,7 @@ export default function Chat() {
                                                     const msgKey = msg._id || msg.id;
                                                     const isSelected = !!selectedMediaMsgs.find(m => String(m._id || m.id) === String(msgKey));
                                                     const isAnySelected = selectedMediaMsgs.length > 0;
-                                                    const mediaUrl = getMediaUrl(msg.file_path);
+                                                    const mediaUrl = getMessageMediaUrl(msg);
 
                                                     return (
                                                         <div key={msgKey} className="wa-media-grid-item" onClick={(e) => {
@@ -19738,7 +19750,7 @@ export default function Chat() {
                             if (msg.type === 'image' || msg.type === 'video') {
                                 previewContent = (
                                     <div style={{ width: 36, height: 36, marginLeft: 12, borderRadius: 4, overflow: 'hidden', flexShrink: 0, backgroundColor: '#f0f2f5' }}>
-                                        {msg.type === 'image' ? <img src={getMediaUrl(msg.file_path)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned" /> : <video src={getMediaUrl(msg.file_path)} muted crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />}
+                                        {msg.type === 'image' ? <img src={getMessageMediaUrl(msg)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned" /> : <video src={getMessageMediaUrl(msg)} muted crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />}
                                     </div>
                                 );
                             } else if (isExcel) {
@@ -20341,7 +20353,7 @@ export default function Chat() {
                             if (msg.type === 'image' || msg.type === 'video') {
                                 previewContent = (
                                     <div style={{ width: 36, height: 36, marginLeft: 12, borderRadius: 4, overflow: 'hidden', flexShrink: 0, backgroundColor: '#f0f2f5' }}>
-                                        {msg.type === 'image' ? <img src={getMediaUrl(msg.file_path)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned" /> : <video src={getMediaUrl(msg.file_path)} muted crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />}
+                                        {msg.type === 'image' ? <img src={getMessageMediaUrl(msg)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned" /> : <video src={getMessageMediaUrl(msg)} muted crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />}
                                     </div>
                                 );
                             } else if (isExcel) {
