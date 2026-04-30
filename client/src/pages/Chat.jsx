@@ -8001,7 +8001,7 @@ export default function Chat() {
         const directUrl = rawPath ? getMediaUrl(rawPath) : '';
 
         if (!rawPath) return fallbackUrl || directUrl || null;
-        if (/(^|\/)uploads\//i.test(rawPath)) return fallbackUrl || directUrl || null;
+        if (/(^|\/)uploads\//i.test(rawPath)) return directUrl || fallbackUrl || null;
         return directUrl || fallbackUrl || null;
     };
 
@@ -10900,7 +10900,7 @@ export default function Chat() {
                                         <div className={`wa-starred-bubble ${isMe ? 'sent' : 'received'}`} style={{ maxWidth: '100%', margin: 0, padding: '6px 7px 8px' }}>
                                             <div className="wa-starred-content">
                                                 {msg.type === 'image' && msg.file_path && (
-                                                    <img src={getMediaUrl(msg.file_path)} alt="" onClick={(e) => { e.stopPropagation(); setViewingImage(msg); }} style={{ maxWidth: '100%', borderRadius: '4px', marginBottom: '4px', display: 'block', cursor: 'pointer' }} />
+                                                    <img src={getMessageMediaUrl(msg)} alt="" onClick={(e) => { e.stopPropagation(); setViewingImage(msg); }} style={{ maxWidth: '100%', borderRadius: '4px', marginBottom: '4px', display: 'block', cursor: 'pointer' }} />
                                                 )}
                                                 {msg.type === 'video' && msg.file_path && (
                                                     <div onClick={(e) => { e.stopPropagation(); setViewingImage(msg); }} style={{ position: 'relative', maxWidth: '100%', borderRadius: '4px', overflow: 'hidden', background: '#000', marginBottom: '4px', cursor: 'pointer' }}>
@@ -15372,7 +15372,7 @@ export default function Chat() {
                                                 )}
                                                 {msg.type === 'video' && msg.file_path && (
                                                     <div className="wa-starred-video-container" style={{ position: 'relative', maxWidth: '100%', borderRadius: '8px', overflow: 'hidden', background: '#000', marginBottom: '8px' }}>
-                                                        <video src={getMediaUrl(msg.file_path)} style={{ width: '100%', maxHeight: '200px', display: 'block', objectFit: 'cover' }} />
+                                                        <video src={getMessageMediaUrl(msg)} style={{ width: '100%', maxHeight: '200px', display: 'block', objectFit: 'cover' }} />
                                                         <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: 'rgba(0,0,0,0.5)', borderRadius: '50%', padding: '8px' }}>
                                                             <Play size={24} color="white" fill="white" />
                                                         </div>
@@ -15637,12 +15637,12 @@ export default function Chat() {
                         <div className={`wa-bubble sent`} style={{ whiteSpace: 'pre-wrap' }}>
                             {infoMessage.type === 'image' ? (
                                 <div className="wa-msg-image">
-                                    <img src={getMediaUrl(infoMessage.file_path)} alt="sent" />
+                                    <img src={getMessageMediaUrl(infoMessage)} alt="sent" />
                                     {infoMessage.content && <p>{infoMessage.content}</p>}
                                 </div>
                             ) : infoMessage.type === 'video' ? (
                                 <div className="wa-msg-image-container" style={{ position: 'relative', maxWidth: '100%', borderRadius: '8px', overflow: 'hidden', background: '#000', marginBottom: '8px' }}>
-                                    <video src={getMediaUrl(infoMessage.file_path)} style={{ width: '100%', maxHeight: '300px', display: 'block', objectFit: 'contain' }} />
+                                    <video src={getMessageMediaUrl(infoMessage)} style={{ width: '100%', maxHeight: '300px', display: 'block', objectFit: 'contain' }} />
                                     <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: 'rgba(0,0,0,0.5)', borderRadius: '50%', padding: '12px' }}>
                                         <Play size={32} color="white" fill="white" />
                                     </div>
@@ -21806,7 +21806,7 @@ export default function Chat() {
                                                             </div>
                                                             {replyingTo.type === 'image' && replyingTo.file_path && !replyingTo.is_view_once && (
                                                                 <div className="wa-reply-preview-thumb">
-                                                                    <img src={getMediaUrl(replyingTo.file_path)} alt="thumbnail" />
+                                                                    <img src={getMessageMediaUrl(replyingTo)} alt="thumbnail" />
                                                                 </div>
                                                             )}
                                                             <X size={24} className="wa-reply-preview-close" onClick={() => setReplyingTo(null)} />
@@ -22543,7 +22543,7 @@ export default function Chat() {
                                                                 if (replyingTo.type === 'image' && replyingTo.file_path && !replyingTo.is_view_once) {
                                                                     return (
                                                                         <div className="wa-reply-preview-thumb">
-                                                                            <img src={getMediaUrl(replyingTo.file_path)} alt="thumbnail" />
+                                                                            <img src={getMessageMediaUrl(replyingTo)} alt="thumbnail" />
                                                                         </div>
                                                                     );
                                                                 }
