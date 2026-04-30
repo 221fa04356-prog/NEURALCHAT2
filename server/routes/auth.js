@@ -16,6 +16,56 @@ const generateSignature = (password) => {
         .digest('hex');
 };
 
+const normalizeMobile = (mobile = '') => String(mobile).replace(/\D/g, '').slice(-10);
+
+const generateMobileSignature = (mobile) => {
+    const normalized = normalizeMobile(mobile);
+    return crypto.createHmac('sha256', process.env.JWT_SECRET)
+        .update(`mobile:${normalized}`)
+        .digest('hex');
+};
+
+const findUsersByMobile = async (mobile) => {
+    const normalized = normalizeMobile(mobile);
+    if (!normalized) return [];
+
+    const signature = generateMobileSignature(normalized);
+    const matches = [];
+    const seenIds = new Set();
+
+    const addMatch = (user) => {
+        if (!user) return;
+        const id = String(user._id || '');
+        if (id && seenIds.has(id)) return;
+        if (id) seenIds.add(id);
+        matches.push(user);
+    };
+
+    const signatureMatches = await User.find({ mobile_signature: signature }).select('name email login_id mobile mobile_signature status role __enc_mobile __enc_email __enc_name');
+    signatureMatches.forEach(addMatch);
+
+    // Backward-compatible fallback for users created before mobile_signature existed.
+    const users = await User.find({}).select('mobile role email name login_id status __enc_mobile __enc_email __enc_name');
+    users.forEach((user) => {
+        if (normalizeMobile(user.mobile) === normalized) addMatch(user);
+    });
+
+    return matches;
+};
+
+const chooseMobileOwner = (users = []) => (
+    users.find((user) => user.status === 'approved' && user.login_id) ||
+    users.find((user) => user.login_id) ||
+    users.find((user) => user.status === 'approved') ||
+    users[0] ||
+    null
+);
+
+const findUserByMobile = async (mobile) => {
+    const matches = await findUsersByMobile(mobile);
+    return chooseMobileOwner(matches);
+};
+
 const maskEmail = (email) => {
     if (!email || !email.includes('@')) return '';
     const [name, domain] = email.split('@');
@@ -25,6 +75,36 @@ const maskEmail = (email) => {
 };
 
 const JWT_SECRET = process.env.JWT_SECRET;
+
+router.get('/check-mobile', async (req, res) => {
+    try {
+        const cleanMobile = normalizeMobile(req.query.mobile);
+        if (!/^\d{10}$/.test(cleanMobile)) {
+            return res.status(400).json({ error: 'Mobile number must be exactly 10 digits.' });
+        }
+
+        const existingMobileUsers = await findUsersByMobile(cleanMobile);
+        if (!existingMobileUsers.length) {
+            return res.json({ available: true });
+        }
+
+        const existingMobile = chooseMobileOwner(existingMobileUsers);
+        const accountLabel = existingMobile.login_id
+            ? `account ${existingMobile.login_id}`
+            : existingMobile.email
+                ? `account ${maskEmail(existingMobile.email)}`
+                : 'another account';
+
+        return res.json({
+            available: false,
+            accountLabel,
+            message: `This mobile number is already linked with ${accountLabel}.`
+        });
+    } catch (err) {
+        console.error('Mobile availability check failed:', err);
+        return res.status(500).json({ error: 'Unable to check mobile number right now.' });
+    }
+});
 
 // Register
 router.post('/register', async (req, res) => {
@@ -40,16 +120,22 @@ router.post('/register', async (req, res) => {
     const emailRegex = /^[a-zA-Z0-9._%+-]+@(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/;
 
     if (!nameRegex.test(name)) return res.status(400).json({ error: 'Name may contain letters, numbers, spaces, dots, apostrophes, and hyphens.' });
-    if (!mobileRegex.test(mobile)) return res.status(400).json({ error: 'Mobile number must be exactly 10 digits.' });
+    const cleanMobile = normalizeMobile(mobile);
+
+    if (!mobileRegex.test(cleanMobile)) return res.status(400).json({ error: 'Mobile number must be exactly 10 digits.' });
     if (!emailRegex.test(email)) return res.status(400).json({ error: 'Please enter a valid email address.' });
 
     try {
         // Check duplicates
-        const existing = await User.findOne({ $or: [{ email }, { mobile }, { name }] });
+        const existingMobile = await findUserByMobile(cleanMobile);
+        if (existingMobile) {
+            return res.status(400).json({ error: 'This number is already taken' });
+        }
+
+        const existing = await User.findOne({ $or: [{ email }, { name }] });
         if (existing) {
             let field = 'details';
             if (existing.email === email) field = 'email';
-            else if (existing.mobile === mobile) field = 'mobile number';
             else if (existing.name === name) field = 'name';
 
             const role = existing.role === 'admin' ? 'Admin' : 'User';
@@ -57,16 +143,17 @@ router.post('/register', async (req, res) => {
         }
 
         // Insert as pending
-        const newUser = await User.create({ name, displayName: name, email, mobile, countryCode, designation, status: 'pending', is_temporary_password: false });
+        const newUser = await User.create({ name, displayName: name, email, mobile: cleanMobile, mobile_signature: generateMobileSignature(cleanMobile), countryCode, designation, status: 'pending', is_temporary_password: false });
 
         // Emit Socket Event
         if (req.io) {
             const userPayload = {
                 id: newUser._id.toString(),
-                name: newUser.name,
-                email: newUser.email,
-                mobile: newUser.mobile,
-                designation: newUser.designation,
+                name,
+                email,
+                mobile: cleanMobile,
+                countryCode,
+                designation,
                 role: newUser.role,
                 status: newUser.status,
                 created_at: newUser.created_at
@@ -277,6 +364,10 @@ router.post('/admin/register', async (req, res) => {
     if (!name || !email || !mobile || !countryCode || !password) return res.status(400).json({ error: 'All fields required' });
 
     try {
+        const cleanMobile = normalizeMobile(mobile);
+        if (!/^\d{10}$/.test(cleanMobile)) return res.status(400).json({ error: 'Mobile number must be exactly 10 digits.' });
+        if (await findUserByMobile(cleanMobile)) return res.status(400).json({ error: 'This number is already taken' });
+
         const existing = await User.findOne({ email });
         if (existing) return res.status(400).json({ error: 'Email already exists' });
 
@@ -296,7 +387,8 @@ router.post('/admin/register', async (req, res) => {
             password_signature: signature,
             role: 'admin',
             status: 'approved',
-            mobile,
+            mobile: cleanMobile,
+            mobile_signature: generateMobileSignature(cleanMobile),
             countryCode
         });
 
@@ -530,8 +622,15 @@ router.post('/send-call-otp', async (req, res) => {
         if (!finalMobile) return res.status(400).json({ error: 'Mobile number is required' });
 
         // Clean mobile number - extract last 10 digits
-        const cleanMobile = finalMobile.replace(/\D/g, '').slice(-10);
+        const cleanMobile = normalizeMobile(finalMobile);
         if (cleanMobile.length !== 10) return res.status(400).json({ error: 'Invalid mobile number length' });
+
+        if (['register', 'admin_register'].includes(context)) {
+            const existingMobile = await findUserByMobile(cleanMobile);
+            if (existingMobile) {
+                return res.status(400).json({ error: 'This number is already taken' });
+            }
+        }
 
         // Generate 6 digit OTP
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -642,17 +741,19 @@ router.put('/update-profile', async (req, res) => {
         if (countryCode !== undefined) updateData.countryCode = countryCode;
         if (mobile !== undefined) {
             // Basic mobile validation match register logic: strictly 10 digits
-            if (!/^\d{10}$/.test(mobile)) {
+            const cleanMobile = normalizeMobile(mobile);
+            if (!/^\d{10}$/.test(cleanMobile)) {
                 console.error('[PROFILE UPDATE] Invalid mobile format:', mobile);
                 return res.status(400).json({ error: 'Mobile number must be exactly 10 digits.' });
             }
             // Check if mobile matches someone else
-            const existing = await User.findOne({ mobile, _id: { $ne: userId } });
-            if (existing) {
+            const existing = await findUserByMobile(cleanMobile);
+            if (existing && String(existing._id) !== String(userId)) {
                 console.error('[PROFILE UPDATE] Mobile already in use by:', existing._id);
                 return res.status(400).json({ error: 'Mobile number already used by another account' });
             }
-            updateData.mobile = mobile;
+            updateData.mobile = cleanMobile;
+            updateData.mobile_signature = generateMobileSignature(cleanMobile);
         }
 
         if (privacySettings !== undefined) {

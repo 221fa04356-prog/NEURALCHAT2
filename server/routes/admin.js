@@ -10,6 +10,7 @@ const ChatDeletion = require('../models/ChatDeletion');
 const PasswordReset = require('../models/PasswordReset');
 const Community = require('../models/Community');
 const ReactionLog = require('../models/ReactionLog'); // Import ReactionLog model for audit
+const ChatActionLog = require('../models/ChatActionLog');
 const { sendEmail } = require('../utils/emailService');
 const sendBrevoMail = require('../brevoMailer');
 const crypto = require('crypto');
@@ -22,11 +23,53 @@ const generateSignature = (password) => {
         .digest('hex');
 };
 
+const USER_PUBLIC_SELECT = [
+    'name',
+    'displayName',
+    'email',
+    'mobile',
+    'countryCode',
+    'designation',
+    'about',
+    'login_id',
+    'role',
+    'status',
+    'token_version',
+    'is_temporary_password',
+    'favorites',
+    'isOnline',
+    'lastSeen',
+    'created_at',
+    'bannedUntil',
+    'rejectionCount',
+    'adminLock',
+    'blockedUsers',
+    'unethicalCount',
+    'messagingBlocked',
+    'unblockRequested',
+    'unblockRequestReason',
+    'privacySettings',
+    '__enc_name',
+    '__enc_displayName',
+    '__enc_email',
+    '__enc_mobile',
+    '__enc_about',
+    '__enc_designation'
+].join(' ');
+
+const toDecryptedUserObject = (user) => {
+    if (!user) return null;
+    if (typeof user.decryptFieldsSync === 'function') {
+        user.decryptFieldsSync();
+    }
+    return user.toObject ? user.toObject() : user;
+};
+
 // Get all users
 router.get('/users', async (req, res) => {
     try {
-        const rawUsers = await User.find().select('-password -password_signature');
-        const users = rawUsers.map(u => u.toObject());
+        const rawUsers = await User.find().select(USER_PUBLIC_SELECT);
+        const users = rawUsers.map(toDecryptedUserObject);
 
         // Add flagged count for each user
         const usersWithFlags = await Promise.all(users.map(async (u) => {
@@ -424,6 +467,13 @@ router.get('/chat/dates/:userId/:otherUserId', async (req, res) => {
 // Get statistics for the dashboard overview
 router.get('/stats', async (req, res) => {
     try {
+        const [blockCount, reportCount, blockMembers, reportMembers] = await Promise.all([
+            ChatActionLog.countDocuments({ action: 'block' }),
+            ChatActionLog.countDocuments({ action: 'report' }),
+            ChatActionLog.distinct('actor_id', { action: 'block' }),
+            ChatActionLog.distinct('actor_id', { action: 'report' })
+        ]);
+
         const metrics = {
             totalUsers: await User.countDocuments({
                 role: { $ne: 'admin' },
@@ -432,7 +482,11 @@ router.get('/stats', async (req, res) => {
             }),
             pendingApprovals: await User.countDocuments({ status: 'pending', role: 'user' }),
             activeResets: await PasswordReset.countDocuments({ status: 'pending' }),
-            unblockRequests: await User.countDocuments({ unblockRequested: true })
+            unblockRequests: await User.countDocuments({ unblockRequested: true }),
+            totalBlocks: blockCount,
+            blockMembers: blockMembers.length,
+            totalReports: reportCount,
+            reportMembers: reportMembers.length
         };
 
         // Registration Trends (Day/Month/Year)
@@ -513,7 +567,13 @@ router.get('/stats', async (req, res) => {
             yearlyApproved,
             yearlyPending,
             yearlyResets,
-            yearlyUnblocks
+            yearlyUnblocks,
+            dailyBlocks,
+            dailyReports,
+            monthlyBlocks,
+            monthlyReports,
+            yearlyBlocks,
+            yearlyReports
         ] = await Promise.all([
             aggregateUsersByStatus(thirtyDaysAgo, "%Y-%m-%d", 'approved'),
             aggregateUsersByStatus(thirtyDaysAgo, "%Y-%m-%d", 'pending'),
@@ -526,8 +586,57 @@ router.get('/stats', async (req, res) => {
             aggregateUsersByStatus(tenYearsAgo, "%Y", 'approved'),
             aggregateUsersByStatus(tenYearsAgo, "%Y", 'pending'),
             aggregateByPeriod(PasswordReset, { created_at: { $gte: tenYearsAgo }, status: 'pending' }, "%Y"),
-            aggregateByPeriod(User, { created_at: { $gte: tenYearsAgo }, role: { $ne: 'admin' }, unblockRequested: true }, "%Y")
+            aggregateByPeriod(User, { created_at: { $gte: tenYearsAgo }, role: { $ne: 'admin' }, unblockRequested: true }, "%Y"),
+            aggregateByPeriod(ChatActionLog, { created_at: { $gte: thirtyDaysAgo }, action: 'block' }, "%Y-%m-%d"),
+            aggregateByPeriod(ChatActionLog, { created_at: { $gte: thirtyDaysAgo }, action: 'report' }, "%Y-%m-%d"),
+            aggregateByPeriod(ChatActionLog, { created_at: { $gte: twelveMonthsAgo }, action: 'block' }, "%Y-%m"),
+            aggregateByPeriod(ChatActionLog, { created_at: { $gte: twelveMonthsAgo }, action: 'report' }, "%Y-%m"),
+            aggregateByPeriod(ChatActionLog, { created_at: { $gte: tenYearsAgo }, action: 'block' }, "%Y"),
+            aggregateByPeriod(ChatActionLog, { created_at: { $gte: tenYearsAgo }, action: 'report' }, "%Y")
         ]);
+
+        const actionPeopleRaw = await ChatActionLog.aggregate([
+            {
+                $group: {
+                    _id: { actor_id: '$actor_id', action: '$action' },
+                    count: { $sum: 1 },
+                    lastActionAt: { $max: '$created_at' }
+                }
+            },
+            { $lookup: { from: 'users', localField: '_id.actor_id', foreignField: '_id', as: 'actor' } },
+            { $unwind: { path: '$actor', preserveNullAndEmptyArrays: true } },
+            { $sort: { count: -1, lastActionAt: -1 } }
+        ]);
+
+        const actionActorIds = [...new Set(actionPeopleRaw.map(row => String(row._id.actor_id)).filter(Boolean))];
+        const actionActors = await User.find({ _id: { $in: actionActorIds } }).select('name login_id __enc_name');
+        const actionActorMap = new Map(actionActors.map(user => {
+            const userObj = toDecryptedUserObject(user);
+            return [String(userObj._id), userObj];
+        }));
+
+        const actionPeople = actionPeopleRaw.map(row => {
+            const actor = actionActorMap.get(String(row._id.actor_id));
+            return ({
+            userId: row._id.actor_id,
+            action: row._id.action,
+            count: row.count,
+            lastActionAt: row.lastActionAt,
+            name: actor?.name || row.actor?.name || 'Unknown member',
+            login_id: actor?.login_id || row.actor?.login_id || ''
+            });
+        });
+
+        const actionContainers = ['block', 'report'].map(action => {
+            const people = actionPeople.filter(item => item.action === action);
+            return {
+                key: action,
+                label: action === 'block' ? 'Block Actions' : 'Report Actions',
+                total: action === 'block' ? blockCount : reportCount,
+                members: action === 'block' ? blockMembers.length : reportMembers.length,
+                people
+            };
+        });
 
         // Helper to fill missing data points
         const fillMissing = (baseDate, count, type, seriesSources) => {
@@ -574,21 +683,28 @@ router.get('/stats', async (req, res) => {
                     approved: dailyApproved,
                     pending: dailyPending,
                     resets: dailyResets,
-                    unblocks: dailyUnblocks
+                    unblocks: dailyUnblocks,
+                    blocks: dailyBlocks,
+                    reports: dailyReports
                 }),
                 month: fillMissing(twelveMonthsAgo, 12, 'month', {
                     approved: monthlyApproved,
                     pending: monthlyPending,
                     resets: monthlyResets,
-                    unblocks: monthlyUnblocks
+                    unblocks: monthlyUnblocks,
+                    blocks: monthlyBlocks,
+                    reports: monthlyReports
                 }),
                 year: fillMissing(tenYearsAgo, 10, 'year', {
                     approved: yearlyApproved,
                     pending: yearlyPending,
                     resets: yearlyResets,
-                    unblocks: yearlyUnblocks
+                    unblocks: yearlyUnblocks,
+                    blocks: yearlyBlocks,
+                    reports: yearlyReports
                 })
-            }
+            },
+            actionContainers
         });
     } catch (err) {
         res.status(500).json({ error: err.message });

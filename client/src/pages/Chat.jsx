@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, memo, useCallback } from 'react';
+import React, { useEffect, useState, useRef, memo, useCallback, useMemo } from 'react';
 import { flushSync } from 'react-dom';
 import axios from 'axios';
 import ImageEditorModal from '../components/ImageEditorModal';
@@ -14,7 +14,7 @@ import {
     LayoutGrid, UserPlus, ArrowRight, Share2, Crop, Check, RotateCcw, Undo2, Minus, Delete, User, Play, MapPin, IndianRupee, Sticker, PlusCircle,
     ShieldCheck, Monitor, BellRing, Laptop, LogOut, Globe, Clock, Mail, Briefcase, ExternalLink,
     ShieldAlert, Fingerprint, HardDrive, Keyboard, HelpCircle, Settings2, Volume2, MonitorSmartphone, Shield, SlidersHorizontal,
-    AlertCircle, UserCheck, Loader2, Ban, ChevronUp, Headphones
+    AlertCircle, UserCheck, Loader2, Ban, ChevronUp, Headphones, AlignLeft, AlignCenter, AlignRight
 } from 'lucide-react';
 
 const browserHostname = window.location.hostname || '';
@@ -1258,6 +1258,27 @@ export default function Chat() {
     const [inlineCropCursor, setInlineCropCursor] = useState('default');
     const [inlineFilterActive, setInlineFilterActive] = useState(false);
     const [inlineImageFilter, setInlineImageFilter] = useState('none');
+    const [inlinePaintActive, setInlinePaintActive] = useState(false);
+    const [inlinePaintColor, setInlinePaintColor] = useState('#33ceff');
+    const [inlinePaintSize, setInlinePaintSize] = useState(8);
+    const [inlinePaintStrokes, setInlinePaintStrokes] = useState([]);
+    const [inlinePaintRedoStrokes, setInlinePaintRedoStrokes] = useState([]);
+    const [inlinePaintCurrentStroke, setInlinePaintCurrentStroke] = useState(null);
+    const [inlinePaintPaletteOpen, setInlinePaintPaletteOpen] = useState(false);
+    const [inlinePaintCursorPoint, setInlinePaintCursorPoint] = useState(null);
+    const inlinePaintCurrentStrokeRef = useRef(null);
+    const inlinePaintFrameRef = useRef(null);
+    const [inlineTextActive, setInlineTextActive] = useState(false);
+    const [inlineTextDraft, setInlineTextDraft] = useState('');
+    const [inlineTexts, setInlineTexts] = useState([]);
+    const [inlineTextBackground, setInlineTextBackground] = useState(false);
+    const [inlineTextPaletteOpen, setInlineTextPaletteOpen] = useState(false);
+    const [inlineTextFont, setInlineTextFont] = useState('Sans Serif');
+    const [inlineTextFontOpen, setInlineTextFontOpen] = useState(false);
+    const [inlineTextAlign, setInlineTextAlign] = useState('center');
+    const [draggingInlineTextId, setDraggingInlineTextId] = useState(null);
+    const [inlineTextDragOffset, setInlineTextDragOffset] = useState({ x: 0, y: 0 });
+    const [inlineRedoEdits, setInlineRedoEdits] = useState([]);
     const inlineImageStageRef = useRef(null);
 
     useEffect(() => {
@@ -1281,6 +1302,26 @@ export default function Chat() {
         setInlineCropCursor('default');
         setInlineFilterActive(false);
         setInlineImageFilter('none');
+        setInlinePaintActive(false);
+        setInlinePaintColor('#33ceff');
+        setInlinePaintSize(8);
+        setInlinePaintStrokes([]);
+        setInlinePaintRedoStrokes([]);
+        setInlinePaintCurrentStroke(null);
+        inlinePaintCurrentStrokeRef.current = null;
+        setInlinePaintPaletteOpen(false);
+        setInlinePaintCursorPoint(null);
+        setInlineTextActive(false);
+        setInlineTextDraft('');
+        setInlineTexts([]);
+        setInlineTextBackground(false);
+        setInlineTextPaletteOpen(false);
+        setInlineTextFont('Sans Serif');
+        setInlineTextFontOpen(false);
+        setInlineTextAlign('center');
+        setDraggingInlineTextId(null);
+        setInlineTextDragOffset({ x: 0, y: 0 });
+        setInlineRedoEdits([]);
     }, [file]);
 
     useEffect(() => {
@@ -1506,6 +1547,7 @@ export default function Chat() {
     const [fullEmojiPicker, setFullEmojiPicker] = useState(null); // { msgId, isGroup, pos }
     const [showInputEmojiPicker, setShowInputEmojiPicker] = useState(false);
     const [inputEmojiPickerPos, setInputEmojiPickerPos] = useState({ x: 0, y: 0 });
+    const [emojiInsertTarget, setEmojiInsertTarget] = useState('chat');
     const [chatContextMenu, setChatContextMenu] = useState(null); // { x: number, y: number }
     const [replyingTo, setReplyingTo] = useState(null); // { _id: string, content: string, senderName: string }
     const [infoMessage, setInfoMessage] = useState(null); // Message details view
@@ -1721,6 +1763,11 @@ export default function Chat() {
         };
         checkUnread();
     }, [remindersList, user]);
+
+    const scheduledEventsCount = useMemo(() => (
+        (remindersList || []).filter((m) => m?.event && !m.event.cancelled).length
+    ), [remindersList]);
+
     const [isCancelEventConfirmOpen, setIsCancelEventConfirmOpen] = useState(false);
     const [eventTick, setEventTick] = useState(0); // For global re-render of expired states
     const remindersErrorRef = useRef({
@@ -2471,6 +2518,76 @@ export default function Chat() {
         if (!fileName) return false;
         const ext = fileName.split('.').pop().toLowerCase();
         return ['pdf', 'doc', 'docx', 'docm', 'dotx', 'dot', 'rtf', 'odt', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xltx', 'xlt', 'ods', 'ppt', 'pptx', 'pptm', 'potx', 'pot', 'ppsx', 'pps', 'odp', 'txt', 'csv'].includes(ext);
+    };
+
+    const getChatHoverPreview = (item, isGroupLike = false) => {
+        const msg = item?.lastMessage || item?.announcements?.lastMessage;
+        if (!msg) return '';
+
+        const fileName = msg.fileName || msg.file_name || msg.originalName || msg.name || '';
+        const msgType = String(msg.type || '').toLowerCase();
+        const looksLikeDocument = msgType === 'document' || msgType === 'file' || isDocument(fileName);
+
+        if (looksLikeDocument) {
+            const size = formatFileSize(msg.fileSize || msg.file_size || msg.size || 0);
+            const rawPages = msg.pageCount || msg.pages || msg.page_count || msg.metadata?.pageCount || msg.metadata?.pages || msg.metadata?.page_count;
+            const pages = Number(rawPages) > 0 ? Number(rawPages) : 1;
+            const pageText = pages ? `${pages} page${Number(pages) === 1 ? '' : 's'}` : 'pages unavailable';
+            return `${fileName || 'Document'} - ${size} - ${pageText}`;
+        }
+
+        const content = String(msg.content || msg.text || '').replace(/\s+/g, ' ').trim();
+        const myId = String(user.id || user._id || userData?.id || userData?._id || '');
+        const myName = user.name || userData?.name || '';
+        const senderId = msg.sender_id?._id || msg.sender_id || msg.user_id?._id || msg.user_id;
+        const senderName = msg.sender_id?.name || msg.user_id?.name || item?.name || 'Someone';
+        const isMe = String(senderId) === String(myId);
+
+        if (msg.is_system || msgType === 'system') {
+            const actor = isMe ? 'You' : senderName;
+            if (/left (the )?(chat|group|community)/i.test(content)) return `${actor} ${content}`;
+            if (/ removed /i.test(content)) {
+                const parts = content.split(' removed ');
+                const remover = isMe ? 'You' : (parts[0] || senderName);
+                let target = parts.slice(1).join(' removed ');
+                const removedMemberId = msg.metadata?.removedMemberId;
+                if (removedMemberId && String(removedMemberId) === String(myId)) {
+                    target = 'you';
+                } else if (myName && target.includes(myName)) {
+                    target = target.replace(myName, 'you');
+                }
+                return `${remover} removed ${target}`;
+            }
+            if (/ added /i.test(content)) {
+                const parts = content.split(' added ');
+                const adder = isMe ? 'You' : (parts[0] || senderName);
+                let target = parts.slice(1).join(' added ');
+                const addedMemberIds = msg.metadata?.addedMemberIds || [];
+                if (addedMemberIds.some(id => String(id) === String(myId))) {
+                    target = 'you';
+                } else if (myName && target.includes(myName)) {
+                    target = target.replace(myName, 'you');
+                }
+                return `${adder} added ${target}`;
+            }
+            if (/cancelled the event:/i.test(content)) return `${actor} ${content.replace(/cancelled the event:/i, 'cancelled event:')}`;
+            if (/deleted the event:/i.test(content)) return `${actor} ${content.replace(/deleted the event:/i, 'deleted event:')}`;
+            return content || 'System update';
+        }
+
+        if (content && !['event', 'poll'].includes(msgType)) {
+            return content;
+        }
+
+        if (msgType === 'image') return isGroupLike ? 'Photo' : 'Image';
+        if (msgType === 'video') return 'Video';
+        if (msgType === 'audio' || msgType === 'voice') return `Voice message (${formatVoiceTime(msg.duration || 0)})`;
+        if (msgType === 'event') return `new event: ${msg.event?.name || msg.event?.title || content || 'event'}`;
+        if (msgType === 'poll') return `Poll: ${msg.poll?.question || content || 'Question'}`;
+        if (!content && msg.event) return `new event: ${msg.event?.name || msg.event?.title || 'event'}`;
+        if (!content && msg.poll) return `Poll: ${msg.poll?.question || 'Question'}`;
+
+        return content || 'New message';
     };
 
     const getDocIcon = (fileName) => {
@@ -4108,7 +4225,29 @@ export default function Chat() {
         if (showGrammarBar !== true) setShowGrammarBar(true);
         if (isGrammarLoading !== true) setIsGrammarLoading(true);
 
+        const syncIssue = getInlineTextAiIssue(trimmedInput);
+        if (syncIssue) {
+            setIsGarbageMessage(true);
+            setGrammarSuggestions(null);
+            setShowGrammarBar(true);
+            setSuggestionApplied(false);
+            setIsGrammarLoading(false);
+            return;
+        } else if (isGarbageMessage !== false) {
+            setIsGarbageMessage(false);
+        }
+
         const timer = setTimeout(async () => {
+            const immediateIssue = getInlineTextAiIssue(trimmedInput);
+            if (immediateIssue) {
+                setIsGarbageMessage(true);
+                setGrammarSuggestions(null);
+                setShowGrammarBar(true);
+                setSuggestionApplied(false);
+                setIsGrammarLoading(false);
+                return;
+            }
+
             const hasVowels = /[aeiouy]/i.test(trimmedInput);
             const hasNumbers = /[0-9]/.test(trimmedInput);
             const isMeaningful = trimmedInput.length >= 1 && (/[a-zA-Z0-9]/.test(trimmedInput) || isEmojiPresent);
@@ -4120,14 +4259,6 @@ export default function Chat() {
             if (isProbablyGarbage || (!isMeaningful && !isEmojiPresent)) {
                 setIsGarbageMessage(true);
                 setShowGrammarBar(true);
-                if (trimmedInput.length >= 3) {
-                    setSnackbar({
-                        message: "Please write a meaningful word or sentence to start the chat",
-                        type: 'error',
-                        duration: 5000,
-                        variant: 'system'
-                    });
-                }
                 setIsGrammarLoading(false);
                 return;
             }
@@ -4154,12 +4285,15 @@ export default function Chat() {
                         return regex.test(trimmedInput);
                     });
 
-                    if (!isUnethical) {
+                    if (isUnethical) {
+                        setIsGarbageMessage(true);
+                        setSuggestionApplied(false);
+                        setShowGrammarBar(true);
+                    } else {
                         setSnackbar({ message: "made with proper grammar", type: 'success', duration: 5000, variant: 'system' });
+                        setSuggestionApplied(true);
+                        setShowGrammarBar(false);
                     }
-
-                    setSuggestionApplied(true);
-                    setShowGrammarBar(false);
                 } else {
                     setSuggestionApplied(false); // NOW we block because suggestions are visible
                     setShowGrammarBar(true);
@@ -4192,7 +4326,7 @@ export default function Chat() {
 
     const renderGrammarBar = (options = {}) => {
         const { floating = false } = options;
-        if (!showGrammarBar || (!grammarSuggestions && !isGrammarLoading) || isGarbageMessage) return null;
+        if (!showGrammarBar || (!isGarbageMessage && !grammarSuggestions && !isGrammarLoading)) return null;
 
         return (
             <div
@@ -4237,7 +4371,7 @@ export default function Chat() {
                         {isGarbageMessage ? (
                             <div style={{ color: '#ef4444', fontSize: '14px', padding: '4px 0', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '500' }}>
                                 <AlertCircle size={16} />
-                                <span>Please write a meaningful word or sentence to start the chat</span>
+                                <span>{getInlineTextAiIssue(input) || 'Please write a meaningful word or sentence to start the chat'}</span>
                             </div>
                         ) : grammarSuggestions ? (
                             <>
@@ -4274,6 +4408,87 @@ export default function Chat() {
                         onClick={() => setShowGrammarBar(false)}
                         className="wa-grammar-close-btn"
                     />
+                </div>
+            </div>
+        );
+    };
+
+    const renderYoutubePlayPipButton = (url, size = 44) => (
+        <button
+            type="button"
+            className="wa-youtube-pip-play"
+            aria-label="Play YouTube video in app"
+            onClick={(event) => {
+                event.stopPropagation();
+                event.preventDefault();
+                setPreviewVideoUrl(url);
+            }}
+            style={{ width: size, height: size }}
+        >
+            <Play size={Math.round(size * 0.42)} color="#fff" fill="#fff" />
+            <span>PiP</span>
+        </button>
+    );
+
+    const renderComposerLinkPreview = () => {
+        if (!typingLinkPreview?.title) return null;
+        const previewUrl = typingLinkPreview.url || input;
+        const isYoutube = !!getYouTubeVideoId(previewUrl);
+        return (
+            <div className="wa-typing-link-preview wa-typing-link-preview-full">
+                <button
+                    type="button"
+                    className="wa-typing-preview-close"
+                    onClick={() => setTypingLinkPreview(null)}
+                    aria-label="Close link preview"
+                >
+                    <X size={18} />
+                </button>
+                <div
+                    className={`wa-link-preview-card ${!typingLinkPreview.image ? 'no-image' : ''} ${isYoutube ? 'youtube' : ''}`}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        if (isYoutube) setPreviewVideoUrl(previewUrl);
+                    }}
+                >
+                    {typingLinkPreview.image && (
+                        <div className="wa-link-preview-image">
+                            <img src={typingLinkPreview.image} alt={typingLinkPreview.title} />
+                            {isYoutube && renderYoutubePlayPipButton(previewUrl)}
+                        </div>
+                    )}
+                    <div className="wa-link-preview-content">
+                        <div className="wa-link-preview-title">{typingLinkPreview.title}</div>
+                        {typingLinkPreview.description && <div className="wa-link-preview-description">{typingLinkPreview.description}</div>}
+                        <div className="wa-link-preview-domain"><span>{typingLinkPreview.domain}</span></div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderReplyLinkPreview = (replyMsg) => {
+        if (!replyMsg) return null;
+        let lp = replyMsg.link_preview;
+        const urlFromContent = typeof replyMsg.content === 'string' ? replyMsg.content.match(/https?:\/\/[^\s]+/)?.[0] : '';
+        const previewUrl = lp?.url || urlFromContent;
+        const ytId = getYouTubeVideoId(previewUrl);
+        if ((!lp || !lp.title) && ytId) {
+            lp = { url: previewUrl, title: 'YouTube Video', domain: 'youtube.com', image: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` };
+        }
+        if (!lp?.title) return null;
+
+        return (
+            <div className="wa-reply-link-preview">
+                {lp.image && (
+                    <div className="wa-reply-link-image">
+                        <img src={lp.image} alt={lp.title} />
+                        {ytId && renderYoutubePlayPipButton(previewUrl, 34)}
+                    </div>
+                )}
+                <div className="wa-reply-link-text">
+                    <div className="wa-reply-link-title">{lp.title}</div>
+                    <div className="wa-reply-link-domain">{lp.domain || previewUrl}</div>
                 </div>
             </div>
         );
@@ -5748,7 +5963,7 @@ export default function Chat() {
                     setIsAttachmentMenuOpen(false);
                 }
             }
-            if (!e.target.closest('.wa-notification-dropdown') && !e.target.closest('.wa-nav-icon-btn[title="Notifications"]')) {
+            if (!e.target.closest('.wa-notification-dropdown') && !e.target.closest('.wa-notification-trigger')) {
                 setShowNotificationDetails(false);
             }
         };
@@ -7071,6 +7286,72 @@ export default function Chat() {
             });
             setOpenDropdown(null);
         } catch (err) { console.error("Favorite toggle failed", err); }
+    };
+
+    const getChatTargetKind = (targetId, targetData = {}) => {
+        const isCommunity = !!targetData.is_community || communities.some(c => String(c.id || c._id) === String(targetId));
+        const isGroup = !isCommunity && (!!targetData.isGroup || !!targetData.is_group || targetData.members !== undefined || groups.some(g => String(g._id || g.id) === String(targetId)));
+        return isCommunity ? 'community' : (isGroup ? 'group' : 'p2p');
+    };
+
+    const handleAddChatToList = (targetId, displayName) => {
+        const normalizedId = String(targetId);
+        if (!customLists.length) {
+            setNewListMembers([normalizedId]);
+            setIsCreateListOpen(true);
+            setOpenDropdown(null);
+            return;
+        }
+
+        const selectedListName = customLists.length === 1
+            ? customLists[0].name
+            : window.prompt(`Add ${displayName} to which list?`, customLists[0].name);
+
+        if (!selectedListName) return;
+        let didUpdate = false;
+        setCustomLists(prev => prev.map(list => {
+            if (String(list.name).toLowerCase() !== String(selectedListName).trim().toLowerCase()) return list;
+            didUpdate = true;
+            const members = (list.members || []).map(String);
+            return members.includes(normalizedId) ? list : { ...list, members: [...(list.members || []), normalizedId] };
+        }));
+        setOpenDropdown(null);
+        setSnackbar({
+            message: didUpdate ? `${displayName} added to ${selectedListName}` : `List "${selectedListName}" not found`,
+            type: didUpdate ? 'success' : 'error',
+            variant: 'system'
+        });
+    };
+
+    const handleModerationAction = async (action, targetId, targetData = {}) => {
+        const targetType = getChatTargetKind(targetId, targetData);
+        const displayName = targetData.name || targetData.communityName || (targetType === 'group' ? 'this group' : targetType === 'community' ? 'this community' : 'this contact');
+
+        if (action === 'block' && targetType !== 'p2p') {
+            setSnackbar({ message: 'Block is only available for p2p chats', type: 'info', variant: 'system' });
+            return;
+        }
+
+        try {
+            const token = localStorage.getItem('token');
+            await axios.post('/api/chat/moderation-action', {
+                action,
+                targetId,
+                targetType,
+                targetName: displayName
+            }, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            setOpenDropdown(null);
+            setSnackbar({
+                message: action === 'block' ? `${displayName} blocked` : `${displayName} reported`,
+                type: 'success',
+                variant: 'system'
+            });
+        } catch (err) {
+            setSnackbar({ message: err.response?.data?.error || `Failed to ${action}`, type: 'error', variant: 'system' });
+        }
     };
 
     const handleMarkAsUnread = async (targetId) => {
@@ -8884,7 +9165,7 @@ export default function Chat() {
         }
     };
 
-    const handleSend = async (e, contentOverride = null, voiceFile = null, voiceDuration = null, voiceIsViewOnce = null, fileOverride = null, isBatchChild = false) => {
+    const handleSend = async (e, contentOverride = null, voiceFile = null, voiceDuration = null, voiceIsViewOnce = null, fileOverride = null, isBatchChild = false, skipInlineImageEdits = false) => {
         if (e) e.preventDefault();
 
         const textToSend = contentOverride !== null ? contentOverride : input;
@@ -8894,7 +9175,12 @@ export default function Chat() {
             ? voiceIsViewOnce
             : (isVoiceSend ? isViewOnceVoice : isViewOnceMedia);
         if (!voiceFile && !fileOverride && queuedFiles.length > 1) {
-            const filesBatch = [...queuedFiles];
+            const activeFileSignature = getFileSignature(file);
+            const filesBatch = await Promise.all(queuedFiles.map((queuedFile) => (
+                activeFileSignature && getFileSignature(queuedFile) === activeFileSignature
+                    ? applyInlineImageEditsToFile(queuedFile)
+                    : queuedFile
+            )));
             const firstCaption = textToSend;
             setInput('');
             setReplyingTo(null);
@@ -8904,33 +9190,18 @@ export default function Chat() {
             setFile(null);
             setIsViewOnceMedia(false);
             for (let i = 0; i < filesBatch.length; i++) {
-                await handleSend(null, i === 0 ? firstCaption : '', null, null, currentViewOnce, filesBatch[i], true);
+                await handleSend(null, i === 0 ? firstCaption : '', null, null, currentViewOnce, filesBatch[i], true, true);
             }
             return;
         }
         let targetFile = fileOverride || voiceFile || file || (selectedFiles.length > 0 ? selectedFiles[0] : null);
-        const normalizedImageRotation = normalizeRotationDegrees(inlineImageRotation);
-        const normalizedInlineCropRect = normalizeCropRect(inlineCropRect);
-        if (
+        const shouldApplyInlineImageEdits =
+            !skipInlineImageEdits &&
             targetFile &&
             targetFile.type?.startsWith('image/') &&
-            normalizedImageRotation !== 0
-        ) {
-            targetFile = await rotateImageFile(targetFile, normalizedImageRotation);
-        }
-        if (
-            targetFile &&
-            targetFile.type?.startsWith('image/') &&
-            normalizedInlineCropRect
-        ) {
-            targetFile = await cropImageFileByRect(targetFile, normalizedInlineCropRect);
-        }
-        if (
-            targetFile &&
-            targetFile.type?.startsWith('image/') &&
-            inlineImageFilter !== 'none'
-        ) {
-            targetFile = await filterImageFile(targetFile, inlineImageFilter);
+            (!fileOverride || getFileSignature(targetFile) === getFileSignature(file));
+        if (shouldApplyInlineImageEdits) {
+            targetFile = await applyInlineImageEditsToFile(targetFile);
         }
         const isVoiceMessage = !!voiceFile && !fileOverride;
         const isCloudAudioMessage = !!cloudAudio;
@@ -8946,27 +9217,15 @@ export default function Chat() {
         // 2. Grammar & AI Validation Gate (for text and captions)
         const trimmedTextToSend = (textToSend || '').trim();
         if (trimmedTextToSend.length > 0) {
-            const badWordsList = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole'];
-            const isUnethical = badWordsList.some(word => {
-                const regex = new RegExp(`\\b${word}\\b`, 'i');
-                return regex.test(trimmedTextToSend);
-            });
-            if (isUnethical) {
-                setSnackbar({
-                    message: "Unethical words are not allowed. Please edit your message.",
-                    type: 'error',
-                    variant: 'system'
-                });
+            const textIssue = getInlineTextAiIssue(trimmedTextToSend);
+            if (textIssue) {
+                setIsGarbageMessage(true);
+                setShowGrammarBar(true);
+                setSuggestionApplied(false);
                 return;
             }
-
             // Only block if the grammar bar is actually showing suggestions that the user HASN'T picked yet.
-            if (showGrammarBar && !suggestionApplied && !isGrammarLoading && grammarSuggestions) {
-                setSnackbar({
-                    message: "Please select a grammar level to continue",
-                    type: 'error',
-                    variant: 'system'
-                });
+            if (showGrammarBar && !suggestionApplied) {
                 return;
             }
         }
@@ -9018,6 +9277,14 @@ export default function Chat() {
             setInlineCropRect(null);
             setInlineFilterActive(false);
             setInlineImageFilter('none');
+            setInlinePaintActive(false);
+            setInlinePaintStrokes([]);
+            setInlinePaintRedoStrokes([]);
+            setInlinePaintCurrentStroke(null);
+            setInlinePaintPaletteOpen(false);
+            setInlineTextActive(false);
+            setInlineTextDraft('');
+            setInlineTexts([]);
 
         try {
             const formData = new FormData();
@@ -9955,11 +10222,11 @@ export default function Chat() {
             <div className="wa-nav-top">
                 <button
                     className={`wa-nav-icon-btn ${(!isProfileOpen && !isSettingsOpen) ? 'active' : ''}`}
+                    data-tooltip={t('sidebar.chats')}
                     onClick={() => {
                         setIsProfileOpen(false);
                         closeSettingsPanel();
                     }}
-                    title={t('sidebar.chats')}
                 >
                     <MessageSquare size={24} />
                     {/* Optional: Add red dot for total unread */}
@@ -9968,7 +10235,7 @@ export default function Chat() {
             <div className="wa-nav-bottom">
                 <button
                     className={`wa-nav-icon-btn ${isSettingsOpen ? 'active' : ''}`}
-                    title={t('sidebar.settings')}
+                    data-tooltip={t('sidebar.settings')}
                     onClick={() => {
                         openSettingsPanel();
                     }}
@@ -9981,13 +10248,15 @@ export default function Chat() {
                         setIsProfileOpen(true);
                         closeSettingsPanel();
                     }}
-                    title={t('sidebar.profile')}
+                    data-tooltip={t('sidebar.profile')}
                 >
                     {/* User Profile Image as Icon */}
                     {userData.image ? (
                         <img src={userData.image} alt="Me" />
                     ) : (
-                        <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#ccc' }} />
+                        <div className="wa-profile-initial">
+                            {(userData.displayName || userData.name || user?.name || 'U').trim().charAt(0).toUpperCase()}
+                        </div>
                     )}
                 </button>
             </div>
@@ -10722,14 +10991,25 @@ export default function Chat() {
                                                             <div style={{ display: 'flex', flexDirection: 'column' }}>
                                                                 <div
                                                                     className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''} ${((lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be'))) ? 'youtube' : ''}`}
-                                                                    onClick={(e) => { e.stopPropagation(); window.open(lp.url, '_blank'); }}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        const previewUrl = lp.url || msg.content;
+                                                                        if (getYouTubeVideoId(previewUrl)) setPreviewVideoUrl(previewUrl);
+                                                                        else window.open(previewUrl, '_blank');
+                                                                    }}
                                                                     style={{ cursor: 'pointer', transition: 'none', marginBottom: (msg.content && msg.content.trim() !== lp.url.trim()) ? '8px' : '0' }}
                                                                 >
                                                                     {lp.image && (
                                                                         <div className="wa-link-preview-image">
                                                                             <img src={lp.image} alt={lp.title} />
-                                                                            {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) && (
-                                                                                <div className="wa-link-preview-play-btn">
+                                                                            {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be') || getYouTubeVideoId(lp.url || msg.content)) && (
+                                                                                <div
+                                                                                    className="wa-link-preview-play-btn"
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        setPreviewVideoUrl(lp.url || msg.content);
+                                                                                    }}
+                                                                                >
                                                                                     <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
                                                                                 </div>
                                                                             )}
@@ -11288,6 +11568,157 @@ export default function Chat() {
         }
     };
 
+    const paintImageFile = async (sourceFile, strokes = []) => {
+        const drawableStrokes = (strokes || []).filter((stroke) => stroke?.points?.length > 1);
+        if (!sourceFile || !sourceFile.type?.startsWith('image/') || drawableStrokes.length === 0) return sourceFile;
+
+        const objectUrl = URL.createObjectURL(sourceFile);
+        try {
+            const imageEl = await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error('Failed to load image for paint'));
+                img.src = objectUrl;
+            });
+
+            const canvas = document.createElement('canvas');
+            canvas.width = imageEl.width;
+            canvas.height = imageEl.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return sourceFile;
+            ctx.drawImage(imageEl, 0, 0, canvas.width, canvas.height);
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            drawableStrokes.forEach((stroke) => {
+                ctx.beginPath();
+                stroke.points.forEach((point, index) => {
+                    const x = clampUnit(point.x) * canvas.width;
+                    const y = clampUnit(point.y) * canvas.height;
+                    if (index === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.strokeStyle = stroke.color || '#33ceff';
+                ctx.lineWidth = Math.max(1, Number(stroke.size || 6)) * (canvas.width / 760);
+                ctx.stroke();
+            });
+
+            const outMime = sourceFile.type || 'image/png';
+            const outBlob = await new Promise((resolve, reject) => {
+                canvas.toBlob((blob) => {
+                    if (blob) resolve(blob);
+                    else reject(new Error('Failed to render painted image'));
+                }, outMime, 0.92);
+            });
+
+            return new File([outBlob], sourceFile.name || `image_${Date.now()}.png`, {
+                type: outBlob.type || outMime,
+                lastModified: Date.now()
+            });
+        } catch (_) {
+            return sourceFile;
+        } finally {
+            URL.revokeObjectURL(objectUrl);
+        }
+    };
+
+    const textImageFile = async (sourceFile, textItems = []) => {
+        const drawableTexts = (textItems || []).filter((item) => String(item?.text || '').trim());
+        if (!sourceFile || !sourceFile.type?.startsWith('image/') || drawableTexts.length === 0) return sourceFile;
+
+        const objectUrl = URL.createObjectURL(sourceFile);
+        try {
+            const imageEl = await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error('Failed to load image for text'));
+                img.src = objectUrl;
+            });
+
+            const canvas = document.createElement('canvas');
+            canvas.width = imageEl.width;
+            canvas.height = imageEl.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return sourceFile;
+            ctx.drawImage(imageEl, 0, 0, canvas.width, canvas.height);
+            drawableTexts.forEach((item) => {
+                const fontSize = Math.max(14, Number(item.size || 28)) * (canvas.width / 760);
+                const x = clampUnit(item.x) * canvas.width;
+                const y = clampUnit(item.y) * canvas.height;
+                const fontFamily = item.font === 'Serif'
+                    ? 'Georgia, serif'
+                    : item.font === 'Norican'
+                        ? 'cursive'
+                        : item.font === 'Bryndan Write'
+                            ? '"Comic Sans MS", cursive'
+                            : item.font === 'Oswald'
+                                ? 'Impact, sans-serif'
+                    : item.font === 'Monospace'
+                        ? '"Courier New", monospace'
+                        : 'Arial, sans-serif';
+                ctx.font = `700 ${fontSize}px ${fontFamily}`;
+                ctx.textAlign = item.align || 'center';
+                ctx.textBaseline = 'middle';
+                ctx.lineJoin = 'round';
+                ctx.strokeStyle = 'rgba(2, 6, 23, 0.72)';
+                ctx.lineWidth = Math.max(3, fontSize / 7);
+                if (item.background) {
+                    const metrics = ctx.measureText(item.text);
+                    const padX = fontSize * 0.45;
+                    const padY = fontSize * 0.25;
+                    ctx.fillStyle = 'rgba(2, 18, 32, 0.78)';
+                    ctx.fillRect(x - metrics.width / 2 - padX, y - fontSize / 2 - padY, metrics.width + padX * 2, fontSize + padY * 2);
+                }
+                ctx.strokeText(item.text, x, y);
+                ctx.fillStyle = item.color || '#ffffff';
+                ctx.fillText(item.text, x, y);
+            });
+
+            const outMime = sourceFile.type || 'image/png';
+            const outBlob = await new Promise((resolve, reject) => {
+                canvas.toBlob((blob) => {
+                    if (blob) resolve(blob);
+                    else reject(new Error('Failed to render text image'));
+                }, outMime, 0.92);
+            });
+
+            return new File([outBlob], sourceFile.name || `image_${Date.now()}.png`, {
+                type: outBlob.type || outMime,
+                lastModified: Date.now()
+            });
+        } catch (_) {
+            return sourceFile;
+        } finally {
+            URL.revokeObjectURL(objectUrl);
+        }
+    };
+
+    const applyInlineImageEditsToFile = async (sourceFile) => {
+        if (!sourceFile || !sourceFile.type?.startsWith('image/')) return sourceFile;
+        let editedFile = sourceFile;
+        const normalizedImageRotation = normalizeRotationDegrees(inlineImageRotation);
+        const normalizedInlineCropRect = normalizeCropRect(inlineCropRect);
+        if (normalizedImageRotation !== 0) {
+            editedFile = await rotateImageFile(editedFile, normalizedImageRotation);
+        }
+        if (normalizedInlineCropRect) {
+            editedFile = await cropImageFileByRect(editedFile, normalizedInlineCropRect);
+        }
+        if (inlineImageFilter !== 'none') {
+            editedFile = await filterImageFile(editedFile, inlineImageFilter);
+        }
+        if (inlinePaintStrokes.length > 0 || inlinePaintCurrentStroke?.points?.length > 1) {
+            editedFile = await paintImageFile(editedFile, [
+                ...inlinePaintStrokes,
+                ...(inlinePaintCurrentStroke?.points?.length > 1 ? [inlinePaintCurrentStroke] : [])
+            ]);
+        }
+        if (inlineTexts.length > 0) {
+            editedFile = await textImageFile(editedFile, inlineTexts);
+        }
+        return editedFile;
+    };
+
     const getFileSignature = (candidate) => {
         if (!candidate) return '';
         return `${candidate.name}|${candidate.size}|${candidate.lastModified}|${candidate.type}`;
@@ -11424,6 +11855,21 @@ export default function Chat() {
         setInlineFilterActive(false);
     };
 
+    const clearInlinePaintMode = () => {
+        setInlinePaintActive(false);
+        setInlinePaintCurrentStroke(null);
+        inlinePaintCurrentStrokeRef.current = null;
+        setInlinePaintPaletteOpen(false);
+        setInlinePaintCursorPoint(null);
+    };
+
+    const clearInlineTextMode = () => {
+        setInlineTextActive(false);
+        setInlineTextDraft('');
+        setInlineTextPaletteOpen(false);
+        setInlineTextFontOpen(false);
+    };
+
     const activateInlineCropMode = () => {
         if (inlineCropActive) {
             clearInlineCropMode();
@@ -11431,6 +11877,8 @@ export default function Chat() {
         }
         setInlineImageEditMode(true);
         clearInlineFilterMode();
+        clearInlinePaintMode();
+        clearInlineTextMode();
         setInlineCropActive(true);
         setInlineCropRect((prev) => normalizeCropRect(prev) || { x: 0, y: 0, w: 1, h: 1 });
     };
@@ -11438,7 +11886,30 @@ export default function Chat() {
     const activateInlineFilterMode = () => {
         setInlineImageEditMode(true);
         clearInlineCropMode();
+        clearInlinePaintMode();
+        clearInlineTextMode();
         setInlineFilterActive((prev) => !prev);
+    };
+
+    const activateInlinePaintMode = () => {
+        const nextActive = !inlinePaintActive;
+        setInlineImageEditMode(true);
+        clearInlineCropMode();
+        clearInlineFilterMode();
+        clearInlineTextMode();
+        setInlinePaintActive(nextActive);
+        setInlinePaintPaletteOpen(false);
+        setInlinePaintCursorPoint(nextActive ? { x: 0.5, y: 0.5 } : null);
+    };
+
+    const activateInlineTextMode = () => {
+        const nextActive = !inlineTextActive;
+        setInlineImageEditMode(true);
+        clearInlineCropMode();
+        clearInlineFilterMode();
+        clearInlinePaintMode();
+        setInlineTextActive(nextActive);
+        setInlineTextDraft('');
     };
 
     const getInlinePreviewRotateScale = () => {
@@ -11584,6 +12055,384 @@ export default function Chat() {
         setInlineCropRect((prev) => normalizeCropRect(prev) || { x: 0, y: 0, w: 1, h: 1 });
     };
 
+    const getInlinePaintPoint = (event) => {
+        const rect = getInlineStageMetrics();
+        if (!rect) return null;
+        const point = {
+            x: clampUnit((event.clientX - rect.left) / rect.width),
+            y: clampUnit((event.clientY - rect.top) / rect.height)
+        };
+        setInlinePaintCursorPoint(point);
+        return point;
+    };
+
+    const scheduleInlinePaintPreview = () => {
+        if (inlinePaintFrameRef.current) return;
+        inlinePaintFrameRef.current = requestAnimationFrame(() => {
+            inlinePaintFrameRef.current = null;
+            setInlinePaintCurrentStroke(inlinePaintCurrentStrokeRef.current);
+        });
+    };
+
+    const handleInlinePaintPointerDown = (event) => {
+        if (!inlinePaintActive) return;
+        const point = getInlinePaintPoint(event);
+        if (!point) return;
+        event.currentTarget?.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+        event.stopPropagation();
+        const nextStroke = {
+            color: inlinePaintColor,
+            size: inlinePaintSize,
+            points: [point]
+        };
+        inlinePaintCurrentStrokeRef.current = nextStroke;
+        setInlinePaintCurrentStroke(nextStroke);
+    };
+
+    const handleInlinePaintPointerMove = (event) => {
+        if (!inlinePaintActive || !inlinePaintCurrentStrokeRef.current) return;
+        const point = getInlinePaintPoint(event);
+        if (!point) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const stroke = inlinePaintCurrentStrokeRef.current;
+        const last = stroke.points[stroke.points.length - 1];
+        if (last && Math.hypot(point.x - last.x, point.y - last.y) < 0.0025) return;
+        inlinePaintCurrentStrokeRef.current = {
+            ...stroke,
+            points: [...stroke.points, point]
+        };
+        scheduleInlinePaintPreview();
+    };
+
+    const handleInlinePaintPointerUp = () => {
+        const finishedStroke = inlinePaintCurrentStrokeRef.current;
+        if (finishedStroke && finishedStroke.points.length > 1) {
+            setInlinePaintStrokes((strokes) => [...strokes, finishedStroke]);
+            setInlinePaintRedoStrokes([]);
+        }
+        inlinePaintCurrentStrokeRef.current = null;
+        setInlinePaintCurrentStroke(null);
+    };
+
+    const undoInlineImageEdit = () => {
+        if (inlinePaintStrokes.length > 0) {
+            setInlinePaintStrokes((strokes) => {
+                const next = strokes.slice(0, -1);
+                const removed = strokes[strokes.length - 1];
+                if (removed) setInlinePaintRedoStrokes((redo) => [...redo, removed]);
+                return next;
+            });
+            return;
+        }
+        if (inlineTexts.length > 0) {
+            setInlineTexts((items) => {
+                const removed = items[items.length - 1];
+                if (removed) setInlineRedoEdits((redo) => [...redo, { type: 'text', value: removed }]);
+                return items.slice(0, -1);
+            });
+            return;
+        }
+        if (inlineImageFilter !== 'none') {
+            setInlineRedoEdits((redo) => [...redo, { type: 'filter', value: inlineImageFilter }]);
+            setInlineImageFilter('none');
+            return;
+        }
+        if (inlineCropRect) {
+            setInlineRedoEdits((redo) => [...redo, { type: 'crop', value: inlineCropRect }]);
+            setInlineCropRect(null);
+            setInlineCropActive(false);
+            return;
+        }
+        if (normalizeRotationDegrees(inlineImageRotation) !== 0) {
+            setInlineRedoEdits((redo) => [...redo, { type: 'rotation', value: inlineImageRotation }]);
+            setInlineImageRotation(0);
+        }
+    };
+
+    const redoInlineImageEdit = () => {
+        if (inlinePaintRedoStrokes.length > 0) {
+            setInlinePaintRedoStrokes((redo) => {
+                const restored = redo[redo.length - 1];
+                if (restored) setInlinePaintStrokes((strokes) => [...strokes, restored]);
+                return redo.slice(0, -1);
+            });
+            return;
+        }
+        if (inlineRedoEdits.length === 0) return;
+        setInlineRedoEdits((redo) => {
+            const restored = redo[redo.length - 1];
+            if (restored?.type === 'text') setInlineTexts((items) => [...items, restored.value]);
+            if (restored?.type === 'filter') setInlineImageFilter(restored.value);
+            if (restored?.type === 'crop') {
+                setInlineCropRect(restored.value);
+                setInlineCropActive(true);
+            }
+            if (restored?.type === 'rotation') setInlineImageRotation(restored.value);
+            return redo.slice(0, -1);
+        });
+    };
+
+    const hasInlineUndo = inlinePaintStrokes.length > 0 || inlineTexts.length > 0 || inlineImageFilter !== 'none' || !!inlineCropRect || normalizeRotationDegrees(inlineImageRotation) !== 0;
+    const hasInlineRedo = inlinePaintRedoStrokes.length > 0 || inlineRedoEdits.length > 0;
+
+    const buildInlinePaintPath = (points, width = 100, height = 100) => {
+        if (!points?.length) return '';
+        return points
+            .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x * width} ${point.y * height}`)
+            .join(' ');
+    };
+
+    const commitInlineTextDraft = () => {
+        const text = inlineTextDraft.trim();
+        if (!text) return;
+        const issue = getInlineTextAiIssue(text);
+        if (issue) {
+            setSnackbar({ message: issue, type: 'error', duration: 4000, variant: 'system' });
+            return;
+        }
+        setInlineTexts((items) => [
+            ...items,
+            {
+                id: Date.now(),
+                text,
+                x: inlineTextAlign === 'left' ? 0.18 : inlineTextAlign === 'right' ? 0.82 : 0.5,
+                y: 0.5,
+                color: inlinePaintColor,
+                size: 28,
+                font: inlineTextFont,
+                background: inlineTextBackground,
+                align: inlineTextAlign
+            }
+        ]);
+        setInlineTextDraft('');
+        setInlineTextActive(false);
+    };
+
+    const getInlineStagePoint = (event) => {
+        const rect = getInlineStageMetrics();
+        if (!rect) return null;
+        return {
+            x: clampUnit((event.clientX - rect.left) / rect.width),
+            y: clampUnit((event.clientY - rect.top) / rect.height)
+        };
+    };
+
+    const handleInlineTextPointerDown = (event, item) => {
+        const point = getInlineStagePoint(event);
+        if (!point) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget?.setPointerCapture?.(event.pointerId);
+        setDraggingInlineTextId(item.id);
+        setInlineTextDragOffset({
+            x: point.x - clampUnit(item.x),
+            y: point.y - clampUnit(item.y)
+        });
+    };
+
+    const handleInlineTextPointerMove = (event) => {
+        if (!draggingInlineTextId) return;
+        const point = getInlineStagePoint(event);
+        if (!point) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setInlineTexts((items) => items.map((item) => (
+            item.id === draggingInlineTextId
+                ? {
+                    ...item,
+                    x: clampUnit(point.x - inlineTextDragOffset.x),
+                    y: clampUnit(point.y - inlineTextDragOffset.y)
+                }
+                : item
+        )));
+    };
+
+    const handleInlineTextPointerUp = () => {
+        setDraggingInlineTextId(null);
+    };
+
+    const applyInlineTextAiStyle = (style) => {
+        const current = inlineTextDraft.trim();
+        if (!current) return;
+        const issue = getInlineTextAiIssue(current);
+        if (issue) {
+            setSnackbar({ message: issue, type: 'error', duration: 4000, variant: 'system' });
+            return;
+        }
+        if (style === 'basic') {
+            setInlineTextDraft(current);
+            return;
+        }
+        if (style === 'fluent') {
+            setInlineTextDraft(current.charAt(0).toUpperCase() + current.slice(1));
+            return;
+        }
+        if (style === 'formal') {
+            setInlineTextDraft(current.replace(/\bi\b/g, 'I'));
+        }
+    };
+
+    const getInlineTextAiIssue = (textValue = inlineTextDraft) => {
+        const text = String(textValue || '').trim();
+        if (!text) return '';
+        const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(text);
+        const normalizedText = text
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[@]/g, 'a')
+            .replace(/[!1|]/g, 'i')
+            .replace(/[0]/g, 'o')
+            .replace(/[3]/g, 'e')
+            .replace(/[5$]/g, 's')
+            .replace(/[7]/g, 't')
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const compactText = normalizedText.replace(/\s+/g, '');
+        const badWordPatterns = [
+            /\bfuck(?:er|ing|ed)?\b/i,
+            /\bmother\s*fucker\b/i,
+            /\bshit(?:ty)?\b/i,
+            /\bass(?:hole)?\b/i,
+            /\barse\b/i,
+            /\bbitch(?:es)?\b/i,
+            /\bson\s+of\s+a\s+bitch\b/i,
+            /\bbastard\b/i,
+            /\bcunt\b/i,
+            /\bdick\s*head\b/i,
+            /\bwanker\b/i,
+            /\bbollocks\b/i,
+            /\bpiss\s+off\b/i,
+            /\bbloody\s+hell\b/i,
+            /\btwat\b/i,
+            /\bprick\b/i,
+            /\bdouche\s*bag\b/i,
+            /\bdamn\b/i,
+            /\bdammit\b/i,
+            /\bidiot\b/i,
+            /\bstupid\b/i,
+            /\bslut\b/i,
+            /\bwhore\b/i,
+            /\bcrap\b/i,
+            /\bjerk\b/i,
+            /\bmierda\b/i,
+            /\bputa\b/i,
+            /\bcabron\b/i,
+            /\bco(?:n|ñ)o\b/i,
+            /\bjoder\b/i,
+            /\bhijo\s+de\s+puta\b/i,
+            /\bme\s+cago\s+en\s+la\s+leche\b/i,
+            /\bcome\s+mierda\b/i,
+            /\bpendejo\b/i,
+            /\bgilipollas\b/i,
+            /\bconcha\b/i,
+            /\bchaqueta\b/i,
+            /\bmerde\b/i,
+            /\bputain\b/i,
+            /\bsalope\b/i,
+            /\bconnard\b/i,
+            /\bcon\b/i,
+            /\bnique\s+ta\s+mere\b/i,
+            /\bva\s+te\s+faire\s+foutre\b/i,
+            /\bta\s+gueule\b/i,
+            /\bcul\b/i,
+            /\bfils\s+de\s+salope\b/i,
+            /\btabarnak\b/i,
+            /\bchutiya\b/i,
+            /\bmadar\s*chod\b/i,
+            /\bbehen\s*chod\b/i,
+            /\bbhosadi?ke\b/i,
+            /\bbsdk\b/i,
+            /\bgandu\b/i,
+            /\brandi\b/i,
+            /\bkutt[ai]\b/i,
+            /\bharamzada\b/i,
+            /\bbadkho\b/i,
+            /\blanja\s+kodaka\b/i,
+            /\bdengu\b/i,
+            /\bdengey\b/i,
+            /\byerri\s*pooku\b/i,
+            /\bmodda\b/i,
+            /\bmadda\b/i,
+            /\bpooku\b/i,
+            /\bgudda\b/i,
+            /\bkojja\b/i,
+            /\bmunda\b/i,
+            /\botha\b/i,
+            /\bthayoli\b/i,
+            /\bthevidiya\b/i,
+            /\bpundai\b/i,
+            /\bsunni\b/i,
+            /\bpoolu\b/i,
+            /\bsoothu\b/i,
+            /\bkundi\b/i,
+            /\bbaadu\b/i,
+            /\bloose?u\b/i,
+            /\bzavadya\b/i,
+            /\bbulla\b/i,
+            /\bkothi\b/i,
+            /\bkathhe\b/i,
+            /\bsule\s+magane\b/i,
+            /\bkhanki\b/i,
+            /\bbara\b/i,
+            /\bchoda\b/i,
+            /\bpatti\b/i,
+            /\bpunda\b/i,
+            /\bmc\b/i,
+            /\bbc\b/i,
+            /\b(?:kill|murder|die|abuse|hurt|harm|hate)\b/i,
+            /\b(?:kill|hurt|harm)\s+(?:you|u|him|her|them|me)\b/i
+        ];
+        const compactBadFragments = [
+            'fuck', 'motherfucker', 'shit', 'asshole', 'arse', 'bitch', 'sonofabitch', 'bastard', 'cunt',
+            'dickhead', 'wanker', 'bollocks', 'pissoff', 'bloodyhell', 'twat', 'prick', 'douchebag',
+            'damn', 'dammit', 'idiot', 'stupid', 'slut', 'whore', 'crap',
+            'mierda', 'puta', 'cabron', 'cono', 'coño', 'joder', 'hijodeputa', 'mecagoenlaleche',
+            'comemierda', 'pendejo', 'gilipollas', 'concha', 'chaqueta',
+            'merde', 'putain', 'salope', 'connard', 'niquetamere', 'vatefairefoutre', 'tagueule',
+            'filsdesalope', 'tabarnak',
+            'chutiya', 'madarchod', 'behenchod', 'bhosadike', 'bhosdike', 'bsdk',
+            'gandu', 'randi', 'kutta', 'kutti', 'haramzada', 'badkho',
+            'lanjakodaka', 'dengu', 'dengey', 'yerripooku', 'madda', 'modda', 'pooku', 'gudda', 'kojja', 'munda',
+            'otha', 'thayoli', 'thevidiya', 'pundai', 'sunni', 'poolu', 'soothu', 'kundi', 'baadu', 'loosu',
+            'zavadya', 'bulla', 'kothi', 'kathhe', 'sulemagane', 'khanki', 'bara', 'choda', 'patti', 'punda'
+        ];
+        const isUnethical =
+            badWordPatterns.some((pattern) => pattern.test(text) || pattern.test(normalizedText)) ||
+            compactBadFragments.some((fragment) => compactText.includes(fragment));
+        if (isUnethical) return 'Bad meaning words are not allowed. Please edit your text.';
+
+        const hasVowels = /[aeiouy]/i.test(text);
+        const hasNumbers = /[0-9]/.test(text);
+        const hasLettersOrNumbers = /[a-zA-Z0-9]/.test(text);
+        const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+        const repetitiveWord = words.length >= 3 && words.every((word) => word === words[0]);
+        const repetitiveChars = /(.)\1{4,}/i.test(text);
+        const lettersOnly = normalizedText.replace(/[^a-z]/g, '');
+        const uniqueLetters = new Set(lettersOnly).size;
+        const consonantRuns = lettersOnly.match(/[^aeiouy]{4,}/gi) || [];
+        const repeatedPairs = /([a-z]{2,3})\1{1,}/i.test(lettersOnly);
+        const lowVarietyNonsense = lettersOnly.length >= 5 && uniqueLetters <= 3;
+        const consonantHeavyNonsense = lettersOnly.length >= 5 && consonantRuns.some((run) => run.length >= 4) && !/(th|sh|ch|ph|wh|ck)/i.test(lettersOnly);
+        const alphabetRuns = ['abcdefghijklmnopqrstuvwxyz', 'zyxwvutsrqponmlkjihgfedcba', 'qwertyuiop', 'poiuytrewq', 'asdfghjkl', 'lkjhgfdsa', 'zxcvbnm', 'mnbvcxz'];
+        const alphabetSpam = lettersOnly.length >= 3 && alphabetRuns.some((run) => run.includes(lettersOnly));
+        const probablyGarbage = !isEmojiPresent && (
+            (text.length >= 3 && !hasVowels && !hasNumbers) ||
+            repetitiveChars ||
+            repetitiveWord ||
+            repeatedPairs ||
+            lowVarietyNonsense ||
+            consonantHeavyNonsense ||
+            alphabetSpam ||
+            !hasLettersOrNumbers
+        );
+        if (probablyGarbage) return 'Please write a meaningful word or sentence.';
+        return '';
+    };
+
     const downloadPreviewFile = () => {
         if (!file) return;
         const link = document.createElement('a');
@@ -11676,21 +12525,26 @@ export default function Chat() {
                         >
                             <X size={22} strokeWidth={2.2} />
                         </button>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setInlineImageRotation(0);
-                                setInlineCropRect({ x: 0, y: 0, w: 1, h: 1 });
-                                setInlineCropActive(false);
-                                setInlineCropResizeHandle(null);
-                                setInlineFilterActive(false);
-                                setInlineImageFilter('none');
-                            }}
-                            style={{ width: 32, height: 32, background: 'none', border: 'none', color: '#c1d2e2', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
-                            title="Undo edit"
-                        >
-                            <Undo2 size={22} strokeWidth={2.2} />
-                        </button>
+                        {hasInlineUndo && (
+                            <button
+                                type="button"
+                                onClick={undoInlineImageEdit}
+                                style={{ width: 32, height: 32, background: 'none', border: 'none', color: '#c1d2e2', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+                                title="Undo edit"
+                            >
+                                <Undo2 size={22} strokeWidth={2.2} />
+                            </button>
+                        )}
+                        {hasInlineRedo && (
+                            <button
+                                type="button"
+                                onClick={redoInlineImageEdit}
+                                style={{ width: 32, height: 32, background: 'none', border: 'none', color: '#c1d2e2', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, transform: 'scaleX(-1)' }}
+                                title="Redo edit"
+                            >
+                                <Undo2 size={22} strokeWidth={2.2} />
+                            </button>
+                        )}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 16, color: '#c1d2e2', justifySelf: 'center' }}>
                         <button
@@ -11747,21 +12601,23 @@ export default function Chat() {
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 cursor: 'pointer',
-                                color: '#c1d2e2',
+                                color: inlineImageEditMode && inlinePaintActive ? '#22d3ee' : '#c1d2e2',
                                 background: 'transparent'
                             }}
                             onClick={() => {
-                                setInlineImageEditMode(true);
-                                clearInlineCropMode();
-                                clearInlineFilterMode();
+                                activateInlinePaintMode();
                             }}
                         >
                             <span style={{ display: 'inline-flex' }}>
                                 <Pencil size={21} strokeWidth={2.1} />
                             </span>
                         </button>
-                        <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Text">
-                            <span style={{ fontSize: 20, fontWeight: 400, lineHeight: 1, color: '#c1d2e2' }}>Aa</span>
+                        <button type="button" onClick={activateInlineTextMode} style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: inlineTextActive ? '#22d3ee' : '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Text">
+                            <span
+                                style={{ fontSize: 20, fontWeight: 400, lineHeight: 1, color: 'inherit' }}
+                            >
+                                Aa
+                            </span>
                         </button>
                         <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Sticker">
                             <CheckSquare size={22} strokeWidth={2.2} />
@@ -11774,13 +12630,14 @@ export default function Chat() {
                         </button>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'end', gap: 14 }}>
-                        {inlineImageEditMode && (inlineCropActive || inlineFilterActive) && (
+                        {inlineImageEditMode && (inlineCropActive || inlineFilterActive || inlinePaintActive) && (
                             <button
                                 type="button"
                                 onClick={() => {
                                     setInlineImageEditMode(false);
                                     clearInlineCropMode();
                                     clearInlineFilterMode();
+                                    clearInlinePaintMode();
                                 }}
                                 style={{
                                     border: 'none',
@@ -11869,16 +12726,15 @@ export default function Chat() {
                 {file && file.type?.startsWith('image/') ? (
                     <div style={{ width: '100%', maxWidth: isMobile ? 'calc(100vw - 24px)' : 760, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: isMobile ? 10 : 14, background: 'transparent' }}>
                         <div style={{
+                            display: inlineImageEditMode && inlineFilterActive ? 'flex' : 'none',
                             width: '100%',
                             minHeight: isMobile ? 76 : 86,
-                            display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             gap: isMobile ? 12 : 22,
                             flexWrap: 'nowrap',
                             overflowX: inlineFilterActive ? 'auto' : 'hidden',
                             scrollbarWidth: 'none',
-                            visibility: inlineImageEditMode && inlineFilterActive ? 'visible' : 'hidden',
                             pointerEvents: inlineImageEditMode && inlineFilterActive ? 'auto' : 'none',
                             background: 'transparent',
                             flexShrink: 0
@@ -11955,7 +12811,7 @@ export default function Chat() {
                                 );
                             })}
                         </div>
-                        <div style={{ width: '100%', flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'visible' }}>
+                        <div style={{ width: '100%', flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                             <div
                                 ref={inlineImageStageRef}
                                 style={{
@@ -11963,6 +12819,7 @@ export default function Chat() {
                                     display: 'inline-block',
                                     maxWidth: '100%',
                                     maxHeight: '100%',
+                                    lineHeight: 0,
                                     transform: inlineImageEditMode
                                         ? `rotate(${inlineImageRotation}deg) scale(${getInlinePreviewRotateScale()})`
                                         : 'none',
@@ -11983,13 +12840,307 @@ export default function Chat() {
                                     style={{
                                         display: 'block',
                                         maxWidth: '100%',
-                                        maxHeight: isMobile ? 'min(100%, calc(100vh - 250px))' : 'min(100%, calc(100vh - 300px))',
+                                        maxHeight: '100%',
                                         width: 'auto',
                                         height: 'auto',
                                         objectFit: 'contain',
                                         filter: getInlineImageFilterCss()
                                     }}
                                 />
+                                {(inlinePaintStrokes.length > 0 || inlinePaintCurrentStroke) && (
+                                    <svg
+                                        viewBox="0 0 100 100"
+                                        preserveAspectRatio="none"
+                                        style={{
+                                            position: 'absolute',
+                                            inset: 0,
+                                            width: '100%',
+                                            height: '100%',
+                                            pointerEvents: 'none',
+                                            overflow: 'hidden'
+                                        }}
+                                    >
+                                        {[...inlinePaintStrokes, ...(inlinePaintCurrentStroke ? [inlinePaintCurrentStroke] : [])].map((stroke, strokeIndex) => (
+                                            <path
+                                                key={strokeIndex}
+                                                d={buildInlinePaintPath(stroke.points)}
+                                                fill="none"
+                                                stroke={stroke.color || '#33ceff'}
+                                                strokeWidth={Math.max(2, Number(stroke.size || 8))}
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                vectorEffect="non-scaling-stroke"
+                                            />
+                                        ))}
+                                    </svg>
+                                )}
+                                {inlineTexts.map((item) => (
+                                    <div
+                                        key={item.id}
+                                        style={{
+                                            position: 'absolute',
+                                            left: `${clampUnit(item.x) * 100}%`,
+                                            top: `${clampUnit(item.y) * 100}%`,
+                                            transform: item.align === 'left'
+                                                ? 'translate(0, -50%)'
+                                                : item.align === 'right'
+                                                    ? 'translate(-100%, -50%)'
+                                                    : 'translate(-50%, -50%)',
+                                            color: item.color || '#ffffff',
+                                            fontSize: item.size || 28,
+                                            fontFamily: item.font === 'Serif'
+                                                ? 'Georgia, serif'
+                                                : item.font === 'Norican'
+                                                    ? 'cursive'
+                                                    : item.font === 'Bryndan Write'
+                                                        ? '"Comic Sans MS", cursive'
+                                                        : item.font === 'Oswald'
+                                                            ? 'Impact, sans-serif'
+                                                : item.font === 'Monospace'
+                                                    ? '"Courier New", monospace'
+                                                    : 'Arial, sans-serif',
+                                            fontWeight: 700,
+                                            textAlign: item.align || 'center',
+                                            textShadow: '0 2px 4px rgba(2, 6, 23, 0.8), 0 0 2px rgba(2, 6, 23, 0.9)',
+                                            pointerEvents: inlineImageEditMode && !inlineTextActive && !inlinePaintActive && !inlineCropActive ? 'auto' : 'none',
+                                            cursor: draggingInlineTextId === item.id ? 'grabbing' : 'grab',
+                                            whiteSpace: 'nowrap',
+                                            zIndex: 4,
+                                            background: item.background ? 'rgba(2, 18, 32, 0.78)' : 'transparent',
+                                            borderRadius: item.background ? 6 : 0,
+                                            padding: item.background ? '4px 10px' : 0,
+                                            touchAction: 'none'
+                                        }}
+                                        onPointerDown={(event) => handleInlineTextPointerDown(event, item)}
+                                        onPointerMove={handleInlineTextPointerMove}
+                                        onPointerUp={handleInlineTextPointerUp}
+                                        onPointerCancel={handleInlineTextPointerUp}
+                                    >
+                                        {item.text}
+                                    </div>
+                                ))}
+                                {inlineImageEditMode && !inlineTextActive && !inlinePaintActive && !inlineCropActive && inlineTexts.length > 0 && (
+                                    <div
+                                        style={{
+                                            position: 'absolute',
+                                            inset: 0,
+                                            zIndex: 3,
+                                            pointerEvents: 'auto',
+                                            cursor: draggingInlineTextId ? 'grabbing' : 'default',
+                                            touchAction: 'none'
+                                        }}
+                                        onPointerMove={handleInlineTextPointerMove}
+                                        onPointerUp={handleInlineTextPointerUp}
+                                        onPointerCancel={handleInlineTextPointerUp}
+                                    />
+                                )}
+                                {inlineImageEditMode && inlineTextActive && (
+                                    <div
+                                        style={{
+                                            position: 'absolute',
+                                            left: '50%',
+                                            top: '50%',
+                                            transform: 'translate(-50%, -50%)',
+                                            zIndex: 8,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: 8,
+                                            padding: 4,
+                                            borderRadius: 9,
+                                            background: 'rgba(8, 30, 50, 0.96)',
+                                            border: '2px solid #33ceff',
+                                            boxShadow: '0 0 0 2px rgba(2, 12, 24, 0.85), 0 8px 20px rgba(2, 6, 23, 0.32)'
+                                        }}
+                                    >
+                                        <button
+                                            type="button"
+                                            title="Emoji"
+                                            className="wa-nav-icon-btn wa-inline-text-emoji-btn"
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                const rect = event.currentTarget.getBoundingClientRect();
+                                                setEmojiInsertTarget('inlineText');
+                                                setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
+                                                setShowInputEmojiPicker((prev) => !prev || emojiInsertTarget !== 'inlineText');
+                                            }}
+                                            style={{
+                                                position: 'absolute',
+                                                left: '50%',
+                                                top: -42,
+                                                transform: 'translateX(-50%)',
+                                                width: 34,
+                                                height: 34,
+                                                borderRadius: '50%',
+                                                border: '2px solid #ffffff',
+                                                background: 'rgba(15, 23, 42, 0.92)',
+                                                color: '#dbeafe',
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                boxShadow: '0 8px 18px rgba(2, 6, 23, 0.34)',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            <Smile size={22} />
+                                        </button>
+                                        {!!inlineTextDraft.trim() && (
+                                            <div
+                                                style={{
+                                                    position: 'absolute',
+                                                    left: 0,
+                                                    bottom: 'calc(100% + 12px)',
+                                                    minWidth: 330,
+                                                    padding: '12px 14px 10px',
+                                                    borderRadius: 12,
+                                                    borderLeft: '3px solid #0EA5BE',
+                                                    background: 'rgba(230, 236, 242, 0.98)',
+                                                    boxShadow: '0 8px 24px rgba(2, 12, 24, 0.28)',
+                                                    color: '#027EB5'
+                                                }}
+                                            >
+                                                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Neural Chat AI</div>
+                                                {getInlineTextAiIssue() ? (
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ef4444', fontSize: 13, fontWeight: 700 }}>
+                                                        <AlertCircle size={16} />
+                                                        {getInlineTextAiIssue()}
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                                        {[
+                                                            { id: 'basic', label: 'BASIC', color: '#059669' },
+                                                            { id: 'fluent', label: 'FLUENT', color: '#1d72d2' },
+                                                            { id: 'formal', label: 'FORMAL', color: '#6d4aff' }
+                                                        ].map((option) => (
+                                                            <button
+                                                                key={option.id}
+                                                                type="button"
+                                                                onClick={() => applyInlineTextAiStyle(option.id)}
+                                                                style={{
+                                                                    border: `1.5px solid ${option.color}`,
+                                                                    color: option.color,
+                                                                    background: '#ffffff',
+                                                                    borderRadius: 999,
+                                                                    padding: '6px 12px',
+                                                                    fontSize: 12,
+                                                                    fontWeight: 800,
+                                                                    letterSpacing: 0.4,
+                                                                    cursor: 'pointer',
+                                                                    display: 'inline-flex',
+                                                                    alignItems: 'center',
+                                                                    gap: 6
+                                                                }}
+                                                            >
+                                                                <MessageSquare size={12} />
+                                                                {option.label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                        <input
+                                            autoFocus
+                                            value={inlineTextDraft}
+                                            onChange={(event) => setInlineTextDraft(event.target.value)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === 'Enter') commitInlineTextDraft();
+                                                if (event.key === 'Escape') clearInlineTextMode();
+                                            }}
+                                            placeholder="Type something"
+                                            style={{
+                                                width: 190,
+                                                height: 34,
+                                                borderRadius: 6,
+                                                border: '1px solid rgba(15, 23, 42, 0.25)',
+                                                outline: 'none',
+                                                padding: '0 10px',
+                                                fontSize: 18,
+                                                color: inlineTextBackground ? '#e0f7ff' : inlinePaintColor,
+                                                background: inlineTextBackground ? 'rgba(2, 18, 32, 0.88)' : '#ffffff',
+                                                borderColor: inlineTextBackground ? '#33ceff' : 'rgba(51, 206, 255, 0.7)',
+                                                textAlign: inlineTextAlign,
+                                                fontFamily: inlineTextFont === 'Serif'
+                                                    ? 'Georgia, serif'
+                                                    : inlineTextFont === 'Norican'
+                                                        ? 'cursive'
+                                                        : inlineTextFont === 'Bryndan Write'
+                                                            ? '"Comic Sans MS", cursive'
+                                                            : inlineTextFont === 'Oswald'
+                                                                ? 'Impact, sans-serif'
+                                                    : inlineTextFont === 'Monospace'
+                                                        ? '"Courier New", monospace'
+                                                        : 'Arial, sans-serif'
+                                            }}
+                                        />
+                                        <button
+                                            type="button"
+                                            title="Done"
+                                            onClick={commitInlineTextDraft}
+                                            disabled={!!getInlineTextAiIssue(inlineTextDraft) || !inlineTextDraft.trim()}
+                                            style={{
+                                                width: 34,
+                                                height: 34,
+                                                borderRadius: '50%',
+                                                border: 'none',
+                                                background: getInlineTextAiIssue(inlineTextDraft) || !inlineTextDraft.trim()
+                                                    ? 'rgba(148, 163, 184, 0.45)'
+                                                    : 'linear-gradient(135deg, #22d3ee, #3b82f6)',
+                                                color: '#ffffff',
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                cursor: getInlineTextAiIssue(inlineTextDraft) || !inlineTextDraft.trim() ? 'not-allowed' : 'pointer',
+                                                flexShrink: 0
+                                            }}
+                                        >
+                                            <Check size={20} strokeWidth={2.6} />
+                                        </button>
+                                    </div>
+                                )}
+                                {inlineImageEditMode && inlinePaintActive && (
+                                    <div
+                                        style={{
+                                            position: 'absolute',
+                                            inset: 0,
+                                            cursor: 'crosshair',
+                                            touchAction: 'none'
+                                        }}
+                                        onPointerDown={handleInlinePaintPointerDown}
+                                        onPointerMove={handleInlinePaintPointerMove}
+                                        onPointerUp={handleInlinePaintPointerUp}
+                                        onPointerCancel={handleInlinePaintPointerUp}
+                                        onPointerLeave={() => setInlinePaintCursorPoint(null)}
+                                    />
+                                )}
+                                {inlineImageEditMode && inlinePaintActive && inlinePaintCursorPoint && (
+                                    <div
+                                        style={{
+                                            position: 'absolute',
+                                            left: `${inlinePaintCursorPoint.x * 100}%`,
+                                            top: `${inlinePaintCursorPoint.y * 100}%`,
+                                            width: Math.max(12, Number(inlinePaintSize || 8)),
+                                            height: Math.max(12, Number(inlinePaintSize || 8)),
+                                            borderRadius: '50%',
+                                            transform: 'translate(-50%, -50%)',
+                                            pointerEvents: 'none',
+                                            zIndex: 4,
+                                            background: 'rgba(255, 255, 255, 0.16)',
+                                            border: `2px solid ${inlinePaintColor}`,
+                                            boxShadow: '0 2px 8px rgba(2, 6, 23, 0.45)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}
+                                    >
+                                        <span style={{
+                                            width: 6,
+                                            height: 6,
+                                            borderRadius: '50%',
+                                            background: inlinePaintColor,
+                                            display: 'block'
+                                        }} />
+                                    </div>
+                                )}
                             {inlineImageEditMode && inlineCropActive && (
                                     <div
                                         style={{
@@ -12055,7 +13206,7 @@ export default function Chat() {
                             </div>
                         </div>
                         <div style={{
-                            display: 'flex',
+                            display: inlineImageEditMode && inlineCropActive ? 'flex' : 'none',
                             alignItems: 'center',
                             justifyContent: 'center',
                             gap: 22,
@@ -12070,7 +13221,6 @@ export default function Chat() {
                             maxWidth: '100%',
                             overflowX: 'visible',
                             scrollbarWidth: 'none',
-                            visibility: inlineImageEditMode && inlineCropActive ? 'visible' : 'hidden',
                             pointerEvents: inlineImageEditMode && inlineCropActive ? 'auto' : 'none',
                             background: 'transparent'
                         }}>
@@ -12129,6 +13279,456 @@ export default function Chat() {
                                         Reset
                                     </button>
                             </>
+                        </div>
+                        <div style={{
+                            display: 'none',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: isMobile ? 12 : 14,
+                            flexWrap: 'nowrap',
+                            padding: isMobile ? '10px 16px' : '14px 22px',
+                            color: '#c1d2e2',
+                            flexShrink: 0,
+                            minHeight: isMobile ? 46 : 54,
+                            width: '100%',
+                            margin: '8px auto 0',
+                            overflow: 'visible',
+                            scrollbarWidth: 'none',
+                            background: 'transparent',
+                            borderBottom: 'none',
+                            boxShadow: 'none',
+                            position: 'relative'
+                        }}>
+                            {[
+                                { color: '#3f3f46', label: 'Charcoal' },
+                                { color: '#9ca3af', label: 'Gray' },
+                                { color: '#ffffff', label: 'White' },
+                                { color: '#33ceff', label: 'Cyan' },
+                                { color: '#52d23d', label: 'Green' },
+                                { color: '#a855f7', label: 'Purple' },
+                                { color: '#f7931e', label: 'Orange' },
+                                { color: '#ff4d4f', label: 'Red' }
+                            ].map((paintOption) => (
+                                <button
+                                    key={paintOption.color}
+                                    type="button"
+                                    title={paintOption.label}
+                                    aria-label={paintOption.label}
+                                    onClick={() => setInlinePaintColor(paintOption.color)}
+                                    style={{
+                                        width: 20,
+                                        height: 20,
+                                        borderRadius: '50%',
+                                        border: inlinePaintColor === paintOption.color
+                                            ? '2px solid #33ceff'
+                                            : (paintOption.color === '#ffffff' ? '1px solid #94a3b8' : 'none'),
+                                        background: paintOption.color,
+                                        cursor: 'pointer',
+                                        flexShrink: 0,
+                                        boxShadow: inlinePaintColor === paintOption.color ? '0 0 0 2px rgba(2, 12, 24, 0.9)' : 'none'
+                                    }}
+                                />
+                            ))}
+                            <button
+                                type="button"
+                                title="More colors"
+                                onClick={() => setInlinePaintPaletteOpen((prev) => !prev)}
+                                style={{
+                                    width: 30,
+                                    height: 30,
+                                    border: 'none',
+                                    background: 'transparent',
+                                    color: inlinePaintPaletteOpen ? '#33ceff' : '#94a3b8',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    flexShrink: 0
+                                }}
+                            >
+                                <ChevronUp size={20} />
+                            </button>
+                            <span style={{ width: isMobile ? 18 : 28, flexShrink: 0 }} />
+                            {[
+                                { size: 3, label: 'Thin brush' },
+                                { size: 6, label: 'Normal brush' },
+                                { size: 10, label: 'Thick brush' },
+                                { size: 16, label: 'Extra thick brush' }
+                            ].map((paintOption) => (
+                                <button
+                                    key={paintOption.size}
+                                    type="button"
+                                    title={paintOption.label}
+                                    aria-label={paintOption.label}
+                                    onClick={() => setInlinePaintSize(paintOption.size)}
+                                    style={{
+                                        width: 28,
+                                        height: 28,
+                                        border: 'none',
+                                        borderRadius: '50%',
+                                        background: 'transparent',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: 'pointer',
+                                        flexShrink: 0
+                                    }}
+                                >
+                                    <span style={{
+                                        width: paintOption.size,
+                                        height: paintOption.size,
+                                        borderRadius: '50%',
+                                        background: inlinePaintSize === paintOption.size ? '#33ceff' : '#b8c4cc',
+                                        display: 'block',
+                                        boxShadow: inlinePaintSize === paintOption.size ? '0 0 0 2px rgba(51, 206, 255, 0.18)' : 'none'
+                                    }} />
+                                </button>
+                            ))}
+                            {inlinePaintPaletteOpen && (
+                                <div style={{
+                                    position: 'absolute',
+                                    bottom: 'calc(100% + 12px)',
+                                    left: '50%',
+                                    transform: 'translateX(-20%)',
+                                    width: 'min(420px, calc(100vw - 48px))',
+                                    padding: 0,
+                                    borderRadius: 14,
+                                    background: '#ffffff',
+                                    boxShadow: '0 18px 40px rgba(2, 6, 23, 0.28)',
+                                    overflow: 'hidden',
+                                    zIndex: 10,
+                                    border: '1px solid rgba(15, 23, 42, 0.08)'
+                                }}>
+                                    <label
+                                        title="Rainbow color picker"
+                                        style={{
+                                            display: 'block',
+                                            position: 'relative',
+                                            height: 136,
+                                            width: '100%',
+                                            cursor: 'pointer',
+                                            background: 'linear-gradient(90deg, #ff4d4f 0%, #ffec3d 16%, #52d23d 32%, #33ceff 48%, #3b82f6 64%, #a855f7 80%, #ff2d8d 100%)'
+                                        }}
+                                    >
+                                        <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
+                                        <input
+                                            type="color"
+                                            value={inlinePaintColor}
+                                            onChange={(event) => setInlinePaintColor(event.target.value)}
+                                            style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'crosshair' }}
+                                        />
+                                    </label>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
+                                        <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
+                                        {inlinePaintColor.toUpperCase()}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <div style={{
+                            display: inlineImageEditMode && inlinePaintActive ? 'flex' : 'none',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: isMobile ? 10 : 12,
+                            flexWrap: 'nowrap',
+                            padding: isMobile ? '9px 12px' : '10px 18px',
+                            color: '#c1d2e2',
+                            minHeight: isMobile ? 44 : 52,
+                            width: 'fit-content',
+                            maxWidth: 'calc(100% - 32px)',
+                            position: 'absolute',
+                            left: '50%',
+                            top: isMobile ? 6 : 10,
+                            transform: 'translateX(-50%)',
+                            overflow: 'visible',
+                            scrollbarWidth: 'none',
+                            background: 'linear-gradient(180deg, rgba(8, 30, 50, 0.96), rgba(6, 24, 42, 0.94))',
+                            border: '1px solid rgba(56, 189, 248, 0.18)',
+                            borderRadius: 16,
+                            boxShadow: '0 14px 34px rgba(2, 6, 23, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+                            backdropFilter: 'blur(14px)',
+                            WebkitBackdropFilter: 'blur(14px)',
+                            zIndex: 120,
+                            pointerEvents: inlineImageEditMode && inlinePaintActive ? 'auto' : 'none'
+                        }}>
+                            {[
+                                { color: '#3f3f46', label: 'Charcoal' },
+                                { color: '#9ca3af', label: 'Gray' },
+                                { color: '#ffffff', label: 'White' },
+                                { color: '#33ceff', label: 'Cyan' },
+                                { color: '#52d23d', label: 'Green' },
+                                { color: '#a855f7', label: 'Purple' },
+                                { color: '#f7931e', label: 'Orange' },
+                                { color: '#ff4d4f', label: 'Red' }
+                            ].map((paintOption) => (
+                                <button
+                                    key={paintOption.color}
+                                    type="button"
+                                    title={paintOption.label}
+                                    aria-label={paintOption.label}
+                                    onClick={() => setInlinePaintColor(paintOption.color)}
+                                    style={{
+                                        width: 24,
+                                        height: 24,
+                                        borderRadius: '50%',
+                                        border: inlinePaintColor === paintOption.color
+                                            ? '2px solid #33ceff'
+                                            : (paintOption.color === '#ffffff' ? '1px solid #94a3b8' : 'none'),
+                                        background: paintOption.color,
+                                        cursor: 'pointer',
+                                        flexShrink: 0,
+                                        padding: 0,
+                                        boxSizing: 'border-box',
+                                        boxShadow: inlinePaintColor === paintOption.color ? '0 0 0 2px rgba(2, 12, 24, 0.9)' : 'none'
+                                    }}
+                                />
+                            ))}
+                            <button
+                                type="button"
+                                title="More colors"
+                                onClick={() => setInlinePaintPaletteOpen((prev) => !prev)}
+                                style={{
+                                    width: 34,
+                                    height: 34,
+                                    border: 'none',
+                                    background: 'transparent',
+                                    color: inlinePaintPaletteOpen ? '#33ceff' : '#94a3b8',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    flexShrink: 0
+                                }}
+                            >
+                                <ChevronUp size={30} strokeWidth={2.5} />
+                            </button>
+                            <span style={{ width: 0, flexShrink: 0 }} />
+                            {[
+                                { size: 4, dot: 7, label: 'Thin brush' },
+                                { size: 8, dot: 12, label: 'Normal brush' },
+                                { size: 14, dot: 18, label: 'Thick brush' },
+                                { size: 22, dot: 25, label: 'Extra thick brush' }
+                            ].map((paintOption) => (
+                                <button
+                                    key={paintOption.size}
+                                    type="button"
+                                    title={paintOption.label}
+                                    aria-label={paintOption.label}
+                                    onClick={() => setInlinePaintSize(paintOption.size)}
+                                    style={{
+                                        width: 34,
+                                        height: 34,
+                                        border: inlinePaintSize === paintOption.size ? '1px solid rgba(51, 206, 255, 0.6)' : '1px solid transparent',
+                                        borderRadius: '50%',
+                                        background: inlinePaintSize === paintOption.size ? 'rgba(51, 206, 255, 0.12)' : 'transparent',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: 'pointer',
+                                        flexShrink: 0,
+                                        padding: 0,
+                                        boxSizing: 'border-box'
+                                    }}
+                                >
+                                    <span style={{
+                                        width: paintOption.dot,
+                                        height: paintOption.dot,
+                                        minWidth: paintOption.dot,
+                                        minHeight: paintOption.dot,
+                                        borderRadius: '50%',
+                                        background: inlinePaintSize === paintOption.size ? '#33ceff' : '#b8c4cc',
+                                        display: 'block',
+                                        aspectRatio: '1 / 1',
+                                        flex: '0 0 auto',
+                                        boxShadow: inlinePaintSize === paintOption.size ? '0 0 10px rgba(51, 206, 255, 0.42)' : 'none'
+                                    }} />
+                                </button>
+                            ))}
+                            {inlinePaintPaletteOpen && (
+                                <div style={{
+                                    position: 'absolute',
+                                    top: 'calc(100% + 10px)',
+                                    left: '50%',
+                                    transform: 'translateX(-50%)',
+                                    width: 'min(420px, calc(100vw - 48px))',
+                                    padding: 0,
+                                    borderRadius: 14,
+                                    background: '#ffffff',
+                                    boxShadow: '0 18px 40px rgba(2, 6, 23, 0.28)',
+                                    overflow: 'hidden',
+                                    zIndex: 10,
+                                    border: '1px solid rgba(15, 23, 42, 0.08)'
+                                }}>
+                                    <label
+                                        title="Rainbow color picker"
+                                        style={{
+                                            display: 'block',
+                                            position: 'relative',
+                                            height: 136,
+                                            width: '100%',
+                                            cursor: 'pointer',
+                                            background: 'linear-gradient(90deg, #ff4d4f 0%, #ffec3d 16%, #52d23d 32%, #33ceff 48%, #3b82f6 64%, #a855f7 80%, #ff2d8d 100%)'
+                                        }}
+                                    >
+                                        <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
+                                        <input
+                                            type="color"
+                                            value={inlinePaintColor}
+                                            onChange={(event) => setInlinePaintColor(event.target.value)}
+                                            style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'crosshair' }}
+                                        />
+                                    </label>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
+                                        <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
+                                        {inlinePaintColor.toUpperCase()}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <div style={{
+                            display: inlineImageEditMode && inlineTextActive ? 'flex' : 'none',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: isMobile ? 10 : 12,
+                            flexWrap: 'nowrap',
+                            padding: isMobile ? '9px 12px' : '10px 18px',
+                            color: '#dbeafe',
+                            minHeight: isMobile ? 44 : 52,
+                            width: 'fit-content',
+                            maxWidth: 'calc(100% - 32px)',
+                            position: 'absolute',
+                            left: '50%',
+                            top: isMobile ? 6 : 10,
+                            transform: 'translateX(-50%)',
+                            overflow: 'visible',
+                            scrollbarWidth: 'none',
+                            background: 'linear-gradient(180deg, rgba(8, 30, 50, 0.96), rgba(6, 24, 42, 0.94))',
+                            border: '1px solid rgba(56, 189, 248, 0.18)',
+                            borderRadius: 16,
+                            boxShadow: '0 14px 34px rgba(2, 6, 23, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+                            backdropFilter: 'blur(14px)',
+                            WebkitBackdropFilter: 'blur(14px)',
+                            zIndex: 120,
+                            pointerEvents: inlineImageEditMode && inlineTextActive ? 'auto' : 'none'
+                        }}>
+                            {[
+                                { color: '#3f3f46', label: 'Charcoal' },
+                                { color: '#9ca3af', label: 'Gray' },
+                                { color: '#ffffff', label: 'White' },
+                                { color: '#33ceff', label: 'Cyan' },
+                                { color: '#52d23d', label: 'Green' },
+                                { color: '#a855f7', label: 'Purple' },
+                                { color: '#f7931e', label: 'Orange' },
+                                { color: '#ff4d4f', label: 'Red' }
+                            ].map((paintOption) => (
+                                <button
+                                    key={paintOption.color}
+                                    type="button"
+                                    title={paintOption.label}
+                                    aria-label={paintOption.label}
+                                    onClick={() => setInlinePaintColor(paintOption.color)}
+                                    style={{
+                                        width: 20,
+                                        height: 20,
+                                        borderRadius: '50%',
+                                        border: inlinePaintColor === paintOption.color
+                                            ? '2px solid #33ceff'
+                                            : (paintOption.color === '#ffffff' ? '1px solid #94a3b8' : 'none'),
+                                        background: paintOption.color,
+                                        cursor: 'pointer',
+                                        flexShrink: 0,
+                                        padding: 0,
+                                        boxSizing: 'border-box',
+                                        boxShadow: inlinePaintColor === paintOption.color ? '0 0 0 2px rgba(2, 12, 24, 0.9)' : 'none'
+                                    }}
+                                />
+                            ))}
+                            <button
+                                type="button"
+                                title="More colors"
+                                onClick={() => setInlineTextPaletteOpen((prev) => !prev)}
+                                style={{ width: 34, height: 34, border: 'none', background: 'transparent', color: inlineTextPaletteOpen ? '#33ceff' : '#94a3b8', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+                            >
+                                <ChevronUp size={28} strokeWidth={2.5} />
+                            </button>
+                            <div className="wa-inline-font-control" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 8, whiteSpace: 'nowrap', position: 'relative' }}>
+                                <span style={{ width: 24, height: 24, borderRadius: '50%', background: '#5f6b75', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#dbeafe', fontWeight: 700 }}>A</span>
+                                <button
+                                    type="button"
+                                    onClick={() => setInlineTextFontOpen((prev) => !prev)}
+                                    style={{ border: 'none', background: 'transparent', color: '#dbeafe', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 16, padding: 0 }}
+                                >
+                                    {inlineTextFont}
+                                    <ChevronUp size={22} strokeWidth={2.4} />
+                                </button>
+                                {inlineTextFontOpen && (
+                                    <div style={{ position: 'absolute', top: 'calc(100% + 10px)', left: '50%', transform: 'translateX(-50%)', minWidth: 322, background: '#ffffff', color: '#0f172a', borderRadius: 18, boxShadow: '0 16px 36px rgba(2, 6, 23, 0.28)', overflow: 'hidden', zIndex: 20, padding: '14px 14px 12px' }}>
+                                        {[
+                                            { name: 'Sans Serif', family: 'Arial, sans-serif', weight: 400 },
+                                            { name: 'Serif', family: 'Georgia, serif', weight: 400 },
+                                            { name: 'Norican', family: 'cursive', weight: 700 },
+                                            { name: 'Bryndan Write', family: '"Comic Sans MS", cursive', weight: 700 },
+                                            { name: 'Oswald', family: 'Impact, sans-serif', weight: 700 },
+                                            { name: 'Monospace', family: '"Courier New", monospace', weight: 700 }
+                                        ].map((fontOption) => (
+                                            <button
+                                                key={fontOption.name}
+                                                type="button"
+                                                onClick={() => { setInlineTextFont(fontOption.name); setInlineTextFontOpen(false); }}
+                                                className="wa-inline-font-option"
+                                                style={{ width: '100%', border: 'none', background: '#ffffff', color: '#0f172a', textAlign: 'left', padding: '9px 28px', cursor: 'pointer', fontSize: fontOption.name === 'Bryndan Write' ? 25 : fontOption.name === 'Oswald' ? 25 : 20, fontFamily: fontOption.family, fontWeight: fontOption.weight, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                                            >
+                                                {fontOption.name}
+                                                {inlineTextFont === fontOption.name && <Check size={20} />}
+                                            </button>
+                                        ))}
+                                        <div style={{ height: 1, background: '#e5e7eb', margin: '8px 0 10px' }} />
+                                        <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+                                            {[
+                                                { id: 'left', label: 'Left align', Icon: AlignLeft },
+                                                { id: 'center', label: 'Center align', Icon: AlignCenter },
+                                                { id: 'right', label: 'Right align', Icon: AlignRight }
+                                            ].map(({ id, label, Icon }) => (
+                                                <button
+                                                    key={id}
+                                                    type="button"
+                                                    title={label}
+                                                    onClick={() => setInlineTextAlign(id)}
+                                                    style={{ width: 42, height: 34, border: 'none', background: 'transparent', color: inlineTextAlign === id ? '#0f172a' : '#6b7280', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                                >
+                                                    <Icon size={23} />
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setInlineTextBackground((prev) => !prev)}
+                                title="Background"
+                                style={{ border: 'none', background: 'transparent', color: '#dbeafe', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 16, whiteSpace: 'nowrap' }}
+                            >
+                                <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlineTextBackground ? '#5f6b75' : 'transparent', border: '1px solid #94a3b8', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Check size={16} />
+                                </span>
+                                Background
+                            </button>
+                            <button type="button" title="Delete text" onClick={clearInlineTextMode} style={{ border: 'none', background: 'transparent', color: '#cbd5e1', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
+                                <Trash2 size={24} />
+                            </button>
+                            {inlineTextPaletteOpen && (
+                                <div style={{ position: 'absolute', top: 'calc(100% + 10px)', left: '50%', transform: 'translateX(-50%)', width: 'min(420px, calc(100vw - 48px))', padding: 0, borderRadius: 14, background: '#ffffff', boxShadow: '0 18px 40px rgba(2, 6, 23, 0.28)', overflow: 'hidden', zIndex: 20, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+                                    <label title="Rainbow color picker" style={{ display: 'block', position: 'relative', height: 136, width: '100%', cursor: 'pointer', background: 'linear-gradient(90deg, #ff4d4f 0%, #ffec3d 16%, #52d23d 32%, #33ceff 48%, #3b82f6 64%, #a855f7 80%, #ff2d8d 100%)' }}>
+                                        <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
+                                        <input type="color" value={inlinePaintColor} onChange={(event) => setInlinePaintColor(event.target.value)} style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'crosshair' }} />
+                                    </label>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
+                                        <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
+                                        {inlinePaintColor.toUpperCase()}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 ) : file && file.type?.startsWith('video/') ? (
@@ -12221,7 +13821,7 @@ export default function Chat() {
                                 if (isDocFile) setIsViewOnceMedia(false);
                             }}>
                                 {f.type?.startsWith('image/') ? (
-                                    <img src={getFilePreviewUrl(f)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={`thumb-${idx}`} />
+                                    <img src={getFilePreviewUrl(f)} style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#061a2d' }} alt={`thumb-${idx}`} />
                                 ) : f.type?.startsWith('video/') ? (
                                     <div style={{ width: '100%', height: '100%', background: 'linear-gradient(180deg, rgba(10, 35, 58, 0.95), rgba(8, 28, 46, 0.95))', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
                                         <Play size={14} color="#b9d8ea" fill="#b9d8ea" />
@@ -12302,6 +13902,7 @@ export default function Chat() {
                             className={`wa-nav-icon-btn ${showInputEmojiPicker ? 'active' : ''}`}
                             onClick={(e) => {
                                 const rect = e.currentTarget.getBoundingClientRect();
+                                setEmojiInsertTarget('chat');
                                 setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
                                 setShowInputEmojiPicker(!showInputEmojiPicker);
                             }}
@@ -13006,8 +14607,8 @@ export default function Chat() {
                                         {previewItems.map((m, i) => {
                                             if (m.type === 'image' || m.type === 'video') {
                                                 return (
-                                                    <div key={i} onClick={(e) => { e.stopPropagation(); setViewingImage(m); }} style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }}>
-                                                        <img src={getMessageMediaUrl(m)} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                    <div key={i} onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }} style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }}>
+                                                        <img src={getMediaUrl(m.file_path)} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                     </div>
                                                 );
                                             }
@@ -13023,7 +14624,7 @@ export default function Chat() {
                                             }
                                             if (m.type === 'file') {
                                                 return (
-                                                    <div key={i} style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px', overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDownload(m.file_path, m.fileName); }}>
+                                                    <div key={i} style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px', overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }}>
                                                         <FileText size={20} color="#8696a0" />
                                                         <div style={{ fontSize: 9, color: '#667781', textAlign: 'center', marginTop: 4, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                             {m.fileName || 'Document'}
@@ -13033,8 +14634,11 @@ export default function Chat() {
                                             }
                                             const lImg = m.link_preview?.image;
                                             return (
-                                                <div key={i} style={{ width: 72, height: 72, borderRadius: 8, background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); window.open(m.link_preview?.url || m.content, '_blank'); }}>
+                                                <div key={i} style={{ width: 72, height: 72, borderRadius: 8, background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', position: 'relative', overflow: 'hidden' }} onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }}>
                                                     {lImg ? <img src={lImg} alt="link" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <LinkIcon size={24} color="#38bdf8" />}
+                                                    {getYouTubeVideoId(m.link_preview?.url || m.content) && (
+                                                        <span className="wa-mini-youtube-play"><Play size={18} color="#fff" fill="#fff" /></span>
+                                                    )}
                                                 </div>
                                             );
                                         })}
@@ -13278,7 +14882,7 @@ export default function Chat() {
                                             const previewUrl = getMessageMediaUrl(m);
                                             if (m.type === 'image' || m.type === 'video') {
                                                 return (
-                                                    <div key={i} className="wa-media-thumb" onClick={(e) => { e.stopPropagation(); setViewingImage(m); }} style={{ cursor: 'pointer', flexShrink: 0 }}>
+                                                    <div key={i} className="wa-media-thumb" onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }} style={{ cursor: 'pointer', flexShrink: 0 }}>
                                                         {m.type === 'video' ? (
                                                             previewUrl ? (
                                                                 <video src={previewUrl} muted playsInline preload="metadata" crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, background: '#0f1f33' }} />
@@ -13307,7 +14911,7 @@ export default function Chat() {
                                             }
                                             if (m.type === 'file') {
                                                 return (
-                                                    <div key={i} className="wa-media-thumb" style={{ background: '#f0f2f5', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px 8px', overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDownload(m.file_path, m.fileName); }}>
+                                                    <div key={i} className="wa-media-thumb" style={{ background: '#f0f2f5', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px 8px', overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }}>
                                                         <FileText size={24} color="#8696a0" />
                                                         <div style={{ fontSize: 10, color: '#667781', textAlign: 'center', marginTop: 4, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                             {m.fileName || 'Doc'}
@@ -13318,14 +14922,20 @@ export default function Chat() {
                                             // Link
                                             if (m.link_preview && m.link_preview.image) {
                                                 return (
-                                                    <div key={i} className="wa-media-thumb" style={{ cursor: 'pointer', flexShrink: 0 }} onClick={(e) => { e.stopPropagation(); window.open(m.link_preview.url, '_blank'); }}>
+                                                    <div key={i} className="wa-media-thumb" style={{ cursor: 'pointer', flexShrink: 0, position: 'relative' }} onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }}>
                                                         <img src={m.link_preview.image} alt="link" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }} />
+                                                        {getYouTubeVideoId(m.link_preview.url || m.content) && (
+                                                            <span className="wa-mini-youtube-play"><Play size={18} color="#fff" fill="#fff" /></span>
+                                                        )}
                                                     </div>
                                                 );
                                             }
                                             return (
-                                                <div key={i} className="wa-media-thumb" style={{ background: 'rgba(255, 255, 255, 0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', border: '1px solid rgba(255, 255, 255, 0.1)' }} onClick={(e) => { e.stopPropagation(); window.open(m.link_preview?.url, '_blank'); }}>
+                                                <div key={i} className="wa-media-thumb" style={{ background: 'rgba(255, 255, 255, 0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', border: '1px solid rgba(255, 255, 255, 0.1)', position: 'relative' }} onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }}>
                                                     <LinkIcon size={24} color="#38bdf8" />
+                                                    {getYouTubeVideoId(m.link_preview?.url || m.content) && (
+                                                        <span className="wa-mini-youtube-play"><Play size={18} color="#fff" fill="#fff" /></span>
+                                                    )}
                                                 </div>
                                             );
                                         })}
@@ -13914,14 +15524,25 @@ export default function Chat() {
                                                             <div style={{ display: 'flex', flexDirection: 'column' }}>
                                                                 <div
                                                                     className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''} ${((lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be'))) ? 'youtube' : ''}`}
-                                                                    onClick={(e) => { e.stopPropagation(); window.open(lp.url, '_blank'); }}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        const previewUrl = lp.url || msg.content;
+                                                                        if (getYouTubeVideoId(previewUrl)) setPreviewVideoUrl(previewUrl);
+                                                                        else window.open(previewUrl, '_blank');
+                                                                    }}
                                                                     style={{ cursor: 'pointer', transition: 'none', marginBottom: (msg.content && msg.content.trim() !== lp.url.trim()) ? '8px' : '0' }}
                                                                 >
                                                                     {lp.image && (
                                                                         <div className="wa-link-preview-image">
                                                                             <img src={lp.image} alt={lp.title} />
-                                                                            {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) && (
-                                                                                <div className="wa-link-preview-play-btn">
+                                                                            {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be') || getYouTubeVideoId(lp.url || msg.content)) && (
+                                                                                <div
+                                                                                    className="wa-link-preview-play-btn"
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        setPreviewVideoUrl(lp.url || msg.content);
+                                                                                    }}
+                                                                                >
                                                                                     <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
                                                                                 </div>
                                                                             )}
@@ -14125,14 +15746,25 @@ export default function Chat() {
                                         <div style={{ display: 'flex', flexDirection: 'column' }}>
                                             <div
                                                 className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''} ${((lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be'))) ? 'youtube' : ''}`}
-                                                onClick={() => window.open(lp.url, '_blank')}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const previewUrl = lp.url || infoMessage.content;
+                                                    if (getYouTubeVideoId(previewUrl)) setPreviewVideoUrl(previewUrl);
+                                                    else window.open(previewUrl, '_blank');
+                                                }}
                                                 style={{ cursor: 'pointer', transition: 'none', marginBottom: (infoMessage.content && infoMessage.content.trim() !== lp.url.trim()) ? '8px' : '0' }}
                                             >
                                                 {lp.image && (
                                                     <div className="wa-link-preview-image">
                                                         <img src={lp.image} alt={lp.title} />
-                                                        {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) && (
-                                                            <div className="wa-link-preview-play-btn">
+                                                        {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be') || getYouTubeVideoId(lp.url || infoMessage.content)) && (
+                                                            <div
+                                                                className="wa-link-preview-play-btn"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setPreviewVideoUrl(lp.url || infoMessage.content);
+                                                                }}
+                                                            >
                                                                 <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
                                                             </div>
                                                         )}
@@ -15200,22 +16832,21 @@ export default function Chat() {
                         {!isDeleted && (
                             <>
                                 <div className="wa-reactions-row">
-                                    <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '\u{1F44D}', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Like" data-tooltip-pos="center">{'\u{1F44D}'}</span>
-                                    <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '\u{2764}\u{FE0F}', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Love" data-tooltip-pos="center">{'\u{2764}\u{FE0F}'}</span>
-                                    <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '\u{1F602}', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Haha" data-tooltip-pos="center">{'\u{1F602}'}</span>
-                                    <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '\u{1F62E}', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Wow" data-tooltip-pos="center">{'\u{1F62E}'}</span>
-                                    <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '\u{1F622}', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Sad" data-tooltip-pos="center">{'\u{1F622}'}</span>
-                                    <span onClick={(e) => { e.stopPropagation(); handleReaction(id, '\u{1F64F}', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }} data-tooltip="Thanks" data-tooltip-pos="center">{'\u{1F64F}'}</span>
+                                    <span aria-label="Like" onClick={(e) => { e.stopPropagation(); handleReaction(id, '\u{1F44D}', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }}>{'\u{1F44D}'}</span>
+                                    <span aria-label="Love" onClick={(e) => { e.stopPropagation(); handleReaction(id, '\u{2764}\u{FE0F}', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }}>{'\u{2764}\u{FE0F}'}</span>
+                                    <span aria-label="Haha" onClick={(e) => { e.stopPropagation(); handleReaction(id, '\u{1F602}', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }}>{'\u{1F602}'}</span>
+                                    <span aria-label="Wow" onClick={(e) => { e.stopPropagation(); handleReaction(id, '\u{1F62E}', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }}>{'\u{1F62E}'}</span>
+                                    <span aria-label="Sad" onClick={(e) => { e.stopPropagation(); handleReaction(id, '\u{1F622}', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }}>{'\u{1F622}'}</span>
+                                    <span aria-label="Thanks" onClick={(e) => { e.stopPropagation(); handleReaction(id, '\u{1F64F}', selectedGroup?._id || !!selectedGroup); setOpenDropdown(null); }}>{'\u{1F64F}'}</span>
                                     <Plus
                                         size={18}
+                                        aria-label="More reactions"
                                         className="wa-plus-icon-reaction"
                                         onClick={(e) => {
                                             e.stopPropagation();
                                             setFullEmojiPicker({ id, isGroup: selectedGroup?._id || !!selectedGroup, pos: { x: dropdownPos.x, y: dropdownPos.y } });
                                             setOpenDropdown(null);
                                         }}
-                                        data-tooltip="More"
-                                        data-tooltip-pos="center"
                                     />
                                 </div>
                                 <div className="wa-dropdown-divider"></div>
@@ -15354,6 +16985,27 @@ export default function Chat() {
                             {data.isFavorite ? <HeartOff size={16} style={{ marginRight: 10 }} /> : <Heart size={16} style={{ marginRight: 10 }} />}
                             {data.isFavorite ? 'Remove favourite' : 'Add to favourites'}
                         </div>
+                        <div className="wa-dropdown-item" onClick={() => handleAddChatToList(id, displayName)}>
+                            <List size={16} style={{ marginRight: 10 }} /> Add to list
+                        </div>
+                        {isCommunity ? (
+                            <div className="wa-dropdown-item delete" onClick={() => handleModerationAction('report', id, data)}>
+                                <ThumbsDown size={16} style={{ marginRight: 10 }} /> Report community
+                            </div>
+                        ) : isGroup ? (
+                            <div className="wa-dropdown-item delete" onClick={() => handleModerationAction('report', id, data)}>
+                                <ThumbsDown size={16} style={{ marginRight: 10 }} /> Report group
+                            </div>
+                        ) : (
+                            <>
+                                <div className="wa-dropdown-item delete" onClick={() => handleModerationAction('block', id, data)}>
+                                    <Ban size={16} style={{ marginRight: 10 }} /> Block {displayName}
+                                </div>
+                                <div className="wa-dropdown-item delete" onClick={() => handleModerationAction('report', id, data)}>
+                                    <ThumbsDown size={16} style={{ marginRight: 10 }} /> Report {displayName}
+                                </div>
+                            </>
+                        )}
 
                         <div className="wa-dropdown-item delete" onClick={() => {
                             setDeleteTarget({ _id: id, id: id, name: displayName, isGroup, isCommunity: !!data.is_community });
@@ -15474,6 +17126,20 @@ export default function Chat() {
                                     <Settings size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> Notification settings
                                 </div>
                                 <div className="wa-dropdown-divider"></div>
+                                <div className="wa-dropdown-item" onClick={() => handleToggleFavorite(id, data.isFavorite)}>
+                                    {data.isFavorite ? <HeartOff size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> : <Heart size={18} style={{ marginRight: 12, color: '#38bdf8' }} />}
+                                    {data.isFavorite ? 'Remove favourite' : 'Add to favourites'}
+                                </div>
+                                <div className="wa-dropdown-item" onClick={() => handleAddChatToList(id, data.name || 'this chat')}>
+                                    <List size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> Add to list
+                                </div>
+                                <div className="wa-dropdown-item" style={{ color: '#f43f5e' }} onClick={() => handleModerationAction('block', id, data)}>
+                                    <Ban size={18} style={{ marginRight: 12, color: '#f43f5e' }} /> Block {data.name || 'contact'}
+                                </div>
+                                <div className="wa-dropdown-item" style={{ color: '#f43f5e' }} onClick={() => handleModerationAction('report', id, data)}>
+                                    <ThumbsDown size={18} style={{ marginRight: 12, color: '#f43f5e' }} /> Report {data.name || 'contact'}
+                                </div>
+                                <div className="wa-dropdown-divider"></div>
                                 <div className="wa-dropdown-item" onClick={() => { setIsClearChatConfirmOpen(true); setOpenDropdown(null); }}>
                                     <Trash2 size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> Clear messages
                                 </div>
@@ -15519,6 +17185,13 @@ export default function Chat() {
                                     <Settings size={18} style={{ marginRight: 12, color: '#54656f' }} /> Notification settings
                                 </div>
                                 <div className="wa-dropdown-divider"></div>
+                                <div className="wa-dropdown-item" onClick={() => handleAddChatToList(id, data.name || 'this group')}>
+                                    <List size={18} style={{ marginRight: 12, color: '#54656f' }} /> Add to list
+                                </div>
+                                <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => handleModerationAction('report', id, data)}>
+                                    <ThumbsDown size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Report {data.isCommunityAnnouncements ? 'community' : 'group'}
+                                </div>
+                                <div className="wa-dropdown-divider"></div>
                                 <div className="wa-dropdown-item" onClick={() => { setIsClearChatConfirmOpen(true); setOpenDropdown(null); }}>
                                     <Trash2 size={18} style={{ marginRight: 12, color: '#54656f' }} /> Clear messages
                                 </div>
@@ -15543,6 +17216,9 @@ export default function Chat() {
                                     <Settings size={18} style={{ marginRight: 12, color: '#54656f' }} /> Community settings
                                 </div>
                                 <div className="wa-dropdown-divider"></div>
+                                <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => handleModerationAction('report', id, { ...data, is_community: true })}>
+                                    <ThumbsDown size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Report community
+                                </div>
                                 <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => {
                                     handleExitCommunity(selectedCommunity);
                                     setOpenDropdown(null);
@@ -16519,14 +18195,14 @@ export default function Chat() {
                                         {cPreviewItems.map((m, i) => {
                                             if (m.type === 'image' || m.type === 'video') {
                                                 return (
-                                                    <div key={i} className="wa-media-thumb" onClick={(e) => { e.stopPropagation(); setViewingImage(m); }} style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }}>
-                                                        <img src={getMessageMediaUrl(m)} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                    <div key={i} className="wa-media-thumb" onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }} style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }}>
+                                                        <img src={getMediaUrl(m.file_path)} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                     </div>
                                                 );
                                             }
                                             if (m.type === 'file') {
                                                 return (
-                                                    <div key={i} className="wa-media-thumb" style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px', overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDownload(m.file_path, m.fileName); }}>
+                                                    <div key={i} className="wa-media-thumb" style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px', overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }}>
                                                         <FileText size={24} color="#8696a0" />
                                                         <div style={{ fontSize: 10, color: '#667781', textAlign: 'center', marginTop: 4, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                             {m.fileName || 'Doc'}
@@ -16536,8 +18212,11 @@ export default function Chat() {
                                             }
                                             if (m.link_preview && m.link_preview.image) {
                                                 return (
-                                                    <div key={i} className="wa-media-thumb" style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)' }} onClick={(e) => { e.stopPropagation(); window.open(m.link_preview.url, '_blank'); }}>
+                                                    <div key={i} className="wa-media-thumb" style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', position: 'relative' }} onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }}>
                                                         <img src={m.link_preview.image} alt="link" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                        {getYouTubeVideoId(m.link_preview.url || m.content) && (
+                                                            <span className="wa-mini-youtube-play"><Play size={18} color="#fff" fill="#fff" /></span>
+                                                        )}
                                                     </div>
                                                 );
                                             }
@@ -17381,18 +19060,7 @@ export default function Chat() {
                                                             if (isAnySelected) {
                                                                 toggleSelection(msg);
                                                             } else {
-                                                                if (msg.type === 'audio') {
-                                                                    handleSearchClick(msgKey);
-                                                                    return;
-                                                                }
-                                                                // Mobile: Lightbox. Desktop: Redirect THEN Lightbox.
-                                                                if (window.innerWidth > 768) {
-                                                                    handleSearchClick(msgKey);
-                                                                    // Delay opening to allow scroll to finish
-                                                                    setTimeout(() => setViewingImage(msg), 600);
-                                                                } else {
-                                                                    setViewingImage(msg);
-                                                                }
+                                                                handleSearchClick(msgKey);
                                                             }
                                                         }}>
                                                             {msg.type === 'audio' ? (
@@ -18154,7 +19822,7 @@ export default function Chat() {
                     <div style={{ position: 'relative' }}>
                         <button
                             className={`wa-nav-icon-btn ${isRemindersModalOpen ? 'active' : ''}`}
-                            title="Reminders"
+                            data-tooltip="Events"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 const uid = user?.id || user?._id;
@@ -18167,13 +19835,13 @@ export default function Chat() {
                             }}
                         >
                             <Calendar size={20} />
-                            {unreadRemindersCount > 0 && <span className="wa-bell-badge" style={{ right: '4px', top: '4px' }}>{unreadRemindersCount}</span>}
+                            <span className="wa-bell-badge" style={{ right: '4px', top: '4px' }}>{scheduledEventsCount}</span>
                         </button>
                     </div>
                     <div style={{ position: 'relative' }}>
                         <button
-                            className={`wa-nav-icon-btn ${showNotificationDetails ? 'active' : ''}`}
-                            title="Notifications"
+                            className={`wa-nav-icon-btn wa-notification-trigger ${showNotificationDetails ? 'active' : ''}`}
+                            data-tooltip="Notifications"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 setShowNotificationDetails(!showNotificationDetails);
@@ -18183,14 +19851,14 @@ export default function Chat() {
                             {totalUnread > 0 && <span className="wa-bell-badge">{totalUnread}</span>}
                         </button>
                     </div>
-                    <button className="wa-nav-icon-btn" title="New Chat" onClick={(e) => {
+                    <button className="wa-nav-icon-btn" data-tooltip="New Chat" onClick={(e) => {
                         e.stopPropagation();
                         if (users.length === 0) fetchUsers();
                         setIsNewChatOpen(true);
                     }}><Plus size={20} /></button>
                     <button
                         className={`wa-nav-icon-btn ${(openDropdown?.type === 'sidebar_menu') ? 'active' : ''}`}
-                        title="Menu"
+                        data-tooltip="Menu"
                         onClick={(e) => {
                             e.stopPropagation();
                             setDropdownPos({ x: e.clientX, y: e.clientY });
@@ -18373,7 +20041,7 @@ export default function Chat() {
                         style={{ position: 'relative' }}
                     >
                         Requests
-                        <span style={{ position: 'absolute', top: -5, right: -5, background: '#0EA5BE', color: 'white', borderRadius: '50%', width: 18, height: 18, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', border: '2px solid rgba(15, 23, 42, 0.9)' }}>
+                        <span className="wa-pill-count">
                             {messageRequests.length}
                         </span>
                     </button>
@@ -18545,49 +20213,49 @@ export default function Chat() {
                                         return dateB - dateA;
                                     });
 
-                                if (displayItems.length === 0) {
-                                    if (!searchQuery.trim() && filterType === 'all') {
-                                        return (
-                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 30px', textAlign: 'center', color: '#94a3b8' }}>
-                                                <div style={{ background: 'rgba(56, 189, 248, 0.05)', borderRadius: '50%', padding: '24px', marginBottom: '16px', border: '1px solid rgba(56, 189, 248, 0.1)' }}>
-                                                    <Plus size={40} color="#0EA5BE" style={{ opacity: 0.8 }} />
-                                                </div>
-                                                <p style={{ fontSize: '15px', color: '#f8fafc', marginBottom: '8px', fontWeight: '600' }}>No chats yet</p>
-                                                <p style={{ fontSize: '13px', lineHeight: '1.5', marginBottom: '24px' }}>Start a fresh conversation with your colleagues or friends.</p>
-                                                <button
-                                                    className="wa-nav-icon-btn"
-                                                    style={{
-                                                        background: '#0EA5BE',
-                                                        color: 'white',
-                                                        borderRadius: '24px',
-                                                        padding: '10px 24px',
-                                                        fontSize: '14px',
-                                                        fontWeight: '600',
-                                                        width: 'auto',
-                                                        height: 'auto',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        gap: '8px',
-                                                        boxShadow: '0 4px 12px rgba(2, 126, 181, 0.2)'
-                                                    }}
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        if (users.length === 0) fetchUsers();
-                                                        setIsNewChatOpen(true);
-                                                    }}
-                                                >
-                                                    <Plus size={18} />
-                                                    Start Chat
-                                                </button>
-                                            </div>
-                                        );
-                                    }
+                            if (displayItems.length === 0) {
+                                if (!searchQuery.trim() && filterType === 'all') {
                                     return (
-                                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0', fontSize: '14px' }}>
-                                            No results found
+                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 30px', textAlign: 'center', color: '#94a3b8' }}>
+                                            <div style={{ background: 'rgba(56, 189, 248, 0.05)', borderRadius: '50%', padding: '24px', marginBottom: '16px', border: '1px solid rgba(56, 189, 248, 0.1)' }}>
+                                                <Plus size={40} color="#0EA5BE" style={{ opacity: 0.8 }} />
+                                            </div>
+                                            <p style={{ fontSize: '15px', color: '#f8fafc', marginBottom: '8px', fontWeight: '600' }}>No chats yet</p>
+                                            <p style={{ fontSize: '13px', lineHeight: '1.5', marginBottom: '24px' }}>Start a fresh conversation with your colleagues or friends.</p>
+                                            <button
+                                                className="wa-start-chat-btn"
+                                                style={{
+                                                    background: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 48%, #4f46e5 100%)',
+                                                    color: 'white',
+                                                    borderRadius: '24px',
+                                                    padding: '10px 24px',
+                                                    fontSize: '14px',
+                                                    fontWeight: '600',
+                                                    width: 'auto',
+                                                    height: 'auto',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '8px',
+                                                    boxShadow: '0 12px 28px rgba(14, 165, 233, 0.2)'
+                                                }}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (users.length === 0) fetchUsers();
+                                                    setIsNewChatOpen(true);
+                                                }}
+                                            >
+                                                <Plus size={18} />
+                                                Start Chat
+                                            </button>
                                         </div>
                                     );
                                 }
+                                return (
+                                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0', fontSize: '14px' }}>
+                                        No results found
+                                    </div>
+                                );
+                            }
 
                                 return displayItems.map(item => {
                                 const isGroup = item.is_group;
@@ -18616,11 +20284,13 @@ export default function Chat() {
                                         </div>
                                     );
                                 };
+                                const chatHoverPreview = getChatHoverPreview(item, isGroup || item.is_community);
 
                                 return (
                                     <div
                                         key={item._id}
                                         className={`wa-user-item ${((item.is_community && selectedCommunity?.id === item.id) || (isGroup && selectedGroup?._id === item._id) || (!isGroup && selectedUser?._id === item._id)) ? 'active' : ''}`}
+                                        data-chat-preview={chatHoverPreview || undefined}
                                         onClick={() => {
                                             setIsContactInfoOpen(false);
                                             setIsCommunityInfoOpen(false);
@@ -18825,9 +20495,24 @@ export default function Chat() {
                         height: '100%',
                         cursor: 'col-resize',
                         zIndex: 100
-                    }}
-                />
-            )}
+                                        }}
+                                    >
+                                        <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
+                                        <input
+                                            type="color"
+                                            value={inlinePaintColor}
+                                            onChange={(event) => setInlinePaintColor(event.target.value)}
+                                            style={{
+                                                position: 'absolute',
+                                                inset: 0,
+                                                opacity: 0,
+                                                width: '100%',
+                                                height: '100%',
+                                                cursor: 'crosshair'
+                                            }}
+                                        />
+                                    </div>
+                                )}
         </div >
     );
 
@@ -19845,29 +21530,25 @@ export default function Chat() {
                             );
                             if (!pendingRequest) return null;
                             return (
-                                <div style={{ background: 'rgba(248, 250, 252, 0.85)', backdropFilter: 'blur(8px)', padding: '20px', borderBottom: '1px solid rgba(226, 232, 240, 0.5)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, boxShadow: 'inset 0 -2px 4px rgba(0,0,0,0.02)' }}>
-                                    <div style={{ fontSize: '0.95rem', color: '#334155', textAlign: 'center', fontWeight: '500' }}>
-                                        <span style={{ color: '#0EA5BE', fontWeight: 'bold' }}>{getContactDisplayName(selectedUser)}</span> wants to message you.
+                                <div className="wa-message-request-banner">
+                                    <div className="wa-message-request-title">
+                                        <span>{getContactDisplayName(selectedUser)}</span> wants to message you.
                                     </div>
-                                    <div style={{ display: 'flex', gap: 12 }}>
+                                    <div className="wa-message-request-actions">
                                         <button
+                                            className="wa-message-request-btn accept"
                                             onClick={() => handleAcceptRequest(pendingRequest._id)}
-                                            style={{ background: '#0EA5BE', color: 'white', border: 'none', padding: '10px 28px', borderRadius: '12px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 4px 6px rgba(2, 126, 181, 0.2)' }}
-                                            onMouseOver={(e) => e.target.style.transform = 'translateY(-1px)'}
-                                            onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
                                         >
                                             Accept
                                         </button>
                                         <button
+                                            className="wa-message-request-btn reject"
                                             onClick={() => handleRejectRequest(pendingRequest._id)}
-                                            style={{ background: 'white', color: '#f15c6d', border: '1px solid #f15c6d', padding: '10px 28px', borderRadius: '12px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s' }}
-                                            onMouseOver={(e) => e.target.style.background = '#fff5f6'}
-                                            onMouseOut={(e) => e.target.style.background = 'white'}
                                         >
                                             Reject
                                         </button>
                                     </div>
-                                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', textAlign: 'center' }}>
+                                    <div className="wa-message-request-note">
                                         If you reject, they will be restricted from messaging you for 24 hours.
                                     </div>
                                 </div>
@@ -20024,21 +21705,7 @@ export default function Chat() {
                             <div className="wa-footer-wrapper">
                                 <div style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '4px' }}>
                                     {/* Typing Link Preview */}
-                                    {typingLinkPreview && typingLinkPreview.title && (
-                                        <div className="wa-typing-link-preview">
-                                            <div className="wa-typing-preview-header" style={{ justifyContent: 'flex-end' }}>
-                                                <X size={16} style={{ cursor: 'pointer', color: '#667781' }} onClick={() => setTypingLinkPreview(null)} />
-                                            </div>
-                                            <div className="wa-typing-preview-card">
-                                                {typingLinkPreview.image && <img src={typingLinkPreview.image} alt={typingLinkPreview.title} className="wa-typing-preview-image" />}
-                                                <div className="wa-typing-preview-text">
-                                                    <div className="wa-typing-preview-title">{typingLinkPreview.title}</div>
-                                                    {typingLinkPreview.description && <div className="wa-typing-preview-description">{typingLinkPreview.description}</div>}
-                                                    <div className="wa-typing-preview-domain"><span>{typingLinkPreview.domain}</span></div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
+                                    {renderComposerLinkPreview()}
 
                                     {accountLocked ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
@@ -20071,7 +21738,7 @@ export default function Chat() {
                                             Messaging Suspended. Action Required for Restoration.
                                         </div>
                                     ) : isMessagingRestricted() ? (
-                                        <div style={{ width: '100%', padding: '12px', background: '#f8fafc', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem', border: '1px solid #e2e8f0' }}>
+                                        <div className="wa-messaging-restricted-pill">
                                             {(() => {
                                                 if (selectedGroup?.isCommunityAnnouncements || selectedGroup?.isAnnouncementGroup) {
                                                     const commIdCheck = String(selectedGroup.community_id || selectedGroup.communityId || '');
@@ -20106,13 +21773,15 @@ export default function Chat() {
                                                     {replyingTo && (
                                                         <div className="wa-reply-preview-container">
                                                             <div style={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
-                                                                <div className="wa-reply-preview-header">
-                                                                    <span className="wa-reply-preview-name">
-                                                                        {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || replyingTo.sender_name || replyingTo.senderName || selectedUser?.name || 'Contact')}
-                                                                    </span>
-                                                                </div>
+                                                                {selectedGroup && (
+                                                                    <div className="wa-reply-preview-header">
+                                                                        <span className="wa-reply-preview-name">
+                                                                            {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || replyingTo.sender_name || replyingTo.senderName || 'Member')}
+                                                                        </span>
+                                                                    </div>
+                                                                )}
                                                                 <div className="wa-reply-preview-content">
-                                                                    {(() => {
+                                                                    {renderReplyLinkPreview(replyingTo) || (() => {
                                                                         if (replyingTo.is_view_once) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ViewOnceBadge size={14} /> <span>View once</span></span>;
                                                                         if (replyingTo.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
                                                                         if (replyingTo.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>{replyingTo.file_name || replyingTo.content || 'File'}</span></span>;
@@ -20167,7 +21836,7 @@ export default function Chat() {
                                                                     className="wa-attachment-floating-hint"
                                                                     style={{ left: `${attachmentHintPos.x}px`, top: `${attachmentHintPos.y}px` }}
                                                                 >
-                                                                    Allowed files: docs, sheets, slides, PDF, images, video, audio (up to 1GB)
+                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)
                                                                 </div>
                                                             )}
                                                             <input
@@ -20182,6 +21851,7 @@ export default function Chat() {
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     const rect = e.currentTarget.getBoundingClientRect();
+                                                                    setEmojiInsertTarget('chat');
                                                                     setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
                                                                     setShowInputEmojiPicker(!showInputEmojiPicker);
                                                                 }}
@@ -20220,11 +21890,11 @@ export default function Chat() {
                                                                 <button
                                                                     onClick={handleSend}
                                                                     className="wa-send-btn-inner"
-                                                                    data-tooltip={(!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? "Please select a grammar level" : "Send"}
-                                                                    disabled={!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))}
+                                                                    data-tooltip={(!file && (getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied) || (input.length >= 1 && !suggestionApplied))) ? (getInlineTextAiIssue(input) || (isGrammarLoading ? "Please wait for Neural Chat AI" : "Please select a grammar level")) : "Send"}
+                                                                    disabled={!file && !!(getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied) || (input.length >= 1 && !suggestionApplied))}
                                                                     style={{
-                                                                        opacity: (!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? 0.5 : 1,
-                                                                        cursor: (!file && (showGrammarBar || (input.length >= 1 && !suggestionApplied))) ? 'not-allowed' : 'pointer'
+                                                                        opacity: (!file && (getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied) || (input.length >= 1 && !suggestionApplied))) ? 0.5 : 1,
+                                                                        cursor: (!file && (getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied) || (input.length >= 1 && !suggestionApplied))) ? 'not-allowed' : 'pointer'
                                                                     }}
                                                                 >
                                                                     <Send size={30} color="white" strokeWidth={2.5} />
@@ -20699,21 +22369,7 @@ export default function Chat() {
 
                                 <div style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '4px' }}>
                                     {/* Typing Link Preview */}
-                                    {typingLinkPreview && typingLinkPreview.title && (
-                                        <div className="wa-typing-link-preview">
-                                            <div className="wa-typing-preview-header" style={{ justifyContent: 'flex-end' }}>
-                                                <X size={16} style={{ cursor: 'pointer', color: '#667781' }} onClick={() => setTypingLinkPreview(null)} />
-                                            </div>
-                                            <div className="wa-typing-preview-card">
-                                                {typingLinkPreview.image && <img src={typingLinkPreview.image} alt={typingLinkPreview.title} className="wa-typing-preview-image" />}
-                                                <div className="wa-typing-preview-text">
-                                                    <div className="wa-typing-preview-title">{typingLinkPreview.title}</div>
-                                                    {typingLinkPreview.description && <div className="wa-typing-preview-description">{typingLinkPreview.description}</div>}
-                                                    <div className="wa-typing-preview-domain"><span>{typingLinkPreview.domain}</span></div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
+                                    {renderComposerLinkPreview()}
 
 
                                     {accountLocked ? (
@@ -20843,13 +22499,15 @@ export default function Chat() {
                                                     {replyingTo && (
                                                         <div className="wa-reply-preview-container">
                                                             <div style={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
-                                                                <div className="wa-reply-preview-header">
-                                                                    <span className="wa-reply-preview-name">
-                                                                        {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || replyingTo.sender_name || replyingTo.senderName || 'Member')}
-                                                                    </span>
-                                                                </div>
+                                                                {selectedGroup && (
+                                                                    <div className="wa-reply-preview-header">
+                                                                        <span className="wa-reply-preview-name">
+                                                                            {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || replyingTo.sender_name || replyingTo.senderName || 'Member')}
+                                                                        </span>
+                                                                    </div>
+                                                                )}
                                                                 <div className="wa-reply-preview-content">
-                                                                    {(() => {
+                                                                    {renderReplyLinkPreview(replyingTo) || (() => {
                                                                         if (replyingTo.is_view_once) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ViewOnceBadge size={14} /> <span>View once</span></span>;
                                                                         if (replyingTo.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
                                                                         if (replyingTo.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>{replyingTo.file_name || replyingTo.content || 'File'}</span></span>;
@@ -20953,7 +22611,7 @@ export default function Chat() {
                                                                     className="wa-attachment-floating-hint"
                                                                     style={{ left: `${attachmentHintPos.x}px`, top: `${attachmentHintPos.y}px` }}
                                                                 >
-                                                                    Allowed files: docs, sheets, slides, PDF, images, video, audio (up to 1GB)
+                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)
                                                                 </div>
                                                             )}
                                                             <input
@@ -20968,6 +22626,7 @@ export default function Chat() {
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     const rect = e.currentTarget.getBoundingClientRect();
+                                                                    setEmojiInsertTarget('chat');
                                                                     setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
                                                                     setShowInputEmojiPicker(!showInputEmojiPicker);
                                                                 }}
@@ -21006,11 +22665,11 @@ export default function Chat() {
                                                                 <button
                                                                     onClick={handleSend}
                                                                     className="wa-send-btn-inner"
-                                                                    data-tooltip={(!file && (showGrammarBar && !suggestionApplied && !isGrammarLoading && grammarSuggestions)) ? (isGarbageMessage ? "Please write a meaningful message" : "Please select a grammar level") : "Send"}
-                                                                    disabled={!file && (showGrammarBar && !suggestionApplied && !isGrammarLoading && grammarSuggestions)}
+                                                                    data-tooltip={(!file && (getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied))) ? (getInlineTextAiIssue(input) || (isGrammarLoading ? "Please wait for Neural Chat AI" : isGarbageMessage ? "Please write a meaningful message" : "Please select a grammar level")) : "Send"}
+                                                                    disabled={!file && !!(getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied))}
                                                                     style={{
-                                                                        opacity: (!file && (showGrammarBar && !suggestionApplied && !isGrammarLoading && grammarSuggestions)) ? 0.5 : 1,
-                                                                        cursor: (!file && (showGrammarBar && !suggestionApplied && !isGrammarLoading && grammarSuggestions)) ? 'not-allowed' : 'pointer'
+                                                                        opacity: (!file && (getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied))) ? 0.5 : 1,
+                                                                        cursor: (!file && (getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied))) ? 'not-allowed' : 'pointer'
                                                                     }}
                                                                 >
                                                                     <Send size={30} color="white" strokeWidth={2.5} />
@@ -21031,9 +22690,9 @@ export default function Chat() {
                         )}
                     </>
                 ) : (
-                    <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#41525d', position: 'relative', zIndex: 5 }}>
+                    <div className="wa-empty-dashboard-text" style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', position: 'relative', zIndex: 5 }}>
                         <h2>Neural Chat</h2>
-                        <p style={{ fontSize: 14, marginTop: 10 }}>Send and receive messages without keeping your phone online.</p>
+                        <p>Send and receive messages without keeping your phone online.</p>
                     </div>
                 )}
 
@@ -21055,12 +22714,6 @@ export default function Chat() {
                     </button>
                 )}
             </div>
-            {(!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) && !isMobile && (
-                <div
-                    className="wa-chat-right-panel-resize-handle"
-                    onMouseDown={handleMouseDownRightPanelResize}
-                />
-            )}
             {isMessageSearchOpen && (selectedUser || selectedGroup) && renderSearchSidebar()}
             {renderContactInfoPanel()}
             {renderCommunityInfoPanel()}
@@ -23526,7 +25179,7 @@ export default function Chat() {
                                 src={`https://www.youtube.com/embed/${getYouTubeVideoId(previewVideoUrl)}?autoplay=1`}
                                 title="YouTube video player"
                                 frameBorder="0"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                                 allowFullScreen
                             ></iframe>
                         </div>
@@ -24632,7 +26285,11 @@ export default function Chat() {
                     zoom={typeof getAppZoom === 'function' ? getAppZoom() : 1}
                     className="input-mode"
                     onSelect={(emoji) => {
-                        setInput(prev => prev + emoji);
+                        if (emojiInsertTarget === 'inlineText') {
+                            setInlineTextDraft(prev => prev + emoji);
+                        } else {
+                            setInput(prev => prev + emoji);
+                        }
                     }}
                     onClose={() => setShowInputEmojiPicker(false)}
                 />

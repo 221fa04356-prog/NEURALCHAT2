@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import axios from 'axios';
-import { Check, Phone, Image as ImageIcon, RefreshCw, Volume2, X, RefreshCcw, Send, CheckCircle } from 'lucide-react';
+import { Check, Phone, Image as ImageIcon, RefreshCw, Volume2, X, RefreshCcw, Send, CheckCircle, ShieldCheck } from 'lucide-react';
 import CountryCodeSelect from './CountryCodeSelect';
 import '../styles/HumanVerification.css';
 
@@ -36,6 +36,7 @@ export default function HumanVerification({ onVerified, context, identifier }) {
     const [puzzleImageUrl, setPuzzleImageUrl] = useState(PUZZLE_IMAGES[0]);
     const [isSuccess, setIsSuccess] = useState(false);
     const [hCountryCode, setHCountryCode] = useState('+91');
+    const [callMobileAvailability, setCallMobileAvailability] = useState({ status: 'idle', message: '' });
 
     // --- Helper to Generate Random Strings/Rotations ---
     const generateCaptcha = () => {
@@ -78,6 +79,41 @@ export default function HumanVerification({ onVerified, context, identifier }) {
         }
         return () => clearInterval(interval);
     }, [resendTimer]);
+
+    useEffect(() => {
+        const isRegistering = ['register', 'admin_register'].includes(context);
+        const cleanPhone = callPhoneInput.replace(/\D/g, '');
+        if (!isRegistering || cleanPhone.length !== 10 || callSent) {
+            setCallMobileAvailability({ status: 'idle', message: '' });
+            return;
+        }
+
+        let cancelled = false;
+        const timer = setTimeout(async () => {
+            setCallMobileAvailability({ status: 'checking', message: '' });
+            try {
+                const res = await axios.get('/api/auth/check-mobile', { params: { mobile: cleanPhone } });
+                if (cancelled) return;
+                if (res.data.available) {
+                    setCallMobileAvailability({ status: 'available', message: '' });
+                    setOtpError('');
+                } else {
+                    const message = res.data.message || 'This mobile number is already linked with another account.';
+                    setCallMobileAvailability({ status: 'taken', message });
+                    setOtpError(message);
+                }
+            } catch (err) {
+                if (!cancelled) {
+                    setCallMobileAvailability({ status: 'error', message: err.response?.data?.error || 'Unable to check mobile number right now.' });
+                }
+            }
+        }, 350);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [callPhoneInput, callSent, context]);
 
     const handleCheckboxClick = () => {
         if (!isVerified) setIsModalOpen(true);
@@ -133,6 +169,10 @@ export default function HumanVerification({ onVerified, context, identifier }) {
             const cleanPhone = callPhoneInput.replace(/\s/g, '');
             if (!/^\d{10}$/.test(cleanPhone)) {
                 setOtpError('Please enter a strict 10-digit mobile number.');
+                return;
+            }
+            if (callMobileAvailability.status === 'taken') {
+                setOtpError(callMobileAvailability.message);
                 return;
             }
         } else {
@@ -222,7 +262,9 @@ export default function HumanVerification({ onVerified, context, identifier }) {
                         </div>
                     )}
                     <div className="hv-modal-content scale-in">
-                        <button className="hv-modal-close-btn" type="button" onClick={closeModal}>Close</button>
+                        <button className="hv-modal-close-btn" type="button" onClick={closeModal} aria-label="Close verification">
+                            <X size={18} />
+                        </button>
                         <h3 className="hv-modal-title">Human Verification</h3>
 
                         {isSuccess ? (
@@ -243,14 +285,14 @@ export default function HumanVerification({ onVerified, context, identifier }) {
                                         className={`hv-tab ${activeMethod === 'captcha' ? 'active' : ''}`}
                                         onClick={() => setActiveMethod('captcha')}
                                     >
-                                        <span className="hv-tab-icon">A</span> Captcha
+                                        <ShieldCheck size={15} className="hv-tab-icon hv-captcha-icon" /> Captcha
                                     </button>
                                     <button
                                         type="button"
                                         className={`hv-tab ${activeMethod === 'call' ? 'active' : ''}`}
                                         onClick={() => setActiveMethod('call')}
                                     >
-                                        <Phone size={14} className="hv-tab-icon" /> Call via Phone
+                                        <Phone size={14} className="hv-tab-icon" /> Phone
                                     </button>
                                     <button
                                         type="button"
@@ -308,12 +350,13 @@ export default function HumanVerification({ onVerified, context, identifier }) {
                                                                 const val = e.target.value.replace(/[^\d\s]/g, '');
                                                                 if (val.replace(/\s/g, '').length <= 10) {
                                                                     setCallPhoneInput(val);
+                                                                    setOtpError('');
                                                                 }
                                                             }}
                                                             className="hv-input hv-phone"
                                                         />
                                                     </div>
-                                                    <button type="button" className="btn-primary-neural hv-send-btn" onClick={() => sendCall(false)} disabled={isSendingCall}>
+                                                    <button type="button" className="btn-primary-neural hv-send-btn" onClick={() => sendCall(false)} disabled={isSendingCall || callMobileAvailability.status === 'taken' || callMobileAvailability.status === 'checking'}>
                                                         {isSendingCall ? 'Sending' : 'Send'} <Send size={14} style={{ marginLeft: 4 }} />
                                                     </button>
                                                 </div>
@@ -321,7 +364,7 @@ export default function HumanVerification({ onVerified, context, identifier }) {
 
                                             {(!['register', 'admin_register'].includes(context)) && !callSent && (
                                                 <div className="mt-4 text-center">
-                                                    <p style={{ fontSize: 14, color: '#444', marginBottom: 16 }}>We will send a call to the mobile number registered with this ID.</p>
+                                                    <p style={{ fontSize: 14, color: '#f8fafc', marginBottom: 16 }}>We will send a call to the mobile number registered with this ID.</p>
                                                     <button type="button" className="btn-primary-neural hv-submit-btn" onClick={() => sendCall(false)} disabled={isSendingCall}>
                                                         {isSendingCall ? 'Sending Call...' : 'Call Me Now'}
                                                     </button>
@@ -368,7 +411,7 @@ export default function HumanVerification({ onVerified, context, identifier }) {
 
                                     {activeMethod === 'puzzle' && (
                                         <div className="hv-puzzle-view fade-in">
-                                            <p className="text-center text-sm text-gray-600 mb-4" style={{ fontSize: '0.9rem' }}>Use arrows to rotate the right image until it matches the left image.</p>
+                                            <p className="text-center text-sm mb-4" style={{ fontSize: '0.9rem', color: '#f8fafc' }}>Use arrows to rotate the right image until it matches the left image.</p>
 
                                             <div className="hv-puzzle-grid">
                                                 <div className="hv-puzzle-column">
