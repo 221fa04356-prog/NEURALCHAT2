@@ -147,13 +147,15 @@ const buildMediaProxyUrl = (rawPath) => {
         try {
             const parsed = new URL(raw, window.location.origin);
             if (parsed.pathname.startsWith('/uploads/')) {
-                return '';
+                const mediaApiPath = `/api/chat/media?path=${encodeURIComponent(parsed.pathname)}`;
+                return appendMediaToken(mediaApiPath);
             }
             return appendMediaToken(`${parsed.pathname || raw}${parsed.search || ''}`);
         } catch (_) {
             const normalized = raw.startsWith('/') ? raw : `/${raw.replace(/^\/+/, '')}`;
             if (normalized.startsWith('/uploads/')) {
-                return '';
+                const mediaApiPath = `/api/chat/media?path=${encodeURIComponent(normalized)}`;
+                return appendMediaToken(mediaApiPath);
             }
             return appendMediaToken(normalized);
         }
@@ -182,8 +184,7 @@ const buildMessageMediaFallbackUrl = (msg, isGroupChat = false) => {
 
 const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
     const rawPath = msg?.file_path || msg?.filePath || '';
-    // Only use message-id fallback when we truly do not have a concrete media path.
-    const messageUrl = rawPath ? '' : buildMessageMediaFallbackUrl(msg, isGroupChat);
+    const messageUrl = buildMessageMediaFallbackUrl(msg, isGroupChat);
     if (!rawPath) {
         return { primaryUrl: messageUrl, retryUrl: '' };
     }
@@ -212,14 +213,20 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
             if (parsed.pathname.startsWith('/api/chat/media')) {
                 const legacyPath = parsed.searchParams.get('path') || '';
                 if (legacyPath.startsWith('/uploads/')) {
-                    return { primaryUrl: messageUrl || '', retryUrl: '' };
+                    const proxyUrl = buildMediaProxyUrl(legacyPath);
+                    return {
+                        primaryUrl: messageUrl || proxyUrl || '',
+                        retryUrl: messageUrl && proxyUrl && messageUrl !== proxyUrl ? proxyUrl : ''
+                    };
                 }
                 return { primaryUrl: appendMediaToken(normalizedUrl), retryUrl: messageUrl && messageUrl !== appendMediaToken(normalizedUrl) ? messageUrl : '' };
             }
             if (parsed.pathname.startsWith('/uploads/')) {
-                // Never hit legacy /uploads directly from the browser.
-                // If we cannot build a message-id resolver URL, render unavailable state.
-                return { primaryUrl: messageUrl || '', retryUrl: '' };
+                const proxyUrl = buildMediaProxyUrl(parsed.pathname);
+                return {
+                    primaryUrl: messageUrl || proxyUrl || '',
+                    retryUrl: messageUrl && proxyUrl && messageUrl !== proxyUrl ? proxyUrl : ''
+                };
             }
         } catch (_) { }
 
@@ -242,7 +249,11 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
             const parsed = new URL(normalized, window.location.origin);
             const legacyPath = parsed.searchParams.get('path') || '';
             if (legacyPath.startsWith('/uploads/')) {
-                return { primaryUrl: messageUrl || '', retryUrl: '' };
+                const proxyUrl = buildMediaProxyUrl(legacyPath);
+                return {
+                    primaryUrl: messageUrl || proxyUrl || '',
+                    retryUrl: messageUrl && proxyUrl && messageUrl !== proxyUrl ? proxyUrl : ''
+                };
             }
         } catch (_) { }
         const directUrl = appendMediaToken(normalized);
@@ -252,9 +263,11 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
         };
     }
     if (normalized.startsWith('/uploads/')) {
-        // Never hit legacy /uploads directly from the browser.
-        // If we cannot build a message-id resolver URL, render unavailable state.
-        return { primaryUrl: messageUrl || '', retryUrl: '' };
+        const proxyUrl = buildMediaProxyUrl(normalized);
+        return {
+            primaryUrl: messageUrl || proxyUrl || '',
+            retryUrl: messageUrl && proxyUrl && messageUrl !== proxyUrl ? proxyUrl : ''
+        };
     }
 
     const directUrl = appendMediaToken(normalized) || '';
