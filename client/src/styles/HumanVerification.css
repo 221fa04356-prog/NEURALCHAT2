@@ -80,8 +80,9 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(2, 6, 23, 0.6);
-    backdrop-filter: blur(8px);
+    background: rgba(2, 6, 23, 0.22);
+    backdrop-filter: blur(10px) saturate(150%);
+    -webkit-backdrop-filter: blur(10px) saturate(150%);
     z-index: 9999;
     display: flex;
     align-items: center;
@@ -91,100 +92,140 @@
 
 /* Modal Content */
 .hv-modal-content {
-    background: rgba(13, 22, 29, 0.95);
-    backdrop-filter: blur(30px) saturate(180%);
-    padding: 30px 24px;
-    border-radius: 24px;
+    background: rgba(30, 41, 59, 0.5);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    padding: 2.5rem 2rem;
+    border-radius: 2rem;
     width: 90%;
-    max-width: 440px;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    max-width: 420px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-top: 1px solid rgba(56, 189, 248, 0.4);
     position: relative;
     z-index: 10001;
     color: #f8fafc;
 }
 
+.hv-modal-content p,
+.hv-modal-content span,
+.hv-modal-content button,
+.hv-modal-content label {
+    color: #f8fafc;
+}
+
 .hv-modal-close-btn {
     position: absolute;
-    top: 15px;
-    right: 15px;
-    background: rgba(30, 41, 59, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    padding: 6px 14px;
-    font-size: 0.8rem;
+    top: 14px;
+    right: 14px;
+    background: rgba(15, 23, 42, 0.56);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 10px;
+    padding: 0;
+    width: 34px !important;
+    height: 34px;
+    min-height: 34px;
+    font-size: 0;
     font-weight: 700;
     cursor: pointer;
-    color: #cbd5e1;
+    color: #f8fafc;
     transition: all 0.2s;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: auto !important;
     z-index: 10;
 }
 
 .hv-modal-close-btn:hover {
-    background: rgba(51, 65, 85, 0.8);
+    background: rgba(56, 189, 248, 0.12);
     color: #f8fafc;
-    border-color: #38bdf8;
+    border-color: rgba(56, 189, 248, 0.55);
 }
 
 .hv-modal-title {
-    font-size: 22px;
-    font-weight: 700;
+    font-size: 21px;
+    font-weight: 800;
     color: #f8fafc;
-    margin-bottom: 8px;
+    margin: 2px 38px 8px;
     text-align: center;
 }
 
 .hv-modal-subtitle {
     font-size: 14px;
-    color: #94a3b8;
-    margin-bottom: 24px;
+    color: #cbd5e1;
+    margin-bottom: 20px;
     text-align: center;
 }
 
 /* Tabs */
 .hv-tabs {
     display: flex;
-    background: rgba(30, 41, 59, 0.4);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
-    padding: 4px;
-    margin-bottom: 20px;
-    gap: 4px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    margin-bottom: 18px;
+    gap: 8px;
 }
 
 .hv-tab {
     flex: 1;
-    padding: 10px 4px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.03);
-    color: #94a3b8;
+    min-height: 42px;
+    padding: 0 10px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 11px;
+    background: rgba(15, 23, 42, 0.5);
+    color: #f8fafc;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 0.9rem;
     font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
     transition: all 0.2s;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 7px;
+    outline: none;
+    box-shadow: none;
+}
+
+.hv-tab:hover {
+    background: rgba(56, 189, 248, 0.14);
+    border-color: rgba(56, 189, 248, 0.48);
+    color: #e0f7ff;
+    box-shadow: 0 10px 22px rgba(2, 6, 23, 0.18);
+}
+
+.hv-tab:focus-visible {
+    border-color: rgba(56, 189, 248, 0.72);
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.18);
 }
 
 .hv-tab.active {
-    background: rgba(56, 189, 248, 0.15);
-    color: #38bdf8;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    background: rgba(14, 165, 233, 0.2);
+    color: #38d5ff;
+    border-color: rgba(56, 189, 248, 0.76);
+    box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.08), 0 8px 18px rgba(14, 165, 233, 0.12);
 }
 
 .hv-tab-icon {
-    font-weight: bold;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    stroke-width: 2.5;
+}
+
+.hv-captcha-icon {
+    color: currentColor;
 }
 
 /* Common container space */
 .hv-method-container {
-    min-height: 180px;
+    min-height: 178px;
     display: flex;
     flex-direction: column;
 }
@@ -192,29 +233,37 @@
 /* Inputs & Buttons */
 .hv-input {
     width: 100%;
-    padding: 12px 16px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    font-size: 16px;
+    padding: 12px 14px;
+    background: rgba(30, 41, 59, 0.22);
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 1rem;
+    font-size: 15px;
     color: #f8fafc;
     outline: none;
-    transition: all 0.2s;
+    transition: all 0.3s ease;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.16);
 }
 
-.hv-input:focus {
-    border-color: #38bdf8;
-    background: rgba(15, 23, 42, 0.8);
-    box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.15);
+.hv-input:focus,
+.hv-input:not(:placeholder-shown) {
+    border-color: rgba(56, 189, 248, 0.72);
+    background: rgba(15, 23, 42, 0.82);
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14), inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.hv-input::placeholder {
+    color: #f8fafc;
+    opacity: 0.72;
 }
 
 .hv-submit-btn {
     width: 100%;
-    padding: 10px;
-    border-radius: 10px;
+    min-height: 43px;
+    padding: 0.72rem 1rem;
+    border-radius: 12px;
     font-weight: 700;
-    font-size: 1rem;
-    margin-top: 16px;
+    font-size: 0.95rem;
+    margin-top: 14px;
     cursor: pointer;
     border: none;
 }
@@ -235,21 +284,22 @@
 .hv-captcha-box {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
 }
 
 .hv-captcha-display {
     flex: 1;
-    background: rgba(255, 255, 255, 0.05);
-    padding: 12px;
+    min-height: 58px;
+    background: rgba(30, 41, 59, 0.22);
+    padding: 13px 14px;
     font-family: 'Courier New', Courier, monospace;
-    font-size: 24px;
+    font-size: 23px;
     font-weight: 700;
     color: #38bdf8;
     letter-spacing: 8px;
     text-align: center;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 1rem;
+    border: 1px solid rgba(148, 163, 184, 0.24);
     position: relative;
     overflow: hidden;
 }
@@ -283,12 +333,12 @@
 }
 
 .hv-icon-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(30, 41, 59, 0.6);
-    color: #94a3b8;
+    width: 42px;
+    height: 42px;
+    border-radius: 1rem;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    background: rgba(30, 41, 59, 0.22);
+    color: #f8fafc;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -297,9 +347,9 @@
 }
 
 .hv-icon-btn:hover {
-    background: rgba(51, 65, 85, 0.8);
+    background: rgba(56, 189, 248, 0.12);
     color: #38bdf8;
-    border-color: #38bdf8;
+    border-color: rgba(56, 189, 248, 0.55);
 }
 
 /* --- Phone Call View --- */
@@ -314,21 +364,25 @@
     position: relative;
     display: flex;
     align-items: center;
-    background: rgba(30, 41, 59, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
+    background: rgba(30, 41, 59, 0.22);
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 1rem;
     overflow: hidden;
+    transition: all 0.3s ease;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.16);
 }
 
-.hv-input-wrapper:focus-within {
-    border-color: #38bdf8;
-    box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.15);
+.hv-input-wrapper:focus-within,
+.hv-input-wrapper:has(.hv-phone:not(:placeholder-shown)) {
+    border-color: rgba(56, 189, 248, 0.72);
+    background: rgba(15, 23, 42, 0.82);
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14), inset 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .hv-country-code-selector {
-    width: 60px;
-    background: rgba(15, 23, 42, 0.8);
-    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    width: 74px;
+    background: transparent;
+    border-right: 1px solid rgba(148, 163, 184, 0.2);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -347,6 +401,8 @@
 
 .hv-cc-select span {
     font-size: 0.85rem !important;
+    color: #f8fafc !important;
+    font-weight: 800 !important;
 }
 
 .hv-phone {
@@ -358,12 +414,14 @@
 
 .hv-phone:focus {
     border-color: transparent;
+    background: transparent;
+    box-shadow: none;
 }
 
 .hv-send-btn {
-    padding: 0 16px;
-    height: 48px;
-    border-radius: 10px;
+    padding: 0 18px;
+    min-height: 43px;
+    border-radius: 12px;
     border: none;
     font-weight: 700;
     cursor: pointer;
@@ -384,7 +442,7 @@
     align-items: center;
     text-align: center;
     gap: 12px;
-    background: rgba(56, 189, 248, 0.1);
+    background: rgba(15, 23, 42, 0.42);
     padding: 16px;
     border-radius: 12px;
     border: 1px solid rgba(56, 189, 248, 0.2);
@@ -400,6 +458,9 @@
     background: transparent;
     border: none;
     color: #38bdf8;
+    min-height: 34px;
+    padding: 0 12px;
+    border-radius: 0.72rem;
     font-size: 0.9rem;
     font-weight: 600;
     text-decoration: underline;
@@ -408,7 +469,7 @@
 }
 
 .hv-resend-link.disabled-link {
-    color: #94a3b8;
+    color: #f8fafc;
     text-decoration: none;
     cursor: not-allowed;
     pointer-events: none;
@@ -444,7 +505,7 @@
 
 .hv-puzzle-grid {
     display: flex;
-    gap: 20px;
+    gap: 16px;
     margin-top: 10px;
 }
 
@@ -456,9 +517,9 @@
 }
 
 .hv-column-title {
-    font-size: 0.85rem;
+    font-size: 0.78rem;
     font-weight: 700;
-    color: #cbd5e1;
+    color: #f8fafc;
     margin-bottom: 8px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -470,7 +531,7 @@
     border-radius: 12px;
     overflow: hidden;
     background: rgba(15, 23, 42, 0.5);
-    border: 2px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(148, 163, 184, 0.18);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -492,13 +553,14 @@
 
 .hv-rotate-btn {
     flex: 1;
-    background: rgba(30, 41, 59, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    padding: 8px 0;
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 12px;
+    min-height: 40px;
+    padding: 0 10px;
     font-size: 0.85rem;
     font-weight: 600;
-    color: #cbd5e1;
+    color: #f8fafc;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -508,9 +570,9 @@
 }
 
 .hv-rotate-btn:hover {
-    background: rgba(51, 65, 85, 0.8);
+    background: rgba(56, 189, 248, 0.12);
     color: #38bdf8;
-    border-color: #38bdf8;
+    border-color: rgba(56, 189, 248, 0.55);
 }
 
 /* Utils */
@@ -624,7 +686,7 @@
 
 .hv-success-view-subtitle {
     font-size: 1rem;
-    color: #94a3b8;
+    color: #f8fafc;
     font-weight: 500;
 }
 

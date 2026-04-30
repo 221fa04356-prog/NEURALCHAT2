@@ -89,6 +89,34 @@
     background: linear-gradient(135deg, rgba(20, 152, 255, 0.18), rgba(78, 89, 255, 0.16)) !important;
 }
 
+.admin-notification-dropdown * {
+    color-scheme: dark;
+}
+
+.admin-main-area h1,
+.admin-main-area h2,
+.admin-main-area h3,
+.admin-main-area h4,
+.admin-main-area h5,
+.admin-main-area h6,
+.admin-main-area .dashboard-title,
+.admin-main-area .dashboard-heading {
+    color: #f8fafc !important;
+    text-shadow: 0 1px 18px rgba(2, 6, 23, 0.35);
+}
+
+.admin-main-area p,
+.admin-main-area span,
+.admin-main-area div {
+    text-rendering: optimizeLegibility;
+}
+
+.admin-main-area .admin-analytics-panel,
+.admin-main-area .admin-data-panel,
+.admin-main-area .admin-empty-panel {
+    color: #e2e8f0 !important;
+}
+
 .admin-review-scroll-button,
 .admin-page-scroll-button {
     touch-action: none;

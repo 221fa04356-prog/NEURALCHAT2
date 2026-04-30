@@ -18,6 +18,7 @@ const userSchema = new mongoose.Schema({
     displayName: { type: String, default: '' },
     email: { type: String, unique: true, required: true },
     mobile: { type: String, unique: true, required: true },
+    mobile_signature: { type: String, unique: true, sparse: true, select: true },
     countryCode: { type: String, required: true, default: '+91' },
     designation: { type: String },
     about: { type: String, default: 'Available' },
@@ -35,6 +36,7 @@ const userSchema = new mongoose.Schema({
     bannedUntil: { type: Date, default: null },       // Temporary ban on sending requests
     rejectionCount: { type: Number, default: 0 },     // Strike counter (banned after each rejection, locked after 5)
     adminLock: { type: Boolean, default: false },       // Locked by admin after 5 strikes
+    blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     customLists: [{
         _id: { type: String }, // Flexible to support timestamp or UUID strings
         name: { type: String, required: true },

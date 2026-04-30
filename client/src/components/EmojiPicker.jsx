@@ -1,5 +1,5 @@
 import React, { useState, useMemo, memo, useRef, useEffect } from 'react';
-import { Search, X, Smile, Flower2, Coffee, Trophy, Car, Lightbulb, Hash } from 'lucide-react';
+import { X, Smile, Flower2, Coffee, Trophy, Car, Lightbulb, Hash } from 'lucide-react';
 
 const EMOJI_DATA = [
     {
@@ -154,6 +154,8 @@ const EmojiPicker = ({ onSelect, onClose, position, className = "", zoom = 1 }) 
                             <div 
                                 key={cat.category}
                                 className={`wa-emoji-cat-btn ${activeCategory === cat.category ? 'active' : ''}`}
+                                title={cat.category}
+                                aria-label={cat.category}
                                 onClick={() => {
                                     setActiveCategory(cat.category);
                                     const el = document.getElementById(`cat-${cat.category}`);
@@ -167,24 +169,12 @@ const EmojiPicker = ({ onSelect, onClose, position, className = "", zoom = 1 }) 
                     </div>
                 </div>
 
-                <div className="wa-emoji-search-wrapper">
-                    <div className="wa-emoji-search-box">
-                        <Search size={18} color="#8696a0" />
-                        <input 
-                            type="text" 
-                            placeholder="Search reaction" 
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                        />
-                    </div>
-                </div>
-
                 <div className="wa-emoji-list-scroll">
                     {search ? (
                         <div className="wa-emoji-section">
                             <div className="wa-emoji-grid">
                                 {EMOJI_DATA.flatMap(c => c.emojis).slice(0, 100).map((emoji, i) => (
-                                    <span key={i} className="wa-emoji-item" onClick={() => onSelect(emoji)}>{emoji}</span>
+                                    <span key={i} className="wa-emoji-item" title={emoji} aria-label={`Emoji ${emoji}`} onClick={() => onSelect(emoji)}>{emoji}</span>
                                 ))}
                             </div>
                         </div>
@@ -194,7 +184,7 @@ const EmojiPicker = ({ onSelect, onClose, position, className = "", zoom = 1 }) 
                                 <div className="wa-emoji-section-title">{cat.category}</div>
                                 <div className="wa-emoji-grid">
                                     {cat.emojis.map((emoji, i) => (
-                                        <span key={i} className="wa-emoji-item" onClick={() => onSelect(emoji)}>{emoji}</span>
+                                        <span key={i} className="wa-emoji-item" title={emoji} aria-label={`Emoji ${emoji}`} onClick={() => onSelect(emoji)}>{emoji}</span>
                                     ))}
                                 </div>
                             </div>

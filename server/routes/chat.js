@@ -8,8 +8,10 @@ const GroupMessage = require('../models/GroupMessage');
 const ChatDeletion = require('../models/ChatDeletion');
 const User = require('../models/User'); // Import User model
 const Group = require('../models/Group'); // Import Group model
+const Community = require('../models/Community');
 const MessageRequest = require('../models/MessageRequest'); // Import MessageRequest model
 const ReactionLog = require('../models/ReactionLog'); // Import ReactionLog model for audit logs
+const ChatActionLog = require('../models/ChatActionLog');
 const Groq = require('groq-sdk');
 const UnethicalLog = require('../models/UnethicalLog');
 const pdfParse = require('pdf-parse'); // Renamed to avoid confusion
@@ -20,8 +22,9 @@ const axios = require('axios'); // For link preview
 const { uploadLocalFileToGridFS, streamGridFSFileWithRange } = require('../utils/gridfsMedia');
 const cloudinaryUpload = require('../middleware/multer');
 const { isCloudinaryConfigured } = require('../config/cloudinary');
+const { detectUnsafeText } = require('../utils/moderation');
 
-const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole']; // Precise bad words without substring issues
+const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole']; // Legacy fallback only
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const jwt = require('jsonwebtoken');
@@ -852,6 +855,77 @@ router.post('/toggle-favorite', authenticateToken, async (req, res) => {
         await currentUser.save();
         res.json({ status: 'success', favorites: currentUser.favorites });
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Block/report chat targets. Blocks are only supported for p2p chats.
+router.post('/moderation-action', authenticateToken, async (req, res) => {
+    const { action, targetId, targetType = 'p2p', targetName = '', reason = '' } = req.body || {};
+    const actorId = req.user.id;
+
+    if (!['block', 'report'].includes(action)) {
+        return res.status(400).json({ error: 'Unsupported action' });
+    }
+    if (!['p2p', 'group', 'community'].includes(targetType)) {
+        return res.status(400).json({ error: 'Unsupported target type' });
+    }
+    if (!targetId || !mongoose.Types.ObjectId.isValid(targetId)) {
+        return res.status(400).json({ error: 'Valid target ID required' });
+    }
+    if (action === 'block' && targetType !== 'p2p') {
+        return res.status(400).json({ error: 'Block is only available for p2p chats' });
+    }
+
+    try {
+        if (targetType === 'p2p') {
+            const targetUser = await User.findById(targetId).select('_id name __enc_name');
+            if (!targetUser) return res.status(404).json({ error: 'Target user not found' });
+            if (String(targetUser._id) === String(actorId)) {
+                return res.status(400).json({ error: 'You cannot perform this action on yourself' });
+            }
+        } else if (targetType === 'group') {
+            const group = await Group.findById(targetId).select('_id members admin admins name');
+            if (!group) return res.status(404).json({ error: 'Group not found' });
+            const isMember = (group.members || []).some(memberId => String(memberId) === String(actorId))
+                || String(group.admin) === String(actorId)
+                || (group.admins || []).some(adminId => String(adminId) === String(actorId));
+            if (!isMember) return res.status(403).json({ error: 'You are not a member of this group' });
+        } else {
+            const community = await Community.findById(targetId).select('_id members creator admins name');
+            if (!community) return res.status(404).json({ error: 'Community not found' });
+            const isMember = (community.members || []).some(memberId => String(memberId) === String(actorId))
+                || String(community.creator) === String(actorId)
+                || (community.admins || []).some(adminId => String(adminId) === String(actorId));
+            if (!isMember) return res.status(403).json({ error: 'You are not a member of this community' });
+        }
+
+        if (action === 'block') {
+            await User.findByIdAndUpdate(actorId, { $addToSet: { blockedUsers: targetId } });
+        }
+
+        const log = await ChatActionLog.create({
+            actor_id: actorId,
+            target_id: targetId,
+            target_type: targetType,
+            action,
+            target_name: String(targetName || '').slice(0, 160),
+            reason: String(reason || '').slice(0, 500)
+        });
+
+        if (req.io) {
+            req.io.to('admins').emit('chat_moderation_action', {
+                action,
+                targetType,
+                targetId,
+                actorId,
+                created_at: log.created_at
+            });
+        }
+
+        res.json({ status: 'success', action, targetType, blocked: action === 'block' });
+    } catch (err) {
+        console.error('[CHAT MODERATION ACTION ERROR]', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1725,13 +1799,24 @@ router.post('/send', authenticateToken, (req, res, next) => {
 
     try {
         // --- PRE-SEND BLOCK CHECK ---
-        const currentUserProfile = await User.findById(userId);
+        const currentUserProfile = await User.findById(userId).select('messagingBlocked unblockRequested blockedUsers');
         if (currentUserProfile.messagingBlocked) {
             return res.status(403).json({
                 error: 'Messaging Blocked',
                 blocked: true,
                 unblockRequested: currentUserProfile.unblockRequested
             });
+        }
+        if (toUserId) {
+            const senderBlockedTarget = (currentUserProfile.blockedUsers || []).some(id => String(id) === String(toUserId));
+            const targetProfile = await User.findById(toUserId).select('blockedUsers');
+            const targetBlockedSender = (targetProfile?.blockedUsers || []).some(id => String(id) === String(userId));
+            if (senderBlockedTarget || targetBlockedSender) {
+                return res.status(403).json({
+                    error: senderBlockedTarget ? 'You blocked this chat' : 'This chat is unavailable',
+                    chatBlocked: true
+                });
+            }
         }
 
         // === Global Safety & Ethics Check (AI-Driven) ===
@@ -1740,10 +1825,16 @@ router.post('/send', authenticateToken, (req, res, next) => {
 
         // Analyze globally for any type of bad words or unethical behavior
         if (content && content.length > 0) {
-            const aiResult = await checkUnethicalWithAI(content);
-            if (aiResult.isUnethical) {
+            const directResult = detectUnsafeText(content);
+            if (directResult.isUnsafe) {
                 isFlagged = true;
-                flagReason = aiResult.reason;
+                flagReason = directResult.reason;
+            } else {
+                const aiResult = await checkUnethicalWithAI(content);
+                if (aiResult.isUnethical) {
+                    isFlagged = true;
+                    flagReason = aiResult.reason;
+                }
             }
         }
 
@@ -1759,7 +1850,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
                 user_id: userId,
                 content: content || 'Forwarded Media/File',
                 reason: flagReason,
-                type: content && badWords.some(word => content.toLowerCase().includes(word)) ? 'direct' : 'indirect'
+                type: detectUnsafeText(content).type || (content && badWords.some(word => content.toLowerCase().includes(word)) ? 'direct' : 'indirect')
             });
 
             // Check if this violation pushes them over the limit

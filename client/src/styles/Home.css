@@ -235,17 +235,17 @@
     color: #64748B;
     font-weight: 600;
     font-size: 0.9rem;
-    display: flex;
+    display: inline-flex;
     justify-content: flex-start;
     align-items: center;
     gap: 6px;
     transition: all 0.2s ease;
     background: transparent;
     border: none;
-    width: 100%;
-    /* Ensure it takes full width to control alignment */
+    width: fit-content;
+    max-width: 100%;
     margin-left: 0;
-    padding-left: 0;
+    padding: 0;
 }
 
 .back-button:hover {
@@ -327,7 +327,7 @@
 .login-footer a,
 .login-footer button {
     text-decoration: none;
-    color: #94a3b8;
+    color: #38bdf8;
     background: none;
     border: none;
     cursor: pointer;
@@ -564,7 +564,8 @@
 }
 
 .input-neural::placeholder {
-    color: #64748b;
+    color: #f8fafc;
+    opacity: 0.72;
 }
 
 .input-neural:focus {

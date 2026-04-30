@@ -60,21 +60,25 @@ const OFFICIAL_PANEL_SHADOW = '0 24px 60px rgba(2, 6, 23, 0.28)';
 const OFFICIAL_TEXT_PRIMARY = '#f8fafc';
 const OFFICIAL_TEXT_SECONDARY = '#cbd5e1';
 const OFFICIAL_TEXT_MUTED = '#94a3b8';
-const ADMIN_ACTION_SURFACE = 'rgba(15, 23, 42, 0.68)';
-const ADMIN_ACTION_BORDER = '1px solid rgba(148, 163, 184, 0.16)';
+const ADMIN_ACTION_SURFACE = 'linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%)';
+const ADMIN_ACTION_BORDER = 'none';
 
 const ACTION_BUTTON_META = {
     primary: {
-        color: '#8ed2ff',
-        hoverBackground: 'rgba(20, 152, 255, 0.12)',
-        hoverBorder: '1px solid rgba(20, 152, 255, 0.34)',
-        hoverColor: '#c8eeff'
+        color: '#ffffff',
+        hoverBackground: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 48%, #4f46e5 100%)',
+        hoverColor: '#ffffff',
+        baseBackground: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 48%, #4f46e5 100%)',
+        baseShadow: '0 12px 24px rgba(14, 165, 233, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.16)',
+        hoverShadow: '0 14px 28px rgba(14, 165, 233, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.18)'
     },
     danger: {
-        color: '#ff6b8a',
-        hoverBackground: 'rgba(245, 54, 92, 0.12)',
-        hoverBorder: '1px solid rgba(245, 54, 92, 0.32)',
-        hoverColor: '#ffd6df'
+        color: '#ffffff',
+        hoverBackground: 'linear-gradient(135deg, #ef4444 0%, #fb7185 48%, #be123c 100%)',
+        hoverColor: '#ffffff',
+        baseBackground: 'linear-gradient(135deg, #ef4444 0%, #fb7185 48%, #be123c 100%)',
+        baseShadow: '0 12px 24px rgba(239, 68, 68, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.16)',
+        hoverShadow: '0 14px 28px rgba(239, 68, 68, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.18)'
     }
 };
 
@@ -114,6 +118,38 @@ const METRIC_META = {
         color: '#6e72ff',
         gradient: ADMIN_PILL_GRADIENT,
         onClickTab: 'unblock'
+    },
+    totalBlocks: {
+        label: 'Block Actions',
+        shortLabel: 'Blocks',
+        subtext: 'Total p2p block actions',
+        icon: XCircle,
+        color: '#fb7185',
+        gradient: 'linear-gradient(135deg, #ef4444 0%, #fb7185 55%, #be123c 100%)'
+    },
+    blockMembers: {
+        label: 'Members Blocking',
+        shortLabel: 'Blockers',
+        subtext: 'Unique members who blocked',
+        icon: UserIcon,
+        color: '#f97316',
+        gradient: 'linear-gradient(135deg, #f97316 0%, #fb7185 55%, #ef4444 100%)'
+    },
+    totalReports: {
+        label: 'Report Actions',
+        shortLabel: 'Reports',
+        subtext: 'Total reports submitted',
+        icon: AlertTriangle,
+        color: '#facc15',
+        gradient: 'linear-gradient(135deg, #f59e0b 0%, #facc15 55%, #fb7185 100%)'
+    },
+    reportMembers: {
+        label: 'Members Reporting',
+        shortLabel: 'Reporters',
+        subtext: 'Unique members who reported',
+        icon: Users,
+        color: '#22c55e',
+        gradient: 'linear-gradient(135deg, #16a34a 0%, #22c55e 55%, #38bdf8 100%)'
     }
 };
 
@@ -121,7 +157,9 @@ const SERIES_META = {
     approved: { label: 'Approved Users', shortLabel: 'Approved', color: '#1a9cff', totalKey: 'totalUsers' },
     pending: { label: 'Pending Approvals', shortLabel: 'Pending', color: '#2e7bff', totalKey: 'pendingApprovals' },
     resets: { label: 'Reset Requests', shortLabel: 'Resets', color: '#4e59ff', totalKey: 'activeResets' },
-    unblocks: { label: 'Unblock Requests', shortLabel: 'Unblock', color: '#6e72ff', totalKey: 'unblockRequests' }
+    unblocks: { label: 'Unblock Requests', shortLabel: 'Unblock', color: '#6e72ff', totalKey: 'unblockRequests' },
+    blocks: { label: 'Block Actions', shortLabel: 'Blocks', color: '#fb7185', totalKey: 'totalBlocks' },
+    reports: { label: 'Report Actions', shortLabel: 'Reports', color: '#facc15', totalKey: 'totalReports' }
 };
 
 const prettifyMetricKey = (key) => key
@@ -230,35 +268,37 @@ const PieTooltip = ({ active, payload }) => {
 const getActionButtonStyle = (variant = 'primary') => {
     const meta = ACTION_BUTTON_META[variant] || ACTION_BUTTON_META.primary;
     return {
-        background: ADMIN_ACTION_SURFACE,
+        background: meta.baseBackground || ADMIN_ACTION_SURFACE,
         color: meta.color,
-        padding: '8px 12px',
-        width: '110px',
-        minWidth: '110px',
-        borderRadius: '10px',
+        padding: '7px 11px',
+        width: '104px',
+        minWidth: '104px',
+        borderRadius: '0.8rem',
         cursor: 'pointer',
-        fontSize: '0.85rem',
+        fontSize: '0.9rem',
         fontWeight: '700',
-        transition: 'all 0.2s ease',
-        boxShadow: 'none',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        boxShadow: meta.baseShadow || '0 10px 25px rgba(14, 165, 233, 0.3)',
         border: ADMIN_ACTION_BORDER,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         gap: '6px',
         whiteSpace: 'nowrap',
-        outline: 'none'
+        outline: 'none',
+        appearance: 'none'
     };
 };
 
 const applyActionButtonHover = (element, variant = 'primary', hovered = true) => {
     const meta = ACTION_BUTTON_META[variant] || ACTION_BUTTON_META.primary;
-    element.style.background = hovered ? meta.hoverBackground : ADMIN_ACTION_SURFACE;
-    element.style.border = hovered ? meta.hoverBorder : ADMIN_ACTION_BORDER;
+    element.style.background = hovered ? meta.hoverBackground : (meta.baseBackground || ADMIN_ACTION_SURFACE);
+    element.style.border = ADMIN_ACTION_BORDER;
     element.style.color = hovered ? meta.hoverColor : meta.color;
-    element.style.transform = hovered ? 'translateY(-1px)' : 'translateY(0)';
-    element.style.boxShadow = 'none';
+    element.style.transform = hovered ? 'translateY(-3px) scale(1.02)' : 'translateY(0) scale(1)';
+    element.style.boxShadow = hovered ? (meta.hoverShadow || '0 15px 35px rgba(14, 165, 233, 0.45)') : (meta.baseShadow || '0 10px 25px rgba(14, 165, 233, 0.3)');
     element.style.outline = 'none';
+    element.style.outlineOffset = '0';
 };
 
 export default function AdminDashboard() {
@@ -373,6 +413,7 @@ export default function AdminDashboard() {
     const [reviewCanScrollDown, setReviewCanScrollDown] = useState(false);
     const [reviewScrollControlTop, setReviewScrollControlTop] = useState(50);
     const [isDraggingReviewScrollControl, setIsDraggingReviewScrollControl] = useState(false);
+    const [highlightedRedirectRow, setHighlightedRedirectRow] = useState(null);
     const scrollHideTimerRef = useRef(null);
 
     const normalizedStats = useMemo(() => {
@@ -405,7 +446,9 @@ export default function AdminDashboard() {
             approved: Number(item?.approved) || 0,
             pending: Number(item?.pending) || 0,
             resets: Number(item?.resets) || 0,
-            unblocks: Number(item?.unblocks ?? item?.unblockRequests) || 0
+            unblocks: Number(item?.unblocks ?? item?.unblockRequests) || 0,
+            blocks: Number(item?.blocks) || 0,
+            reports: Number(item?.reports) || 0
         }));
     }, [normalizedStats, chartPeriod]);
 
@@ -432,6 +475,14 @@ export default function AdminDashboard() {
             color: metric.color || THEME_SERIES_COLORS[index % THEME_SERIES_COLORS.length]
         }))
     ), [overviewMetrics]);
+
+    const actionContainers = useMemo(() => (
+        Array.isArray(normalizedStats?.actionContainers) ? normalizedStats.actionContainers : []
+    ), [normalizedStats]);
+
+    const reviewNotifications = useMemo(() => (
+        [...adminNotifications].sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+    ), [adminNotifications]);
 
     const handleFloatingScroll = () => {
         if (isDraggingScrollControl) return;
@@ -491,7 +542,7 @@ export default function AdminDashboard() {
             window.removeEventListener('resize', updateScrollState);
             if (scrollHideTimerRef.current) clearTimeout(scrollHideTimerRef.current);
         };
-    }, [activeTab, stats, users.length, resets.length, adminNotifications.length, searchQuery]);
+    }, [activeTab, stats, users.length, resets.length, reviewNotifications.length, searchQuery]);
 
     useEffect(() => {
         if (!isDraggingScrollControl) return;
@@ -699,16 +750,19 @@ export default function AdminDashboard() {
         // Tab switching logic for non-chat alerts
         if (alert.type === 'unblock_request') {
             setActiveTab('unblock');
+            setHighlightedRedirectRow({ kind: 'unblock', id: String(alert.userId || '') });
             setShowNotifications(false);
             return;
         }
         if (alert.type === 'registration') {
             setActiveTab('pending');
+            setHighlightedRedirectRow({ kind: 'pending', id: String(alert.userId || '') });
             setShowNotifications(false);
             return;
         }
         if (alert.type === 'reset') {
             setActiveTab('resets');
+            setHighlightedRedirectRow({ kind: 'reset', id: String(alert.requestId || alert.id || '') });
             setShowNotifications(false);
             return;
         }
@@ -788,6 +842,18 @@ export default function AdminDashboard() {
             chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
         }
     }, [viewChat?.messages, chatStep]);
+
+    useEffect(() => {
+        if (!highlightedRedirectRow) return;
+
+        const timer = setTimeout(() => setHighlightedRedirectRow(null), 4500);
+        const rowEl = document.querySelector(`[data-redirect-row="${highlightedRedirectRow.kind}:${highlightedRedirectRow.id}"]`);
+        if (rowEl && typeof rowEl.scrollIntoView === 'function') {
+            rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        return () => clearTimeout(timer);
+    }, [highlightedRedirectRow, activeTab, users, resets]);
 
     useEffect(() => {
         fetchData();
@@ -894,6 +960,7 @@ export default function AdminDashboard() {
                 timestamp: new Date()
             };
             setAdminNotifications(prev => [newNotif, ...prev]);
+            fetchData();
             fetchStats();
         });
 
@@ -910,6 +977,7 @@ export default function AdminDashboard() {
             const newNotif = {
                 id: `reset-${newReset.id}-${Date.now()}`,
                 type: 'reset',
+                requestId: newReset.id,
                 userId: newReset.user_id,
                 name: newReset.name,
                 email: newReset.email,
@@ -935,6 +1003,12 @@ export default function AdminDashboard() {
                 timestamp: new Date()
             };
             setAdminNotifications(prev => [newNotif, ...prev]);
+        });
+
+        socket.on('chat_moderation_action', (data) => {
+            fetchStats();
+            const actionLabel = data?.action === 'block' ? 'Block' : 'Report';
+            showSnackbar(`${actionLabel} action recorded`, 'info');
         });
 
         socket.on('user_approved', ({ userId }) => {
@@ -1454,6 +1528,7 @@ export default function AdminDashboard() {
                         {lp.domain}
                     </div>
                 </div>
+
             </div>
         );
     };
@@ -1585,6 +1660,7 @@ export default function AdminDashboard() {
                         </button>
                     </div>
                 </div>
+
             </div>
         );
     };
@@ -1676,6 +1752,7 @@ export default function AdminDashboard() {
                         </button>
                     </div>
                 </div>
+
             </div>
         );
     };
@@ -1875,8 +1952,8 @@ export default function AdminDashboard() {
         return (
             <div className="admin-notification-dropdown" style={{
                 position: isMobile ? 'fixed' : 'absolute',
-                top: isMobile ? '66px' : '78px',
-                right: isMobile ? '10px' : '16px',
+                top: isMobile ? '66px' : '84px',
+                right: isMobile ? '10px' : '128px',
                 left: isMobile ? '12px' : 'auto',
                 width: isMobile ? 'auto' : '360px',
                 maxWidth: isMobile ? 'none' : '360px',
@@ -1892,21 +1969,48 @@ export default function AdminDashboard() {
                 }}>
                     <span style={{ fontWeight: '700', color: OFFICIAL_TEXT_PRIMARY, fontSize: '0.95rem' }}>Review Box</span>
                     <span style={{
-                        background: ADMIN_PILL_GRADIENT, color: 'white', padding: '3px 9px',
-                        borderRadius: '999px', fontSize: '0.7rem', fontWeight: '700',
-                        boxShadow: '0 10px 24px rgba(78, 89, 255, 0.24)'
+                        position: 'relative',
+                        width: '28px',
+                        height: '28px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#cbd5e1'
                     }}>
-                        {adminNotifications.length}
+                        <Bell size={18} color="#cbd5e1" fill="none" />
+                        {reviewNotifications.length > 0 && (
+                            <span style={{
+                                position: 'absolute',
+                                top: '-8px',
+                                right: '-8px',
+                                minWidth: '18px',
+                                height: '18px',
+                                padding: '0 5px',
+                                borderRadius: '999px',
+                                background: 'linear-gradient(135deg, #59b7ff 0%, #4e59ff 100%)',
+                                color: 'white',
+                                fontSize: '0.62rem',
+                                fontWeight: '800',
+                                lineHeight: 1,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                border: '2px solid rgba(12, 20, 38, 0.9)',
+                                boxShadow: '0 8px 18px rgba(78, 89, 255, 0.35)'
+                            }}>
+                                {reviewNotifications.length}
+                            </span>
+                        )}
                     </span>
                 </div>
                 <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                    {adminNotifications.length === 0 ? (
+                    {reviewNotifications.length === 0 ? (
                         <div style={{ padding: '40px 20px', textAlign: 'center', color: OFFICIAL_TEXT_MUTED, fontSize: '0.85rem' }}>
                             <Bell size={30} style={{ margin: '0 auto 10px', opacity: 0.3, display: 'block' }} />
                             No recent actions to review
                         </div>
                     ) : (
-                        adminNotifications.map((alert, idx) => (
+                        reviewNotifications.map((alert, idx) => (
                             <div
                                 key={idx}
                                 onClick={() => handleViewAlert(alert)}
@@ -1980,7 +2084,7 @@ export default function AdminDashboard() {
                                         ) : alert.type === 'registration' ? (
                                             `New user: ${alert.email || alert.login_id || alert.userId}`
                                         ) : alert.type === 'reset' ? (
-                                            `For: ${alert.login_id || alert.email || alert.name}`
+                                            `Id: ${alert.login_id || alert.email || alert.name}`
                                         ) : null}
                                     </div>
                                 </div>
@@ -1997,7 +2101,7 @@ export default function AdminDashboard() {
                             borderTop: '1px solid rgba(148, 163, 184, 0.12)', background: 'rgba(255,255,255,0.02)'
                         }}
                     >
-                        Clear all notifications
+                        Clear recent notifications
                     </div>
                 )}
             </div>
@@ -2375,6 +2479,42 @@ export default function AdminDashboard() {
                         </div>
                     </div>
                 </div>
+
+                {actionContainers.length > 0 && (
+                    <div className="dashboard-overview-grid" style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '1.5rem', marginTop: '1.5rem' }}>
+                        {actionContainers.map(container => (
+                            <div key={container.key} className="admin-analytics-panel" style={{ padding: '1.5rem', borderRadius: '1.25rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                                    <div>
+                                        <h4 style={{ margin: 0, color: OFFICIAL_TEXT_PRIMARY, fontSize: '1rem', fontWeight: 800 }}>{container.label}</h4>
+                                        <div style={{ color: OFFICIAL_TEXT_MUTED, fontSize: '0.82rem', fontWeight: 600, marginTop: 4 }}>
+                                            {container.members || 0} members, {container.total || 0} total actions
+                                        </div>
+                                    </div>
+                                    <div style={{ color: container.key === 'block' ? '#fb7185' : '#facc15', fontSize: '1.7rem', fontWeight: 900 }}>
+                                        {container.total || 0}
+                                    </div>
+                                </div>
+                                <div style={{ display: 'grid', gap: '0.75rem' }}>
+                                    {(container.people || []).slice(0, 6).map(person => (
+                                        <div key={`${container.key}-${person.userId}`} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '1rem', alignItems: 'center', padding: '0.75rem 0.9rem', borderRadius: '0.9rem', background: 'rgba(15, 23, 42, 0.62)', border: '1px solid rgba(148, 163, 184, 0.12)' }}>
+                                            <div style={{ minWidth: 0 }}>
+                                                <div style={{ color: OFFICIAL_TEXT_PRIMARY, fontWeight: 800, fontSize: '0.9rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{person.name || 'Unknown member'}</div>
+                                                <div style={{ color: OFFICIAL_TEXT_MUTED, fontWeight: 600, fontSize: '0.75rem' }}>{person.login_id ? `Login ID ${person.login_id}` : 'Member action count'}</div>
+                                            </div>
+                                            <div style={{ color: container.key === 'block' ? '#fb7185' : '#facc15', fontWeight: 900 }}>{person.count || 0}</div>
+                                        </div>
+                                    ))}
+                                    {(!container.people || container.people.length === 0) && (
+                                        <div style={{ color: OFFICIAL_TEXT_MUTED, fontSize: '0.85rem', fontWeight: 600, textAlign: 'center', padding: '1rem' }}>
+                                            No {container.key} actions yet.
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
         );
     };
@@ -2417,14 +2557,24 @@ export default function AdminDashboard() {
                         </tr>
                     </thead>
                     <tbody>
-                        {filtered.map((u, i) => (
+                        {filtered.map((u, i) => {
+                            const rowId = String(u.id || u._id || '');
+                            const isHighlighted = Boolean(
+                                highlightedRedirectRow &&
+                                highlightedRedirectRow.kind === listType &&
+                                highlightedRedirectRow.id === rowId
+                            );
+                            return (
                             <tr
                                 key={u.id}
+                                data-redirect-row={`${listType}:${rowId}`}
                                 style={{
                                     borderBottom: 'none',
                                     transition: 'all 0.25s ease',
                                     position: 'relative',
-                                    zIndex: 0
+                                    zIndex: 0,
+                                    background: isHighlighted ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
+                                    boxShadow: isHighlighted ? 'inset 0 0 0 1px rgba(56, 189, 248, 0.45), 0 16px 36px rgba(2, 6, 23, 0.18)' : 'none'
                                 }}
                                 className="hover-row"
                                 onMouseOver={(e) => {
@@ -2435,20 +2585,20 @@ export default function AdminDashboard() {
                                 }}
                                 onMouseOut={(e) => {
                                     e.currentTarget.style.transform = 'none';
-                                    e.currentTarget.style.background = 'transparent';
-                                    e.currentTarget.style.boxShadow = 'none';
+                                    e.currentTarget.style.background = isHighlighted ? 'rgba(56, 189, 248, 0.12)' : 'transparent';
+                                    e.currentTarget.style.boxShadow = isHighlighted ? 'inset 0 0 0 1px rgba(56, 189, 248, 0.45), 0 16px 36px rgba(2, 6, 23, 0.18)' : 'none';
                                     e.currentTarget.style.zIndex = '0';
                                 }}
                             >
-                                <td style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.9rem', color: OFFICIAL_TEXT_MUTED }}>{i + 1}</td>
+                                <td style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.95rem', color: OFFICIAL_TEXT_MUTED }}>{i + 1}</td>
                                 <td style={{ padding: '1rem' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                         <div style={{ textAlign: 'center' }}>
-                                            <div style={{ fontWeight: '600', color: OFFICIAL_TEXT_PRIMARY }}>{u.name}</div>
+                                            <div style={{ fontSize: '0.95rem', fontWeight: '600', color: OFFICIAL_TEXT_PRIMARY }}>{u.name}</div>
                                         </div>
                                     </div>
                                 </td>
-                                <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.9rem', color: OFFICIAL_TEXT_SECONDARY, fontWeight: '500' }}>
+                                <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.95rem', color: OFFICIAL_TEXT_SECONDARY, fontWeight: '500' }}>
                                     <span style={{
                                         display: 'inline-flex',
                                         alignItems: 'center',
@@ -2457,7 +2607,7 @@ export default function AdminDashboard() {
                                         padding: '4px 12px',
                                         background: 'rgba(255,255,255,0.05)',
                                         borderRadius: '4px',
-                                        fontSize: '0.75rem',
+                                        fontSize: '0.85rem',
                                         color: '#73a8ff',
                                         fontWeight: '700',
                                         minWidth: '60px',
@@ -2470,7 +2620,7 @@ export default function AdminDashboard() {
                                     style={{
                                         padding: '1rem',
                                         textAlign: 'center',
-                                        fontSize: '0.9rem',
+                                        fontSize: '0.95rem',
                                         color: OFFICIAL_TEXT_SECONDARY,
                                         minWidth: listType === 'pending' ? '260px' : '180px',
                                         whiteSpace: 'nowrap'
@@ -2478,7 +2628,7 @@ export default function AdminDashboard() {
                                 >
                                     {u.email}
                                 </td>
-                                {listType === 'management' && <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.9rem', color: OFFICIAL_TEXT_SECONDARY }}>{u.login_id}</td>}
+                                {listType === 'management' && <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.95rem', color: OFFICIAL_TEXT_SECONDARY }}>{u.login_id}</td>}
                                 {listType === 'pending' && (
                                     <td style={{ padding: '1rem', textAlign: 'center' }}>
                                         <input
@@ -2489,7 +2639,7 @@ export default function AdminDashboard() {
                                                 const val = e.target.value.replace(/\D/g, '');
                                                 setLoginIds({ ...loginIds, [u.id]: val });
                                             }}
-                                            style={{ width: '60px', padding: '8px 4px', fontSize: '0.7rem', borderRadius: '6px', border: '1px solid #dee2e6', textAlign: 'center' }}
+                                            style={{ width: '70px', padding: '8px 4px', fontSize: '0.85rem', borderRadius: '6px', border: '1px solid #dee2e6', textAlign: 'center' }}
                                         />
                                     </td>
                                 )}
@@ -2511,7 +2661,7 @@ export default function AdminDashboard() {
                                                             e.preventDefault();
                                                         }
                                                     }}
-                                                    style={{ width: '120px', padding: '8px 24px 8px 8px', fontSize: '0.8rem', borderRadius: '6px', border: '1px solid #dee2e6', textAlign: 'center', outline: 'none' }}
+                                                    style={{ width: '135px', padding: '8px 24px 8px 8px', fontSize: '0.88rem', borderRadius: '6px', border: '1px solid #dee2e6', textAlign: 'center', outline: 'none' }}
                                                 />
                                                 <div onClick={() => setShowPass({ ...showPass, [u.id]: !showPass[u.id] })} style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: '#8898aa', display: 'flex', alignItems: 'center' }}>
                                                     {showPass[u.id] ? <EyeOff size={14} /> : <Eye size={14} />}
@@ -2531,7 +2681,7 @@ export default function AdminDashboard() {
                                                             e.preventDefault();
                                                         }
                                                     }}
-                                                    style={{ width: '155px', padding: '8px 24px 8px 8px', fontSize: '0.8rem', borderRadius: '6px', border: '1px solid #dee2e6', textAlign: 'center', outline: 'none' }}
+                                                    style={{ width: '170px', padding: '8px 24px 8px 8px', fontSize: '0.88rem', borderRadius: '6px', border: '1px solid #dee2e6', textAlign: 'center', outline: 'none' }}
                                                 />
                                                 <div onClick={() => setShowPassRe({ ...showPassRe, [u.id]: !showPassRe[u.id] })} style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: '#8898aa', display: 'flex', alignItems: 'center' }}>
                                                     {showPassRe[u.id] ? <EyeOff size={14} /> : <Eye size={14} />}
@@ -2540,11 +2690,11 @@ export default function AdminDashboard() {
                                         </div>
                                     </td>
                                 )}
-                                <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.85rem', color: OFFICIAL_TEXT_MUTED }}>
+                                <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.9rem', color: OFFICIAL_TEXT_MUTED }}>
                                     {u.created_at ? (
                                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '2px' }}>
                                             <div style={{ fontWeight: '600', color: OFFICIAL_TEXT_SECONDARY }}>{new Date(u.created_at).toLocaleDateString('en-IN')}</div>
-                                            <div style={{ fontSize: '0.75rem', opacity: 0.8, whiteSpace: 'nowrap' }}>
+                                            <div style={{ fontSize: '0.8rem', opacity: 0.8, whiteSpace: 'nowrap' }}>
                                                 {new Date(u.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
                                             </div>
                                         </div>
@@ -2612,7 +2762,8 @@ export default function AdminDashboard() {
                                     </div>
                                 </td>
                             </tr>
-                        ))}
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>
@@ -2648,14 +2799,24 @@ export default function AdminDashboard() {
                             </tr>
                         </thead>
                         <tbody>
-                            {filteredResets.map((r, i) => (
+                            {filteredResets.map((r, i) => {
+                                const rowId = String(r.id || '');
+                                const isHighlighted = Boolean(
+                                    highlightedRedirectRow &&
+                                    highlightedRedirectRow.kind === 'reset' &&
+                                    highlightedRedirectRow.id === rowId
+                                );
+                                return (
                                 <tr
                                     key={r.id}
+                                    data-redirect-row={`reset:${rowId}`}
                                     style={{
                                         borderBottom: 'none',
                                         transition: 'all 0.25s ease',
                                         position: 'relative',
-                                        zIndex: 0
+                                        zIndex: 0,
+                                        background: isHighlighted ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
+                                        boxShadow: isHighlighted ? 'inset 0 0 0 1px rgba(56, 189, 248, 0.45), 0 16px 36px rgba(2, 6, 23, 0.18)' : 'none'
                                     }}
                                     onMouseOver={(e) => {
                                         e.currentTarget.style.transform = 'none';
@@ -2665,16 +2826,16 @@ export default function AdminDashboard() {
                                     }}
                                     onMouseOut={(e) => {
                                         e.currentTarget.style.transform = 'none';
-                                        e.currentTarget.style.background = 'transparent';
-                                        e.currentTarget.style.boxShadow = 'none';
+                                        e.currentTarget.style.background = isHighlighted ? 'rgba(56, 189, 248, 0.12)' : 'transparent';
+                                        e.currentTarget.style.boxShadow = isHighlighted ? 'inset 0 0 0 1px rgba(56, 189, 248, 0.45), 0 16px 36px rgba(2, 6, 23, 0.18)' : 'none';
                                         e.currentTarget.style.zIndex = '0';
                                     }}
                                 >
-                                    <td style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.9rem', color: OFFICIAL_TEXT_MUTED }}>{i + 1}</td>
+                                    <td style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.85rem', color: OFFICIAL_TEXT_MUTED }}>{i + 1}</td>
                                     <td style={{ padding: '1rem', textAlign: 'center' }}>
-                                        <div style={{ fontWeight: '600', color: OFFICIAL_TEXT_PRIMARY }}>{r.name}</div>
+                                        <div style={{ fontWeight: '600', color: OFFICIAL_TEXT_PRIMARY, fontSize: '0.9rem' }}>{r.name}</div>
                                     </td>
-                                    <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.9rem', color: OFFICIAL_TEXT_SECONDARY }}>{r.login_id}</td>
+                                    <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.85rem', color: OFFICIAL_TEXT_SECONDARY }}>{r.login_id}</td>
                                     <td style={{ padding: '1rem' }}>
                                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
                                             <div style={{ position: 'relative' }}>
@@ -2693,12 +2854,12 @@ export default function AdminDashboard() {
                                                     }}
                                                     style={{
                                                         padding: '8px 24px 8px 8px',
-                                                        fontSize: '0.8rem',
+                                                        fontSize: '0.78rem',
                                                         width: '120px',
                                                         borderRadius: '6px',
                                                         border: '1px solid #cbd5e1',
                                                         outline: 'none',
-                                                        color: '#334155',
+                                                        color: OFFICIAL_TEXT_SECONDARY,
                                                         textAlign: 'center'
                                                     }}
                                                 />
@@ -2722,12 +2883,12 @@ export default function AdminDashboard() {
                                                     }}
                                                     style={{
                                                         padding: '8px 24px 8px 8px',
-                                                        fontSize: '0.8rem',
+                                                        fontSize: '0.78rem',
                                                         width: '155px',
                                                         borderRadius: '6px',
                                                         border: '1px solid #cbd5e1',
                                                         outline: 'none',
-                                                        color: '#334155',
+                                                        color: OFFICIAL_TEXT_SECONDARY,
                                                         textAlign: 'center'
                                                     }}
                                                 />
@@ -2737,11 +2898,11 @@ export default function AdminDashboard() {
                                             </div>
                                         </div>
                                     </td>
-                                    <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.85rem', color: OFFICIAL_TEXT_MUTED }}>
+                                    <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED }}>
                                         {r.created_at ? (
                                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
                                                 <div style={{ fontWeight: '600', color: OFFICIAL_TEXT_SECONDARY }}>{new Date(r.created_at).toLocaleDateString('en-IN')}</div>
-                                                <div style={{ fontSize: '0.75rem', opacity: 0.8, whiteSpace: 'nowrap' }}>
+                                                <div style={{ fontSize: '0.72rem', opacity: 0.8, whiteSpace: 'nowrap' }}>
                                                     {new Date(r.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
                                                 </div>
                                             </div>
@@ -2774,7 +2935,8 @@ export default function AdminDashboard() {
                                         </div>
                                     </td>
                                 </tr>
-                            ))}
+                                );
+                            })}
                         </tbody>
                     </table>
                 )}
@@ -2898,17 +3060,33 @@ export default function AdminDashboard() {
                         </tr>
                     </thead>
                     <tbody>
-                        {unblockReqs.map((u, i) => (
-                            <tr key={u.id} className="hover-row" style={{ borderBottom: '1px solid rgba(148, 163, 184, 0.08)' }}>
-                                <td style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.9rem', color: OFFICIAL_TEXT_MUTED }}>{i + 1}</td>
+                        {unblockReqs.map((u, i) => {
+                            const rowId = String(u.id || u._id || '');
+                            const isHighlighted = Boolean(
+                                highlightedRedirectRow &&
+                                highlightedRedirectRow.kind === 'unblock' &&
+                                highlightedRedirectRow.id === rowId
+                            );
+                            return (
+                            <tr
+                                key={u.id}
+                                data-redirect-row={`unblock:${rowId}`}
+                                className="hover-row"
+                                style={{
+                                    borderBottom: '1px solid rgba(148, 163, 184, 0.08)',
+                                    background: isHighlighted ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
+                                    boxShadow: isHighlighted ? 'inset 0 0 0 1px rgba(56, 189, 248, 0.45), 0 16px 36px rgba(2, 6, 23, 0.18)' : 'none'
+                                }}
+                            >
+                                <td style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.85rem', color: OFFICIAL_TEXT_MUTED }}>{i + 1}</td>
                                 <td style={{ padding: '1rem' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
                                         <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', border: '1px solid rgba(148, 163, 184, 0.12)' }}>
                                             {u.image ? <img src={u.image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={16} color="#73a8ff" />}
                                         </div>
                                         <div style={{ textAlign: 'left' }}>
-                                            <div style={{ fontWeight: '700', color: OFFICIAL_TEXT_PRIMARY, fontSize: '0.9rem' }}>{u.name}</div>
-                                            <div style={{ fontSize: '0.75rem', color: OFFICIAL_TEXT_MUTED }}>ID: {u.login_id}</div>
+                                            <div style={{ fontWeight: '700', color: OFFICIAL_TEXT_PRIMARY, fontSize: '0.85rem' }}>{u.name}</div>
+                                            <div style={{ fontSize: '0.72rem', color: OFFICIAL_TEXT_MUTED }}>ID: {u.login_id}</div>
                                         </div>
                                     </div>
                                 </td>
@@ -2917,7 +3095,7 @@ export default function AdminDashboard() {
                                         background: 'rgba(255,255,255,0.04)',
                                         padding: '10px 15px',
                                         borderRadius: '12px',
-                                        fontSize: '0.85rem',
+                                        fontSize: '0.8rem',
                                         color: OFFICIAL_TEXT_SECONDARY,
                                         maxWidth: '300px',
                                         margin: '0 auto',
@@ -2930,10 +3108,10 @@ export default function AdminDashboard() {
                                 <td style={{ padding: '1rem', textAlign: 'center' }}>
                                     <span style={{
                                         padding: '4px 10px',
-                                        background: '#fee2e2',
-                                        color: '#ef4444',
+                                        background: 'rgba(255,255,255,0.06)',
+                                        color: OFFICIAL_TEXT_SECONDARY,
                                         borderRadius: '12px',
-                                        fontSize: '0.75rem',
+                                        fontSize: '0.72rem',
                                         fontWeight: '700'
                                     }}>
                                         {u.unethicalCount || 0} / 5 Strikes
@@ -2960,7 +3138,8 @@ export default function AdminDashboard() {
                                     </div>
                                 </td>
                             </tr>
-                        ))}
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>
@@ -3044,7 +3223,7 @@ export default function AdminDashboard() {
                         >
                             <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', width: sidebarOpen || isMobile ? '20px' : '22px', height: sidebarOpen || isMobile ? '20px' : '22px' }}>
                                 <item.icon size={sidebarOpen || isMobile ? 18 : 20} strokeWidth={2} style={{ color: item.color }} />
-                                {(!sidebarOpen && !isMobile && item.count !== undefined) && (
+                                {(item.count !== undefined) && (
                                     <span style={{
                                         position: 'absolute',
                                         top: '-8px',
@@ -3070,20 +3249,8 @@ export default function AdminDashboard() {
                                 )}
                             </div>
                             {(isMobile || sidebarOpen) && (
-                                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', flex: 1, marginLeft: '0.9rem', gap: '0.8rem', minWidth: 0 }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', alignItems: 'center', flex: 1, marginLeft: '0.9rem', gap: '0.8rem', minWidth: 0 }}>
                                     <span style={{ fontWeight: activeTab === item.id ? '800' : '600', fontSize: isMobile ? '0.96rem' : '0.88rem', whiteSpace: 'nowrap', lineHeight: 1.1 }}>{item.name}</span>
-                                    {item.count !== undefined && (
-                                        <span style={{
-                                            background: 'transparent !important',
-                                            color: item.color,
-                                            fontSize: isMobile ? '0.96rem' : '0.88rem', fontWeight: '700',
-                                            padding: '0', borderRadius: '0',
-                                            minWidth: '24px', textAlign: 'right', flexShrink: 0,
-                                            boxShadow: 'none'
-                                        }}>
-                                            {item.count || 0}
-                                        </span>
-                                    )}
                                 </div>
                             )}
                         </div>
@@ -3149,25 +3316,29 @@ export default function AdminDashboard() {
                             <div
                                 onClick={(e) => { e.stopPropagation(); setShowNotifications(!showNotifications); }}
                                 style={{
-                                    cursor: 'pointer', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, borderRadius: '50%',
+                                    cursor: 'pointer', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, borderRadius: '50%',
                                     background: 'transparent',
                                     transition: 'background 0.2s', position: 'relative'
                                 }}
                             >
                                 <Bell
                                     size={20}
-                                    color={showNotifications ? '#73a8ff' : '#94a3b8'}
-                                    fill={showNotifications ? '#4e59ff' : 'none'}
+                                    color={showNotifications ? '#e2e8f0' : '#cbd5e1'}
+                                    fill="none"
                                 />
-                                {adminNotifications.length > 0 && (
+                                {reviewNotifications.length > 0 && (
                                     <span style={{
-                                        position: 'absolute', top: '4px', right: '4px',
-                                        background: '#f5365c', color: 'white', fontSize: '0.65rem',
-                                        minWidth: '16px', height: '16px', borderRadius: '50%',
+                                        position: 'absolute', top: '1px', right: '1px',
+                                        background: 'linear-gradient(135deg, #59b7ff 0%, #4e59ff 100%)', color: 'white', fontSize: '0.62rem',
+                                        minWidth: '17px', height: '17px', borderRadius: '999px',
                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        fontWeight: '700', border: '2px solid rgba(12, 20, 38, 0.9)'
+                                        padding: '0 4px',
+                                        fontWeight: '700', border: '2px solid rgba(12, 20, 38, 0.9)',
+                                        boxShadow: '0 8px 18px rgba(78, 89, 255, 0.35)',
+                                        lineHeight: 1,
+                                        zIndex: 2
                                     }}>
-                                        {adminNotifications.length}
+                                        {reviewNotifications.length}
                                     </span>
                                 )}
                             </div>
@@ -3200,11 +3371,12 @@ export default function AdminDashboard() {
                                         whiteSpace: 'nowrap',
                                         zIndex: 1000,
                                         pointerEvents: 'none',
-                                        background: 'rgba(255, 255, 255, 0.9)',
-                                        padding: '6px 14px',
-                                        borderRadius: '8px',
-                                        boxShadow: '0 4px 15px rgba(0,0,0,0.05)',
-                                        backdropFilter: 'blur(5px)'
+                                        background: 'linear-gradient(180deg, rgba(10, 18, 36, 0.98) 0%, rgba(13, 23, 42, 0.96) 100%)',
+                                        padding: '7px 14px',
+                                        borderRadius: '999px',
+                                        border: '1px solid rgba(56, 189, 248, 0.24)',
+                                        boxShadow: '0 14px 34px rgba(2, 6, 23, 0.45), 0 0 18px rgba(56, 189, 248, 0.18)',
+                                        backdropFilter: 'blur(10px)'
                                     }}>
                                         Logout
                                     </div>

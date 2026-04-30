@@ -18,6 +18,7 @@ const axios = require('axios');
 const { uploadLocalFileToGridFS } = require('../utils/gridfsMedia');
 const Groq = require('groq-sdk');
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const { detectUnsafeText } = require('../utils/moderation');
 
 const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole']; // Precise bad words
 
@@ -916,10 +917,16 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
         let flagReason = "";
 
         if (content && content.length > 0) {
-            const aiResult = await checkUnethicalWithAI(content);
-            if (aiResult.isUnethical) {
+            const directResult = detectUnsafeText(content);
+            if (directResult.isUnsafe) {
                 isFlagged = true;
-                flagReason = aiResult.reason;
+                flagReason = directResult.reason;
+            } else {
+                const aiResult = await checkUnethicalWithAI(content);
+                if (aiResult.isUnethical) {
+                    isFlagged = true;
+                    flagReason = aiResult.reason;
+                }
             }
         }
 
@@ -934,7 +941,7 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
                 user_id: senderId,
                 content: content || 'Group Media/File',
                 reason: flagReason,
-                type: content && badWords.some(word => content.toLowerCase().includes(word)) ? 'direct' : 'indirect'
+                type: detectUnsafeText(content).type || (content && badWords.some(word => content.toLowerCase().includes(word)) ? 'direct' : 'indirect')
             });
 
             // Check if this violation pushes them over the limit

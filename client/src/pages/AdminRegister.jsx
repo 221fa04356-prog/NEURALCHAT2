@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import { Shield, Lock, Mail, User, Key, Eye, EyeOff, ArrowLeft, Phone } from 'lucide-react';
@@ -6,7 +6,6 @@ import LandingBackground from '../components/LandingBackground';
 import HumanVerification from '../components/HumanVerification';
 import Snackbar from '../components/Snackbar';
 import CountryCodeSelect from '../components/CountryCodeSelect';
-import { countryCodes } from '../utils/countryCodes';
 import '../styles/Home.css';
 
 export default function AdminRegister() {
@@ -15,7 +14,40 @@ export default function AdminRegister() {
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [snackbar, setSnackbar] = useState({ open: false, message: '', type: 'info' });
     const [isHumanVerified, setIsHumanVerified] = useState(false);
+    const [mobileAvailability, setMobileAvailability] = useState({ status: 'idle', message: '' });
     const navigate = useNavigate();
+
+    useEffect(() => {
+        const cleanMobile = formData.mobile.replace(/\D/g, '');
+        if (cleanMobile.length !== 10) {
+            setMobileAvailability({ status: 'idle', message: '' });
+            return;
+        }
+
+        let cancelled = false;
+        const timer = setTimeout(async () => {
+            setMobileAvailability({ status: 'checking', message: 'Checking mobile number...' });
+            try {
+                const res = await axios.get('/api/auth/check-mobile', { params: { mobile: cleanMobile } });
+                if (cancelled) return;
+                if (res.data.available) {
+                    setMobileAvailability({ status: 'available', message: '' });
+                } else {
+                    const message = res.data.message || 'This mobile number is already linked with another account.';
+                    setMobileAvailability({ status: 'taken', message });
+                }
+            } catch (err) {
+                if (!cancelled) {
+                    setMobileAvailability({ status: 'error', message: err.response?.data?.error || 'Unable to check mobile number right now.' });
+                }
+            }
+        }, 350);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [formData.mobile]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -43,6 +75,10 @@ export default function AdminRegister() {
 
         if (!formData.mobile || !mobileRegex.test(formData.mobile)) {
             setSnackbar({ open: true, message: 'Mobile number must be exactly 10 digits.', type: 'warning' });
+            return;
+        }
+        if (mobileAvailability.status === 'taken') {
+            setSnackbar({ open: true, message: mobileAvailability.message, type: 'error' });
             return;
         }
 
@@ -166,6 +202,11 @@ export default function AdminRegister() {
                                         />
                                     </div>
                                 </div>
+                                {mobileAvailability.status === 'taken' && (
+                                    <p style={{ margin: '6px 0 0', color: '#f87171', fontSize: '0.82rem', fontWeight: 700 }}>
+                                        {mobileAvailability.message}
+                                    </p>
+                                )}
                             </div>
 
                             <div className="form-group-custom">
@@ -243,7 +284,7 @@ export default function AdminRegister() {
                                 />
                             </div>
 
-                            <button type="submit" className="btn-primary-neural" style={{ width: '100%', borderRadius: '1rem', border: 'none', fontWeight: '800', cursor: 'pointer' }}>
+                            <button type="submit" className="btn-primary-neural" disabled={mobileAvailability.status === 'taken' || mobileAvailability.status === 'checking'} style={{ width: '100%', borderRadius: '1rem', border: 'none', fontWeight: '800', cursor: mobileAvailability.status === 'taken' || mobileAvailability.status === 'checking' ? 'not-allowed' : 'pointer', opacity: mobileAvailability.status === 'taken' || mobileAvailability.status === 'checking' ? 0.65 : 1 }}>
                                 <Shield size={18} /> Create Admin Account
                             </button>
                         </form>
