@@ -1645,6 +1645,7 @@ export default function Chat() {
     const [isStarredMessagesOpen, setIsStarredMessagesOpen] = useState(false); // New state for Starred Messages
     const [isGlobalStarredOpen, setIsGlobalStarredOpen] = useState(false); // For starred from main menu
     const [globalStarredMessages, setGlobalStarredMessages] = useState([]);
+    const [globalStarredCount, setGlobalStarredCount] = useState(0);
     const [isGlobalStarredLoading, setIsGlobalStarredLoading] = useState(false);
     const [sharedMediaTab, setSharedMediaTab] = useState('media'); // 'media', 'docs', 'links'
     const [selectedMediaMsgs, setSelectedMediaMsgs] = useState([]);
@@ -3889,6 +3890,13 @@ export default function Chat() {
             const updateStarred = (prev) => prev.map(m => (ids.includes(m._id) || ids.includes(m.id)) ? { ...m, is_starred: !allStarred } : m);
             setMessages(updateStarred);
             setGroupMessages(updateStarred);
+            const delta = allStarred ? -selectedMediaMsgs.length : selectedMediaMsgs.filter(m => !m.is_starred).length;
+            setGlobalStarredCount(prev => Math.max(0, prev + delta));
+            if (allStarred) {
+                setGlobalStarredMessages(prev => prev.filter(m => !ids.some(id => String(id) === String(m._id || m.id))));
+            } else if (isGlobalStarredOpen) {
+                fetchGlobalStarredMessages(false);
+            }
 
             setSnackbar({ message: `Messages ${allStarred ? 'unstarred' : 'starred'}`, type: 'success', variant: 'system' });
             setSelectedMediaMsgs([]);
@@ -3975,6 +3983,13 @@ export default function Chat() {
             )));
             setMessages(prev => prev.map(m => ids.some(id => String(id) === String(m._id) || String(id) === String(m.id)) ? { ...m, is_starred: !allStarred } : m));
             setGroupMessages(prev => prev.map(m => ids.some(id => String(id) === String(m._id) || String(id) === String(m.id)) ? { ...m, is_starred: !allStarred } : m));
+            const delta = allStarred ? -forwardSelectedMsgs.length : forwardSelectedMsgs.filter(m => !m.is_starred).length;
+            setGlobalStarredCount(prev => Math.max(0, prev + delta));
+            if (allStarred) {
+                setGlobalStarredMessages(prev => prev.filter(m => !ids.some(id => String(id) === String(m._id || m.id))));
+            } else if (isGlobalStarredOpen) {
+                fetchGlobalStarredMessages(false);
+            }
             setSnackbar({ message: `Messages ${allStarred ? 'unstarred' : 'starred'}`, type: 'success', variant: 'system' });
             setIsForwardingMode(false);
             setIsChatSelectionMode(false);
@@ -5921,18 +5936,20 @@ export default function Chat() {
     }, []);
 
     // --- Fetch Global Starred Messages ---
-    const fetchGlobalStarredMessages = async () => {
-        setIsGlobalStarredLoading(true);
+    const fetchGlobalStarredMessages = async (showLoader = true) => {
+        if (showLoader) setIsGlobalStarredLoading(true);
         try {
             const token = localStorage.getItem('token');
             const res = await axios.get('/api/chat/messages/starred/all', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            setGlobalStarredMessages(res.data);
+            const starred = Array.isArray(res.data) ? res.data : [];
+            setGlobalStarredMessages(starred);
+            setGlobalStarredCount(starred.length);
         } catch (err) {
             console.error("Failed to fetch global starred messages", err);
         } finally {
-            setIsGlobalStarredLoading(false);
+            if (showLoader) setIsGlobalStarredLoading(false);
         }
     };
 
@@ -5942,6 +5959,12 @@ export default function Chat() {
             fetchGlobalStarredMessages();
         }
     }, [isGlobalStarredOpen]);
+
+    useEffect(() => {
+        const currentUserId = user?.id || user?._id;
+        if (!currentUserId || !localStorage.getItem('token')) return;
+        fetchGlobalStarredMessages(false);
+    }, [user?.id, user?._id]);
 
     // --- Fetch Current User Data (For Profile) ---
     useEffect(() => {
@@ -7004,6 +7027,12 @@ export default function Chat() {
             );
             setMessages(prev => prev.map(m => (String(m._id) === String(msgId) || String(m.id) === String(msgId)) ? { ...m, is_starred: !currentState } : m));
             setGroupMessages(prev => prev.map(m => (String(m._id) === String(msgId) || String(m.id) === String(msgId)) ? { ...m, is_starred: !currentState } : m));
+            setGlobalStarredCount(prev => Math.max(0, prev + (!currentState ? 1 : -1)));
+            if (currentState) {
+                setGlobalStarredMessages(prev => prev.filter(m => String(m._id || m.id) !== String(msgId)));
+            } else if (isGlobalStarredOpen) {
+                fetchGlobalStarredMessages(false);
+            }
             setSnackbar({ message: `Message ${!currentState ? 'starred' : 'unstarred'}`, type: 'success', variant: 'system', onAction: () => handleToggleStar(msgId, !currentState), actionLabel: 'Undo' });
             setOpenDropdown(null);
         } catch (err) { console.error("Star toggle failed", err); }
@@ -7532,7 +7561,8 @@ export default function Chat() {
     };
 
     const confirmUnstarAll = async () => {
-        const targetMsgs = unstarTarget === 'global' ? globalStarredMessages : messages.filter(m => m.is_starred);
+        const currentChatMessages = (selectedGroup || selectedCommunity ? groupMessages : messages).filter(m => m.is_starred);
+        const targetMsgs = unstarTarget === 'global' ? globalStarredMessages : currentChatMessages;
         if (targetMsgs.length === 0) {
             setIsUnstarConfirmOpen(false);
             return;
@@ -7552,13 +7582,17 @@ export default function Chat() {
 
             if (unstarTarget === 'global') {
                 setGlobalStarredMessages([]);
+                setGlobalStarredCount(0);
                 // Also update local current chat messages if any of them were unstarred
                 setMessages(prev => prev.map(m => ({ ...m, is_starred: false })));
                 setGroupMessages(prev => prev.map(m => ({ ...m, is_starred: false })));
             } else {
-                setMessages(prev => prev.map(m => ({ ...m, is_starred: false })));
+                const targetIds = new Set(targetMsgs.map(m => String(m._id || m.id)));
+                setMessages(prev => prev.map(m => targetIds.has(String(m._id || m.id)) ? { ...m, is_starred: false } : m));
+                setGroupMessages(prev => prev.map(m => targetIds.has(String(m._id || m.id)) ? { ...m, is_starred: false } : m));
+                setGlobalStarredCount(prev => Math.max(0, prev - targetMsgs.length));
                 // Also update global list if it's loaded
-                setGlobalStarredMessages(prev => prev.filter(m => !targetMsgs.some(tm => String(tm._id) === String(m._id))));
+                setGlobalStarredMessages(prev => prev.filter(m => !targetIds.has(String(m._id || m.id))));
             }
             setSnackbar({ message: "Messages unstarred", type: 'success', variant: 'system' });
             setIsUnstarConfirmOpen(false);
@@ -13003,13 +13037,21 @@ export default function Chat() {
                         <div style={{ width: '100%', borderBottom: thickDivider }}></div>
 
                         <div style={{ background: itemBgColor }}>
+                            {(() => {
+                                const starredCount = groupMessages.filter(m => m.is_starred).length;
+                                return (
                             <div className="clickable" onClick={() => { setIsContactInfoOpen(false); setIsStarredMessagesOpen(true); }} style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                                     <Star size={24} color="#38bdf8" />
                                     <span style={{ color: textColor, fontSize: 16 }}>Starred messages</span>
                                 </div>
-                                <ChevronRight size={20} color="#38bdf8" />
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span style={{ color: subTextColor, fontSize: 15 }}>{starredCount}</span>
+                                    <ChevronRight size={20} color="#38bdf8" />
+                                </div>
                             </div>
+                                );
+                            })()}
                             <div className="clickable" onClick={() => { setIsContactInfoOpen(false); setIsNotificationSettingsOpen(true); }} style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                                     <Bell size={24} color="#38bdf8" />
@@ -13293,7 +13335,8 @@ export default function Chat() {
                             setIsStarredMessagesOpen(true);
                         }}>
                             <div className="wa-setting-icon"><Star size={20} color="#38bdf8" /></div>
-                            <div className="wa-setting-text" style={{ color: '#f8fafc' }}>{t('contact_info.starred_messages')}</div>
+                            <div className="wa-setting-text" style={{ color: '#f8fafc', flex: 1 }}>{t('contact_info.starred_messages')}</div>
+                            <span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 600 }}>{messages.filter(m => m.is_starred).length}</span>
                             <ChevronRight size={20} color="#38bdf8" style={{ transform: 'none' }} />
                         </div>
                         <div className="wa-setting-item clickable" onClick={() => {
@@ -13609,7 +13652,9 @@ export default function Chat() {
         if (!activeTarget) return null;
 
         const isGroupOrCommunity = !!selectedGroup || !!selectedCommunity;
-        const starredMsgs = (isGroupOrCommunity ? groupMessages : messages).filter(m => m.is_starred);
+        const starredMsgs = (isGroupOrCommunity ? groupMessages : messages)
+            .filter(m => m.is_starred)
+            .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
         return (
             <div className={`wa-starred-messages-panel ${isStarredMessagesOpen ? 'active' : ''}`} style={{ background: 'transparent' }}>
@@ -14491,6 +14536,15 @@ export default function Chat() {
                 setMessages(prev => prev.map(m =>
                     m._id === viewingImage._id ? { ...m, is_starred: newStatus } : m
                 ));
+                setGroupMessages(prev => prev.map(m =>
+                    m._id === viewingImage._id ? { ...m, is_starred: newStatus } : m
+                ));
+                setGlobalStarredCount(prev => Math.max(0, prev + (newStatus ? 1 : -1)));
+                if (!newStatus) {
+                    setGlobalStarredMessages(prev => prev.filter(m => String(m._id || m.id) !== String(viewingImage._id)));
+                } else if (isGlobalStarredOpen) {
+                    fetchGlobalStarredMessages(false);
+                }
 
                 // Update viewingImage state
                 setViewingImage(prev => ({ ...prev, is_starred: newStatus }));
@@ -15355,7 +15409,9 @@ export default function Chat() {
                                     <Users size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> New community
                                 </div>
                                 <div className="wa-dropdown-item" onClick={() => { setIsGlobalStarredOpen(true); setOpenDropdown(null); }}>
-                                    <Star size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> Starred messages
+                                    <Star size={18} style={{ marginRight: 12, color: '#38bdf8' }} />
+                                    <span style={{ flex: 1 }}>Starred messages</span>
+                                    <span style={{ color: '#94a3b8', fontSize: 13, fontWeight: 600 }}>{globalStarredCount}</span>
                                 </div>
                                 <div className="wa-dropdown-item" onClick={() => { setIsArchivedChatsOpen(true); setOpenDropdown(null); }}>
                                     <Archive size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> Archived
@@ -18405,7 +18461,7 @@ export default function Chat() {
             )}
 
             {/* Chat List: Groups + Users combined */}
-            <div className="wa-user-list" onScroll={() => { setOpenDropdown(null); }} style={{ paddingBottom: isMobile ? '12px' : '0' }}>
+            <div className="wa-user-list" onScroll={() => { setOpenDropdown(null); }}>
                 {!isDataLoaded ? (
                     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0' }}>
                         <CircleDashed size={24} className="wa-spinner" style={{ animation: 'waSpinner 1s linear infinite' }} />
@@ -18413,114 +18469,115 @@ export default function Chat() {
                     </div>
                 ) : (
                     <>
-                        {(() => {
-                            const displayItems = [...groups.map(g => ({ ...g, is_group: true })), ...users.map(u => ({ ...u, is_group: false })), ...communities.map(c => ({ ...c, is_community: true, _id: c.id, lastMessage: c.announcements?.lastMessage }))]
-                                .filter(item => {
-                                    const displayName = item.name || (item.is_group ? 'Unnamed Group' : 'User');
-                                    const contentPart = item.lastMessage?.content || '';
-                                    const q = searchQuery.toLowerCase();
-                                    const nameMatch = displayName.toLowerCase().includes(q);
-                                    const msgMatch = contentPart.toLowerCase().includes(q);
-                                    const mobileMatch = !item.is_group && item.mobile?.toLowerCase().includes(q);
-                                    const emailMatch = !item.is_group && item.email?.toLowerCase().includes(q);
-                                    const matchesSearch = nameMatch || msgMatch || mobileMatch || emailMatch;
+                        <div className="wa-user-list-content">
+                            {(() => {
+                                const displayItems = [...groups.map(g => ({ ...g, is_group: true })), ...users.map(u => ({ ...u, is_group: false })), ...communities.map(c => ({ ...c, is_community: true, _id: c.id, lastMessage: c.announcements?.lastMessage }))]
+                                    .filter(item => {
+                                        const displayName = item.name || (item.is_group ? 'Unnamed Group' : 'User');
+                                        const contentPart = item.lastMessage?.content || '';
+                                        const q = searchQuery.toLowerCase();
+                                        const nameMatch = displayName.toLowerCase().includes(q);
+                                        const msgMatch = contentPart.toLowerCase().includes(q);
+                                        const mobileMatch = !item.is_group && item.mobile?.toLowerCase().includes(q);
+                                        const emailMatch = !item.is_group && item.email?.toLowerCase().includes(q);
+                                        const matchesSearch = nameMatch || msgMatch || mobileMatch || emailMatch;
 
-                                    if (filterType === 'groups') {
-                                        return matchesSearch && item.is_group;
-                                    }
+                                        if (filterType === 'groups') {
+                                            return matchesSearch && item.is_group;
+                                        }
 
-                                    if (filterType.startsWith('custom_')) {
-                                        const listId = filterType.replace('custom_', '');
-                                        const activeList = customLists.find(l => String(l._id || l.id) === listId);
-                                        return matchesSearch && activeList && activeList.members.includes(String(item._id || item.id));
-                                    }
+                                        if (filterType.startsWith('custom_')) {
+                                            const listId = filterType.replace('custom_', '');
+                                            const activeList = customLists.find(l => String(l._id || l.id) === listId);
+                                            return matchesSearch && activeList && activeList.members.includes(String(item._id || item.id));
+                                        }
 
 
-                                    if (archivedChatIds.includes(item._id)) return false;
+                                        if (archivedChatIds.includes(item._id)) return false;
 
-                                    // If not searching and on "All" tab, hide users with no history/no pinning/no active requests
-                                    if (!searchQuery.trim() && filterType === 'all' && !item.is_group && !item.is_community) {
-                                        const hasHistory = !!item.lastMessage;
-                                        const isPinned = !!item.isPinned;
-                                        const isPending = item.requestStatus === 'pending';
-                                        const isRestricted = item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000;
+                                        // If not searching and on "All" tab, hide users with no history/no pinning/no active requests
+                                        if (!searchQuery.trim() && filterType === 'all' && !item.is_group && !item.is_community) {
+                                            const hasHistory = !!item.lastMessage;
+                                            const isPinned = !!item.isPinned;
+                                            const isPending = item.requestStatus === 'pending';
+                                            const isRestricted = item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000;
 
-                                        if (!hasHistory && !isPinned && !isPending && !isRestricted) return false;
-                                    }
+                                            if (!hasHistory && !isPinned && !isPending && !isRestricted) return false;
+                                        }
 
-                                    if (filterType === 'all') {
+                                        if (filterType === 'all') {
+                                            return matchesSearch;
+                                        }
+                                        if (filterType === 'unread') return matchesSearch && (item.unreadCount > 0);
+                                        if (filterType === 'favorites') return matchesSearch && item.isFavorite;
+                                        if (filterType === 'groups') return matchesSearch && item.is_group;
+                                        if (filterType === 'communities') return matchesSearch && item.is_community;
                                         return matchesSearch;
-                                    }
-                                    if (filterType === 'unread') return matchesSearch && (item.unreadCount > 0);
-                                    if (filterType === 'favorites') return matchesSearch && item.isFavorite;
-                                    if (filterType === 'groups') return matchesSearch && item.is_group;
-                                    if (filterType === 'communities') return matchesSearch && item.is_community;
-                                    return matchesSearch;
-                                })
-                                .sort((a, b) => {
-                                    // Typing contacts always first (instant visibility)
-                                    const aId = String(a._id || a.id || '').toLowerCase();
-                                    const bId = String(b._id || b.id || '').toLowerCase();
+                                    })
+                                    .sort((a, b) => {
+                                        // Typing contacts always first (instant visibility)
+                                        const aId = String(a._id || a.id || '').toLowerCase();
+                                        const bId = String(b._id || b.id || '').toLowerCase();
 
-                                    const aMatch = aId ? Object.entries(typingUsers || {}).find(([id, set]) => String(id).toLowerCase() === aId && set?.size > 0) : null;
-                                    const bMatch = bId ? Object.entries(typingUsers || {}).find(([id, set]) => String(id).toLowerCase() === bId && set?.size > 0) : null;
+                                        const aMatch = aId ? Object.entries(typingUsers || {}).find(([id, set]) => String(id).toLowerCase() === aId && set?.size > 0) : null;
+                                        const bMatch = bId ? Object.entries(typingUsers || {}).find(([id, set]) => String(id).toLowerCase() === bId && set?.size > 0) : null;
 
-                                    if (aMatch && !bMatch) return -1;
-                                    if (!aMatch && bMatch) return 1;
-                                    // Pinned always next
-                                    if (a.isPinned && !b.isPinned) return -1;
-                                    if (!a.isPinned && b.isPinned) return 1;
-                                    // Then by date, defaulting to 0 if none
-                                    const dateA = new Date(a.lastMessage?.created_at || a.created_at || 0);
-                                    const dateB = new Date(b.lastMessage?.created_at || b.created_at || 0);
-                                    return dateB - dateA;
-                                });
+                                        if (aMatch && !bMatch) return -1;
+                                        if (!aMatch && bMatch) return 1;
+                                        // Pinned always next
+                                        if (a.isPinned && !b.isPinned) return -1;
+                                        if (!a.isPinned && b.isPinned) return 1;
+                                        // Then by date, defaulting to 0 if none
+                                        const dateA = new Date(a.lastMessage?.created_at || a.created_at || 0);
+                                        const dateB = new Date(b.lastMessage?.created_at || b.created_at || 0);
+                                        return dateB - dateA;
+                                    });
 
-                            if (displayItems.length === 0) {
-                                if (!searchQuery.trim() && filterType === 'all') {
-                                    return (
-                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 30px', textAlign: 'center', color: '#94a3b8' }}>
-                                            <div style={{ background: 'rgba(56, 189, 248, 0.05)', borderRadius: '50%', padding: '24px', marginBottom: '16px', border: '1px solid rgba(56, 189, 248, 0.1)' }}>
-                                                <Plus size={40} color="#0EA5BE" style={{ opacity: 0.8 }} />
+                                if (displayItems.length === 0) {
+                                    if (!searchQuery.trim() && filterType === 'all') {
+                                        return (
+                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 30px', textAlign: 'center', color: '#94a3b8' }}>
+                                                <div style={{ background: 'rgba(56, 189, 248, 0.05)', borderRadius: '50%', padding: '24px', marginBottom: '16px', border: '1px solid rgba(56, 189, 248, 0.1)' }}>
+                                                    <Plus size={40} color="#0EA5BE" style={{ opacity: 0.8 }} />
+                                                </div>
+                                                <p style={{ fontSize: '15px', color: '#f8fafc', marginBottom: '8px', fontWeight: '600' }}>No chats yet</p>
+                                                <p style={{ fontSize: '13px', lineHeight: '1.5', marginBottom: '24px' }}>Start a fresh conversation with your colleagues or friends.</p>
+                                                <button
+                                                    className="wa-nav-icon-btn"
+                                                    style={{
+                                                        background: '#0EA5BE',
+                                                        color: 'white',
+                                                        borderRadius: '24px',
+                                                        padding: '10px 24px',
+                                                        fontSize: '14px',
+                                                        fontWeight: '600',
+                                                        width: 'auto',
+                                                        height: 'auto',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '8px',
+                                                        boxShadow: '0 4px 12px rgba(2, 126, 181, 0.2)'
+                                                    }}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        if (users.length === 0) fetchUsers();
+                                                        setIsNewChatOpen(true);
+                                                    }}
+                                                >
+                                                    <Plus size={18} />
+                                                    Start Chat
+                                                </button>
                                             </div>
-                                            <p style={{ fontSize: '15px', color: '#f8fafc', marginBottom: '8px', fontWeight: '600' }}>No chats yet</p>
-                                            <p style={{ fontSize: '13px', lineHeight: '1.5', marginBottom: '24px' }}>Start a fresh conversation with your colleagues or friends.</p>
-                                            <button
-                                                className="wa-nav-icon-btn"
-                                                style={{
-                                                    background: '#0EA5BE',
-                                                    color: 'white',
-                                                    borderRadius: '24px',
-                                                    padding: '10px 24px',
-                                                    fontSize: '14px',
-                                                    fontWeight: '600',
-                                                    width: 'auto',
-                                                    height: 'auto',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '8px',
-                                                    boxShadow: '0 4px 12px rgba(2, 126, 181, 0.2)'
-                                                }}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    if (users.length === 0) fetchUsers();
-                                                    setIsNewChatOpen(true);
-                                                }}
-                                            >
-                                                <Plus size={18} />
-                                                Start Chat
-                                            </button>
+                                        );
+                                    }
+                                    return (
+                                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0', fontSize: '14px' }}>
+                                            No results found
                                         </div>
                                     );
                                 }
-                                return (
-                                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0', fontSize: '14px' }}>
-                                        No results found
-                                    </div>
-                                );
-                            }
 
-                            return displayItems.map(item => {
+                                return displayItems.map(item => {
                                 const isGroup = item.is_group;
                                 const displayName = item.is_community ? (item.name || 'Community') : (isGroup ? (item.name || 'Unnamed Group') : getContactDisplayName(item));
 
@@ -18653,36 +18710,36 @@ export default function Chat() {
                                         </div>
                                     </div>
                                 );
-                            });
-                        })()}
+                                });
+                            })()}
+                        </div>
+
+                        {isDataLoaded && (
+                            <div className="wa-chat-list-end-note">
+                                <div className="wa-chat-list-end-note-mobile-hint">
+                                    Tap and hold on a chat for more options
+                                </div>
+                                <div className="wa-chat-list-end-note-encryption">
+                                    <Lock size={13} />
+                                    <span>
+                                        Your personal messages are <span className="wa-chat-list-end-note-green">end-to-end encrypted</span>
+                                    </span>
+                                </div>
+                            </div>
+                        )}
                     </>
-                )}
-                {isDataLoaded && (
-                    <div className="wa-chat-list-end-note">
-                        <div className="wa-chat-list-end-note-mobile-hint">
-                            Tap and hold on a chat for more options
-                        </div>
-                        <div className="wa-chat-list-end-note-encryption">
-                            <Lock size={13} />
-                            <span>
-                                Your personal messages are <span className="wa-chat-list-end-note-green">end-to-end encrypted</span>
-                            </span>
-                        </div>
-                    </div>
                 )}
             </div>
 
             {/* Mobile Bottom Navigation Bar */}
             {isMobile && (
                 <div style={{
-                    position: 'absolute',
-                    bottom: 0,
-                    left: 0,
                     width: '100%',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-around',
                     height: '60px',
+                    flexShrink: 0,
                     backgroundColor: 'rgba(15, 23, 42, 0.95)',
                     backdropFilter: 'blur(20px)',
                     borderTop: '1px solid rgba(255, 255, 255, 0.1)',
