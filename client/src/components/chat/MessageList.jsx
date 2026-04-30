@@ -120,23 +120,34 @@ VoiceWaveform.displayName = 'VoiceWaveform';
 
 const appendMediaToken = (url) => {
     if (!url) return '';
-    const token = localStorage.getItem('token') || '';
-    if (!token) return url;
+    const apiBase = (axios.defaults.baseURL || '').replace(/\/$/, '');
+    const apiOrigin = apiBase.replace(/\/api$/i, '');
 
     try {
         const parsed = new URL(url, window.location.origin);
         if (!parsed.pathname.startsWith('/api/chat/media')) return url;
+        const token = localStorage.getItem('token') || '';
         parsed.searchParams.set('token', token);
+        if (apiOrigin) {
+            return `${apiOrigin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+        }
         if (/^https?:\/\//i.test(url)) return parsed.toString();
         return `${parsed.pathname}${parsed.search}${parsed.hash}`;
     } catch (_) {
         if (!String(url).includes('/api/chat/media')) return url;
+        const token = localStorage.getItem('token') || '';
         const withoutToken = String(url)
             .replace(/([?&])token=[^&#]*&?/i, '$1')
             .replace(/[?&]$/g, '');
-        return withoutToken.includes('?')
-            ? `${withoutToken}&token=${encodeURIComponent(token)}`
-            : `${withoutToken}?token=${encodeURIComponent(token)}`;
+        const tokenized = token
+            ? (withoutToken.includes('?')
+                ? `${withoutToken}&token=${encodeURIComponent(token)}`
+                : `${withoutToken}?token=${encodeURIComponent(token)}`)
+            : withoutToken;
+        if (apiOrigin && tokenized.startsWith('/api/chat/media')) {
+            return `${apiOrigin}${tokenized}`;
+        }
+        return tokenized;
     }
 };
 
