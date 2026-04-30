@@ -226,8 +226,8 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
                 if (legacyPath.startsWith('/uploads/')) {
                     const proxyUrl = buildMediaProxyUrl(legacyPath);
                     return {
-                        primaryUrl: messageUrl || proxyUrl || '',
-                        retryUrl: messageUrl && proxyUrl && messageUrl !== proxyUrl ? proxyUrl : ''
+                        primaryUrl: proxyUrl || messageUrl || '',
+                        retryUrl: proxyUrl && messageUrl && messageUrl !== proxyUrl ? messageUrl : ''
                     };
                 }
                 return { primaryUrl: appendMediaToken(normalizedUrl), retryUrl: messageUrl && messageUrl !== appendMediaToken(normalizedUrl) ? messageUrl : '' };
@@ -235,8 +235,8 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
             if (parsed.pathname.startsWith('/uploads/')) {
                 const proxyUrl = buildMediaProxyUrl(parsed.pathname);
                 return {
-                    primaryUrl: messageUrl || proxyUrl || '',
-                    retryUrl: messageUrl && proxyUrl && messageUrl !== proxyUrl ? proxyUrl : ''
+                    primaryUrl: proxyUrl || messageUrl || '',
+                    retryUrl: proxyUrl && messageUrl && messageUrl !== proxyUrl ? messageUrl : ''
                 };
             }
         } catch (_) { }
@@ -262,8 +262,8 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
             if (legacyPath.startsWith('/uploads/')) {
                 const proxyUrl = buildMediaProxyUrl(legacyPath);
                 return {
-                    primaryUrl: messageUrl || proxyUrl || '',
-                    retryUrl: messageUrl && proxyUrl && messageUrl !== proxyUrl ? proxyUrl : ''
+                    primaryUrl: proxyUrl || messageUrl || '',
+                    retryUrl: proxyUrl && messageUrl && messageUrl !== proxyUrl ? messageUrl : ''
                 };
             }
         } catch (_) { }
@@ -276,8 +276,8 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
     if (normalized.startsWith('/uploads/')) {
         const proxyUrl = buildMediaProxyUrl(normalized);
         return {
-            primaryUrl: messageUrl || proxyUrl || '',
-            retryUrl: messageUrl && proxyUrl && messageUrl !== proxyUrl ? proxyUrl : ''
+            primaryUrl: proxyUrl || messageUrl || '',
+            retryUrl: proxyUrl && messageUrl && messageUrl !== proxyUrl ? messageUrl : ''
         };
     }
 
