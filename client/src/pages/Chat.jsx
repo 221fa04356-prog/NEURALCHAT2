@@ -435,6 +435,8 @@ const getEventLifecycleState = (event) => {
             hasStarted: false,
             isEnded: false,
             isCancelled: false,
+            isRescheduled: false,
+            isVoteLocked: false,
             statusLabel: 'Upcoming event',
         };
     }
@@ -444,6 +446,8 @@ const getEventLifecycleState = (event) => {
             hasStarted: false,
             isEnded: false,
             isCancelled: true,
+            isRescheduled: false,
+            isVoteLocked: true,
             statusLabel: 'Event cancelled',
         };
     }
@@ -462,7 +466,9 @@ const getEventLifecycleState = (event) => {
         hasStarted,
         isEnded,
         isCancelled: false,
-        statusLabel: isEnded ? 'Event ended' : hasStarted ? 'Event active' : 'Upcoming event',
+        isRescheduled: Boolean(event.rescheduledAt) && !hasStarted && !isEnded,
+        isVoteLocked: hasStarted || isEnded,
+        statusLabel: isEnded ? 'Event ended' : hasStarted ? 'Event started' : event.rescheduledAt ? 'Event rescheduled' : 'Upcoming event',
     };
 };
 
@@ -1909,15 +1915,22 @@ export default function Chat() {
                     }
                 });
 
-                // Keep UI updated if events expire
-                setEventTick(prev => prev + 1);
             }
         }, 60000);
         return () => {
             clearInterval(refreshInterval);
             clearInterval(reminderTickInterval);
         };
-    }, [user, isAppAsleep, remindersList, eventTick]);
+    }, [user, isAppAsleep, remindersList]);
+
+    useEffect(() => {
+        if (!user || isAppAsleep) return;
+        const intervalId = setInterval(() => {
+            setEventTick(prev => prev + 1);
+        }, 15000);
+
+        return () => clearInterval(intervalId);
+    }, [user, isAppAsleep]);
 
     const isAccountBanned = () => {
         if (!accountBanned) return false;
@@ -6407,6 +6420,13 @@ export default function Chat() {
 
     const handleEventRespond = async (msg, status) => {
         try {
+            const lifecycle = getEventLifecycleState(msg?.event);
+            if (lifecycle.isVoteLocked || lifecycle.isCancelled) {
+                setSnackbar({ message: 'Voting is closed for this event', type: 'info', variant: 'system' });
+                setOpenEventRespondId(null);
+                return;
+            }
+
             const token = localStorage.getItem('token');
             const isGroup = !!msg.group_id;
             const msgId = msg._id || msg.id;
@@ -6439,7 +6459,8 @@ export default function Chat() {
             }
         } catch (err) {
             console.error('[EVENT RESPOND ERROR]', err);
-            setSnackbar({ message: 'Failed to respond to event', type: 'error' });
+            const errorMessage = err.response?.data?.error || 'Failed to respond to event';
+            setSnackbar({ message: errorMessage, type: 'error' });
         }
     };
 
@@ -8639,6 +8660,16 @@ export default function Chat() {
     };
 
     const openEditEvent = (msg) => {
+        const lifecycle = getEventLifecycleState(msg?.event);
+        if (lifecycle.isEnded) {
+            setSnackbar({ message: 'Ended events cannot be edited', type: 'info', variant: 'system' });
+            return;
+        }
+        if (lifecycle.isCancelled) {
+            setSnackbar({ message: 'Cancelled events cannot be edited', type: 'info', variant: 'system' });
+            return;
+        }
+
         setEventEditTarget(msg);
         const ev = msg.event || {};
         setEventName(ev.name || '');
@@ -8654,6 +8685,17 @@ export default function Chat() {
 
     const submitEventEdit = async () => {
         if (!eventEditTarget) return;
+        const lifecycle = getEventLifecycleState(eventEditTarget?.event);
+        if (lifecycle.isEnded) {
+            setSnackbar({ message: 'Ended events cannot be edited', type: 'info', variant: 'system' });
+            setIsEventEditOpen(false);
+            return;
+        }
+        if (lifecycle.isCancelled) {
+            setSnackbar({ message: 'Cancelled events cannot be edited', type: 'info', variant: 'system' });
+            setIsEventEditOpen(false);
+            return;
+        }
         const isGroup = !!eventEditTarget.group_id;
         const msgId = eventEditTarget._id || eventEditTarget.id;
         const token = localStorage.getItem('token');
@@ -8735,6 +8777,7 @@ export default function Chat() {
             }
 
             setIsCancelEventConfirmOpen(false);
+            setIsEventEditOpen(false);
             setIsEventDetailsOpen(false);
             setSnackbar({ message: 'Event cancelled', type: 'success', variant: 'system' });
         } catch (err) {
@@ -21413,6 +21456,11 @@ export default function Chat() {
                         <div style={{ color: softText, fontSize: 14, marginBottom: 12 }}>
                             {totalCount} {totalCount === 1 ? 'person' : 'people'} responded
                         </div>
+                        {lifecycle.statusLabel !== 'Upcoming event' && (
+                            <div style={{ color: lifecycle.isCancelled || lifecycle.isEnded ? softText : '#38bdf8', fontSize: 15, fontWeight: 600 }}>
+                                {lifecycle.statusLabel}
+                            </div>
+                        )}
                     </div>
 
                     {renderResponseSection('Going', goingCount, 'Going')}
@@ -21465,8 +21513,13 @@ export default function Chat() {
                                         <span onClick={(e) => { e.stopPropagation(); confirmCancelEvent(eventDetailsMsg); }} style={{ ...actionLinkStyle, color: '#f87171' }}>Cancel event</span>
                                     </div>
                                 )}
+                                {lifecycle.isRescheduled && (
+                                    <div style={{ color: '#38bdf8', fontSize: 15, fontWeight: 600, textAlign: 'center' }}>
+                                        Event rescheduled
+                                    </div>
+                                )}
                                 <div style={{ position: 'relative' }}>
-                                    {openEventRespondId === eventDetailsMsg._id && (
+                                    {openEventRespondId === String(eventDetailsMsg._id || eventDetailsMsg.id) && (
                                         <div style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, background: cardBg, borderRadius: '12px', boxShadow: '0 -4px 20px rgba(0,0,0,0.28)', marginBottom: '10px', zIndex: 100, overflow: 'hidden', border: '1px solid rgba(148, 163, 184, 0.16)' }}>
                                             {['Going', 'Maybe', 'Not going'].map(status => (
                                                 <button
@@ -21480,7 +21533,7 @@ export default function Chat() {
                                             ))}
                                         </div>
                                     )}
-                                    <button onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === eventDetailsMsg._id ? null : eventDetailsMsg._id); }} style={{ background: '#0EA5BE', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '24px', fontSize: 16, fontWeight: 600, cursor: 'pointer', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                    <button onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === String(eventDetailsMsg._id || eventDetailsMsg.id) ? null : String(eventDetailsMsg._id || eventDetailsMsg.id)); }} style={{ background: '#0EA5BE', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '24px', fontSize: 16, fontWeight: 600, cursor: 'pointer', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
                                         {myResponse ? myResponse.status : 'Respond'}
                                         <ChevronUp size={20} />
                                     </button>
@@ -24125,15 +24178,7 @@ export default function Chat() {
                             </div>
 
                             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
-                                {String(eventEditTarget.user_id || eventEditTarget.sender_id?._id || eventEditTarget.sender_id || '') === String(user.id || user._id) && (
-                                    <button
-                                        onClick={() => confirmCancelEvent(eventEditTarget)}
-                                        style={{ background: 'none', border: '1px solid #f87171', color: '#f87171', padding: '10px 18px', borderRadius: 22 }}
-                                    >
-                                        Cancel event
-                                    </button>
-                                )}
-                                <button onClick={() => setIsEventEditOpen(false)} style={{ background: 'none', border: '1px solid #d1d7db', color: '#54656f', padding: '10px 18px', borderRadius: 22 }}>Cancel</button>
+                                <button onClick={() => confirmCancelEvent(eventEditTarget)} style={{ background: 'none', border: '1px solid #f87171', color: '#f87171', padding: '10px 18px', borderRadius: 22 }}>Cancel event</button>
                                 <button onClick={submitEventEdit} style={{ background: '#0EA5BE', border: 'none', color: 'white', padding: '10px 18px', borderRadius: 22 }}>Save</button>
                             </div>
                         </div>
