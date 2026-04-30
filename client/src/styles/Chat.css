@@ -1634,6 +1634,9 @@ html {
 
 .wa-user-list {
     flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
     background: rgba(15, 23, 42, 0.72);
     display: flex;
@@ -10193,6 +10196,14 @@ svg.wa-back-icon,
 }
 
 @media (max-width: 768px) {
+    .wa-user-list {
+        flex: 1;
+    }
+
+    .wa-user-list-content {
+        flex: 0 0 auto;
+    }
+
     .wa-chat-list-end-note {
         padding: 0 0 60px 0;
         border-top: 1px solid rgba(56, 189, 248, 0.16);
@@ -10357,8 +10368,8 @@ svg.wa-back-icon,
     border-radius: 12px !important;
 }
 
-.wa-message-bubble.is-poll.wa-msg-sent {
-}
+/*.wa-message-bubble.is-poll.wa-msg-sent {
+}*/
 
 /* Theme-shaded preview and modal surfaces */
 .wa-link-preview-card,

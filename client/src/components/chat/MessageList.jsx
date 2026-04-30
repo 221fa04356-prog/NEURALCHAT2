@@ -147,13 +147,15 @@ const buildMediaProxyUrl = (rawPath) => {
         try {
             const parsed = new URL(raw, window.location.origin);
             if (parsed.pathname.startsWith('/uploads/')) {
-                return '';
+                const mediaApiPath = `/api/chat/media?path=${encodeURIComponent(parsed.pathname)}`;
+                return appendMediaToken(mediaApiPath);
             }
             return appendMediaToken(`${parsed.pathname || raw}${parsed.search || ''}`);
         } catch (_) {
             const normalized = raw.startsWith('/') ? raw : `/${raw.replace(/^\/+/, '')}`;
             if (normalized.startsWith('/uploads/')) {
-                return '';
+                const mediaApiPath = `/api/chat/media?path=${encodeURIComponent(normalized)}`;
+                return appendMediaToken(mediaApiPath);
             }
             return appendMediaToken(normalized);
         }
@@ -182,8 +184,7 @@ const buildMessageMediaFallbackUrl = (msg, isGroupChat = false) => {
 
 const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
     const rawPath = msg?.file_path || msg?.filePath || '';
-    // Only use message-id fallback when we truly do not have a concrete media path.
-    const messageUrl = rawPath ? '' : buildMessageMediaFallbackUrl(msg, isGroupChat);
+    const messageUrl = buildMessageMediaFallbackUrl(msg, isGroupChat);
     if (!rawPath) {
         return { primaryUrl: messageUrl, retryUrl: '' };
     }
@@ -212,14 +213,20 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
             if (parsed.pathname.startsWith('/api/chat/media')) {
                 const legacyPath = parsed.searchParams.get('path') || '';
                 if (legacyPath.startsWith('/uploads/')) {
-                    return { primaryUrl: messageUrl || '', retryUrl: '' };
+                    const proxyUrl = buildMediaProxyUrl(legacyPath);
+                    return {
+                        primaryUrl: messageUrl || proxyUrl || '',
+                        retryUrl: messageUrl && proxyUrl && messageUrl !== proxyUrl ? proxyUrl : ''
+                    };
                 }
                 return { primaryUrl: appendMediaToken(normalizedUrl), retryUrl: messageUrl && messageUrl !== appendMediaToken(normalizedUrl) ? messageUrl : '' };
             }
             if (parsed.pathname.startsWith('/uploads/')) {
-                // Never hit legacy /uploads directly from the browser.
-                // If we cannot build a message-id resolver URL, render unavailable state.
-                return { primaryUrl: messageUrl || '', retryUrl: '' };
+                const proxyUrl = buildMediaProxyUrl(parsed.pathname);
+                return {
+                    primaryUrl: messageUrl || proxyUrl || '',
+                    retryUrl: messageUrl && proxyUrl && messageUrl !== proxyUrl ? proxyUrl : ''
+                };
             }
         } catch (_) { }
 
@@ -242,7 +249,11 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
             const parsed = new URL(normalized, window.location.origin);
             const legacyPath = parsed.searchParams.get('path') || '';
             if (legacyPath.startsWith('/uploads/')) {
-                return { primaryUrl: messageUrl || '', retryUrl: '' };
+                const proxyUrl = buildMediaProxyUrl(legacyPath);
+                return {
+                    primaryUrl: messageUrl || proxyUrl || '',
+                    retryUrl: messageUrl && proxyUrl && messageUrl !== proxyUrl ? proxyUrl : ''
+                };
             }
         } catch (_) { }
         const directUrl = appendMediaToken(normalized);
@@ -252,9 +263,11 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
         };
     }
     if (normalized.startsWith('/uploads/')) {
-        // Never hit legacy /uploads directly from the browser.
-        // If we cannot build a message-id resolver URL, render unavailable state.
-        return { primaryUrl: messageUrl || '', retryUrl: '' };
+        const proxyUrl = buildMediaProxyUrl(normalized);
+        return {
+            primaryUrl: messageUrl || proxyUrl || '',
+            retryUrl: messageUrl && proxyUrl && messageUrl !== proxyUrl ? proxyUrl : ''
+        };
     }
 
     const directUrl = appendMediaToken(normalized) || '';
@@ -360,16 +373,98 @@ const MessageList = memo(({
     const formatInlineEventTime = (event) => {
         const startDate = event?.startDate;
         if (!startDate) return 'Event';
-        const startTime = event?.startTime || '00:00';
-        const startValue = new Date(`${String(startDate).split('T')[0]}T${startTime}:00`);
-        if (Number.isNaN(startValue.getTime())) return 'Event';
+
+        const buildDateTime = (dateValue, timeValue, fallbackDateValue) => {
+            const normalizedDate = String(dateValue || fallbackDateValue || '').split('T')[0];
+            if (!normalizedDate) return null;
+            const normalizedTime = String(timeValue || '00:00').slice(0, 5);
+            const parsed = new Date(`${normalizedDate}T${normalizedTime}:00`);
+            return Number.isNaN(parsed.getTime()) ? null : parsed;
+        };
+
+        const formatTime = (dateValue) => dateValue.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        const startValue = buildDateTime(startDate, event?.startTime);
+        if (!startValue) return 'Event';
+
+        const endValue = buildDateTime(event?.endDate, event?.endTime, startDate);
         const now = new Date();
-        const isToday = startValue.toDateString() === now.toDateString();
-        const dateLabel = isToday
+        const tomorrow = new Date();
+        tomorrow.setDate(now.getDate() + 1);
+
+        const isSameDay = (left, right) => left && right && left.toDateString() === right.toDateString();
+        const dateLabel = isSameDay(startValue, now)
             ? 'Today'
-            : startValue.toLocaleDateString([], { month: 'numeric', day: 'numeric', year: 'numeric' });
-        const timeLabel = startValue.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-        return `${dateLabel}, ${timeLabel}`;
+            : isSameDay(startValue, tomorrow)
+                ? 'Tomorrow'
+                : startValue.toLocaleDateString([], { month: 'numeric', day: 'numeric', year: 'numeric' });
+
+        if (!endValue || !event?.endTime) {
+            return `${dateLabel}, ${formatTime(startValue)}`;
+        }
+
+        if (isSameDay(startValue, endValue)) {
+            return `${dateLabel}, ${formatTime(startValue)} - ${formatTime(endValue)}`;
+        }
+
+        return `${dateLabel}, ${formatTime(startValue)} - ${endValue.toLocaleDateString([], { month: 'numeric', day: 'numeric', year: 'numeric' })}, ${formatTime(endValue)}`;
+    };
+    const getEventOwnerId = (msg) => String(msg?.sender_id?._id || msg?.sender_id || msg?.user_id?._id || msg?.user_id || '');
+    const getEventResponses = (event) => {
+        const responseMap = new Map();
+        (event?.responses || []).forEach((response) => {
+            const responseUserId = String(response?.user_id?._id || response?.user_id?.id || response?.user_id || '');
+            if (!responseUserId) return;
+            responseMap.set(responseUserId, response);
+        });
+        (event?.participants || []).forEach((participant) => {
+            const participantId = String(participant?._id || participant?.id || participant || '');
+            if (!participantId || responseMap.has(participantId)) return;
+            responseMap.set(participantId, { user_id: participantId, status: 'Going' });
+        });
+        return Array.from(responseMap.values());
+    };
+    const getEventLifecycleState = (event) => {
+        if (!event) {
+            return {
+                hasStarted: false,
+                isEnded: false,
+                isCancelled: false,
+                isRescheduled: false,
+                isVoteLocked: false,
+                statusLabel: 'Upcoming event'
+            };
+        }
+
+        if (event.cancelled) {
+            return {
+                hasStarted: false,
+                isEnded: false,
+                isCancelled: true,
+                isRescheduled: false,
+                isVoteLocked: true,
+                statusLabel: 'Event cancelled'
+            };
+        }
+
+        const startDateValue = event.startDate ? String(event.startDate).split('T')[0] : '';
+        const endDateValue = event.endDate ? String(event.endDate).split('T')[0] : '';
+        const startAt = startDateValue ? new Date(`${startDateValue}T${String(event.startTime || '00:00').slice(0, 5)}:00`) : null;
+        const endAt = (endDateValue || event.endTime)
+            ? new Date(`${(endDateValue || startDateValue)}T${String(event.endTime || event.startTime || '23:59').slice(0, 5)}:00`)
+            : null;
+        const now = new Date();
+        const hasStarted = !!(startAt && !Number.isNaN(startAt.getTime()) && startAt <= now);
+        const isEnded = !!(endAt && !Number.isNaN(endAt.getTime()) && endAt <= now);
+        const isRescheduled = !!event.rescheduledAt && !hasStarted && !isEnded;
+
+        return {
+            hasStarted,
+            isEnded,
+            isCancelled: false,
+            isRescheduled,
+            isVoteLocked: hasStarted || isEnded,
+            statusLabel: isEnded ? 'Event ended' : hasStarted ? 'Event started' : isRescheduled ? 'Event rescheduled' : 'Upcoming event'
+        };
     };
 
     useEffect(() => {
@@ -1773,42 +1868,114 @@ const MessageList = memo(({
                                     </div>
                                 )}
                                 {msg.type === 'event' && msg.event && (
-                                    <div
-                                        className="wa-event-card"
-                                        onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }}
-                                        style={{ background: '#ffffff', borderRadius: '12px', overflow: 'hidden', width: isMobile ? '240px' : '260px', maxWidth: '100%', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px' }}
-                                    >
-                                        <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative' }}>
-                                            <div style={{ display: 'flex', gap: '14px' }}>
-                                                <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                                    <Calendar size={24} color="#0EA5BE" />
-                                                </div>
-                                                <div style={{ flex: 1, minWidth: 0 }}>
-                                                    <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>
-                                                        {msg.event.name || 'Event'}
-                                                    </div>
-                                                    <div style={{ fontSize: '14px', color: '#667781' }}>
-                                                        {formatInlineEventTime(msg.event)}
-                                                    </div>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
-                                                        <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
-                                                            <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                                                                <UserIcon size={12} color="#8696a0" style={{ marginTop: '1px' }} />
+                                    (() => {
+                                        const myId = String(user?.id || user?._id || '');
+                                        const eventOwnerId = getEventOwnerId(msg);
+                                        const isSenderEvent = eventOwnerId === myId;
+                                        const lifecycle = getEventLifecycleState(msg.event);
+                                        const responses = getEventResponses(msg.event);
+                                        const myResponse = responses.find((response) => String(response?.user_id?._id || response?.user_id?.id || response?.user_id || '') === myId);
+                                        const actionLabel = isSenderEvent ? 'Edit event' : 'Respond';
+                                        const canOpenRespond = !isSenderEvent && !lifecycle.isVoteLocked && !lifecycle.isCancelled;
+                                        const canEditEvent = isSenderEvent && !lifecycle.isEnded && !lifecycle.isCancelled;
+                                        const respondedCount = responses.length;
+                                        const statusTone = lifecycle.isEnded || lifecycle.isCancelled || lifecycle.isRescheduled
+                                            ? '#dc2626'
+                                            : lifecycle.hasStarted
+                                                ? '#0EA5BE'
+                                                : '#0EA5BE';
+                                        const actionTone = isSenderEvent && !canEditEvent ? '#94a3b8' : '#0EA5BE';
+                                        const hasStatusRow = lifecycle.statusLabel !== 'Upcoming event';
+
+                                        return (
+                                            <div
+                                                className="wa-event-card"
+                                                onClick={(e) => { e.stopPropagation(); openEventDetails(msg); }}
+                                                style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: isMobile ? '240px' : '260px', maxWidth: '100%', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px', position: 'relative' }}
+                                            >
+                                                <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' }}>
+                                                    <div style={{ display: 'flex', gap: '14px' }}>
+                                                        <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                            <Calendar size={24} color="#0EA5BE" />
+                                                        </div>
+                                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                                            <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>
+                                                                {msg.event.name || 'Event'}
+                                                            </div>
+                                                            <div style={{ fontSize: '14px', color: '#667781' }}>
+                                                                {formatInlineEventTime(msg.event)}
+                                                            </div>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+                                                                <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
+                                                                    <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                                                        <UserIcon size={12} color="#8696a0" style={{ marginTop: '1px' }} />
+                                                                    </div>
+                                                                </div>
+                                                                <span style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500 }}>
+                                                                    {respondedCount} responded
+                                                                </span>
                                                             </div>
                                                         </div>
-                                                        <span style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500 }}>
-                                                            {msg.event.participants?.length || 0} going
-                                                        </span>
                                                     </div>
                                                 </div>
+                                                <div style={{ padding: '0 16px 12px', borderTop: '1px solid #f0f2f5', textAlign: 'center', position: 'relative', background: '#ffffff', borderBottomLeftRadius: '12px', borderBottomRightRadius: '12px' }}>
+                                                    {!isSenderEvent && canOpenRespond && openEventRespondId === String(msg._id || msg.id) && (
+                                                        <div
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            style={{ position: 'absolute', left: '50%', bottom: 'calc(100% + 8px)', transform: 'translateX(-50%)', width: isMobile ? '175px' : '190px', background: '#ffffff', borderRadius: '16px', boxShadow: '0 10px 30px rgba(0,0,0,0.18)', border: '1px solid rgba(0,0,0,0.08)', overflow: 'hidden', zIndex: 25 }}
+                                                        >
+                                                            {['Going', 'Maybe', 'Not going'].map((status) => (
+                                                                <button
+                                                                    key={status}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleEventRespond(msg, status);
+                                                                    }}
+                                                                    style={{ width: '100%', background: myResponse?.status === status ? 'rgba(14, 165, 190, 0.08)' : '#ffffff', border: 'none', borderBottom: status !== 'Not going' ? '1px solid #f0f2f5' : 'none', padding: '14px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px', fontSize: '15px', color: '#111b21', textAlign: 'left' }}
+                                                                >
+                                                                    <span style={{ width: 18, height: 18, borderRadius: '50%', border: `2px solid ${myResponse?.status === status ? '#0EA5BE' : '#9ca3af'}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                        {myResponse?.status === status && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0EA5BE', display: 'block' }} />}
+                                                                    </span>
+                                                                    <span>{status}</span>
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+
+                                                    <div
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            if (isSenderEvent) {
+                                                                if (!canEditEvent) {
+                                                                    openEventDetails(msg);
+                                                                    return;
+                                                                }
+                                                                openEditEvent(msg);
+                                                                return;
+                                                            }
+                                                            if (!canOpenRespond) {
+                                                                openEventDetails(msg);
+                                                                return;
+                                                            }
+                                                            setOpenEventRespondId(openEventRespondId === String(msg._id || msg.id) ? null : String(msg._id || msg.id));
+                                                        }}
+                                                        style={{ color: actionTone, fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', minHeight: '22px', paddingTop: '12px', paddingBottom: hasStatusRow ? '10px' : '2px', cursor: (canEditEvent || canOpenRespond) ? 'pointer' : 'default', opacity: (!isSenderEvent && !canOpenRespond) || (isSenderEvent && !canEditEvent) ? 0.75 : 1 }}
+                                                    >
+                                                        <span>{actionLabel}</span>
+                                                        {!isSenderEvent && <ChevronDown size={16} color={actionTone} />}
+                                                    </div>
+
+                                                    {hasStatusRow && (
+                                                        <div style={{ borderTop: '1px solid #eef2f5', paddingTop: '10px' }}>
+                                                            <div style={{ color: statusTone, fontWeight: '600', fontSize: '15px', minHeight: '22px' }}>
+                                                                {lifecycle.statusLabel}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
-                                        <div style={{ padding: '12px 0', margin: '0 16px', borderTop: '1px solid #f0f2f5', textAlign: 'center' }}>
-                                            <span style={{ color: msg.event.cancelled ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
-                                                {msg.event.cancelled ? 'Event cancelled' : 'View event'}
-                                            </span>
-                                        </div>
-                                    </div>
+                                        );
+                                    })()
                                 )}
 
                                 {msg.content &&

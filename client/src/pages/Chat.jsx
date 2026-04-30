@@ -435,6 +435,8 @@ const getEventLifecycleState = (event) => {
             hasStarted: false,
             isEnded: false,
             isCancelled: false,
+            isRescheduled: false,
+            isVoteLocked: false,
             statusLabel: 'Upcoming event',
         };
     }
@@ -444,6 +446,8 @@ const getEventLifecycleState = (event) => {
             hasStarted: false,
             isEnded: false,
             isCancelled: true,
+            isRescheduled: false,
+            isVoteLocked: true,
             statusLabel: 'Event cancelled',
         };
     }
@@ -462,7 +466,9 @@ const getEventLifecycleState = (event) => {
         hasStarted,
         isEnded,
         isCancelled: false,
-        statusLabel: isEnded ? 'Event ended' : hasStarted ? 'Event active' : 'Upcoming event',
+        isRescheduled: Boolean(event.rescheduledAt) && !hasStarted && !isEnded,
+        isVoteLocked: hasStarted || isEnded,
+        statusLabel: isEnded ? 'Event ended' : hasStarted ? 'Event started' : event.rescheduledAt ? 'Event rescheduled' : 'Upcoming event',
     };
 };
 
@@ -1681,6 +1687,7 @@ export default function Chat() {
     const [isStarredMessagesOpen, setIsStarredMessagesOpen] = useState(false); // New state for Starred Messages
     const [isGlobalStarredOpen, setIsGlobalStarredOpen] = useState(false); // For starred from main menu
     const [globalStarredMessages, setGlobalStarredMessages] = useState([]);
+    const [globalStarredCount, setGlobalStarredCount] = useState(0);
     const [isGlobalStarredLoading, setIsGlobalStarredLoading] = useState(false);
     const [sharedMediaTab, setSharedMediaTab] = useState('media'); // 'media', 'docs', 'links'
     const [selectedMediaMsgs, setSelectedMediaMsgs] = useState([]);
@@ -1956,15 +1963,22 @@ export default function Chat() {
                     }
                 });
 
-                // Keep UI updated if events expire
-                setEventTick(prev => prev + 1);
             }
         }, 60000);
         return () => {
             clearInterval(refreshInterval);
             clearInterval(reminderTickInterval);
         };
-    }, [user, isAppAsleep, remindersList, eventTick]);
+    }, [user, isAppAsleep, remindersList]);
+
+    useEffect(() => {
+        if (!user || isAppAsleep) return;
+        const intervalId = setInterval(() => {
+            setEventTick(prev => prev + 1);
+        }, 15000);
+
+        return () => clearInterval(intervalId);
+    }, [user, isAppAsleep]);
 
     const isAccountBanned = () => {
         if (!accountBanned) return false;
@@ -3993,6 +4007,13 @@ export default function Chat() {
             const updateStarred = (prev) => prev.map(m => (ids.includes(m._id) || ids.includes(m.id)) ? { ...m, is_starred: !allStarred } : m);
             setMessages(updateStarred);
             setGroupMessages(updateStarred);
+            const delta = allStarred ? -selectedMediaMsgs.length : selectedMediaMsgs.filter(m => !m.is_starred).length;
+            setGlobalStarredCount(prev => Math.max(0, prev + delta));
+            if (allStarred) {
+                setGlobalStarredMessages(prev => prev.filter(m => !ids.some(id => String(id) === String(m._id || m.id))));
+            } else if (isGlobalStarredOpen) {
+                fetchGlobalStarredMessages(false);
+            }
 
             setSnackbar({ message: `Messages ${allStarred ? 'unstarred' : 'starred'}`, type: 'success', variant: 'system' });
             setSelectedMediaMsgs([]);
@@ -4019,7 +4040,7 @@ export default function Chat() {
 
         const texts = selectedMediaMsgs.map(m => {
             if (m.type === 'text') return m.content;
-            const url = getMediaUrl(m.file_path);
+            const url = getMessageMediaUrl(m);
             if (url) return `${m.content || ''}\n${url}`.trim();
             return m.content || '';
         }).join('\n---\n');
@@ -4079,6 +4100,13 @@ export default function Chat() {
             )));
             setMessages(prev => prev.map(m => ids.some(id => String(id) === String(m._id) || String(id) === String(m.id)) ? { ...m, is_starred: !allStarred } : m));
             setGroupMessages(prev => prev.map(m => ids.some(id => String(id) === String(m._id) || String(id) === String(m.id)) ? { ...m, is_starred: !allStarred } : m));
+            const delta = allStarred ? -forwardSelectedMsgs.length : forwardSelectedMsgs.filter(m => !m.is_starred).length;
+            setGlobalStarredCount(prev => Math.max(0, prev + delta));
+            if (allStarred) {
+                setGlobalStarredMessages(prev => prev.filter(m => !ids.some(id => String(id) === String(m._id || m.id))));
+            } else if (isGlobalStarredOpen) {
+                fetchGlobalStarredMessages(false);
+            }
             setSnackbar({ message: `Messages ${allStarred ? 'unstarred' : 'starred'}`, type: 'success', variant: 'system' });
             setIsForwardingMode(false);
             setIsChatSelectionMode(false);
@@ -4115,7 +4143,7 @@ export default function Chat() {
 
         const texts = forwardSelectedMsgs.map(m => {
             if (m.type === 'text') return m.content;
-            const rawUrl = getMediaUrl(m.file_path);
+            const rawUrl = getMessageMediaUrl(m);
             const url = encodeURI(rawUrl);
             if (url) {
                 // If there's a caption, include it
@@ -6123,18 +6151,20 @@ export default function Chat() {
     }, []);
 
     // --- Fetch Global Starred Messages ---
-    const fetchGlobalStarredMessages = async () => {
-        setIsGlobalStarredLoading(true);
+    const fetchGlobalStarredMessages = async (showLoader = true) => {
+        if (showLoader) setIsGlobalStarredLoading(true);
         try {
             const token = localStorage.getItem('token');
             const res = await axios.get('/api/chat/messages/starred/all', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            setGlobalStarredMessages(res.data);
+            const starred = Array.isArray(res.data) ? res.data : [];
+            setGlobalStarredMessages(starred);
+            setGlobalStarredCount(starred.length);
         } catch (err) {
             console.error("Failed to fetch global starred messages", err);
         } finally {
-            setIsGlobalStarredLoading(false);
+            if (showLoader) setIsGlobalStarredLoading(false);
         }
     };
 
@@ -6144,6 +6174,12 @@ export default function Chat() {
             fetchGlobalStarredMessages();
         }
     }, [isGlobalStarredOpen]);
+
+    useEffect(() => {
+        const currentUserId = user?.id || user?._id;
+        if (!currentUserId || !localStorage.getItem('token')) return;
+        fetchGlobalStarredMessages(false);
+    }, [user?.id, user?._id]);
 
     // --- Fetch Current User Data (For Profile) ---
     useEffect(() => {
@@ -6622,6 +6658,13 @@ export default function Chat() {
 
     const handleEventRespond = async (msg, status) => {
         try {
+            const lifecycle = getEventLifecycleState(msg?.event);
+            if (lifecycle.isVoteLocked || lifecycle.isCancelled) {
+                setSnackbar({ message: 'Voting is closed for this event', type: 'info', variant: 'system' });
+                setOpenEventRespondId(null);
+                return;
+            }
+
             const token = localStorage.getItem('token');
             const isGroup = !!msg.group_id;
             const msgId = msg._id || msg.id;
@@ -6654,7 +6697,8 @@ export default function Chat() {
             }
         } catch (err) {
             console.error('[EVENT RESPOND ERROR]', err);
-            setSnackbar({ message: 'Failed to respond to event', type: 'error' });
+            const errorMessage = err.response?.data?.error || 'Failed to respond to event';
+            setSnackbar({ message: errorMessage, type: 'error' });
         }
     };
 
@@ -7198,6 +7242,12 @@ export default function Chat() {
             );
             setMessages(prev => prev.map(m => (String(m._id) === String(msgId) || String(m.id) === String(msgId)) ? { ...m, is_starred: !currentState } : m));
             setGroupMessages(prev => prev.map(m => (String(m._id) === String(msgId) || String(m.id) === String(msgId)) ? { ...m, is_starred: !currentState } : m));
+            setGlobalStarredCount(prev => Math.max(0, prev + (!currentState ? 1 : -1)));
+            if (currentState) {
+                setGlobalStarredMessages(prev => prev.filter(m => String(m._id || m.id) !== String(msgId)));
+            } else if (isGlobalStarredOpen) {
+                fetchGlobalStarredMessages(false);
+            }
             setSnackbar({ message: `Message ${!currentState ? 'starred' : 'unstarred'}`, type: 'success', variant: 'system', onAction: () => handleToggleStar(msgId, !currentState), actionLabel: 'Undo' });
             setOpenDropdown(null);
         } catch (err) { console.error("Star toggle failed", err); }
@@ -7792,7 +7842,8 @@ export default function Chat() {
     };
 
     const confirmUnstarAll = async () => {
-        const targetMsgs = unstarTarget === 'global' ? globalStarredMessages : messages.filter(m => m.is_starred);
+        const currentChatMessages = (selectedGroup || selectedCommunity ? groupMessages : messages).filter(m => m.is_starred);
+        const targetMsgs = unstarTarget === 'global' ? globalStarredMessages : currentChatMessages;
         if (targetMsgs.length === 0) {
             setIsUnstarConfirmOpen(false);
             return;
@@ -7812,13 +7863,17 @@ export default function Chat() {
 
             if (unstarTarget === 'global') {
                 setGlobalStarredMessages([]);
+                setGlobalStarredCount(0);
                 // Also update local current chat messages if any of them were unstarred
                 setMessages(prev => prev.map(m => ({ ...m, is_starred: false })));
                 setGroupMessages(prev => prev.map(m => ({ ...m, is_starred: false })));
             } else {
-                setMessages(prev => prev.map(m => ({ ...m, is_starred: false })));
+                const targetIds = new Set(targetMsgs.map(m => String(m._id || m.id)));
+                setMessages(prev => prev.map(m => targetIds.has(String(m._id || m.id)) ? { ...m, is_starred: false } : m));
+                setGroupMessages(prev => prev.map(m => targetIds.has(String(m._id || m.id)) ? { ...m, is_starred: false } : m));
+                setGlobalStarredCount(prev => Math.max(0, prev - targetMsgs.length));
                 // Also update global list if it's loaded
-                setGlobalStarredMessages(prev => prev.filter(m => !targetMsgs.some(tm => String(tm._id) === String(m._id))));
+                setGlobalStarredMessages(prev => prev.filter(m => !targetIds.has(String(m._id || m.id))));
             }
             setSnackbar({ message: "Messages unstarred", type: 'success', variant: 'system' });
             setIsUnstarConfirmOpen(false);
@@ -7936,6 +7991,18 @@ export default function Chat() {
         if (msg?.group_id) params.set('isGroup', 'true');
         const qs = params.toString();
         return `${apiOrigin}/api/chat/media/message/${encodeURIComponent(msgId)}${qs ? `?${qs}` : ''}`;
+    };
+
+    const getMessageMediaUrl = (msg) => {
+        if (!msg) return null;
+
+        const fallbackUrl = resolveMessageMediaFallbackUrl(msg);
+        const rawPath = String(msg.file_path || msg.filePath || '');
+        const directUrl = rawPath ? getMediaUrl(rawPath) : '';
+
+        if (!rawPath) return fallbackUrl || directUrl || null;
+        if (/(^|\/)uploads\//i.test(rawPath)) return fallbackUrl || directUrl || null;
+        return directUrl || fallbackUrl || null;
     };
 
     const resolveAudioStreamUrl = async (msg) => {
@@ -8920,6 +8987,16 @@ export default function Chat() {
     };
 
     const openEditEvent = (msg) => {
+        const lifecycle = getEventLifecycleState(msg?.event);
+        if (lifecycle.isEnded) {
+            setSnackbar({ message: 'Ended events cannot be edited', type: 'info', variant: 'system' });
+            return;
+        }
+        if (lifecycle.isCancelled) {
+            setSnackbar({ message: 'Cancelled events cannot be edited', type: 'info', variant: 'system' });
+            return;
+        }
+
         setEventEditTarget(msg);
         const ev = msg.event || {};
         setEventName(ev.name || '');
@@ -8935,6 +9012,17 @@ export default function Chat() {
 
     const submitEventEdit = async () => {
         if (!eventEditTarget) return;
+        const lifecycle = getEventLifecycleState(eventEditTarget?.event);
+        if (lifecycle.isEnded) {
+            setSnackbar({ message: 'Ended events cannot be edited', type: 'info', variant: 'system' });
+            setIsEventEditOpen(false);
+            return;
+        }
+        if (lifecycle.isCancelled) {
+            setSnackbar({ message: 'Cancelled events cannot be edited', type: 'info', variant: 'system' });
+            setIsEventEditOpen(false);
+            return;
+        }
         const isGroup = !!eventEditTarget.group_id;
         const msgId = eventEditTarget._id || eventEditTarget.id;
         const token = localStorage.getItem('token');
@@ -9016,6 +9104,7 @@ export default function Chat() {
             }
 
             setIsCancelEventConfirmOpen(false);
+            setIsEventEditOpen(false);
             setIsEventDetailsOpen(false);
             setSnackbar({ message: 'Event cancelled', type: 'success', variant: 'system' });
         } catch (err) {
@@ -10815,7 +10904,7 @@ export default function Chat() {
                                                 )}
                                                 {msg.type === 'video' && msg.file_path && (
                                                     <div onClick={(e) => { e.stopPropagation(); setViewingImage(msg); }} style={{ position: 'relative', maxWidth: '100%', borderRadius: '4px', overflow: 'hidden', background: '#000', marginBottom: '4px', cursor: 'pointer' }}>
-                                                        <video src={getMediaUrl(msg.file_path)} style={{ width: '100%', maxHeight: '200px', display: 'block', objectFit: 'cover' }} />
+                                                        <video src={getMessageMediaUrl(msg)} style={{ width: '100%', maxHeight: '200px', display: 'block', objectFit: 'cover' }} />
                                                         <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: 'rgba(0,0,0,0.5)', borderRadius: '50%', padding: '4px' }}>
                                                             <Play size={20} color="white" fill="white" />
                                                         </div>
@@ -14564,13 +14653,21 @@ export default function Chat() {
                         <div style={{ width: '100%', borderBottom: thickDivider }}></div>
 
                         <div style={{ background: itemBgColor }}>
+                            {(() => {
+                                const starredCount = groupMessages.filter(m => m.is_starred).length;
+                                return (
                             <div className="clickable" onClick={() => { setIsContactInfoOpen(false); setIsStarredMessagesOpen(true); }} style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                                     <Star size={24} color="#38bdf8" />
                                     <span style={{ color: textColor, fontSize: 16 }}>Starred messages</span>
                                 </div>
-                                <ChevronRight size={20} color="#38bdf8" />
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span style={{ color: subTextColor, fontSize: 15 }}>{starredCount}</span>
+                                    <ChevronRight size={20} color="#38bdf8" />
+                                </div>
                             </div>
+                                );
+                            })()}
                             <div className="clickable" onClick={() => { setIsContactInfoOpen(false); setIsNotificationSettingsOpen(true); }} style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                                     <Bell size={24} color="#38bdf8" />
@@ -14782,7 +14879,7 @@ export default function Chat() {
                         <div className="wa-media-preview-row">
                                     <>
                                         {previewItems.map((m, i) => {
-                                            const previewUrl = getMediaUrl(m.file_path);
+                                            const previewUrl = getMessageMediaUrl(m);
                                             if (m.type === 'image' || m.type === 'video') {
                                                 return (
                                                     <div key={i} className="wa-media-thumb" onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }} style={{ cursor: 'pointer', flexShrink: 0 }}>
@@ -14860,7 +14957,8 @@ export default function Chat() {
                             setIsStarredMessagesOpen(true);
                         }}>
                             <div className="wa-setting-icon"><Star size={20} color="#38bdf8" /></div>
-                            <div className="wa-setting-text" style={{ color: '#f8fafc' }}>{t('contact_info.starred_messages')}</div>
+                            <div className="wa-setting-text" style={{ color: '#f8fafc', flex: 1 }}>{t('contact_info.starred_messages')}</div>
+                            <span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 600 }}>{messages.filter(m => m.is_starred).length}</span>
                             <ChevronRight size={20} color="#38bdf8" style={{ transform: 'none' }} />
                         </div>
                         <div className="wa-setting-item clickable" onClick={() => {
@@ -15176,7 +15274,9 @@ export default function Chat() {
         if (!activeTarget) return null;
 
         const isGroupOrCommunity = !!selectedGroup || !!selectedCommunity;
-        const starredMsgs = (isGroupOrCommunity ? groupMessages : messages).filter(m => m.is_starred);
+        const starredMsgs = (isGroupOrCommunity ? groupMessages : messages)
+            .filter(m => m.is_starred)
+            .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
         return (
             <div className={`wa-starred-messages-panel ${isStarredMessagesOpen ? 'active' : ''}`} style={{ background: 'transparent' }}>
@@ -15267,7 +15367,7 @@ export default function Chat() {
                                             <div className="wa-starred-content">
                                                 {msg.type === 'image' && msg.file_path && (
                                                     <div className="wa-starred-image-container" onClick={(e) => { e.stopPropagation(); setViewingImage(msg); }} style={{ cursor: 'pointer' }}>
-                                                        <img src={getMediaUrl(msg.file_path)} alt="Starred" className="wa-starred-image" />
+                                                        <img src={getMessageMediaUrl(msg)} alt="Starred" className="wa-starred-image" />
                                                     </div>
                                                 )}
                                                 {msg.type === 'video' && msg.file_path && (
@@ -16080,6 +16180,15 @@ export default function Chat() {
                 setMessages(prev => prev.map(m =>
                     m._id === viewingImage._id ? { ...m, is_starred: newStatus } : m
                 ));
+                setGroupMessages(prev => prev.map(m =>
+                    m._id === viewingImage._id ? { ...m, is_starred: newStatus } : m
+                ));
+                setGlobalStarredCount(prev => Math.max(0, prev + (newStatus ? 1 : -1)));
+                if (!newStatus) {
+                    setGlobalStarredMessages(prev => prev.filter(m => String(m._id || m.id) !== String(viewingImage._id)));
+                } else if (isGlobalStarredOpen) {
+                    fetchGlobalStarredMessages(false);
+                }
 
                 // Update viewingImage state
                 setViewingImage(prev => ({ ...prev, is_starred: newStatus }));
@@ -16964,7 +17073,9 @@ export default function Chat() {
                                     <Users size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> New community
                                 </div>
                                 <div className="wa-dropdown-item" onClick={() => { setIsGlobalStarredOpen(true); setOpenDropdown(null); }}>
-                                    <Star size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> Starred messages
+                                    <Star size={18} style={{ marginRight: 12, color: '#38bdf8' }} />
+                                    <span style={{ flex: 1 }}>Starred messages</span>
+                                    <span style={{ color: '#94a3b8', fontSize: 13, fontWeight: 600 }}>{globalStarredCount}</span>
                                 </div>
                                 <div className="wa-dropdown-item" onClick={() => { setIsArchivedChatsOpen(true); setOpenDropdown(null); }}>
                                     <Archive size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> Archived
@@ -18941,7 +19052,7 @@ export default function Chat() {
                                                     const msgKey = msg._id || msg.id;
                                                     const isSelected = !!selectedMediaMsgs.find(m => String(m._id || m.id) === String(msgKey));
                                                     const isAnySelected = selectedMediaMsgs.length > 0;
-                                                    const mediaUrl = getMediaUrl(msg.file_path);
+                                                    const mediaUrl = getMessageMediaUrl(msg);
 
                                                     return (
                                                         <div key={msgKey} className="wa-media-grid-item" onClick={(e) => {
@@ -20030,7 +20141,7 @@ export default function Chat() {
             )}
 
             {/* Chat List: Groups + Users combined */}
-            <div className="wa-user-list" onScroll={() => { setOpenDropdown(null); }} style={{ paddingBottom: isMobile ? '12px' : '0' }}>
+            <div className="wa-user-list" onScroll={() => { setOpenDropdown(null); }}>
                 {!isDataLoaded ? (
                     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0' }}>
                         <CircleDashed size={24} className="wa-spinner" style={{ animation: 'waSpinner 1s linear infinite' }} />
@@ -20038,68 +20149,69 @@ export default function Chat() {
                     </div>
                 ) : (
                     <>
-                        {(() => {
-                            const displayItems = [...groups.map(g => ({ ...g, is_group: true })), ...users.map(u => ({ ...u, is_group: false })), ...communities.map(c => ({ ...c, is_community: true, _id: c.id, lastMessage: c.announcements?.lastMessage }))]
-                                .filter(item => {
-                                    const displayName = item.name || (item.is_group ? 'Unnamed Group' : 'User');
-                                    const contentPart = item.lastMessage?.content || '';
-                                    const q = searchQuery.toLowerCase();
-                                    const nameMatch = displayName.toLowerCase().includes(q);
-                                    const msgMatch = contentPart.toLowerCase().includes(q);
-                                    const mobileMatch = !item.is_group && item.mobile?.toLowerCase().includes(q);
-                                    const emailMatch = !item.is_group && item.email?.toLowerCase().includes(q);
-                                    const matchesSearch = nameMatch || msgMatch || mobileMatch || emailMatch;
+                        <div className="wa-user-list-content">
+                            {(() => {
+                                const displayItems = [...groups.map(g => ({ ...g, is_group: true })), ...users.map(u => ({ ...u, is_group: false })), ...communities.map(c => ({ ...c, is_community: true, _id: c.id, lastMessage: c.announcements?.lastMessage }))]
+                                    .filter(item => {
+                                        const displayName = item.name || (item.is_group ? 'Unnamed Group' : 'User');
+                                        const contentPart = item.lastMessage?.content || '';
+                                        const q = searchQuery.toLowerCase();
+                                        const nameMatch = displayName.toLowerCase().includes(q);
+                                        const msgMatch = contentPart.toLowerCase().includes(q);
+                                        const mobileMatch = !item.is_group && item.mobile?.toLowerCase().includes(q);
+                                        const emailMatch = !item.is_group && item.email?.toLowerCase().includes(q);
+                                        const matchesSearch = nameMatch || msgMatch || mobileMatch || emailMatch;
 
-                                    if (filterType === 'groups') {
-                                        return matchesSearch && item.is_group;
-                                    }
+                                        if (filterType === 'groups') {
+                                            return matchesSearch && item.is_group;
+                                        }
 
-                                    if (filterType.startsWith('custom_')) {
-                                        const listId = filterType.replace('custom_', '');
-                                        const activeList = customLists.find(l => String(l._id || l.id) === listId);
-                                        return matchesSearch && activeList && activeList.members.includes(String(item._id || item.id));
-                                    }
+                                        if (filterType.startsWith('custom_')) {
+                                            const listId = filterType.replace('custom_', '');
+                                            const activeList = customLists.find(l => String(l._id || l.id) === listId);
+                                            return matchesSearch && activeList && activeList.members.includes(String(item._id || item.id));
+                                        }
 
 
-                                    if (archivedChatIds.includes(item._id)) return false;
+                                        if (archivedChatIds.includes(item._id)) return false;
 
-                                    // If not searching and on "All" tab, hide users with no history/no pinning/no active requests
-                                    if (!searchQuery.trim() && filterType === 'all' && !item.is_group && !item.is_community) {
-                                        const hasHistory = !!item.lastMessage;
-                                        const isPinned = !!item.isPinned;
-                                        const isPending = item.requestStatus === 'pending';
-                                        const isRestricted = item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000;
+                                        // If not searching and on "All" tab, hide users with no history/no pinning/no active requests
+                                        if (!searchQuery.trim() && filterType === 'all' && !item.is_group && !item.is_community) {
+                                            const hasHistory = !!item.lastMessage;
+                                            const isPinned = !!item.isPinned;
+                                            const isPending = item.requestStatus === 'pending';
+                                            const isRestricted = item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000;
 
-                                        if (!hasHistory && !isPinned && !isPending && !isRestricted) return false;
-                                    }
+                                            if (!hasHistory && !isPinned && !isPending && !isRestricted) return false;
+                                        }
 
-                                    if (filterType === 'all') {
+                                        if (filterType === 'all') {
+                                            return matchesSearch;
+                                        }
+                                        if (filterType === 'unread') return matchesSearch && (item.unreadCount > 0);
+                                        if (filterType === 'favorites') return matchesSearch && item.isFavorite;
+                                        if (filterType === 'groups') return matchesSearch && item.is_group;
+                                        if (filterType === 'communities') return matchesSearch && item.is_community;
                                         return matchesSearch;
-                                    }
-                                    if (filterType === 'unread') return matchesSearch && (item.unreadCount > 0);
-                                    if (filterType === 'favorites') return matchesSearch && item.isFavorite;
-                                    if (filterType === 'groups') return matchesSearch && item.is_group;
-                                    if (filterType === 'communities') return matchesSearch && item.is_community;
-                                    return matchesSearch;
-                                })
-                                .sort((a, b) => {
-                                    // Typing contacts always first (instant visibility)
-                                    const aId = String(a._id || a.id || '').toLowerCase();
-                                    const bId = String(b._id || b.id || '').toLowerCase();
+                                    })
+                                    .sort((a, b) => {
+                                        // Typing contacts always first (instant visibility)
+                                        const aId = String(a._id || a.id || '').toLowerCase();
+                                        const bId = String(b._id || b.id || '').toLowerCase();
 
-                                    const aMatch = aId ? Object.entries(typingUsers || {}).find(([id, set]) => String(id).toLowerCase() === aId && set?.size > 0) : null;
-                                    const bMatch = bId ? Object.entries(typingUsers || {}).find(([id, set]) => String(id).toLowerCase() === bId && set?.size > 0) : null;
+                                        const aMatch = aId ? Object.entries(typingUsers || {}).find(([id, set]) => String(id).toLowerCase() === aId && set?.size > 0) : null;
+                                        const bMatch = bId ? Object.entries(typingUsers || {}).find(([id, set]) => String(id).toLowerCase() === bId && set?.size > 0) : null;
 
-                                    if (aMatch && !bMatch) return -1;
-                                    if (!aMatch && bMatch) return 1;
-                                    // Pinned always next
-                                    if (a.isPinned && !b.isPinned) return -1;
-                                    if (!a.isPinned && b.isPinned) return 1;
-                                    // Then by date, defaulting to 0 if none
-                                    const dateA = new Date(a.lastMessage?.created_at || a.created_at || 0);
-                                    const dateB = new Date(b.lastMessage?.created_at || b.created_at || 0);
-                                    return dateB - dateA;
-                                });
+                                        if (aMatch && !bMatch) return -1;
+                                        if (!aMatch && bMatch) return 1;
+                                        // Pinned always next
+                                        if (a.isPinned && !b.isPinned) return -1;
+                                        if (!a.isPinned && b.isPinned) return 1;
+                                        // Then by date, defaulting to 0 if none
+                                        const dateA = new Date(a.lastMessage?.created_at || a.created_at || 0);
+                                        const dateB = new Date(b.lastMessage?.created_at || b.created_at || 0);
+                                        return dateB - dateA;
+                                    });
 
                             if (displayItems.length === 0) {
                                 if (!searchQuery.trim() && filterType === 'all') {
@@ -20145,7 +20257,7 @@ export default function Chat() {
                                 );
                             }
 
-                            return displayItems.map(item => {
+                                return displayItems.map(item => {
                                 const isGroup = item.is_group;
                                 const displayName = item.is_community ? (item.name || 'Community') : (isGroup ? (item.name || 'Unnamed Group') : getContactDisplayName(item));
 
@@ -20280,36 +20392,36 @@ export default function Chat() {
                                         </div>
                                     </div>
                                 );
-                            });
-                        })()}
+                                });
+                            })()}
+                        </div>
+
+                        {isDataLoaded && (
+                            <div className="wa-chat-list-end-note">
+                                <div className="wa-chat-list-end-note-mobile-hint">
+                                    Tap and hold on a chat for more options
+                                </div>
+                                <div className="wa-chat-list-end-note-encryption">
+                                    <Lock size={13} />
+                                    <span>
+                                        Your personal messages are <span className="wa-chat-list-end-note-green">end-to-end encrypted</span>
+                                    </span>
+                                </div>
+                            </div>
+                        )}
                     </>
-                )}
-                {isDataLoaded && (
-                    <div className="wa-chat-list-end-note">
-                        <div className="wa-chat-list-end-note-mobile-hint">
-                            Tap and hold on a chat for more options
-                        </div>
-                        <div className="wa-chat-list-end-note-encryption">
-                            <Lock size={13} />
-                            <span>
-                                Your personal messages are <span className="wa-chat-list-end-note-green">end-to-end encrypted</span>
-                            </span>
-                        </div>
-                    </div>
                 )}
             </div>
 
             {/* Mobile Bottom Navigation Bar */}
             {isMobile && (
                 <div style={{
-                    position: 'absolute',
-                    bottom: 0,
-                    left: 0,
                     width: '100%',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-around',
                     height: '60px',
+                    flexShrink: 0,
                     backgroundColor: 'rgba(15, 23, 42, 0.95)',
                     backdropFilter: 'blur(20px)',
                     borderTop: '1px solid rgba(255, 255, 255, 0.1)',
@@ -21323,7 +21435,7 @@ export default function Chat() {
                             if (msg.type === 'image' || msg.type === 'video') {
                                 previewContent = (
                                     <div style={{ width: 36, height: 36, marginLeft: 12, borderRadius: 4, overflow: 'hidden', flexShrink: 0, backgroundColor: '#f0f2f5' }}>
-                                        {msg.type === 'image' ? <img src={getMediaUrl(msg.file_path)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned" /> : <video src={getMediaUrl(msg.file_path)} muted crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />}
+                                        {msg.type === 'image' ? <img src={getMessageMediaUrl(msg)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned" /> : <video src={getMessageMediaUrl(msg)} muted crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />}
                                     </div>
                                 );
                             } else if (isExcel) {
@@ -21911,7 +22023,7 @@ export default function Chat() {
                             if (msg.type === 'image' || msg.type === 'video') {
                                 previewContent = (
                                     <div style={{ width: 36, height: 36, marginLeft: 12, borderRadius: 4, overflow: 'hidden', flexShrink: 0, backgroundColor: '#f0f2f5' }}>
-                                        {msg.type === 'image' ? <img src={getMediaUrl(msg.file_path)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned" /> : <video src={getMediaUrl(msg.file_path)} muted crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />}
+                                        {msg.type === 'image' ? <img src={getMessageMediaUrl(msg)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="pinned" /> : <video src={getMessageMediaUrl(msg)} muted crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />}
                                     </div>
                                 );
                             } else if (isExcel) {
@@ -23066,6 +23178,11 @@ export default function Chat() {
                         <div style={{ color: softText, fontSize: 14, marginBottom: 12 }}>
                             {totalCount} {totalCount === 1 ? 'person' : 'people'} responded
                         </div>
+                        {lifecycle.statusLabel !== 'Upcoming event' && (
+                            <div style={{ color: lifecycle.isCancelled || lifecycle.isEnded ? softText : '#38bdf8', fontSize: 15, fontWeight: 600 }}>
+                                {lifecycle.statusLabel}
+                            </div>
+                        )}
                     </div>
 
                     {renderResponseSection('Going', goingCount, 'Going')}
@@ -23118,8 +23235,13 @@ export default function Chat() {
                                         <span onClick={(e) => { e.stopPropagation(); confirmCancelEvent(eventDetailsMsg); }} style={{ ...actionLinkStyle, color: '#f87171' }}>Cancel event</span>
                                     </div>
                                 )}
+                                {lifecycle.isRescheduled && (
+                                    <div style={{ color: '#38bdf8', fontSize: 15, fontWeight: 600, textAlign: 'center' }}>
+                                        Event rescheduled
+                                    </div>
+                                )}
                                 <div style={{ position: 'relative' }}>
-                                    {openEventRespondId === eventDetailsMsg._id && (
+                                    {openEventRespondId === String(eventDetailsMsg._id || eventDetailsMsg.id) && (
                                         <div style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, background: cardBg, borderRadius: '12px', boxShadow: '0 -4px 20px rgba(0,0,0,0.28)', marginBottom: '10px', zIndex: 100, overflow: 'hidden', border: '1px solid rgba(148, 163, 184, 0.16)' }}>
                                             {['Going', 'Maybe', 'Not going'].map(status => (
                                                 <button
@@ -23133,7 +23255,7 @@ export default function Chat() {
                                             ))}
                                         </div>
                                     )}
-                                    <button onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === eventDetailsMsg._id ? null : eventDetailsMsg._id); }} style={{ background: '#0EA5BE', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '24px', fontSize: 16, fontWeight: 600, cursor: 'pointer', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                    <button onClick={(e) => { e.stopPropagation(); setOpenEventRespondId(openEventRespondId === String(eventDetailsMsg._id || eventDetailsMsg.id) ? null : String(eventDetailsMsg._id || eventDetailsMsg.id)); }} style={{ background: '#0EA5BE', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '24px', fontSize: 16, fontWeight: 600, cursor: 'pointer', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
                                         {myResponse ? myResponse.status : 'Respond'}
                                         <ChevronUp size={20} />
                                     </button>
@@ -25778,15 +25900,7 @@ export default function Chat() {
                             </div>
 
                             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
-                                {String(eventEditTarget.user_id || eventEditTarget.sender_id?._id || eventEditTarget.sender_id || '') === String(user.id || user._id) && (
-                                    <button
-                                        onClick={() => confirmCancelEvent(eventEditTarget)}
-                                        style={{ background: 'none', border: '1px solid #f87171', color: '#f87171', padding: '10px 18px', borderRadius: 22 }}
-                                    >
-                                        Cancel event
-                                    </button>
-                                )}
-                                <button onClick={() => setIsEventEditOpen(false)} style={{ background: 'none', border: '1px solid #d1d7db', color: '#54656f', padding: '10px 18px', borderRadius: 22 }}>Cancel</button>
+                                <button onClick={() => confirmCancelEvent(eventEditTarget)} style={{ background: 'none', border: '1px solid #f87171', color: '#f87171', padding: '10px 18px', borderRadius: 22 }}>Cancel event</button>
                                 <button onClick={submitEventEdit} style={{ background: '#0EA5BE', border: 'none', color: 'white', padding: '10px 18px', borderRadius: 22 }}>Save</button>
                             </div>
                         </div>

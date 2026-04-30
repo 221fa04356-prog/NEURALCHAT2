@@ -1652,6 +1652,18 @@ router.post('/event/:messageId/respond', authenticateToken, async (req, res) => 
 
         const msg = await Message.findById(messageId);
         if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event message not found' });
+        const event = msg.event || {};
+        const startDateValue = event.startDate ? String(event.startDate).split('T')[0] : '';
+        const startTimeValue = String(event.startTime || '00:00').slice(0, 5);
+        const startAt = startDateValue ? new Date(`${startDateValue}T${startTimeValue}:00`) : null;
+
+        if (event.cancelled) {
+            return res.status(400).json({ error: 'This event has been cancelled.' });
+        }
+
+        if (startAt && !Number.isNaN(startAt.getTime()) && startAt <= new Date()) {
+            return res.status(400).json({ error: 'Voting is closed because this event has already started.' });
+        }
 
         // Update participants array for backward compatibility
         msg.event.participants = (msg.event.participants || []).filter(id => String(id) !== String(userId));
@@ -3285,8 +3297,21 @@ router.post('/event/:messageId/edit', authenticateToken, async (req, res) => {
 
         // Only creator can edit for now
         if (String(msg.user_id) !== String(userId)) return res.status(403).json({ error: 'Not allowed' });
+        const event = msg.event || {};
+        const startDateValue = event.startDate ? String(event.startDate).split('T')[0] : '';
+        const endDateValue = event.endDate ? String(event.endDate).split('T')[0] : '';
+        const endTimeValue = String(event.endTime || event.startTime || '23:59').slice(0, 5);
+        const endAt = (endDateValue || startDateValue) ? new Date(`${endDateValue || startDateValue}T${endTimeValue}:00`) : null;
 
-        const { name, description, location, startDate, startTime, endDate, endTime } = req.body;
+        if (event.cancelled) {
+            return res.status(400).json({ error: 'Cancelled events cannot be edited.' });
+        }
+
+        if (endAt && !Number.isNaN(endAt.getTime()) && endAt <= new Date()) {
+            return res.status(400).json({ error: 'Ended events cannot be edited.' });
+        }
+
+        const { name, description, location, startDate, startTime, endDate, endTime, reminderTiming } = req.body;
         if (name) msg.event.name = name;
         if (description !== undefined) msg.event.description = description;
         if (location !== undefined) msg.event.location = location;
@@ -3294,6 +3319,9 @@ router.post('/event/:messageId/edit', authenticateToken, async (req, res) => {
         if (startTime !== undefined) msg.event.startTime = startTime;
         if (endDate !== undefined) msg.event.endDate = endDate;
         if (endTime !== undefined) msg.event.endTime = endTime;
+        if (reminderTiming !== undefined) msg.event.reminderTiming = reminderTiming;
+        msg.event.rescheduledAt = new Date();
+        msg.event.rescheduledBy = userId;
 
         msg.markModified('event');
         await msg.save();
