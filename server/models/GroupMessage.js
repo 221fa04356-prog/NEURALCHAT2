@@ -62,6 +62,8 @@ const groupMessageSchema = new mongoose.Schema({
         cancelled: { type: Boolean, default: false },
         cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
         cancelledAt: { type: Date },
+        rescheduledAt: { type: Date },
+        rescheduledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
         responses: [{
             user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
             status: { type: String, enum: ['Going', 'Maybe', 'Not going'] },
