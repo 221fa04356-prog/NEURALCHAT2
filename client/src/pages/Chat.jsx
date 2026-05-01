@@ -15905,8 +15905,8 @@ export default function Chat() {
                         </div>
                         <div className={`wa-bubble sent`} style={{ whiteSpace: 'pre-wrap' }}>
                             {infoMessage.type === 'image' ? (
-                                <div className="wa-msg-image">
-                                    <img src={getMessageMediaUrl(infoMessage)} alt="sent" />
+                                <div className="wa-info-media-frame">
+                                    <img className="wa-info-media-image" src={getMessageMediaUrl(infoMessage)} alt="sent" />
                                     {infoMessage.content && <p>{infoMessage.content}</p>}
                                 </div>
                             ) : infoMessage.type === 'video' ? (
