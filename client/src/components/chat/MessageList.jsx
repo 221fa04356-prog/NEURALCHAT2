@@ -288,6 +288,22 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
     };
 };
 
+const sanitizeClipboardPayloadText = (rawText) => {
+    const text = typeof rawText === 'string' ? rawText : '';
+    if (!text) return '';
+
+    const cleaned = text
+        .split(/\r?\n/)
+        .filter((line) => {
+            const trimmed = String(line || '').trim();
+            return !trimmed.startsWith('__NEURALCHAT_FILE__');
+        })
+        .join('\n')
+        .trim();
+
+    return cleaned.startsWith('__NEURALCHAT_FILE__') ? '' : cleaned;
+};
+
 const MessageScroller = React.forwardRef((props, ref) => (
     <div
         {...props}
@@ -951,7 +967,8 @@ const MessageList = memo(({
 
         const senderColor = isMe ? '#0EA5BE' : (msg.sender_color || '#0EA5BE');
         const fileNameDirect = msg.fileName || msg.file_name || msg.name || "";
-        const contentGuess = (typeof msg.content === 'string' ? msg.content.trim() : '');
+        const sanitizedMessageContent = sanitizeClipboardPayloadText(msg.content || '');
+        const contentGuess = sanitizedMessageContent.trim();
         const filePathGuess = decodeURIComponent(String(msg.file_path || msg.filePath || '').split('?')[0].split('/').pop() || '').trim();
         const rawFileName = fileNameDirect || (/\.[a-z0-9]{2,8}$/i.test(contentGuess) ? contentGuess : '') || filePathGuess || 'Document';
         const displayFileName = rawFileName.replace(/^\d{10,}-/, '');
@@ -1210,7 +1227,7 @@ const MessageList = memo(({
                         </div>
                     )}
                     <div
-                        className={`wa-message-bubble ${isMe ? 'wa-msg-sent' : 'wa-msg-rec'} ${msg.type === 'audio' ? 'wa-voice-type' : ''} ${msg.type === 'poll' ? 'is-poll' : ''} ${msg.link_preview ? 'has-link-preview' : ''}`}
+                        className={`wa-message-bubble ${isMe ? 'wa-msg-sent' : 'wa-msg-rec'} ${msg.type === 'audio' ? 'wa-voice-type' : ''} ${msg.type === 'poll' ? 'is-poll' : ''} ${msg.link_preview ? 'has-link-preview' : ''} ${msg.type === 'file' && !isVideoByExt ? 'wa-file-message-bubble' : ''}`}
                         onContextMenu={(e) => {
                             if (!isForwardingMode) {
                                 e.preventDefault();
@@ -1600,15 +1617,12 @@ const MessageList = memo(({
                                                 <span>File</span>
                                             </div>
                                         ) : (
-                                            <div
-                                                className="wa-msg-doc-bubble"
-                                                style={{ overflow: 'hidden', borderRadius: 12 }}
-                                            >
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '2px 2px 4px' }}>
+                                            <div className="wa-msg-doc-bubble">
+                                                <div className="wa-doc-head">
                                                     <div className="wa-doc-icon" style={{ background: docAccent }}>
                                                         {fileBadgeLabel}
                                                     </div>
-                                                    <div style={{ minWidth: 0 }}>
+                                                    <div className="wa-doc-copy">
                                                         <div className="wa-doc-title">{docTypeName}</div>
                                                         <div className="wa-doc-filename" title={displayFileName}>
                                                             {displayFileName}
@@ -1989,12 +2003,17 @@ const MessageList = memo(({
                                     })()
                                 )}
 
-                                {msg.content &&
+                                {sanitizedMessageContent &&
                                     msg.type !== 'contact' &&
                                     msg.type !== 'poll' &&
                                     msg.type !== 'event' &&
                                     !(msg.is_view_once && (msg.type === 'image' || msg.type === 'video' || msg.type === 'audio' || (msg.type === 'file' && isVideoByExt))) && (
-                                    <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{renderContent(msg.content)}</span>
+                                    <span
+                                        className={`wa-msg-inline-text ${msg.type === 'file' ? 'has-attachment' : ''}`}
+                                        style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block', maxWidth: '100%' }}
+                                    >
+                                        {renderContent(sanitizedMessageContent)}
+                                    </span>
                                 )}
                             </>
                         )}
