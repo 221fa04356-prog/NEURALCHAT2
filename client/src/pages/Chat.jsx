@@ -107,6 +107,22 @@ const getMediaUrl = (path) => {
     return appendMediaToken(resolved) || null;
 };
 
+const isPersistentMessageObjectId = (value) => /^[a-f0-9]{24}$/i.test(String(value || '').trim());
+
+const isManagedAppMediaPath = (rawPath = '') => {
+    const value = String(rawPath || '').trim();
+    if (!value || value.startsWith('blob:') || value.startsWith('data:')) return false;
+    if (value.startsWith('/uploads/') || value.startsWith('/api/chat/media')) return true;
+    if (!/^https?:\/\//i.test(value)) return true;
+
+    try {
+        const parsed = new URL(value);
+        return parsed.pathname.startsWith('/uploads/') || parsed.pathname.startsWith('/api/chat/media');
+    } catch (_) {
+        return false;
+    }
+};
+
 const getUploadMediaDuration = async (mediaFile) => {
     if (!mediaFile || !(mediaFile instanceof Blob || mediaFile instanceof File)) return 0;
     const mimeType = String(mediaFile.type || '').toLowerCase();
@@ -2002,6 +2018,31 @@ export default function Chat() {
     const [pinMessageDuration, setPinMessageDuration] = useState('30 days');
     const [currentPinnedIndex, setCurrentPinnedIndex] = useState(0);
 
+    useEffect(() => {
+        if (!replyingTo && !infoMessage && !pinMessageModal) return;
+
+        if (replyingTo) {
+            const liveReplyTarget = resolveLiveMessageRef(replyingTo);
+            if (liveReplyTarget && liveReplyTarget !== replyingTo) {
+                setReplyingTo(liveReplyTarget);
+            }
+        }
+
+        if (infoMessage) {
+            const liveInfoMessage = resolveLiveMessageRef(infoMessage);
+            if (liveInfoMessage && liveInfoMessage !== infoMessage) {
+                setInfoMessage(liveInfoMessage);
+            }
+        }
+
+        if (pinMessageModal) {
+            const livePinnedMessage = resolveLiveMessageRef(pinMessageModal);
+            if (livePinnedMessage && livePinnedMessage !== pinMessageModal) {
+                setPinMessageModal(livePinnedMessage);
+            }
+        }
+    }, [replyingTo, infoMessage, pinMessageModal, resolveLiveMessageRef]);
+
     const openSettingsPanel = (initialTab = null) => {
         setIsProfileOpen(false);
         setIsSettingsEditing(false);
@@ -3463,6 +3504,54 @@ export default function Chat() {
     const communitiesRef = useRef([]);
     const selectedCommunityRef = useRef(null);
     const [groupMessages, setGroupMessages] = useState([]);
+    const activeChatMessages = useMemo(
+        () => (selectedGroup ? groupMessages : messages),
+        [selectedGroup, groupMessages, messages]
+    );
+    const resolveLiveMessageRef = useCallback((messageRef) => {
+        if (!messageRef) return null;
+
+        const targetId = String(messageRef._id || messageRef.id || '').trim();
+        if (targetId) {
+            const exact = activeChatMessages.find((msg) => String(msg?._id || msg?.id || '').trim() === targetId);
+            if (exact) return exact;
+        }
+
+        const targetSender = String(
+            messageRef.sender_id?._id ||
+            messageRef.sender_id ||
+            messageRef.user_id?._id ||
+            messageRef.user_id ||
+            ''
+        ).trim();
+        const targetType = String(messageRef.type || '').trim();
+        const targetFileName = String(messageRef.fileName || '').trim();
+        const targetContent = String(messageRef.content || '').trim();
+        const targetFileSize = Number(messageRef.fileSize || 0);
+        const targetCreatedAt = new Date(messageRef.created_at || 0).getTime();
+
+        return activeChatMessages.find((msg) => {
+            if (!isPersistentMessageObjectId(msg?._id || msg?.id)) return false;
+            if (String(msg?.type || '').trim() !== targetType) return false;
+
+            const msgSender = String(
+                msg?.sender_id?._id ||
+                msg?.sender_id ||
+                msg?.user_id?._id ||
+                msg?.user_id ||
+                ''
+            ).trim();
+            if (targetSender && msgSender && msgSender !== targetSender) return false;
+            if (targetFileName && String(msg?.fileName || '').trim() !== targetFileName) return false;
+            if (targetContent && String(msg?.content || '').trim() !== targetContent) return false;
+            if (targetFileSize && Number(msg?.fileSize || 0) !== targetFileSize) return false;
+
+            const msgCreatedAt = new Date(msg?.created_at || 0).getTime();
+            if (targetCreatedAt && msgCreatedAt && Math.abs(msgCreatedAt - targetCreatedAt) > 30000) return false;
+
+            return true;
+        }) || null;
+    }, [activeChatMessages]);
     const [isManageGroupsOpen, setIsManageGroupsOpen] = useState(false);
     const [isAddExistingGroupsOpen, setIsAddExistingGroupsOpen] = useState(false);
     const [isConfirmAddGroupsOpen, setIsConfirmAddGroupsOpen] = useState(false);
@@ -7367,8 +7456,13 @@ export default function Chat() {
     const handleTogglePinMessage = async (e) => {
         if (e) e.preventDefault();
         if (!pinMessageModal) return;
-        const msgId = pinMessageModal._id || pinMessageModal.id;
-        const isCurrentlyPinned = pinMessageModal.is_pinned;
+        const liveMessage = resolveLiveMessageRef(pinMessageModal) || pinMessageModal;
+        const msgId = liveMessage._id || liveMessage.id;
+        const isCurrentlyPinned = liveMessage.is_pinned;
+        if (!isPersistentMessageObjectId(msgId)) {
+            setSnackbar({ message: 'Please wait a moment for the message to finish syncing before pinning it.', type: 'info', variant: 'system' });
+            return;
+        }
         try {
             const token = localStorage.getItem('token');
             const res = await axios.post(`/api/chat/message/${msgId}/toggle`,
@@ -7387,6 +7481,10 @@ export default function Chat() {
     };
 
     const handleUnpinMessage = async (msgId) => {
+        if (!isPersistentMessageObjectId(msgId)) {
+            setSnackbar({ message: 'This message is still syncing. Try unpinning again in a moment.', type: 'info', variant: 'system' });
+            return;
+        }
         try {
             const token = localStorage.getItem('token');
             const res = await axios.post(`/api/chat/message/${msgId}/toggle`,
@@ -8165,8 +8263,12 @@ export default function Chat() {
         const rawPath = String(msg.file_path || msg.filePath || '');
         const directUrl = rawPath ? getMediaUrl(rawPath) : '';
 
+        if (rawPath.startsWith('blob:') || rawPath.startsWith('data:')) return rawPath;
         if (!rawPath) return fallbackUrl || directUrl || null;
-        if (/(^|\/)uploads\//i.test(rawPath)) return directUrl || fallbackUrl || null;
+        if (isPersistentMessageObjectId(msg._id || msg.id) && isManagedAppMediaPath(rawPath) && fallbackUrl) {
+            return fallbackUrl;
+        }
+        if (/(^|\/)uploads\//i.test(rawPath)) return fallbackUrl || directUrl || null;
         return directUrl || fallbackUrl || null;
     };
 
