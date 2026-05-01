@@ -31,6 +31,7 @@ const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const MIN_VALID_AUDIO_BYTES = 1024; // Only flag extremely tiny blobs as suspicious
+const ACTION_LOCK_THRESHOLD = 7;
 
 const isTransientDbError = (err) => {
     const name = String(err?.name || '');
@@ -617,7 +618,7 @@ router.get('/history/:userId', async (req, res) => {
 // GET Current User Profile - Secured with Auth
 router.get('/me', authenticateToken, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).select('name displayName email mobile countryCode designation about role login_id isOnline lastSeen bannedUntil rejectionCount adminLock messagingBlocked unblockRequested nameOverrides privacySettings __enc_name __enc_displayName __enc_email __enc_mobile __enc_designation __enc_about');
+        const user = await User.findById(req.user.id).select('name displayName email mobile countryCode designation about role login_id isOnline lastSeen bannedUntil rejectionCount adminLock messagingBlocked unblockRequested blockedUsers nameOverrides privacySettings __enc_name __enc_displayName __enc_email __enc_mobile __enc_designation __enc_about');
         if (!user) return res.status(404).json({ error: 'User not found' });
         
         // Convert to plain object to modify response without affecting DB
@@ -647,7 +648,7 @@ router.get('/users', authenticateToken, async (req, res) => {
             query.role = { $ne: 'admin' };
         }
 
-        const users = await User.find(query).select('name email mobile _id role about isOnline lastSeen messagingBlocked privacySettings __enc_name __enc_email __enc_mobile __enc_about __enc_designation');
+        const users = await User.find(query).select('name email mobile _id role about isOnline lastSeen messagingBlocked blockedUsers privacySettings __enc_name __enc_email __enc_mobile __enc_about __enc_designation');
         console.log(`[DEBUG] /users: Found ${users.length} raw users for requester ${currentUserId} (Role: ${currentUserRole})`);
 
         if (!currentUserId) {
@@ -656,8 +657,9 @@ router.get('/users', authenticateToken, async (req, res) => {
         }
 
         // 0. Get current user's favorites and name overrides once
-        const currentUserObj = await User.findById(currentUserId).select('favorites nameOverrides');
+        const currentUserObj = await User.findById(currentUserId).select('favorites blockedUsers nameOverrides');
         const userFavorites = currentUserObj?.favorites || [];
+        const currentUserBlocked = currentUserObj?.blockedUsers || [];
         const nameOverrides = currentUserObj?.nameOverrides || new Map();
 
         const enhancedUsers = await Promise.all(users.map(async (u) => {
@@ -666,6 +668,7 @@ router.get('/users', authenticateToken, async (req, res) => {
             try {
                 // Apply name override if exists
                 const userObj = u.toObject();
+                delete userObj.blockedUsers;
                 const customName = nameOverrides instanceof Map ? nameOverrides.get(String(u._id)) : nameOverrides[String(u._id)];
                 if (customName) {
                     userObj.name = customName;
@@ -735,6 +738,8 @@ router.get('/users', authenticateToken, async (req, res) => {
                     docCount: isAccepted ? docCount : 0,
                     linkCount: isAccepted ? linkCount : 0,
                     isFavorite: userFavorites.some(favId => String(favId) === String(u._id)),
+                    blockedByMe: currentUserBlocked.some(blockedId => String(blockedId) === String(u._id)),
+                    blockedMe: (u.blockedUsers || []).some(blockedId => String(blockedId) === String(currentUserId)),
                     hasPendingRequest: isPendingForMe,
                     requestStatus: request ? request.status : 'none',
                     requestUpdatedAt: request ? request.updated_at : null,
@@ -744,6 +749,7 @@ router.get('/users', authenticateToken, async (req, res) => {
                 console.error(`[DEBUG] /users: Error processing user ${u._id}:`, userErr.message);
                 // Return basic user object so the list doesn't break
                 const userObj = u.toObject();
+                delete userObj.blockedUsers;
                 const customName = nameOverrides instanceof Map ? nameOverrides.get(String(u._id)) : nameOverrides[String(u._id)];
                 if (customName) userObj.name = customName;
 
@@ -912,6 +918,35 @@ router.post('/moderation-action', authenticateToken, async (req, res) => {
             target_name: String(targetName || '').slice(0, 160),
             reason: String(reason || '').slice(0, 500)
         });
+        let targetLocked = false;
+        let targetActionCount = 0;
+        if (targetType === 'p2p' && ['block', 'report'].includes(action)) {
+            targetActionCount = await ChatActionLog.countDocuments({
+                target_id: targetId,
+                target_type: 'p2p',
+                action: { $in: ['block', 'report'] }
+            });
+            if (targetActionCount > ACTION_LOCK_THRESHOLD) {
+                const lockedUser = await User.findByIdAndUpdate(targetId, {
+                    messagingBlocked: true,
+                    unblockRequestReason: `Account locked after ${targetActionCount} block/report actions.`
+                }, { returnDocument: 'after' });
+                targetLocked = !!lockedUser;
+                if (req.io && lockedUser) {
+                    req.io.to(String(targetId)).emit('user_blocked', {
+                        blocked: true,
+                        reason: 'Your account has been locked after repeated block/report actions.',
+                        actionCount: targetActionCount
+                    });
+                    req.io.to(String(targetId)).emit('force_logout', {
+                        reason: 'Your account has been locked after repeated block/report actions.'
+                    });
+                    setTimeout(() => {
+                        req.io.in(String(targetId)).disconnectSockets(true);
+                    }, 300);
+                }
+            }
+        }
 
         if (req.io) {
             req.io.to('admins').emit('chat_moderation_action', {
@@ -919,13 +954,44 @@ router.post('/moderation-action', authenticateToken, async (req, res) => {
                 targetType,
                 targetId,
                 actorId,
-                created_at: log.created_at
+                created_at: log.created_at,
+                targetLocked,
+                targetActionCount
             });
         }
 
-        res.json({ status: 'success', action, targetType, blocked: action === 'block' });
+        res.json({ status: 'success', action, targetType, blocked: action === 'block', targetLocked, targetActionCount });
     } catch (err) {
         console.error('[CHAT MODERATION ACTION ERROR]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.post('/unblock-user', authenticateToken, async (req, res) => {
+    const { targetUserId } = req.body || {};
+    const actorId = req.user.id;
+
+    if (!targetUserId || !mongoose.Types.ObjectId.isValid(targetUserId)) {
+        return res.status(400).json({ error: 'Valid target user ID required' });
+    }
+
+    try {
+        const targetUser = await User.findById(targetUserId).select('_id name __enc_name');
+        if (!targetUser) return res.status(404).json({ error: 'Target user not found' });
+
+        await User.findByIdAndUpdate(actorId, { $pull: { blockedUsers: targetUserId } });
+        if (typeof targetUser.decryptFieldsSync === 'function') targetUser.decryptFieldsSync();
+        const targetObj = targetUser.toObject ? targetUser.toObject() : targetUser;
+        await ChatActionLog.create({
+            actor_id: actorId,
+            target_id: targetUserId,
+            target_type: 'p2p',
+            action: 'unblock',
+            target_name: String(targetObj.name || '').slice(0, 160)
+        });
+        res.json({ status: 'success', targetUserId, blocked: false });
+    } catch (err) {
+        console.error('[CHAT UNBLOCK USER ERROR]', err);
         res.status(500).json({ error: err.message });
     }
 });

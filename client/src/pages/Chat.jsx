@@ -1170,6 +1170,7 @@ export default function Chat() {
     const [showUnblockModal, setShowUnblockModal] = useState(false);
     const [unblockReason, setUnblockReason] = useState('');
     const [showUnblockTooltip, setShowUnblockTooltip] = useState(false);
+    const [blockConfirmTarget, setBlockConfirmTarget] = useState(null);
 
 
     const handleReaction = async (messageId, emoji, isGroup) => {
@@ -4333,8 +4334,8 @@ export default function Chat() {
                 className="wa-grammar-bar"
                 style={{
                     display: 'flex',
-                    flexDirection: 'row',
-                    alignItems: 'center',
+                    flexDirection: 'column',
+                    alignItems: 'stretch',
                     gap: '8px',
                     margin: floating ? 0 : undefined,
                     borderLeft: floating ? '3px solid #0EA5BE' : undefined,
@@ -4369,8 +4370,8 @@ export default function Chat() {
 
                     <div className="wa-grammar-options">
                         {isGarbageMessage ? (
-                            <div style={{ color: '#ef4444', fontSize: '14px', padding: '4px 0', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '500' }}>
-                                <AlertCircle size={16} />
+                            <div className="wa-grammar-alert-text" style={{ color: '#ef4444', fontSize: '14px', padding: '4px 0', display: 'flex', alignItems: 'flex-start', gap: '8px', fontWeight: '500' }}>
+                                <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
                                 <span>{getInlineTextAiIssue(input) || 'Please write a meaningful word or sentence to start the chat'}</span>
                             </div>
                         ) : grammarSuggestions ? (
@@ -7288,8 +7289,18 @@ export default function Chat() {
         } catch (err) { console.error("Favorite toggle failed", err); }
     };
 
+    const getCommunityByAnnouncementId = (announcementId) => {
+        if (!announcementId) return null;
+        return communities.find((community) => {
+            const currentAnnouncementId = community.announcements?._id || community.announcements?.id || community.announcements;
+            return String(currentAnnouncementId) === String(announcementId);
+        }) || null;
+    };
+
     const getChatTargetKind = (targetId, targetData = {}) => {
-        const isCommunity = !!targetData.is_community || communities.some(c => String(c.id || c._id) === String(targetId));
+        const isCommunity = !!targetData.is_community
+            || !!targetData.isCommunityAnnouncements
+            || communities.some(c => String(c.id || c._id) === String(targetId));
         const isGroup = !isCommunity && (!!targetData.isGroup || !!targetData.is_group || targetData.members !== undefined || groups.some(g => String(g._id || g.id) === String(targetId)));
         return isCommunity ? 'community' : (isGroup ? 'group' : 'p2p');
     };
@@ -7324,11 +7335,30 @@ export default function Chat() {
     };
 
     const handleModerationAction = async (action, targetId, targetData = {}) => {
-        const targetType = getChatTargetKind(targetId, targetData);
-        const displayName = targetData.name || targetData.communityName || (targetType === 'group' ? 'this group' : targetType === 'community' ? 'this community' : 'this contact');
+        const announcementCommunity = targetData.isCommunityAnnouncements
+            ? (getCommunityByAnnouncementId(targetId) || selectedCommunity)
+            : null;
+        const resolvedTargetId = announcementCommunity
+            ? (announcementCommunity._id || announcementCommunity.id)
+            : targetId;
+        const resolvedTargetData = announcementCommunity
+            ? { ...announcementCommunity, is_community: true }
+            : targetData;
+        const targetType = getChatTargetKind(resolvedTargetId, resolvedTargetData);
+        const displayName = resolvedTargetData.name || resolvedTargetData.communityName || (targetType === 'group' ? 'this group' : targetType === 'community' ? 'this community' : 'this contact');
 
         if (action === 'block' && targetType !== 'p2p') {
             setSnackbar({ message: 'Block is only available for p2p chats', type: 'info', variant: 'system' });
+            return;
+        }
+
+        if (action === 'block' && !targetData.__confirmed) {
+            setBlockConfirmTarget({
+                targetId: resolvedTargetId,
+                targetData: resolvedTargetData,
+                displayName
+            });
+            setOpenDropdown(null);
             return;
         }
 
@@ -7336,12 +7366,30 @@ export default function Chat() {
             const token = localStorage.getItem('token');
             await axios.post('/api/chat/moderation-action', {
                 action,
-                targetId,
+                targetId: resolvedTargetId,
                 targetType,
                 targetName: displayName
             }, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+
+            if (action === 'block' && targetType === 'p2p') {
+                const normalizedTargetId = String(resolvedTargetId);
+                setUsers(prev => prev.map(contact => (
+                    String(contact._id || contact.id) === normalizedTargetId
+                        ? { ...contact, blockedByMe: true }
+                        : contact
+                )));
+                setSelectedUser(prev => (
+                    prev && String(prev._id || prev.id) === normalizedTargetId
+                        ? { ...prev, blockedByMe: true }
+                        : prev
+                ));
+                setUserData(prev => ({
+                    ...(prev || {}),
+                    blockedUsers: [...new Set([...(prev?.blockedUsers || []).map(String), normalizedTargetId])]
+                }));
+            }
 
             setOpenDropdown(null);
             setSnackbar({
@@ -7351,6 +7399,36 @@ export default function Chat() {
             });
         } catch (err) {
             setSnackbar({ message: err.response?.data?.error || `Failed to ${action}`, type: 'error', variant: 'system' });
+        }
+    };
+
+    const handleUnblockChatUser = async () => {
+        const targetId = selectedUser?._id || selectedUser?.id;
+        if (!targetId) return;
+
+        try {
+            const token = localStorage.getItem('token');
+            await axios.post('/api/chat/unblock-user', { targetUserId: targetId }, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const normalizedTargetId = String(targetId);
+            setUsers(prev => prev.map(contact => (
+                String(contact._id || contact.id) === normalizedTargetId
+                    ? { ...contact, blockedByMe: false }
+                    : contact
+            )));
+            setSelectedUser(prev => (
+                prev && String(prev._id || prev.id) === normalizedTargetId
+                    ? { ...prev, blockedByMe: false }
+                    : prev
+            ));
+            setUserData(prev => ({
+                ...(prev || {}),
+                blockedUsers: (prev?.blockedUsers || []).filter(blockedId => String(blockedId) !== normalizedTargetId)
+            }));
+            setSnackbar({ message: `${selectedUser?.name || 'Contact'} unblocked`, type: 'success', variant: 'system' });
+        } catch (err) {
+            setSnackbar({ message: err.response?.data?.error || 'Failed to unblock', type: 'error', variant: 'system' });
         }
     };
 
@@ -11738,6 +11816,30 @@ export default function Chat() {
         setFile(nextFile);
     };
 
+    const resetInlineImageEditState = () => {
+        setInlineImageEditMode(false);
+        setInlineImageRotation(0);
+        clearInlineCropMode();
+        setInlineCropRect(null);
+        clearInlineFilterMode();
+        setInlineImageFilter('none');
+        clearInlinePaintMode();
+        setInlinePaintStrokes([]);
+        setInlinePaintRedoStrokes([]);
+        setInlinePaintCurrentStroke(null);
+        setInlinePaintPaletteOpen(false);
+        clearInlineTextMode();
+        setInlineTexts([]);
+        setInlineRedoEdits([]);
+    };
+
+    const applyInlineImageEditsToPreview = async () => {
+        if (!file || !file.type?.startsWith('image/')) return;
+        const editedFile = await applyInlineImageEditsToFile(file);
+        replaceActivePreviewFile(editedFile);
+        resetInlineImageEditState();
+    };
+
     const applyInlineRotateStep = (degrees) => {
         if (!file || !file.type?.startsWith('image/')) return;
         setInlineImageRotation((prev) => prev + Number(degrees || 0));
@@ -12458,6 +12560,15 @@ export default function Chat() {
         setInlineCropCursor('default');
         setInlineFilterActive(false);
         setInlineImageFilter('none');
+        setInlinePaintActive(false);
+        setInlinePaintStrokes([]);
+        setInlinePaintRedoStrokes([]);
+        setInlinePaintCurrentStroke(null);
+        setInlinePaintPaletteOpen(false);
+        setInlineTextActive(false);
+        setInlineTextDraft('');
+        setInlineTexts([]);
+        setInlineRedoEdits([]);
         setIsDiscardPreviewConfirmOpen(false);
     };
 
@@ -12619,26 +12730,12 @@ export default function Chat() {
                                 Aa
                             </span>
                         </button>
-                        <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Sticker">
-                            <CheckSquare size={22} strokeWidth={2.2} />
-                        </button>
-                        <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Draw">
-                            <CircleDashed size={22} strokeWidth={2.2} />
-                        </button>
-                        <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Emoji">
-                            <Smile size={22} strokeWidth={2.2} />
-                        </button>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'end', gap: 14 }}>
-                        {inlineImageEditMode && (inlineCropActive || inlineFilterActive || inlinePaintActive) && (
+                        {inlineImageEditMode && (inlineCropActive || inlineFilterActive || inlinePaintActive || inlineTextActive || hasInlineUndo) && (
                             <button
                                 type="button"
-                                onClick={() => {
-                                    setInlineImageEditMode(false);
-                                    clearInlineCropMode();
-                                    clearInlineFilterMode();
-                                    clearInlinePaintMode();
-                                }}
+                                onClick={applyInlineImageEditsToPreview}
                                 style={{
                                     border: 'none',
                                     background: 'transparent',
@@ -12698,7 +12795,7 @@ export default function Chat() {
                 flexDirection: 'column',
                 justifyContent: 'center',
                 alignItems: 'center',
-                overflow: 'hidden',
+                overflow: isImagePreview ? 'auto' : 'hidden',
                 padding: isImagePreview ? (isMobile ? '16px 12px 12px' : '24px 28px 18px') : '26px 40px 20px',
                 position: 'relative',
                 background: isImagePreview ? 'transparent' : (isMediaThemePreview ? '#041b2d' : '#0b141a'),
@@ -12811,7 +12908,7 @@ export default function Chat() {
                                 );
                             })}
                         </div>
-                        <div style={{ width: '100%', flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                        <div style={{ width: '100%', flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}>
                             <div
                                 ref={inlineImageStageRef}
                                 style={{
@@ -21737,6 +21834,37 @@ export default function Chat() {
                                             <ShieldAlert size={18} />
                                             Messaging Suspended. Action Required for Restoration.
                                         </div>
+                                    ) : selectedUser && (
+                                        selectedUser.blockedByMe
+                                        || selectedUser.blockedMe
+                                        || (userData?.blockedUsers || []).some(blockedId => String(blockedId) === String(selectedUser._id || selectedUser.id))
+                                    ) ? (
+                                        <div className="wa-blocked-chat-footer">
+                                            <button
+                                                type="button"
+                                                className="wa-blocked-action-btn danger"
+                                                onClick={() => {
+                                                    setDeleteTarget({ _id: selectedUser._id || selectedUser.id, id: selectedUser._id || selectedUser.id, name: selectedUser.name, isGroup: false });
+                                                    setIsDeleteChatConfirmOpen(true);
+                                                }}
+                                            >
+                                                <Trash2 size={18} />
+                                                Delete chat
+                                            </button>
+                                            {!selectedUser.blockedMe && (
+                                                <button
+                                                    type="button"
+                                                    className="wa-blocked-action-btn success"
+                                                    onClick={handleUnblockChatUser}
+                                                >
+                                                    <Ban size={18} />
+                                                    Unblock
+                                                </button>
+                                            )}
+                                            {selectedUser.blockedMe && (
+                                                <span className="wa-blocked-chat-note">This chat is unavailable</span>
+                                            )}
+                                        </div>
                                     ) : isMessagingRestricted() ? (
                                         <div className="wa-messaging-restricted-pill">
                                             {(() => {
@@ -25077,6 +25205,22 @@ export default function Chat() {
                 confirmVariant="danger"
                 onConfirm={discardFilePreview}
                 onCancel={() => setIsDiscardPreviewConfirmOpen(false)}
+            />
+
+            <ConfirmModal
+                isOpen={!!blockConfirmTarget}
+                title={`Block ${blockConfirmTarget?.displayName || 'this contact'}?`}
+                message={`This person won't be able to message or call you. They won't know you blocked them.`}
+                confirmText="Block"
+                cancelText="Cancel"
+                confirmVariant="danger"
+                onConfirm={() => {
+                    if (!blockConfirmTarget) return;
+                    const target = blockConfirmTarget;
+                    setBlockConfirmTarget(null);
+                    handleModerationAction('block', target.targetId, { ...target.targetData, __confirmed: true });
+                }}
+                onCancel={() => setBlockConfirmTarget(null)}
             />
 
             <ConfirmModal
