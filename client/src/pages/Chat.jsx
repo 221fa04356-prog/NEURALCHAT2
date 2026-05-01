@@ -2018,31 +2018,6 @@ export default function Chat() {
     const [pinMessageDuration, setPinMessageDuration] = useState('30 days');
     const [currentPinnedIndex, setCurrentPinnedIndex] = useState(0);
 
-    useEffect(() => {
-        if (!replyingTo && !infoMessage && !pinMessageModal) return;
-
-        if (replyingTo) {
-            const liveReplyTarget = resolveLiveMessageRef(replyingTo);
-            if (liveReplyTarget && liveReplyTarget !== replyingTo) {
-                setReplyingTo(liveReplyTarget);
-            }
-        }
-
-        if (infoMessage) {
-            const liveInfoMessage = resolveLiveMessageRef(infoMessage);
-            if (liveInfoMessage && liveInfoMessage !== infoMessage) {
-                setInfoMessage(liveInfoMessage);
-            }
-        }
-
-        if (pinMessageModal) {
-            const livePinnedMessage = resolveLiveMessageRef(pinMessageModal);
-            if (livePinnedMessage && livePinnedMessage !== pinMessageModal) {
-                setPinMessageModal(livePinnedMessage);
-            }
-        }
-    }, [replyingTo, infoMessage, pinMessageModal, resolveLiveMessageRef]);
-
     const openSettingsPanel = (initialTab = null) => {
         setIsProfileOpen(false);
         setIsSettingsEditing(false);
@@ -3552,6 +3527,32 @@ export default function Chat() {
             return true;
         }) || null;
     }, [activeChatMessages]);
+
+    useEffect(() => {
+        if (!replyingTo && !infoMessage && !pinMessageModal) return;
+
+        if (replyingTo) {
+            const liveReplyTarget = resolveLiveMessageRef(replyingTo);
+            if (liveReplyTarget && liveReplyTarget !== replyingTo) {
+                setReplyingTo(liveReplyTarget);
+            }
+        }
+
+        if (infoMessage) {
+            const liveInfoMessage = resolveLiveMessageRef(infoMessage);
+            if (liveInfoMessage && liveInfoMessage !== infoMessage) {
+                setInfoMessage(liveInfoMessage);
+            }
+        }
+
+        if (pinMessageModal) {
+            const livePinnedMessage = resolveLiveMessageRef(pinMessageModal);
+            if (livePinnedMessage && livePinnedMessage !== pinMessageModal) {
+                setPinMessageModal(livePinnedMessage);
+            }
+        }
+    }, [replyingTo, infoMessage, pinMessageModal, resolveLiveMessageRef]);
+
     const [isManageGroupsOpen, setIsManageGroupsOpen] = useState(false);
     const [isAddExistingGroupsOpen, setIsAddExistingGroupsOpen] = useState(false);
     const [isConfirmAddGroupsOpen, setIsConfirmAddGroupsOpen] = useState(false);
