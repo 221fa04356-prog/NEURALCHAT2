@@ -5560,6 +5560,77 @@ html.wa-screenshot-protection-active .wa-app-container {
     position: relative;
     max-height: 120px;
     box-sizing: border-box;
+    overflow: hidden;
+}
+
+.wa-grammar-alert-text span {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+}
+
+.wa-blocked-chat-footer {
+    width: 100%;
+    min-height: 56px;
+    padding: 14px 16px;
+    border-radius: 0;
+    border: 0;
+    border-top: 1px solid rgba(148, 163, 184, 0.18);
+    background: rgba(248, 250, 252, 0.96);
+    color: #475569;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 60px;
+    font-size: 0.95rem;
+    font-weight: 800;
+    text-align: center;
+    box-sizing: border-box;
+}
+
+.wa-blocked-action-btn {
+    min-width: 152px;
+    min-height: 50px;
+    padding: 0 24px;
+    border-radius: 999px;
+    background: #ffffff;
+    border: 1px solid rgba(148, 163, 184, 0.38);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 16px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.wa-blocked-action-btn.danger {
+    color: #e11d48;
+}
+
+.wa-blocked-action-btn.success {
+    color: #059669;
+}
+
+.wa-blocked-action-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+}
+
+.wa-blocked-action-btn.danger:hover {
+    background: #fff1f2;
+    border-color: rgba(225, 29, 72, 0.28);
+}
+
+.wa-blocked-action-btn.success:hover {
+    background: #ecfdf5;
+    border-color: rgba(5, 150, 105, 0.28);
+}
+
+.wa-blocked-chat-note {
+    color: #64748b;
+    font-weight: 700;
 }
 
 .wa-grammar-close-btn {

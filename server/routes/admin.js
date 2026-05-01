@@ -467,10 +467,11 @@ router.get('/chat/dates/:userId/:otherUserId', async (req, res) => {
 // Get statistics for the dashboard overview
 router.get('/stats', async (req, res) => {
     try {
+        const blockActionMatch = { action: { $in: ['block', 'unblock'] } };
         const [blockCount, reportCount, blockMembers, reportMembers] = await Promise.all([
-            ChatActionLog.countDocuments({ action: 'block' }),
+            ChatActionLog.countDocuments(blockActionMatch),
             ChatActionLog.countDocuments({ action: 'report' }),
-            ChatActionLog.distinct('actor_id', { action: 'block' }),
+            ChatActionLog.distinct('actor_id', blockActionMatch),
             ChatActionLog.distinct('actor_id', { action: 'report' })
         ]);
 
@@ -587,18 +588,24 @@ router.get('/stats', async (req, res) => {
             aggregateUsersByStatus(tenYearsAgo, "%Y", 'pending'),
             aggregateByPeriod(PasswordReset, { created_at: { $gte: tenYearsAgo }, status: 'pending' }, "%Y"),
             aggregateByPeriod(User, { created_at: { $gte: tenYearsAgo }, role: { $ne: 'admin' }, unblockRequested: true }, "%Y"),
-            aggregateByPeriod(ChatActionLog, { created_at: { $gte: thirtyDaysAgo }, action: 'block' }, "%Y-%m-%d"),
+            aggregateByPeriod(ChatActionLog, { created_at: { $gte: thirtyDaysAgo }, action: { $in: ['block', 'unblock'] } }, "%Y-%m-%d"),
             aggregateByPeriod(ChatActionLog, { created_at: { $gte: thirtyDaysAgo }, action: 'report' }, "%Y-%m-%d"),
-            aggregateByPeriod(ChatActionLog, { created_at: { $gte: twelveMonthsAgo }, action: 'block' }, "%Y-%m"),
+            aggregateByPeriod(ChatActionLog, { created_at: { $gte: twelveMonthsAgo }, action: { $in: ['block', 'unblock'] } }, "%Y-%m"),
             aggregateByPeriod(ChatActionLog, { created_at: { $gte: twelveMonthsAgo }, action: 'report' }, "%Y-%m"),
-            aggregateByPeriod(ChatActionLog, { created_at: { $gte: tenYearsAgo }, action: 'block' }, "%Y"),
+            aggregateByPeriod(ChatActionLog, { created_at: { $gte: tenYearsAgo }, action: { $in: ['block', 'unblock'] } }, "%Y"),
             aggregateByPeriod(ChatActionLog, { created_at: { $gte: tenYearsAgo }, action: 'report' }, "%Y")
         ]);
 
         const actionPeopleRaw = await ChatActionLog.aggregate([
+            { $match: { action: { $in: ['block', 'unblock', 'report'] } } },
             {
                 $group: {
-                    _id: { actor_id: '$actor_id', action: '$action' },
+                    _id: {
+                        actor_id: '$actor_id',
+                        action: {
+                            $cond: [{ $in: ['$action', ['block', 'unblock']] }, 'block', '$action']
+                        }
+                    },
                     count: { $sum: 1 },
                     lastActionAt: { $max: '$created_at' }
                 }
@@ -609,7 +616,7 @@ router.get('/stats', async (req, res) => {
         ]);
 
         const actionActorIds = [...new Set(actionPeopleRaw.map(row => String(row._id.actor_id)).filter(Boolean))];
-        const actionActors = await User.find({ _id: { $in: actionActorIds } }).select('name login_id __enc_name');
+        const actionActors = await User.find({ _id: { $in: actionActorIds } }).select('name login_id blockedUsers __enc_name');
         const actionActorMap = new Map(actionActors.map(user => {
             const userObj = toDecryptedUserObject(user);
             return [String(userObj._id), userObj];
@@ -627,6 +634,71 @@ router.get('/stats', async (req, res) => {
             });
         });
 
+        const actionDetailsRaw = await ChatActionLog.find({})
+            .sort({ created_at: -1 })
+            .limit(500)
+            .populate('actor_id', 'name login_id __enc_name')
+            .lean();
+
+        const targetIdsByType = actionDetailsRaw.reduce((acc, log) => {
+            if (log.target_id && log.target_type) {
+                acc[log.target_type] = acc[log.target_type] || new Set();
+                acc[log.target_type].add(String(log.target_id));
+            }
+            return acc;
+        }, {});
+        const [targetUsers, targetGroups, targetCommunities] = await Promise.all([
+            targetIdsByType.p2p?.size ? User.find({ _id: { $in: [...targetIdsByType.p2p] } }).select('name login_id mobile email __enc_name __enc_mobile __enc_email') : [],
+            targetIdsByType.group?.size ? Group.find({ _id: { $in: [...targetIdsByType.group] } }).select('name members').lean() : [],
+            targetIdsByType.community?.size ? Community.find({ _id: { $in: [...targetIdsByType.community] } }).select('name members').lean() : []
+        ]);
+        const targetMap = new Map([
+            ...targetUsers.map(target => {
+                const targetObj = toDecryptedUserObject(target);
+                return [`p2p:${String(targetObj._id)}`, {
+                    name: targetObj.name || 'Unknown user',
+                    login_id: targetObj.login_id || '',
+                    mobile: targetObj.mobile || '',
+                    email: targetObj.email || ''
+                }];
+            }),
+            ...targetGroups.map(target => [`group:${String(target._id)}`, {
+                name: target.name || 'Unknown group',
+                members: Array.isArray(target.members) ? target.members.length : 0
+            }]),
+            ...targetCommunities.map(target => [`community:${String(target._id)}`, {
+                name: target.name || 'Unknown community',
+                members: Array.isArray(target.members) ? target.members.length : 0
+            }])
+        ]);
+
+        const actionDetails = actionDetailsRaw.map(log => {
+            const actorId = log.actor_id?._id || log.actor_id;
+            const actor = actionActorMap.get(String(actorId));
+            const targetInfo = targetMap.get(`${log.target_type}:${String(log.target_id)}`) || {};
+            const currentBlocked = log.target_type === 'p2p'
+                ? (actor?.blockedUsers || []).some(blockedId => String(blockedId) === String(log.target_id))
+                : null;
+            return {
+                id: String(log._id),
+                userId: String(actorId || ''),
+                action: log.action === 'unblock' ? 'block' : log.action,
+                eventAction: log.action,
+                currentBlocked,
+                targetType: log.target_type,
+                targetId: String(log.target_id || ''),
+                targetName: targetInfo.name || log.target_name || '',
+                targetLoginId: targetInfo.login_id || '',
+                targetMobile: targetInfo.mobile || '',
+                targetEmail: targetInfo.email || '',
+                targetMembers: targetInfo.members || 0,
+                reason: log.reason || '',
+                created_at: log.created_at,
+                name: actor?.name || 'Unknown member',
+                login_id: actor?.login_id || ''
+            };
+        });
+
         const actionContainers = ['block', 'report'].map(action => {
             const people = actionPeople.filter(item => item.action === action);
             return {
@@ -634,7 +706,12 @@ router.get('/stats', async (req, res) => {
                 label: action === 'block' ? 'Block Actions' : 'Report Actions',
                 total: action === 'block' ? blockCount : reportCount,
                 members: action === 'block' ? blockMembers.length : reportMembers.length,
-                people
+                people: people.map(person => ({
+                    ...person,
+                    events: actionDetails.filter(detail => (
+                        detail.action === action && String(detail.userId) === String(person.userId)
+                    ))
+                }))
             };
         });
 
@@ -704,7 +781,8 @@ router.get('/stats', async (req, res) => {
                     reports: yearlyReports
                 })
             },
-            actionContainers
+            actionContainers,
+            actionDetails
         });
     } catch (err) {
         res.status(500).json({ error: err.message });

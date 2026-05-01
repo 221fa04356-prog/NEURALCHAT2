@@ -4,7 +4,7 @@ const chatActionLogSchema = new mongoose.Schema({
     actor_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     target_id: { type: mongoose.Schema.Types.ObjectId, required: true },
     target_type: { type: String, enum: ['p2p', 'group', 'community'], required: true },
-    action: { type: String, enum: ['block', 'report'], required: true },
+    action: { type: String, enum: ['block', 'unblock', 'report'], required: true },
     target_name: { type: String, default: '' },
     reason: { type: String, default: '' },
     created_at: { type: Date, default: Date.now }

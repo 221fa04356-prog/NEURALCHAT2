@@ -9,7 +9,7 @@ import {
     Eye, EyeOff, Menu, AlertTriangle, ArrowLeft, Smile,
     User as UserIcon, Search, Bell, Settings, LayoutDashboard,
     TrendingUp, Calendar, ChevronRight, X, Layers, Check, RefreshCw, Forward, ChevronDown, XCircle,
-    Mic, Pause, Play, List, History, ShieldCheck, MapPin, Video, Phone
+    Mic, Pause, Play, List, History, ShieldCheck, MapPin, Video, Phone, Ban
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import {
@@ -123,33 +123,19 @@ const METRIC_META = {
         label: 'Block Actions',
         shortLabel: 'Blocks',
         subtext: 'Total p2p block actions',
-        icon: XCircle,
-        color: '#fb7185',
-        gradient: 'linear-gradient(135deg, #ef4444 0%, #fb7185 55%, #be123c 100%)'
-    },
-    blockMembers: {
-        label: 'Members Blocking',
-        shortLabel: 'Blockers',
-        subtext: 'Unique members who blocked',
-        icon: UserIcon,
-        color: '#f97316',
-        gradient: 'linear-gradient(135deg, #f97316 0%, #fb7185 55%, #ef4444 100%)'
+        icon: Ban,
+        color: '#38bdf8',
+        gradient: ADMIN_PILL_GRADIENT,
+        actionDetail: 'block'
     },
     totalReports: {
         label: 'Report Actions',
         shortLabel: 'Reports',
         subtext: 'Total reports submitted',
         icon: AlertTriangle,
-        color: '#facc15',
-        gradient: 'linear-gradient(135deg, #f59e0b 0%, #facc15 55%, #fb7185 100%)'
-    },
-    reportMembers: {
-        label: 'Members Reporting',
-        shortLabel: 'Reporters',
-        subtext: 'Unique members who reported',
-        icon: Users,
-        color: '#22c55e',
-        gradient: 'linear-gradient(135deg, #16a34a 0%, #22c55e 55%, #38bdf8 100%)'
+        color: '#2e7bff',
+        gradient: ADMIN_PILL_GRADIENT,
+        actionDetail: 'report'
     }
 };
 
@@ -158,8 +144,8 @@ const SERIES_META = {
     pending: { label: 'Pending Approvals', shortLabel: 'Pending', color: '#2e7bff', totalKey: 'pendingApprovals' },
     resets: { label: 'Reset Requests', shortLabel: 'Resets', color: '#4e59ff', totalKey: 'activeResets' },
     unblocks: { label: 'Unblock Requests', shortLabel: 'Unblock', color: '#6e72ff', totalKey: 'unblockRequests' },
-    blocks: { label: 'Block Actions', shortLabel: 'Blocks', color: '#fb7185', totalKey: 'totalBlocks' },
-    reports: { label: 'Report Actions', shortLabel: 'Reports', color: '#facc15', totalKey: 'totalReports' }
+    blocks: { label: 'Block Actions', shortLabel: 'Blocks', color: '#73a8ff', totalKey: 'totalBlocks' },
+    reports: { label: 'Report Actions', shortLabel: 'Reports', color: '#8ed2ff', totalKey: 'totalReports' }
 };
 
 const prettifyMetricKey = (key) => key
@@ -312,7 +298,12 @@ export default function AdminDashboard() {
         /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
 
     // 1. State Declarations
-    const [activeTab, setActiveTab] = useState(sessionStorage.getItem('adminActiveTab') || 'overview');
+    const [activeTab, setActiveTab] = useState(() => {
+        const savedTab = sessionStorage.getItem('adminActiveTab') || 'overview';
+        if (savedTab === 'block-members') return 'block-actions';
+        if (savedTab === 'report-members') return 'report-actions';
+        return savedTab;
+    });
     const [stats, setStats] = useState(null);
     const [chartPeriod, setChartPeriod] = useState('day'); // 'day', 'month', 'year'
     const [users, setUsers] = useState([]);
@@ -414,6 +405,7 @@ export default function AdminDashboard() {
     const [reviewScrollControlTop, setReviewScrollControlTop] = useState(50);
     const [isDraggingReviewScrollControl, setIsDraggingReviewScrollControl] = useState(false);
     const [highlightedRedirectRow, setHighlightedRedirectRow] = useState(null);
+    const [actionAuditView, setActionAuditView] = useState(null);
     const scrollHideTimerRef = useRef(null);
 
     const normalizedStats = useMemo(() => {
@@ -431,6 +423,7 @@ export default function AdminDashboard() {
         if (!normalizedStats) return [];
 
         return Object.entries(normalizedStats)
+            .filter(([key]) => !['blockMembers', 'reportMembers'].includes(key))
             .filter(([_, value]) => typeof value === 'number' && Number.isFinite(value))
             .map(([key, value], index) => ({
                 key,
@@ -469,16 +462,63 @@ export default function AdminDashboard() {
     ), [chartSeries]);
 
     const distributionMetrics = useMemo(() => (
-        overviewMetrics.map((metric, index) => ({
-            ...metric,
-            renderValue: metric.value === 0 ? 0.0001 : metric.value,
-            color: metric.color || THEME_SERIES_COLORS[index % THEME_SERIES_COLORS.length]
-        }))
+        overviewMetrics
+            .filter(metric => !['blockMembers', 'reportMembers'].includes(metric.key))
+            .map((metric, index) => ({
+                ...metric,
+                renderValue: metric.value === 0 ? 0.0001 : metric.value,
+                color: metric.color || THEME_SERIES_COLORS[index % THEME_SERIES_COLORS.length]
+            }))
     ), [overviewMetrics]);
 
     const actionContainers = useMemo(() => (
         Array.isArray(normalizedStats?.actionContainers) ? normalizedStats.actionContainers : []
     ), [normalizedStats]);
+
+    const actionDetails = useMemo(() => (
+        Array.isArray(normalizedStats?.actionDetails) ? normalizedStats.actionDetails : []
+    ), [normalizedStats]);
+
+    const looksEncryptedValue = (value) => {
+        const text = String(value || '').trim();
+        if (!text) return false;
+        return /^[a-f0-9]{24,}(:[a-f0-9]{16,})?$/i.test(text);
+    };
+
+    const adminUserLookup = useMemo(() => {
+        const byId = new Map();
+        const byLoginId = new Map();
+        users.forEach((entry) => {
+            const id = String(entry?._id || entry?.id || '');
+            if (id) byId.set(id, entry);
+            const loginId = String(entry?.login_id || '').trim();
+            if (loginId) byLoginId.set(loginId, entry);
+        });
+        return { byId, byLoginId };
+    }, [users]);
+
+    const resolvedActionDetails = useMemo(() => (
+        actionDetails.map((detail) => {
+            if (detail?.targetType !== 'p2p') return detail;
+            const matchedUser = adminUserLookup.byId.get(String(detail.targetId || ''))
+                || adminUserLookup.byLoginId.get(String(detail.targetLoginId || '').trim());
+            if (!matchedUser) {
+                return {
+                    ...detail,
+                    targetName: looksEncryptedValue(detail.targetName) ? '' : detail.targetName,
+                    targetMobile: looksEncryptedValue(detail.targetMobile) ? '' : detail.targetMobile,
+                    targetEmail: looksEncryptedValue(detail.targetEmail) ? '' : detail.targetEmail
+                };
+            }
+            return {
+                ...detail,
+                targetName: matchedUser.name || matchedUser.displayName || (!looksEncryptedValue(detail.targetName) ? detail.targetName : ''),
+                targetLoginId: matchedUser.login_id || detail.targetLoginId || '',
+                targetMobile: matchedUser.mobile || (!looksEncryptedValue(detail.targetMobile) ? detail.targetMobile : ''),
+                targetEmail: matchedUser.email || (!looksEncryptedValue(detail.targetEmail) ? detail.targetEmail : '')
+            };
+        })
+    ), [actionDetails, adminUserLookup]);
 
     const reviewNotifications = useMemo(() => (
         [...adminNotifications].sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
@@ -686,6 +726,13 @@ export default function AdminDashboard() {
         const adminLabel = `Admin (${name})`;
         setSnackbar({ open: true, message, type, senderName: adminLabel });
     };
+    const pushAdminNotification = (notification) => {
+        const id = notification.id || `${notification.type || 'notice'}-${Date.now()}`;
+        setAdminNotifications(prev => {
+            if (prev.some(n => n.id === id)) return prev;
+            return [{ ...notification, id, timestamp: notification.timestamp || new Date() }, ...prev];
+        });
+    };
     const closeSnackbar = () => setSnackbar(null);
 
     const [confirmConfig, setConfirmConfig] = useState(null);
@@ -763,6 +810,11 @@ export default function AdminDashboard() {
         if (alert.type === 'reset') {
             setActiveTab('resets');
             setHighlightedRedirectRow({ kind: 'reset', id: String(alert.requestId || alert.id || '') });
+            setShowNotifications(false);
+            return;
+        }
+        if (alert.type === 'moderation_action') {
+            setActiveTab(alert.action === 'report' ? 'report-actions' : 'block-actions');
             setShowNotifications(false);
             return;
         }
@@ -1007,8 +1059,18 @@ export default function AdminDashboard() {
 
         socket.on('chat_moderation_action', (data) => {
             fetchStats();
-            const actionLabel = data?.action === 'block' ? 'Block' : 'Report';
-            showSnackbar(`${actionLabel} action recorded`, 'info');
+            const actionLabel = data?.action === 'block' ? 'Block' : data?.action === 'unblock' ? 'Unblock' : 'Report';
+            const message = `${actionLabel} action recorded`;
+            showSnackbar(message, 'info');
+            pushAdminNotification({
+                id: `moderation-${data?.action || 'action'}-${data?.actorId || data?.userId || 'admin'}-${data?.targetId || data?.messageId || Date.now()}-${data?.timestamp || Date.now()}`,
+                type: 'moderation_action',
+                action: data?.action || 'report',
+                userName: data?.actorName || data?.userName || data?.memberName || 'Admin',
+                targetName: data?.targetName || data?.partnerName || data?.receiverName || '',
+                message,
+                timestamp: data?.timestamp ? new Date(data.timestamp) : new Date()
+            });
         });
 
         socket.on('user_approved', ({ userId }) => {
@@ -2033,6 +2095,14 @@ export default function AdminDashboard() {
                                         <AlertTriangle size={18} color="#f5365c" />
                                     ) : alert.type === 'unblock_request' ? (
                                         <ShieldCheck size={18} color="#6e72ff" />
+                                    ) : alert.type === 'moderation_action' ? (
+                                        alert.action === 'report' ? (
+                                            <AlertTriangle size={18} color="#73a8ff" />
+                                        ) : alert.action === 'unblock' ? (
+                                            <ShieldCheck size={18} color="#34d399" />
+                                        ) : (
+                                            <XCircle size={18} color="#ff6b7d" />
+                                        )
                                     ) : alert.type === 'registration' ? (
                                         <UserCheck size={18} color="#2e7bff" />
                                     ) : alert.type === 'reset' ? (
@@ -2046,6 +2116,7 @@ export default function AdminDashboard() {
                                         <span style={{ fontWeight: '700', fontSize: '0.825rem', color: OFFICIAL_TEXT_PRIMARY }}>
                                             {alert.type === 'unethical' ? 'Unethical Content' : 
                                              alert.type === 'unblock_request' ? 'Unblock Request' : 
+                                             alert.type === 'moderation_action' ? `${alert.action === 'unblock' ? 'Unblock' : alert.action === 'block' ? 'Block' : 'Report'} Action` :
                                              alert.type === 'registration' ? 'New Registration' : 
                                              alert.type === 'reset' ? 'Password Reset' : 'Message Deleted'}
                                         </span>
@@ -2057,6 +2128,7 @@ export default function AdminDashboard() {
                                         {alert.type === 'registration' ? <UserIcon size={12} /> : 
                                          alert.type === 'reset' ? <Key size={12} /> : 
                                          alert.type === 'unblock_request' ? <ShieldCheck size={12} /> : 
+                                         alert.type === 'moderation_action' ? (alert.action === 'unblock' ? <ShieldCheck size={12} /> : alert.action === 'block' ? <XCircle size={12} /> : <AlertTriangle size={12} />) :
                                             alert.isGroup ? <Users size={12} /> : <UserIcon size={12} />}
                                         <span style={{ fontWeight: '600' }}>{alert.deletedBy || alert.userName || alert.name}</span>
                                         {(alert.type === 'unethical' || alert.type === 'deletion') && (
@@ -2081,6 +2153,8 @@ export default function AdminDashboard() {
                                             )
                                         ) : alert.type === 'unblock_request' ? (
                                             `Reason: "${alert.reason || 'No reason provided'}"`
+                                        ) : alert.type === 'moderation_action' ? (
+                                            alert.targetName ? `${alert.message} for ${alert.targetName}` : alert.message
                                         ) : alert.type === 'registration' ? (
                                             `New user: ${alert.email || alert.login_id || alert.userId}`
                                         ) : alert.type === 'reset' ? (
@@ -2330,7 +2404,9 @@ export default function AdminDashboard() {
                             subtext={metric.subtext}
                             gradient={metric.gradient}
                             icon={metric.icon}
-                            onClick={metric.onClickTab ? () => setActiveTab(metric.onClickTab) : undefined}
+                            onClick={metric.actionDetail
+                                ? () => setActiveTab(metric.actionDetail === 'block' ? 'block-actions' : 'report-actions')
+                                : (metric.onClickTab ? () => setActiveTab(metric.onClickTab) : undefined)}
                         />
                     ))}
                 </div>
@@ -2480,41 +2556,6 @@ export default function AdminDashboard() {
                     </div>
                 </div>
 
-                {actionContainers.length > 0 && (
-                    <div className="dashboard-overview-grid" style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '1.5rem', marginTop: '1.5rem' }}>
-                        {actionContainers.map(container => (
-                            <div key={container.key} className="admin-analytics-panel" style={{ padding: '1.5rem', borderRadius: '1.25rem' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                                    <div>
-                                        <h4 style={{ margin: 0, color: OFFICIAL_TEXT_PRIMARY, fontSize: '1rem', fontWeight: 800 }}>{container.label}</h4>
-                                        <div style={{ color: OFFICIAL_TEXT_MUTED, fontSize: '0.82rem', fontWeight: 600, marginTop: 4 }}>
-                                            {container.members || 0} members, {container.total || 0} total actions
-                                        </div>
-                                    </div>
-                                    <div style={{ color: container.key === 'block' ? '#fb7185' : '#facc15', fontSize: '1.7rem', fontWeight: 900 }}>
-                                        {container.total || 0}
-                                    </div>
-                                </div>
-                                <div style={{ display: 'grid', gap: '0.75rem' }}>
-                                    {(container.people || []).slice(0, 6).map(person => (
-                                        <div key={`${container.key}-${person.userId}`} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '1rem', alignItems: 'center', padding: '0.75rem 0.9rem', borderRadius: '0.9rem', background: 'rgba(15, 23, 42, 0.62)', border: '1px solid rgba(148, 163, 184, 0.12)' }}>
-                                            <div style={{ minWidth: 0 }}>
-                                                <div style={{ color: OFFICIAL_TEXT_PRIMARY, fontWeight: 800, fontSize: '0.9rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{person.name || 'Unknown member'}</div>
-                                                <div style={{ color: OFFICIAL_TEXT_MUTED, fontWeight: 600, fontSize: '0.75rem' }}>{person.login_id ? `Login ID ${person.login_id}` : 'Member action count'}</div>
-                                            </div>
-                                            <div style={{ color: container.key === 'block' ? '#fb7185' : '#facc15', fontWeight: 900 }}>{person.count || 0}</div>
-                                        </div>
-                                    ))}
-                                    {(!container.people || container.people.length === 0) && (
-                                        <div style={{ color: OFFICIAL_TEXT_MUTED, fontSize: '0.85rem', fontWeight: 600, textAlign: 'center', padding: '1rem' }}>
-                                            No {container.key} actions yet.
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
             </div>
         );
     };
@@ -2767,6 +2808,265 @@ export default function AdminDashboard() {
                     </tbody>
                 </table>
             </div>
+        );
+    };
+
+    const renderActionTable = (actionType) => {
+        const details = resolvedActionDetails.filter(item => item.action === actionType);
+        const title = actionType === 'block' ? 'Block Actions' : 'Report Actions';
+        const emptyLabel = actionType === 'block' ? 'block actions' : 'report actions';
+        const getTargetLoginLabel = (detail) => detail?.targetLoginId || 'N/A';
+        const getEventActionLabel = (detail) => {
+            if (detail?.eventAction === 'unblock') return 'Unblocked';
+            if (detail?.action === 'block' && detail?.currentBlocked === false) return 'Unblocked';
+            if (detail?.eventAction === 'block' || detail?.action === 'block') return 'Blocked';
+            if (detail?.eventAction === 'report' || detail?.action === 'report') return 'Reported';
+            return 'Action';
+        };
+        const getEventActionColor = (detail) => {
+            const label = getEventActionLabel(detail);
+            if (label === 'Unblocked') return '#34d399';
+            if (label === 'Reported') return '#facc15';
+            return '#fb7185';
+        };
+        const getStatusColor = (status) => status === 'unblocked' ? '#34d399' : '#fb7185';
+        const getStatusLabel = (status) => status === 'unblocked' ? 'Unblocked' : 'Blocked';
+        const getRawActionStatus = (detail) => {
+            if (detail?.eventAction === 'unblock') return 'unblocked';
+            if (detail?.eventAction === 'block' || detail?.action === 'block') return 'blocked';
+            return getEventActionLabel(detail).toLowerCase() === 'unblocked' ? 'unblocked' : 'blocked';
+        };
+        const findActionDetailForStatus = (sourceDetail, status) => {
+            const related = details
+                .filter(item => (
+                    String(item.userId || '') === String(sourceDetail?.userId || '') &&
+                    String(item.targetId || '') === String(sourceDetail?.targetId || '')
+                ))
+                .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+            const exact = related.find(item => getRawActionStatus(item) === status);
+            if (exact) return exact;
+            return null;
+        };
+        const viewButtonStyle = {
+            border: '1px solid rgba(115, 168, 255, 0.36)',
+            background: 'rgba(20, 152, 255, 0.1)',
+            color: '#9ed6ff',
+            borderRadius: 999,
+            padding: '7px 18px',
+            fontWeight: 900,
+            cursor: 'pointer',
+            minWidth: 104
+        };
+
+        const activeDetail = actionAuditView?.detail;
+        const chosenStatus = actionAuditView?.selectedStatus;
+        const chosenDetail = activeDetail && chosenStatus ? findActionDetailForStatus(activeDetail, chosenStatus) : null;
+        const activeColor = chosenStatus ? getStatusColor(chosenStatus) : '#9ed6ff';
+        const activeTime = chosenDetail?.created_at
+            ? new Date(chosenDetail.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+            : 'N/A';
+
+        return (
+            <>
+                <div className="table-responsive" style={{ borderRadius: '1.25rem', overflow: 'hidden', background: OFFICIAL_PANEL_SURFACE, border: OFFICIAL_PANEL_BORDER, boxShadow: OFFICIAL_PANEL_SHADOW }}>
+                    <div style={{ padding: '1.1rem 1.25rem', borderBottom: '1px solid rgba(148, 163, 184, 0.14)' }}>
+                        <h3 style={{ margin: 0, color: OFFICIAL_TEXT_PRIMARY, fontSize: '1rem', fontWeight: 900 }}>{title} History</h3>
+                    </div>
+                    <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', color: OFFICIAL_TEXT_SECONDARY }}>
+                        <thead>
+                            <tr style={{ background: 'rgba(15, 23, 42, 0.72)' }}>
+                                <th style={{ width: '22%', padding: '0.85rem 1.25rem', textAlign: 'left', color: '#9ed6ff', fontSize: '0.78rem' }}>Member</th>
+                                <th style={{ width: '22%', padding: '0.85rem 1rem', textAlign: 'center', color: '#9ed6ff', fontSize: '0.78rem' }}>Victim Login ID</th>
+                                <th style={{ width: '24%', padding: '0.85rem 1rem', textAlign: 'center', color: '#9ed6ff', fontSize: '0.78rem' }}>Action</th>
+                                <th style={{ width: '32%', padding: '0.85rem 1.25rem', textAlign: 'center', color: '#9ed6ff', fontSize: '0.78rem' }}>Type</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {details.map(detail => (
+                                <tr key={detail.id} style={{ borderTop: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                                    <td style={{ padding: '0.95rem 1.25rem', fontWeight: 800, color: OFFICIAL_TEXT_PRIMARY }}>
+                                        {detail.name || 'Unknown member'}
+                                        <div style={{ color: OFFICIAL_TEXT_MUTED, fontSize: '0.72rem', fontWeight: 700 }}>{detail.login_id || 'N/A'}</div>
+                                    </td>
+                                    <td style={{ padding: '0.95rem 1rem', textAlign: 'center', fontWeight: 900, color: OFFICIAL_TEXT_PRIMARY }}>
+                                        {getTargetLoginLabel(detail)}
+                                    </td>
+                                    <td style={{ padding: '0.95rem 1rem', textAlign: 'center' }}>
+                                        <button
+                                            type="button"
+                                            style={viewButtonStyle}
+                                            onClick={() => setActionAuditView({ detail, mode: 'action', selectedStatus: null })}
+                                        >
+                                            View
+                                        </button>
+                                    </td>
+                                    <td style={{ padding: '0.95rem 1.25rem', textAlign: 'center', fontWeight: 700, textTransform: 'capitalize' }}>{detail.targetType || 'N/A'}</td>
+                                </tr>
+                            ))}
+                            {details.length === 0 && (
+                                <tr>
+                                <td colSpan={4} style={{ padding: '1.5rem', textAlign: 'center', color: OFFICIAL_TEXT_MUTED, fontWeight: 700 }}>No {emptyLabel} yet.</td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                {actionAuditView && activeDetail && (
+                    <div
+                        onClick={() => setActionAuditView(null)}
+                        style={{
+                            position: 'fixed',
+                            inset: 0,
+                            zIndex: 10000,
+                            background: 'rgba(4, 12, 28, 0.16)',
+                            backdropFilter: 'blur(3px) saturate(120%)',
+                            WebkitBackdropFilter: 'blur(3px) saturate(120%)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: 20
+                        }}
+                    >
+                        <div
+                            onClick={(event) => event.stopPropagation()}
+                            style={{
+                                width: 'min(430px, 100%)',
+                                borderRadius: 18,
+                                background: 'linear-gradient(180deg, rgba(10, 18, 36, 0.98), rgba(13, 23, 42, 0.96))',
+                                border: `1px solid ${activeColor}55`,
+                                boxShadow: `0 24px 70px rgba(2, 6, 23, 0.5), 0 0 0 1px ${activeColor}22`,
+                                padding: 22,
+                                color: OFFICIAL_TEXT_PRIMARY,
+                                position: 'relative'
+                            }}
+                        >
+                            <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 80px', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+                                {chosenStatus ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setActionAuditView(prev => ({ ...prev, selectedStatus: null }))}
+                                        style={{ border: 'none', background: 'transparent', color: '#9ed6ff', fontWeight: 900, cursor: 'pointer', padding: '6px 0', textAlign: 'left' }}
+                                    >
+                                        Back
+                                    </button>
+                                ) : <span />}
+                                <div style={{ fontSize: 18, fontWeight: 900, textAlign: 'center', whiteSpace: 'nowrap' }}>Action Details</div>
+                                <button
+                                    type="button"
+                                    onClick={() => setActionAuditView(null)}
+                                    style={{ border: 'none', background: 'transparent', color: '#9ed6ff', cursor: 'pointer', justifySelf: 'end', fontWeight: 900, padding: '6px 0' }}
+                                >
+                                    Close
+                                </button>
+                            </div>
+                            {!chosenStatus ? (
+                                <div style={{ display: 'grid', gap: 14 }}>
+                                    <div style={{ color: OFFICIAL_TEXT_MUTED, fontWeight: 800, textAlign: 'center' }}>
+                                        Select which status you want to inspect for victim login ID {getTargetLoginLabel(activeDetail)}.
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                                        {['blocked', 'unblocked'].map((status) => {
+                                            const statusDetail = findActionDetailForStatus(activeDetail, status);
+                                            const color = getStatusColor(status);
+                                            const available = !!statusDetail;
+                                            const isUnblocked = status === 'unblocked';
+                                            return (
+                                                <button
+                                                    key={status}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (!available) {
+                                                            showSnackbar(`Alert: ${getStatusLabel(status)} record is not available for this victim.`, 'warning');
+                                                            return;
+                                                        }
+                                                        setActionAuditView(prev => ({ ...prev, selectedStatus: status }));
+                                                    }}
+                                                    onMouseEnter={(event) => {
+                                                        event.currentTarget.style.transform = 'translateY(-2px)';
+                                                        event.currentTarget.style.filter = 'brightness(1.08) saturate(1.08)';
+                                                        event.currentTarget.style.boxShadow = isUnblocked
+                                                            ? '0 18px 36px rgba(47, 140, 255, 0.34), inset 0 1px 1px rgba(255,255,255,0.28)'
+                                                            : '0 18px 36px rgba(244, 63, 94, 0.34), inset 0 1px 1px rgba(255,255,255,0.28)';
+                                                    }}
+                                                    onMouseLeave={(event) => {
+                                                        event.currentTarget.style.transform = 'translateY(0)';
+                                                        event.currentTarget.style.filter = 'none';
+                                                        event.currentTarget.style.boxShadow = isUnblocked
+                                                            ? '0 14px 30px rgba(47, 140, 255, 0.24), inset 0 1px 1px rgba(255,255,255,0.25)'
+                                                            : '0 14px 30px rgba(244, 63, 94, 0.24), inset 0 1px 1px rgba(255,255,255,0.25)';
+                                                    }}
+                                                    style={{
+                                                        minHeight: 54,
+                                                        borderRadius: 16,
+                                                        border: 'none',
+                                                        background: isUnblocked
+                                                            ? 'linear-gradient(135deg, #22c6f3 0%, #2f8cff 58%, #5b6cff 100%)'
+                                                            : 'linear-gradient(135deg, #ff5b6e 0%, #f43f5e 58%, #be123c 100%)',
+                                                        color: '#ffffff',
+                                                        fontWeight: 950,
+                                                        fontSize: 16,
+                                                        cursor: 'pointer',
+                                                        boxShadow: isUnblocked
+                                                            ? '0 14px 30px rgba(47, 140, 255, 0.24), inset 0 1px 1px rgba(255,255,255,0.25)'
+                                                            : '0 14px 30px rgba(244, 63, 94, 0.24), inset 0 1px 1px rgba(255,255,255,0.25)',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        gap: 8,
+                                                        opacity: available ? 1 : 0.72,
+                                                        transition: 'transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease'
+                                                    }}
+                                                >
+                                                    {isUnblocked ? <ShieldCheck size={18} /> : <Ban size={18} />}
+                                                    {getStatusLabel(status)}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div style={{ display: 'grid', gap: 12, color: OFFICIAL_TEXT_SECONDARY, fontWeight: 700 }}>
+                                    <div>Member: <span style={{ color: OFFICIAL_TEXT_PRIMARY }}>{activeDetail.name || 'Unknown member'} ({activeDetail.login_id || 'N/A'})</span></div>
+                                    <div>Victim Login ID: <span style={{ color: OFFICIAL_TEXT_PRIMARY }}>{getTargetLoginLabel(activeDetail)}</span></div>
+                                    {chosenDetail ? (
+                                        <>
+                                            <div style={{
+                                                marginTop: 4,
+                                                padding: '14px 16px',
+                                                borderRadius: 14,
+                                                background: `${activeColor}18`,
+                                                border: `1px solid ${activeColor}66`,
+                                                color: activeColor,
+                                                fontSize: 24,
+                                                fontWeight: 950,
+                                                textAlign: 'center'
+                                            }}>
+                                                {getStatusLabel(chosenStatus)}
+                                            </div>
+                                            <div style={{ textAlign: 'center', color: OFFICIAL_TEXT_MUTED, fontWeight: 800 }}>Time: {activeTime}</div>
+                                        </>
+                                    ) : (
+                                        <div style={{
+                                            marginTop: 4,
+                                            padding: '14px 16px',
+                                            borderRadius: 14,
+                                            background: 'rgba(245, 158, 11, 0.14)',
+                                            border: '1px solid rgba(245, 158, 11, 0.5)',
+                                            color: '#fbbf24',
+                                            fontSize: 16,
+                                            fontWeight: 900,
+                                            textAlign: 'center'
+                                        }}>
+                                            Alert: {getStatusLabel(chosenStatus)} record is not available for this victim.
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </>
         );
     };
 
@@ -3152,7 +3452,6 @@ export default function AdminDashboard() {
 
     return (
         <div className="dashboard-layout" style={{ display: 'flex', height: '100vh', width: '100vw', background: 'transparent', fontFamily: "'Open Sans', sans-serif", position: 'relative', overflow: 'hidden' }}>
-            
             {/* Mobile Sidebar Overlay */}
             {isMobile && mobileSidebarOpen && (
                 <div
@@ -3203,7 +3502,9 @@ export default function AdminDashboard() {
                         { id: 'management', name: 'Total Users', icon: Users, count: normalizedStats?.totalUsers, color: '#1a9cff' },
                         { id: 'pending', name: 'Pending Approvals', icon: UserCheck, count: normalizedStats?.pendingApprovals, color: '#2e7bff' },
                         { id: 'resets', name: 'Reset Requests', icon: Key, count: normalizedStats?.activeResets, color: '#4e59ff' },
-                        { id: 'unblock', name: 'Unblock Requests', icon: ShieldCheck, count: normalizedStats?.unblockRequests, color: '#6e72ff' }
+                        { id: 'unblock', name: 'Unblock Requests', icon: ShieldCheck, count: normalizedStats?.unblockRequests, color: '#6e72ff' },
+                        { id: 'block-actions', name: 'Block Actions', icon: XCircle, count: normalizedStats?.totalBlocks, color: '#73a8ff' },
+                        { id: 'report-actions', name: 'Report Actions', icon: AlertTriangle, count: normalizedStats?.totalReports, color: '#73a8ff' }
                     ].map(item => (
                         <div
                             key={item.id}
@@ -3404,7 +3705,7 @@ export default function AdminDashboard() {
                 >
                     <div className="admin-scroll-shell" style={{ maxWidth: '1200px', margin: '0 auto', minWidth: 0, position: 'relative' }}>
 
-                        {(activeTab === 'overview' || activeTab === 'management' || activeTab === 'pending' || activeTab === 'resets' || activeTab === 'unblock') && (
+                        {(activeTab === 'overview' || activeTab === 'management' || activeTab === 'pending' || activeTab === 'resets' || activeTab === 'unblock' || activeTab === 'block-actions' || activeTab === 'report-actions') && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '2rem' }}>
                                 <div style={{
                                     width: '36px', height: '36px',
@@ -3418,6 +3719,8 @@ export default function AdminDashboard() {
                                     {activeTab === 'pending' && <UserCheck size={20} color="white" />}
                                     {activeTab === 'resets' && <Key size={20} color="white" />}
                                     {activeTab === 'unblock' && <ShieldCheck size={20} color="white" />}
+                                    {activeTab === 'block-actions' && <XCircle size={20} color="white" />}
+                                    {activeTab === 'report-actions' && <AlertTriangle size={20} color="white" />}
                                 </div>
                                 <h1 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#f8fafc', fontStyle: 'normal', margin: 0 }}>
                                     {activeTab === 'overview' && 'Dashboard'}
@@ -3425,6 +3728,8 @@ export default function AdminDashboard() {
                                     {activeTab === 'pending' && 'Pending Approvals'}
                                     {activeTab === 'resets' && 'Reset Requests'}
                                     {activeTab === 'unblock' && 'Unblock Requests'}
+                                    {activeTab === 'block-actions' && 'Block Actions'}
+                                    {activeTab === 'report-actions' && 'Report Actions'}
                                 </h1>
                                 <div style={{ flex: 1 }}></div>
                             </div>
@@ -3439,6 +3744,8 @@ export default function AdminDashboard() {
                                 {activeTab === 'pending' && renderUsersList('pending')}
                                 {activeTab === 'resets' && renderResets()}
                                 {activeTab === 'unblock' && renderUnblockRequests()}
+                                {activeTab === 'block-actions' && renderActionTable('block')}
+                                {activeTab === 'report-actions' && renderActionTable('report')}
                                 {activeTab === 'reactions' && renderReactionLogs()}
                             </>
                         )}
@@ -4223,7 +4530,7 @@ export default function AdminDashboard() {
                         backdropFilter: 'blur(10px)'
                     }} onClick={e => e.stopPropagation()}>
                         <div style={{
-                            background: '#DB2A04', color: 'white', padding: '16px 20px',
+                            background: 'linear-gradient(135deg, #ef4444 0%, #fb7185 48%, #be123c 100%)', color: 'white', padding: '16px 20px',
                             fontWeight: '700', fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between'
                         }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -4246,19 +4553,19 @@ export default function AdminDashboard() {
                                             onClick={() => setUnethicalModalUser(group)}
                                             style={{
                                                 padding: '12px 16px', margin: '6px',
-                                                background: '#E72C05', border: '1px solid rgba(0,0,0,0.05)',
+                                                background: 'linear-gradient(135deg, #ef4444 0%, #fb7185 48%, #be123c 100%)', border: '1px solid rgba(255,125,154,0.35)',
                                                 borderRadius: '8px', cursor: 'pointer',
                                                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                                                 transition: 'all 0.2s',
                                                 boxShadow: '0 2px 5px rgba(0,0,0,0.05)'
                                             }}
                                             onMouseOver={e => {
-                                                e.currentTarget.style.background = '#cf2504';
+                                                e.currentTarget.style.background = 'linear-gradient(135deg, #f43f5e 0%, #fb7185 48%, #9f1239 100%)';
                                                 e.currentTarget.style.transform = 'translateY(-2px)';
                                                 e.currentTarget.style.boxShadow = '0 5px 15px rgba(0,0,0,0.1)';
                                             }}
                                             onMouseOut={e => {
-                                                e.currentTarget.style.background = '#E72C05';
+                                                e.currentTarget.style.background = 'linear-gradient(135deg, #ef4444 0%, #fb7185 48%, #be123c 100%)';
                                                 e.currentTarget.style.transform = 'translateY(0)';
                                                 e.currentTarget.style.boxShadow = '0 2px 5px rgba(0,0,0,0.05)';
                                             }}
