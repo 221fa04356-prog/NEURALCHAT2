@@ -4212,6 +4212,7 @@ html.wa-screenshot-protection-active .wa-app-container {
 .wa-info-message-preview .wa-bubble {
     z-index: 1;
     max-width: 85%;
+    width: min(100%, 420px);
     background-color: var(--wa-outgoing-msg-bg);
     padding: 8px 12px 6px 12px;
     border-radius: 8px;
@@ -4221,6 +4222,8 @@ html.wa-screenshot-protection-active .wa-app-container {
     /* Support multiple lines */
     text-align: left;
     /* Text inside bubble should be left-aligned */
+    overflow: hidden;
+    box-sizing: border-box;
 }
 
 .wa-info-message-preview .wa-bubble p {
@@ -4228,6 +4231,63 @@ html.wa-screenshot-protection-active .wa-app-container {
     word-break: break-word;
     white-space: pre-wrap;
     line-height: 1.4;
+}
+
+.wa-info-media-frame {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(2, 6, 23, 0.35);
+}
+
+.wa-info-media-image {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    max-height: min(62vh, 520px);
+    object-fit: contain;
+    border-radius: 10px;
+    background: transparent;
+}
+
+@media (max-width: 768px) {
+    .wa-info-message-preview {
+        padding: 22px 14px;
+    }
+
+    .wa-info-message-preview .wa-bubble {
+        max-width: 100%;
+        width: min(100%, 340px);
+        padding: 8px 8px 6px;
+        border-radius: 10px;
+    }
+
+    .wa-info-media-image {
+        max-height: min(56vh, 420px);
+    }
+}
+
+@media (max-width: 480px) {
+    .wa-info-message-preview {
+        padding: 18px 10px;
+    }
+
+    .wa-info-message-preview .wa-bubble {
+        width: min(100%, 100%);
+        padding: 6px 6px 4px;
+        border-radius: 10px;
+    }
+
+    .wa-info-media-frame,
+    .wa-info-media-image {
+        border-radius: 8px;
+    }
+
+    .wa-info-media-image {
+        max-height: min(50vh, 360px);
+    }
 }
 
 .wa-info-stats {
