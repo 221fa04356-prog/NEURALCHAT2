@@ -2520,6 +2520,142 @@ export default function Chat() {
         return ['pdf', 'doc', 'docx', 'docm', 'dotx', 'dot', 'rtf', 'odt', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xltx', 'xlt', 'ods', 'ppt', 'pptx', 'pptm', 'potx', 'pot', 'ppsx', 'pps', 'odp', 'txt', 'csv'].includes(ext);
     };
 
+    const CLIPBOARD_FILE_PREFIX = '__NEURALCHAT_FILE__';
+
+    const guessMimeTypeFromFileName = (fileName = '') => {
+        const ext = String(fileName).split('.').pop()?.toLowerCase() || '';
+        const mimeByExt = {
+            pdf: 'application/pdf',
+            doc: 'application/msword',
+            docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            docm: 'application/vnd.ms-word.document.macroenabled.12',
+            dot: 'application/msword',
+            dotx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.template',
+            rtf: 'application/rtf',
+            odt: 'application/vnd.oasis.opendocument.text',
+            xls: 'application/vnd.ms-excel',
+            xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            xlsm: 'application/vnd.ms-excel.sheet.macroenabled.12',
+            xlsb: 'application/vnd.ms-excel.sheet.binary.macroenabled.12',
+            xlt: 'application/vnd.ms-excel',
+            xltx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.template',
+            ods: 'application/vnd.oasis.opendocument.spreadsheet',
+            ppt: 'application/vnd.ms-powerpoint',
+            pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            pptm: 'application/vnd.ms-powerpoint.presentation.macroenabled.12',
+            pot: 'application/vnd.ms-powerpoint',
+            potx: 'application/vnd.openxmlformats-officedocument.presentationml.template',
+            pps: 'application/vnd.ms-powerpoint',
+            ppsx: 'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
+            odp: 'application/vnd.oasis.opendocument.presentation',
+            csv: 'text/csv',
+            txt: 'text/plain'
+        };
+        return mimeByExt[ext] || 'application/octet-stream';
+    };
+
+    const parseSharedContacts = (content) => {
+        const fallback = [{ name: 'Contact', mobile: '', image: '', about: 'Available' }];
+
+        try {
+            let raw = content;
+            if (typeof raw === 'string') {
+                raw = raw.trim();
+                raw = raw ? JSON.parse(raw) : null;
+            }
+
+            if (typeof raw === 'string') {
+                raw = JSON.parse(raw);
+            }
+
+            const items = Array.isArray(raw) ? raw : [raw];
+            const normalized = items
+                .filter(Boolean)
+                .map((item) => ({
+                    ...item,
+                    _id: item?._id || item?.id || '',
+                    id: item?._id || item?.id || '',
+                    name: item?.name || '',
+                    mobile: item?.mobile || item?.phone || '',
+                    image: item?.image || item?.profile_photo || '',
+                    about: item?.about || 'Available'
+                }))
+                .filter((item) => item.name || item.mobile || item.image);
+
+            return normalized.length > 0 ? normalized : fallback;
+        } catch (e) {
+            return fallback;
+        }
+    };
+
+    const summarizeSharedContacts = (content) => {
+        const contacts = parseSharedContacts(content);
+        const first = contacts[0] || {};
+        if (contacts.length > 1) {
+            return `${first.name || first.mobile || 'Contact'} and ${contacts.length - 1} other contact${contacts.length > 2 ? 's' : ''}`;
+        }
+        return first.name || first.mobile || 'Contact';
+    };
+
+    const decodeClipboardPayloadText = (rawText) => {
+        const text = String(rawText || '').trim();
+        if (!text) return null;
+
+        try {
+            if (text.startsWith(CLIPBOARD_FILE_PREFIX)) {
+                return JSON.parse(text.slice(CLIPBOARD_FILE_PREFIX.length));
+            }
+        } catch (e) {
+            return null;
+        }
+
+        try {
+            const parsed = JSON.parse(text);
+            if (parsed && typeof parsed === 'object') return parsed;
+        } catch (e) { }
+
+        if (/^[A-Za-z0-9+/=]+$/.test(text) && text.length % 4 === 0) {
+            try {
+                const decoded = atob(text);
+                const parsed = JSON.parse(decoded);
+                if (parsed && typeof parsed === 'object') return parsed;
+            } catch (e) { }
+        }
+
+        return null;
+    };
+
+    const sanitizeClipboardPayloadText = (rawText) => {
+        const text = typeof rawText === 'string' ? rawText : '';
+        if (!text) return '';
+
+        const lines = text
+            .split(/\r?\n/)
+            .filter((line) => !decodeClipboardPayloadText(line));
+
+        const cleaned = lines.join('\n').trim();
+        return decodeClipboardPayloadText(cleaned) ? '' : cleaned;
+    };
+
+    const filePayloadToFile = async (payload) => {
+        const fileName = payload?.fileName || payload?.name || 'document';
+        const mimeType = payload?.mimeType || guessMimeTypeFromFileName(fileName);
+        const mediaPath = payload?.filePath || payload?.file_path || payload?.url;
+        if (!mediaPath) return null;
+
+        const fileUrl = /^https?:\/\//i.test(mediaPath) ? mediaPath : getMediaUrl(mediaPath);
+        const response = await fetch(encodeURI(fileUrl));
+        if (!response.ok) {
+            throw new Error(`Failed to fetch clipboard file (${response.status})`);
+        }
+
+        const blob = await response.blob();
+        return new File([blob], fileName, {
+            type: blob.type || mimeType || 'application/octet-stream',
+            lastModified: Date.now()
+        });
+    };
+
     const getChatHoverPreview = (item, isGroupLike = false) => {
         const msg = item?.lastMessage || item?.announcements?.lastMessage;
         if (!msg) return '';
@@ -2573,6 +2709,10 @@ export default function Chat() {
             if (/cancelled the event:/i.test(content)) return `${actor} ${content.replace(/cancelled the event:/i, 'cancelled event:')}`;
             if (/deleted the event:/i.test(content)) return `${actor} ${content.replace(/deleted the event:/i, 'deleted event:')}`;
             return content || 'System update';
+        }
+
+        if (msgType === 'contact') {
+            return summarizeSharedContacts(msg.content || msg.text || '');
         }
 
         if (content && !['event', 'poll'].includes(msgType)) {
@@ -2940,23 +3080,11 @@ export default function Chat() {
                 );
             }
             case 'contact':
-                try {
-                    const parsed = JSON.parse(msg.content);
-                    if (Array.isArray(parsed)) {
-                        return (
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                <UserIcon size={14} /> {parsed[0].name || parsed[0].mobile} and {parsed.length - 1} other contact{parsed.length > 2 ? 's' : ''}
-                            </span>
-                        );
-                    }
-                    return (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <UserIcon size={14} /> {parsed.name || parsed.mobile || 'Contact'}
-                        </span>
-                    );
-                } catch (e) {
-                    return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><UserIcon size={14} /> Contact</span>;
-                }
+                return (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <UserIcon size={14} /> {summarizeSharedContacts(msg.content)}
+                    </span>
+                );
             case 'event':
                 if (msg.event) {
                     const eventDisplayName = msg.event.name || msg.event.title || 'event';
@@ -3688,10 +3816,11 @@ export default function Chat() {
 
     // Helper to highlight text and make links clickable
     const renderContent = (content) => {
-        if (!content) return content;
+        const safeContent = sanitizeClipboardPayloadText(content);
+        if (!safeContent) return safeContent;
 
         const urlRegex = /(https?:\/\/[^\s]+)/g;
-        const parts = String(content).split(urlRegex);
+        const parts = String(safeContent).split(urlRegex);
 
         return parts.map((part, i) => {
             // Check if part is a URL
@@ -3911,11 +4040,64 @@ export default function Chat() {
             }
         }
 
+        if (msg.type === 'file' && msg.file_path) {
+            try {
+                const fileName = getDisplayFileName(msg) || 'document';
+                const mimeType = guessMimeTypeFromFileName(fileName);
+                const payload = {
+                    kind: 'neuralchat-file',
+                    filePath: msg.file_path,
+                    fileName,
+                    mimeType,
+                    sourceType: msg.type
+                };
+                const payloadText = `${CLIPBOARD_FILE_PREFIX}${JSON.stringify(payload)}`;
+                const fileBlobResponse = await fetch(encodeURI(getMediaUrl(msg.file_path)));
+                if (!fileBlobResponse.ok) {
+                    throw new Error(`Failed to fetch file (${fileBlobResponse.status})`);
+                }
+                const fileBlob = await fileBlobResponse.blob();
+
+                if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
+                    try {
+                        await navigator.clipboard.write([
+                            new ClipboardItem({
+                                'text/plain': new Blob([payloadText], { type: 'text/plain' }),
+                                [fileBlob.type || mimeType || 'application/octet-stream']: fileBlob
+                            })
+                        ]);
+                    } catch (clipboardWriteErr) {
+                        await navigator.clipboard.writeText(payloadText);
+                    }
+                } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(payloadText);
+                } else {
+                    const textArea = document.createElement("textarea");
+                    textArea.value = payloadText;
+                    textArea.style.position = 'fixed';
+                    textArea.style.left = '-9999px';
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                }
+
+                setSnackbar({ message: 'Document copied to clipboard!', type: 'success', variant: 'system' });
+                setOpenDropdown(null);
+                return;
+            } catch (err) {
+                console.error('Failed to copy document:', err);
+                setSnackbar({ message: 'Failed to copy document', type: 'error', variant: 'system' });
+                setOpenDropdown(null);
+                return;
+            }
+        }
+
         // For text, files, videos, audio - copy as text/URL
         let contentToCopy = '';
         if (msg.type === 'text') {
             contentToCopy = msg.content || '';
-        } else if (msg.type === 'file' || msg.type === 'video') {
+        } else if (msg.type === 'video') {
             // Copy URL and content if available
             const url = getMediaUrl(msg.file_path);
             contentToCopy = msg.content ? `${msg.content}\n${url}` : url;
@@ -4714,6 +4896,7 @@ export default function Chat() {
                     else if (data.type === 'image') previewText = 'Sent an image';
                     else if (data.type === 'video') previewText = 'Video';
                     else if (data.type === 'file') previewText = incomingFileName ? truncateFileName(incomingFileName) : 'Sent a file';
+                    else if (data.type === 'contact') previewText = summarizeSharedContacts(data.content);
 
                     if (previewText.length > 50) previewText = previewText.substring(0, 50) + '...';
 
@@ -5577,6 +5760,7 @@ export default function Chat() {
                     if (data.message.type === 'image') previewText = 'Photo';
                     else if (data.message.type === 'video') previewText = 'Video';
                     else if (data.message.type === 'file') previewText = incomingGroupFileName ? truncateFileName(incomingGroupFileName) : 'File';
+                    else if (data.message.type === 'contact') previewText = summarizeSharedContacts(data.message.content);
 
                     showIncomingNotification({
                         senderName: `${senderName} @ ${groupName}`,
@@ -7086,27 +7270,8 @@ export default function Chat() {
     };
 
     const parseContactMessageContent = useCallback((content) => {
-        try {
-            const raw = typeof content === 'string' ? JSON.parse(content) : content;
-            const items = Array.isArray(raw) ? raw : [raw];
-            const normalized = items
-                .filter(Boolean)
-                .map((item) => ({
-                    ...item,
-                    _id: item?._id || item?.id || '',
-                    id: item?._id || item?.id || '',
-                    name: item?.name || '',
-                    mobile: item?.mobile || item?.phone || '',
-                    image: item?.image || item?.profile_photo || '',
-                    about: item?.about || 'Available'
-                }))
-                .filter((item) => item.name || item.mobile || item.image);
-
-            return normalized.length > 0 ? normalized : [{ name: 'Contact', mobile: '', image: '', about: 'Available' }];
-        } catch (e) {
-            return [{ name: 'Contact', mobile: '', image: '', about: 'Available' }];
-        }
-    }, []);
+        return parseSharedContacts(content);
+    }, [parseSharedContacts]);
 
     const renderContactMessageCard = useCallback((content, options = {}) => {
         const { tone = 'light', marginBottom = 0 } = options;
@@ -9168,7 +9333,8 @@ export default function Chat() {
     const handleSend = async (e, contentOverride = null, voiceFile = null, voiceDuration = null, voiceIsViewOnce = null, fileOverride = null, isBatchChild = false, skipInlineImageEdits = false) => {
         if (e) e.preventDefault();
 
-        const textToSend = contentOverride !== null ? contentOverride : input;
+        const rawTextToSend = contentOverride !== null ? contentOverride : input;
+        const textToSend = sanitizeClipboardPayloadText(rawTextToSend);
         const queuedFiles = selectedFiles.length ? selectedFiles : (file ? [file] : []);
         const isVoiceSend = !!voiceFile && !fileOverride;
         const currentViewOnce = (voiceIsViewOnce !== null)
@@ -20723,12 +20889,31 @@ export default function Chat() {
         return true;
     };
 
-    const handlePaste = (e) => {
+    const handlePaste = async (e) => {
         const clipboardFiles = Array.from(e.clipboardData?.files || []);
-        if (!clipboardFiles.length) return;
-        if (ingestIncomingFiles(clipboardFiles)) {
+        if (!clipboardFiles.length) {
+            const clipboardText = e.clipboardData?.getData('text/plain') || '';
+            const payload = decodeClipboardPayloadText(clipboardText);
+            const looksLikeCopiedFile = payload?.kind === 'neuralchat-file' || payload?.filePath || payload?.file_path;
+            if (!looksLikeCopiedFile) return;
+
             e.preventDefault();
             e.stopPropagation();
+
+            try {
+                const clipboardFile = await filePayloadToFile(payload);
+                ingestIncomingFiles([clipboardFile]);
+            } catch (err) {
+                console.error('Clipboard document paste failed:', err);
+                setSnackbar({ message: 'Unable to paste copied document.', type: 'error', variant: 'system' });
+            }
+            return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+        if (ingestIncomingFiles(clipboardFiles)) {
+            return;
         }
     };
 
@@ -20750,10 +20935,26 @@ export default function Chat() {
     useEffect(() => {
         if (!(selectedUser || selectedGroup)) return;
 
-        const onWindowPaste = (event) => {
+        const onWindowPaste = async (event) => {
             if (event.defaultPrevented) return;
             const files = Array.from(event.clipboardData?.files || []);
-            if (!files.length) return;
+            if (!files.length) {
+                const clipboardText = event.clipboardData?.getData('text/plain') || '';
+                const payload = decodeClipboardPayloadText(clipboardText);
+                const looksLikeCopiedFile = payload?.kind === 'neuralchat-file' || payload?.filePath || payload?.file_path;
+                if (!looksLikeCopiedFile) return;
+
+                event.preventDefault();
+
+                try {
+                    const clipboardFile = await filePayloadToFile(payload);
+                    ingestIncomingFiles([clipboardFile]);
+                } catch (err) {
+                    console.error('Window clipboard document paste failed:', err);
+                    setSnackbar({ message: 'Unable to paste copied document.', type: 'error', variant: 'system' });
+                }
+                return;
+            }
             if (ingestIncomingFiles(files)) {
                 event.preventDefault();
             }
@@ -21481,13 +21682,7 @@ export default function Chat() {
                                         <span style={{ fontWeight: 500, fontSize: 13, color: '#f8fafc', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
                                             {(() => {
                                                 if (msg.type === 'contact') {
-                                                    try {
-                                                        const p = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content;
-                                                        if (Array.isArray(p)) {
-                                                            return p.length > 1 ? `${p[0].name || p[0].mobile || 'Contact'} and ${p.length - 1} other contact${p.length > 2 ? 's' : ''}` : (p[0].name || p[0].mobile || 'Contact');
-                                                        }
-                                                        return p.name || p.mobile || 'Contact';
-                                                    } catch (e) { return 'Contact'; }
+                                                    return summarizeSharedContacts(msg.content);
                                                 }
                                                 const sId = (msg.sender_id?._id || msg.sender_id) || (msg.user_id?._id || msg.user_id);
                                                 if (String(sId) === String(user.id || user._id)) return 'You';
@@ -21502,16 +21697,7 @@ export default function Chat() {
                                                     return msg.poll?.question || 'Poll';
                                                 }
                                                 if (msg.type === 'contact' && msg.content) {
-                                                    try {
-                                                        const parsed = JSON.parse(msg.content);
-                                                        if (Array.isArray(parsed)) {
-                                                            return parsed.length > 1 ? `${parsed[0].name || 'Contact'} and ${parsed.length - 1} other contact${parsed.length > 2 ? 's' : ''}` : (parsed[0].name || parsed[0].mobile || 'Contact');
-                                                        } else {
-                                                            return parsed.name || parsed.mobile || 'Contact';
-                                                        }
-                                                    } catch (e) {
-                                                        return 'Contact';
-                                                    }
+                                                    return summarizeSharedContacts(msg.content);
                                                 }
                                                 return msg.content || (msg.type === 'image' ? 'Photo' : msg.type === 'file' ? 'Document' : msg.type === 'video' ? 'Video' : 'Message');
                                             })()}
@@ -22079,16 +22265,7 @@ export default function Chat() {
                                                     return msg.poll?.question || 'Poll';
                                                 }
                                                 if (msg.type === 'contact' && msg.content) {
-                                                    try {
-                                                        const parsed = JSON.parse(msg.content);
-                                                        if (Array.isArray(parsed)) {
-                                                            return parsed.length > 1 ? `${parsed[0].name || 'Contact'} and ${parsed.length - 1} other contact${parsed.length > 2 ? 's' : ''}` : (parsed[0].name || parsed[0].mobile || 'Contact');
-                                                        } else {
-                                                            return parsed.name || parsed.mobile || 'Contact';
-                                                        }
-                                                    } catch (e) {
-                                                        return 'Contact';
-                                                    }
+                                                    return summarizeSharedContacts(msg.content);
                                                 }
                                                 return msg.content || (msg.type === 'image' ? 'Photo' : msg.type === 'file' ? 'Document' : msg.type === 'video' ? 'Video' : 'Message');
                                             })()}
@@ -23273,9 +23450,9 @@ export default function Chat() {
 
         return (
             <div className="wa-mute-modal-overlay" onClick={() => setIsEventModalOpen(false)} style={{ zIndex: 3000 }}>
-                <div className="wa-mute-modal" onClick={e => e.stopPropagation()} style={{ width: '400px', maxWidth: '90%', padding: '0', background: '#ffffff', borderRadius: '12px', display: 'flex', flexDirection: 'column', height: 'auto', maxHeight: '90vh', color: '#111b21', boxShadow: '0 10px 40px rgba(0,0,0,0.1)' }}>
+                <div className="wa-mute-modal" onClick={e => e.stopPropagation()} style={{ width: '400px', maxWidth: '90%', padding: '0', background: '#0b2236', borderRadius: '12px', display: 'flex', flexDirection: 'column', height: 'auto', maxHeight: '90vh', color: '#f8fafc', boxShadow: '0 10px 40px rgba(0,0,0,0.35)', border: '1px solid rgba(14, 165, 190, 0.25)' }}>
                     <div style={{ padding: '15px 20px', display: 'flex', alignItems: 'center', borderTopLeftRadius: '12px', borderTopRightRadius: '12px', flexShrink: 0 }}>
-                        <button onClick={() => setIsEventModalOpen(false)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={24} /></button>
+                        <button onClick={() => setIsEventModalOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={24} /></button>
                         <div style={{ flex: 1, textAlign: 'center', marginRight: '34px' }}>
                             <span style={{ fontSize: '19px', fontWeight: '500', whiteSpace: 'nowrap' }}>Create event</span>
                         </div>
@@ -23289,7 +23466,7 @@ export default function Chat() {
                                 value={eventName}
                                 onChange={e => setEventName(e.target.value)}
                                 placeholder="Event name"
-                                style={{ width: '100%', border: 'none', borderBottom: '2px solid #0EA5BE', padding: '8px 40px 8px 0', fontSize: '16px', outline: 'none', background: 'transparent', color: '#111b21' }}
+                                style={{ width: '100%', border: 'none', borderBottom: '2px solid #0EA5BE', padding: '8px 40px 8px 0', fontSize: '16px', outline: 'none', background: 'transparent', color: '#f8fafc' }}
                             />
                             <Smile size={24} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px', cursor: 'pointer' }} />
                         </div>
@@ -23308,19 +23485,19 @@ export default function Chat() {
 
                         {/* Start Date & Time */}
                         <div style={{ marginBottom: '20px' }}>
-                            <div style={{ fontSize: '14px', color: '#667781', marginBottom: '12px' }}>Start date and time</div>
+                            <div style={{ fontSize: '14px', color: '#94a3b8', marginBottom: '12px' }}>Start date and time</div>
                             <div style={{ display: 'flex', gap: '20px' }}>
-                                <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #dfe5e7' }}>
+                                <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid rgba(248, 250, 252, 0.8)' }}>
                                     <input
                                         type="date"
                                         value={eventStartDate}
                                         onChange={e => setEventStartDate(e.target.value)}
-                                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#111b21', padding: '8px 0', outline: 'none' }}
+                                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#f8fafc', padding: '8px 0', outline: 'none' }}
                                     />
                                     <Calendar size={20} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px', pointerEvents: 'none' }} />
                                 </div>
-                                <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #dfe5e7', cursor: 'pointer' }} onClick={() => setShowStartTimePicker(!showStartTimePicker)}>
-                                    <div style={{ padding: '8px 0', color: '#111b21' }}>{eventStartTime}</div>
+                                <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid rgba(248, 250, 252, 0.8)', cursor: 'pointer' }} onClick={() => setShowStartTimePicker(!showStartTimePicker)}>
+                                    <div style={{ padding: '8px 0', color: '#f8fafc' }}>{eventStartTime}</div>
                                     <Clock size={20} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px' }} />
                                     {showStartTimePicker && (
                                         <TimePicker value={eventStartTime} onChange={setEventStartTime} onClose={() => setShowStartTimePicker(false)} />
@@ -23343,19 +23520,19 @@ export default function Chat() {
                         )}
                         {eventEndDate && (
                             <div style={{ marginBottom: '20px' }}>
-                                <div style={{ fontSize: '14px', color: '#667781', marginBottom: '12px' }}>End date and time</div>
+                                <div style={{ fontSize: '14px', color: '#94a3b8', marginBottom: '12px' }}>End date and time</div>
                                 <div style={{ display: 'flex', gap: '20px', marginBottom: '12px' }}>
-                                    <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #dfe5e7' }}>
+                                    <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid rgba(248, 250, 252, 0.8)' }}>
                                         <input
                                             type="date"
                                             value={eventEndDate}
                                             onChange={e => setEventEndDate(e.target.value)}
-                                            style={{ width: '100%', background: 'transparent', border: 'none', color: '#111b21', padding: '8px 0', outline: 'none' }}
+                                            style={{ width: '100%', background: 'transparent', border: 'none', color: '#f8fafc', padding: '8px 0', outline: 'none' }}
                                         />
                                         <Calendar size={20} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px', pointerEvents: 'none' }} />
                                     </div>
-                                    <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid #dfe5e7', cursor: 'pointer' }} onClick={() => setShowEndTimePicker(!showEndTimePicker)}>
-                                        <div style={{ padding: '8px 0', color: '#111b21' }}>{eventEndTime}</div>
+                                    <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid rgba(248, 250, 252, 0.8)', cursor: 'pointer' }} onClick={() => setShowEndTimePicker(!showEndTimePicker)}>
+                                        <div style={{ padding: '8px 0', color: '#f8fafc' }}>{eventEndTime}</div>
                                         <Clock size={20} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px' }} />
                                         {showEndTimePicker && (
                                             <TimePicker value={eventEndTime} onChange={setEventEndTime} onClose={() => setShowEndTimePicker(false)} />
@@ -23380,14 +23557,14 @@ export default function Chat() {
                                 value={eventLocation}
                                 onChange={e => setEventLocation(e.target.value)}
                                 placeholder="Location (optional)"
-                                style={{ width: '100%', border: 'none', borderBottom: '1px solid #dfe5e7', padding: '8px 40px 8px 0', fontSize: '16px', outline: 'none', background: 'transparent', color: '#111b21' }}
+                                style={{ width: '100%', border: 'none', borderBottom: '1px solid rgba(248, 250, 252, 0.8)', padding: '8px 40px 8px 0', fontSize: '16px', outline: 'none', background: 'transparent', color: '#f8fafc' }}
                             />
                             <MapPin size={22} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px' }} />
                         </div>
 
                         {/* Reminder Timing Dropdown */}
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
-                            <div style={{ color: '#111b21', fontSize: '16px' }}>Reminder</div>
+                            <div style={{ color: '#94a3b8', fontSize: '16px' }}>Reminder</div>
                             <div style={{ position: 'relative' }}>
                                 <select
                                     value={eventReminderTiming}
@@ -23405,7 +23582,7 @@ export default function Chat() {
 
                         {/* Call Toggle */}
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
-                            <div style={{ color: '#111b21', fontSize: '16px' }}>Call</div>
+                            <div style={{ color: '#94a3b8', fontSize: '16px' }}>Call</div>
                             <div
                                 onClick={() => setEventCallOn(!eventCallOn)}
                                 style={{
@@ -23425,7 +23602,7 @@ export default function Chat() {
                         {/* Call Type Dropdown */}
                         {eventCallOn && (
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
-                                <div style={{ color: '#111b21', fontSize: '16px' }}>Call type</div>
+                                <div style={{ color: '#94a3b8', fontSize: '16px' }}>Call type</div>
                                 <div style={{ position: 'relative' }}>
                                     <button
                                         onClick={() => setShowEventCallTypeDropdown(!showEventCallTypeDropdown)}
@@ -25865,31 +26042,31 @@ export default function Chat() {
             {/* Edit Event Modal */}
             {isEventEditOpen && eventEditTarget && (
                 <div className="wa-mute-modal-overlay" onClick={() => setIsEventEditOpen(false)} style={{ zIndex: 30000 }}>
-                    <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px', width: '94%', borderRadius: '16px', padding: 0, background: '#ffffff', boxShadow: '0 17px 50px rgba(0,0,0,0.19)', overflow: 'hidden' }}>
-                        <div style={{ padding: '18px 20px' }}>
-                            <div style={{ padding: '0 0 15px 0', display: 'flex', alignItems: 'center', position: 'relative' }}>
-                                <div style={{ flex: 1, textAlign: 'center' }}>
-                                    <h3 style={{ margin: 0, fontSize: '19px', fontWeight: '500', color: '#111b21', whiteSpace: 'nowrap' }}>Edit event</h3>
-                                </div>
-                                <button onClick={() => setIsEventEditOpen(false)} style={{ position: 'absolute', right: 0, background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={24} /></button>
+                <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px', width: '94%', borderRadius: '16px', padding: 0, background: '#0b2236', boxShadow: '0 17px 50px rgba(0,0,0,0.35)', overflow: 'hidden', border: '1px solid rgba(14, 165, 190, 0.25)' }}>
+                    <div style={{ padding: '18px 20px' }}>
+                        <div style={{ padding: '0 0 15px 0', display: 'flex', alignItems: 'center', position: 'relative' }}>
+                            <div style={{ flex: 1, textAlign: 'center' }}>
+                                <h3 style={{ margin: 0, fontSize: '19px', fontWeight: '500', color: '#f8fafc', whiteSpace: 'nowrap' }}>Edit event</h3>
                             </div>
+                            <button onClick={() => setIsEventEditOpen(false)} style={{ position: 'absolute', right: 0, background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={24} /></button>
+                        </div>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                <input value={eventName} onChange={(e) => setEventName(e.target.value)} placeholder="Event name" style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef' }} />
-                                <textarea value={eventDescription} onChange={(e) => setEventDescription(e.target.value)} placeholder="Description" style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef' }} />
-                                <input value={eventLocation} onChange={(e) => setEventLocation(e.target.value)} placeholder="Location" style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef' }} />
+                                <input value={eventName} onChange={(e) => setEventName(e.target.value)} placeholder="Event name" style={{ padding: '10px', borderRadius: 8, border: '1px solid #dbe4ea', background: '#f8fafc', color: '#111b21' }} />
+                                <textarea value={eventDescription} onChange={(e) => setEventDescription(e.target.value)} placeholder="Description" style={{ padding: '10px', borderRadius: 8, border: '1px solid #dbe4ea', background: '#f8fafc', color: '#111b21' }} />
+                                <input value={eventLocation} onChange={(e) => setEventLocation(e.target.value)} placeholder="Location" style={{ padding: '10px', borderRadius: 8, border: '1px solid #dbe4ea', background: '#f8fafc', color: '#111b21' }} />
                                 <div style={{ display: 'flex', gap: 8 }}>
-                                    <input type="date" value={eventStartDate} onChange={(e) => setEventStartDate(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', flex: 1 }} />
-                                    <input type="time" value={eventStartTime} onChange={(e) => setEventStartTime(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', width: 140 }} />
+                                    <input type="date" value={eventStartDate} onChange={(e) => setEventStartDate(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #dbe4ea', background: '#f8fafc', color: '#111b21', flex: 1 }} />
+                                    <input type="time" value={eventStartTime} onChange={(e) => setEventStartTime(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #dbe4ea', background: '#f8fafc', color: '#111b21', width: 140 }} />
                                 </div>
                                 <div style={{ display: 'flex', gap: 8 }}>
-                                    <input type="date" value={eventEndDate} onChange={(e) => setEventEndDate(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', flex: 1 }} />
-                                    <input type="time" value={eventEndTime} onChange={(e) => setEventEndTime(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', width: 140 }} />
+                                    <input type="date" value={eventEndDate} onChange={(e) => setEventEndDate(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #dbe4ea', background: '#f8fafc', color: '#111b21', flex: 1 }} />
+                                    <input type="time" value={eventEndTime} onChange={(e) => setEventEndTime(e.target.value)} style={{ padding: '10px', borderRadius: 8, border: '1px solid #dbe4ea', background: '#f8fafc', color: '#111b21', width: 140 }} />
                                 </div>
                                 <select
                                     value={eventReminderTiming}
                                     onChange={(e) => setEventReminderTiming(e.target.value)}
-                                    style={{ padding: '10px', borderRadius: 8, border: '1px solid #e9edef', width: '100%' }}
+                                    style={{ padding: '10px', borderRadius: 8, border: '1px solid #dbe4ea', width: '100%', background: '#f8fafc', color: '#111b21' }}
                                 >
                                     <option value="default">Default auto reminder</option>
                                     <option value="1m">1 min before (Test)</option>
