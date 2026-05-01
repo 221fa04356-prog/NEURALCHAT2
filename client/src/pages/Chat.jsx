@@ -31,10 +31,109 @@ const debugLog = (...args) => {
 };
 
 const SCREENSHOT_PROTECTION_CLASS = 'wa-screenshot-protection-active';
+const SCREENSHOT_INLINE_APPLIED_ATTR = 'data-wa-screenshot-inline-applied';
+const SCREENSHOT_OVERLAY_ID = 'wa-dom-screenshot-mask';
+const SCREENSHOT_APP_HIDDEN_ATTR = 'data-wa-screenshot-app-hidden';
 
-const setScreenshotProtectionDomState = (active) => {
+const ensureScreenshotProtectionOverlay = () => {
+    let overlay = document.getElementById(SCREENSHOT_OVERLAY_ID);
+    if (overlay) return overlay;
+
+    overlay = document.createElement('div');
+    overlay.id = SCREENSHOT_OVERLAY_ID;
+    overlay.className = 'wa-dom-screenshot-mask';
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.innerHTML = `
+        <div class="wa-dom-screenshot-mask__panel">
+            <div class="wa-dom-screenshot-mask__glyph">CAM</div>
+            <div class="wa-dom-screenshot-mask__eyebrow">Neural Chat</div>
+            <div class="wa-dom-screenshot-mask__message">Screenshot privacy mode active</div>
+            <div class="wa-dom-screenshot-mask__caption">Sensitive chat content is hidden for 3 seconds after each screenshot attempt.</div>
+            <div class="wa-dom-screenshot-mask__source">Detected via Screenshot shortcut</div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    return overlay;
+};
+
+const setScreenshotProtectionDomState = (active, source = 'Screenshot shortcut') => {
     document.documentElement.classList.toggle(SCREENSHOT_PROTECTION_CLASS, active);
     document.body.classList.toggle(SCREENSHOT_PROTECTION_CLASS, active);
+
+    const appContainer = document.querySelector('.wa-app-container');
+    const overlay = ensureScreenshotProtectionOverlay();
+
+    if (active) {
+        if (overlay) {
+            const sourceNode = overlay.querySelector('.wa-dom-screenshot-mask__source');
+            if (sourceNode) {
+                sourceNode.textContent = `Detected via ${source}`;
+            }
+            overlay.classList.add('active');
+            overlay.style.setProperty('display', 'flex', 'important');
+            overlay.style.setProperty('opacity', '1', 'important');
+            overlay.style.setProperty('visibility', 'visible', 'important');
+        }
+        if (appContainer) {
+            if (appContainer.getAttribute(SCREENSHOT_APP_HIDDEN_ATTR) !== '1') {
+                appContainer.setAttribute(SCREENSHOT_APP_HIDDEN_ATTR, '1');
+                appContainer.dataset.waScreenshotPrevVisibility = appContainer.style.visibility || '';
+                appContainer.dataset.waScreenshotPrevOpacity = appContainer.style.opacity || '';
+            }
+            appContainer.style.setProperty('visibility', 'hidden', 'important');
+            appContainer.style.setProperty('opacity', '0', 'important');
+            Array.from(appContainer.children).forEach((child) => {
+                if (!(child instanceof HTMLElement)) return;
+                if (child.getAttribute(SCREENSHOT_INLINE_APPLIED_ATTR) === '1') return;
+                child.setAttribute(SCREENSHOT_INLINE_APPLIED_ATTR, '1');
+                child.dataset.waScreenshotPrevFilter = child.style.filter || '';
+                child.dataset.waScreenshotPrevTransform = child.style.transform || '';
+                child.dataset.waScreenshotPrevTransition = child.style.transition || '';
+                child.dataset.waScreenshotPrevVisibility = child.style.visibility || '';
+                child.dataset.waScreenshotPrevOpacity = child.style.opacity || '';
+                child.style.setProperty('filter', 'blur(34px) saturate(0.08) brightness(0.38)', 'important');
+                child.style.setProperty('transform', 'scale(1.024)', 'important');
+                child.style.setProperty('transform-origin', 'center', 'important');
+                child.style.setProperty('transition', 'filter 0.03s linear, transform 0.03s linear', 'important');
+                child.style.setProperty('visibility', 'hidden', 'important');
+                child.style.setProperty('opacity', '0', 'important');
+            });
+            appContainer.style.setProperty('background', '#050b14', 'important');
+        }
+    } else {
+        if (overlay) {
+            overlay.classList.remove('active');
+            overlay.style.removeProperty('display');
+            overlay.style.removeProperty('opacity');
+            overlay.style.removeProperty('visibility');
+        }
+        if (appContainer) {
+            if (appContainer.getAttribute(SCREENSHOT_APP_HIDDEN_ATTR) === '1') {
+                appContainer.style.visibility = appContainer.dataset.waScreenshotPrevVisibility || '';
+                appContainer.style.opacity = appContainer.dataset.waScreenshotPrevOpacity || '';
+                appContainer.removeAttribute(SCREENSHOT_APP_HIDDEN_ATTR);
+                delete appContainer.dataset.waScreenshotPrevVisibility;
+                delete appContainer.dataset.waScreenshotPrevOpacity;
+            }
+            Array.from(appContainer.children).forEach((child) => {
+                if (!(child instanceof HTMLElement)) return;
+                if (child.getAttribute(SCREENSHOT_INLINE_APPLIED_ATTR) !== '1') return;
+                child.style.filter = child.dataset.waScreenshotPrevFilter || '';
+                child.style.transform = child.dataset.waScreenshotPrevTransform || '';
+                child.style.transition = child.dataset.waScreenshotPrevTransition || '';
+                child.style.visibility = child.dataset.waScreenshotPrevVisibility || '';
+                child.style.opacity = child.dataset.waScreenshotPrevOpacity || '';
+                child.style.removeProperty('transform-origin');
+                child.removeAttribute(SCREENSHOT_INLINE_APPLIED_ATTR);
+                delete child.dataset.waScreenshotPrevFilter;
+                delete child.dataset.waScreenshotPrevTransform;
+                delete child.dataset.waScreenshotPrevTransition;
+                delete child.dataset.waScreenshotPrevVisibility;
+                delete child.dataset.waScreenshotPrevOpacity;
+            });
+            appContainer.style.removeProperty('background');
+        }
+    }
 };
 
 const appendMediaToken = (url) => {
@@ -1574,11 +1673,11 @@ export default function Chat() {
     const notificationSettingsRef = useRef(notificationSettings);
     const [notificationsEnabled, setNotificationsEnabled] = useState(() => getStoredNotificationSettings().masterEnabled);
 
-    const setSnackbar = (config) => {
+    const setSnackbar = useCallback((config) => {
         if (!config || notificationsEnabled || (config && config.forceShow)) {
             setSnackbarRaw(config);
         }
-    };
+    }, [notificationsEnabled]);
 
     useEffect(() => {
         notificationSettingsRef.current = notificationSettings;
@@ -2047,6 +2146,7 @@ export default function Chat() {
     const [privacyDialogSearch, setPrivacyDialogSearch] = useState('');
     const [isSavingPrivacy, setIsSavingPrivacy] = useState(false);
     const [isScreenshotPrivacyMaskActive, setIsScreenshotPrivacyMaskActive] = useState(false);
+    const [screenshotPrivacySource, setScreenshotPrivacySource] = useState('');
     const [isDeleteChatConfirmOpen, setIsDeleteChatConfirmOpen] = useState(false);
     const [isEncryptionInfoOpen, setIsEncryptionInfoOpen] = useState(false);
     const [encryptionVerifyData, setEncryptionVerifyData] = useState({
@@ -2083,16 +2183,25 @@ export default function Chat() {
     const [fontScaleMode, setFontScaleMode] = useState(() => localStorage.getItem('neuChat_fontScaleMode') || 'app');
     const lastBrowserScaleRef = useRef(window.devicePixelRatio / (parseFloat(localStorage.getItem('neuChat_baseDPR')) || window.devicePixelRatio || 1));
     const screenshotMaskTimerRef = useRef(null);
-    const screenshotShortcutLastTriggerRef = useRef(0);
-    const screenshotMaskDismissAfterRef = useRef(0);
+    const screenshotSnackbarTimerRef = useRef(null);
+    const screenshotIntentRef = useRef({ source: '', timestamp: 0 });
+    const lastScreenshotTriggerRef = useRef({ source: '', timestamp: 0, eventType: '' });
     const clearScreenshotProtection = React.useCallback(() => {
         setScreenshotProtectionDomState(false);
         setIsScreenshotPrivacyMaskActive(false);
-        screenshotMaskDismissAfterRef.current = 0;
+        setScreenshotPrivacySource('');
         if (screenshotMaskTimerRef.current) {
             clearTimeout(screenshotMaskTimerRef.current);
             screenshotMaskTimerRef.current = null;
         }
+        if (screenshotSnackbarTimerRef.current) {
+            cancelAnimationFrame(screenshotSnackbarTimerRef.current);
+            screenshotSnackbarTimerRef.current = null;
+        }
+    }, []);
+
+    useEffect(() => {
+        ensureScreenshotProtectionOverlay();
     }, []);
 
     useEffect(() => {
@@ -2121,25 +2230,64 @@ export default function Chat() {
         fetchProfile();
     }, []);
 
-    const triggerScreenshotProtection = React.useCallback((source = 'shortcut') => {
-        if (!privacySettings.screenshotDetection) return;
-        setScreenshotProtectionDomState(true);
-        screenshotMaskDismissAfterRef.current = Date.now() + 450;
-        flushSync(() => {
-            setIsScreenshotPrivacyMaskActive(true);
-        });
-        if (screenshotMaskTimerRef.current) clearTimeout(screenshotMaskTimerRef.current);
-        screenshotMaskTimerRef.current = setTimeout(() => {
-            clearScreenshotProtection();
-        }, 2200);
+    const normalizeScreenshotSource = React.useCallback((rawSource = 'shortcut') => {
+        const source = String(rawSource || 'shortcut').trim();
+        if (!source) return 'Screenshot shortcut';
 
-        setSnackbar({
-            message: `Screenshot activity detected via ${source}. Sensitive chat content is now protected.`,
-            type: 'info',
-            variant: 'system'
+        const normalized = source.toLowerCase();
+        if (normalized === 'printscreen' || normalized === 'prtsc') return 'PrintScreen';
+        if (normalized === 's') return 'Snipping Tool';
+        if (['3', '4', '5'].includes(normalized)) return 'System screenshot shortcut';
+        if (normalized.includes('shortcut')) return 'Screenshot shortcut';
+        return source;
+    }, []);
+
+    const triggerScreenshotProtection = React.useCallback((source = 'shortcut', eventType = 'manual') => {
+        if (!privacySettings.screenshotDetection) return;
+        const normalizedSource = normalizeScreenshotSource(source);
+        const now = Date.now();
+        const lastTrigger = lastScreenshotTriggerRef.current;
+        const isDuplicate =
+            lastTrigger.source === normalizedSource &&
+            lastTrigger.eventType === eventType &&
+            now - lastTrigger.timestamp < 250;
+
+        if (isDuplicate) return;
+
+        lastScreenshotTriggerRef.current = {
+            source: normalizedSource,
+            timestamp: now,
+            eventType
+        };
+        // Disable old protection logic in favor of root ScreenshotPrivacy component
+        // setScreenshotProtectionDomState(true, normalizedSource);
+        const overlay = ensureScreenshotProtectionOverlay();
+        overlay?.offsetHeight;
+        document.body.offsetHeight;
+        flushSync(() => {
+            // setIsScreenshotPrivacyMaskActive(true);
+            setScreenshotPrivacySource(normalizedSource);
+        });
+        if (screenshotMaskTimerRef.current) {
+            clearTimeout(screenshotMaskTimerRef.current);
+        }
+        // screenshotMaskTimerRef.current = setTimeout(() => {
+        //     clearScreenshotProtection();
+        // }, 3000);
+
+        if (screenshotSnackbarTimerRef.current) {
+            cancelAnimationFrame(screenshotSnackbarTimerRef.current);
+        }
+        screenshotSnackbarTimerRef.current = requestAnimationFrame(() => {
+            screenshotSnackbarTimerRef.current = null;
+            setSnackbar({
+                message: `Screenshot activity detected via ${normalizedSource}. Sensitive chat content is now protected.`,
+                type: 'info',
+                variant: 'system'
+            });
         });
     }, [
-        clearScreenshotProtection,
+        normalizeScreenshotSource,
         privacySettings.screenshotDetection,
         setSnackbar
     ]);
@@ -2158,43 +2306,47 @@ export default function Chat() {
                 || (event.ctrlKey && event.shiftKey && key === 's');
         };
 
+        const registerScreenshotIntent = (source) => {
+            screenshotIntentRef.current = {
+                source: normalizeScreenshotSource(source),
+                timestamp: Date.now()
+            };
+        };
+
         const handleScreenshotShortcut = (event) => {
             if (!isScreenshotShortcut(event)) return;
-            const now = Date.now();
-            if (now - screenshotShortcutLastTriggerRef.current < 700) return;
-            screenshotShortcutLastTriggerRef.current = now;
-            triggerScreenshotProtection(event.key || 'shortcut');
+            if (event.type !== 'keydown' || event.repeat) return;
+            const shortcutSource = event.key || event.code || 'shortcut';
+            registerScreenshotIntent(shortcutSource);
+            triggerScreenshotProtection(shortcutSource, event.type);
         };
 
-        window.addEventListener('keydown', handleScreenshotShortcut);
-        window.addEventListener('keyup', handleScreenshotShortcut);
+        const retriggerFromIntent = (eventType) => {
+            const { source, timestamp } = screenshotIntentRef.current;
+            if (!source || Date.now() - timestamp > 1800) return;
+            triggerScreenshotProtection(source, eventType);
+        };
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') {
+                retriggerFromIntent('visibilitychange');
+            }
+        };
+
+        const handleWindowBlur = () => {
+            retriggerFromIntent('blur');
+        };
+
+        window.addEventListener('keydown', handleScreenshotShortcut, true);
+        window.addEventListener('blur', handleWindowBlur);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
         return () => {
-            window.removeEventListener('keydown', handleScreenshotShortcut);
-            window.removeEventListener('keyup', handleScreenshotShortcut);
+            window.removeEventListener('keydown', handleScreenshotShortcut, true);
+            window.removeEventListener('blur', handleWindowBlur);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
             clearScreenshotProtection();
         };
-    }, [clearScreenshotProtection, triggerScreenshotProtection]);
-
-    useEffect(() => {
-        if (!isScreenshotPrivacyMaskActive) return undefined;
-
-        const dismissMask = () => clearScreenshotProtection();
-        const dismissMaskOnMouseMove = () => {
-            if (Date.now() < screenshotMaskDismissAfterRef.current) return;
-            dismissMask();
-        };
-        const dismissMaskOnEscape = (event) => {
-            if (String(event.key || '') === 'Escape') dismissMask();
-        };
-
-        window.addEventListener('mousemove', dismissMaskOnMouseMove, true);
-        window.addEventListener('keydown', dismissMaskOnEscape, true);
-
-        return () => {
-            window.removeEventListener('mousemove', dismissMaskOnMouseMove, true);
-            window.removeEventListener('keydown', dismissMaskOnEscape, true);
-        };
-    }, [clearScreenshotProtection, isScreenshotPrivacyMaskActive]);
+    }, [clearScreenshotProtection, normalizeScreenshotSource, triggerScreenshotProtection]);
 
     useEffect(() => () => {
         setScreenshotProtectionDomState(false);
@@ -25247,9 +25399,22 @@ export default function Chat() {
 
                 {isScreenshotPrivacyMaskActive && (
                     <div className="wa-global-privacy-mask" aria-hidden="true">
-                        <div className="wa-global-privacy-mask__message">Screenshot privacy mode active</div>
+                        <div className="wa-global-privacy-mask__panel">
+                            <div className="wa-global-privacy-mask__glyph">
+                                <Camera size={isMobile ? 38 : 52} strokeWidth={1.8} />
+                            </div>
+                            <div className="wa-global-privacy-mask__eyebrow">Neural Chat</div>
+                            <div className="wa-global-privacy-mask__message">Screenshot privacy mode active</div>
+                            <div className="wa-global-privacy-mask__caption">
+                                Sensitive chat content is hidden for 3 seconds after each screenshot attempt.
+                            </div>
+                            <div className="wa-global-privacy-mask__source">
+                                Detected via {screenshotPrivacySource || 'Screenshot shortcut'}
+                            </div>
+                        </div>
                     </div>
                 )}
+
             </div>
 
             {snackbar && (

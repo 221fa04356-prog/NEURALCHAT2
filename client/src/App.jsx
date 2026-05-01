@@ -9,6 +9,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import Chat from './pages/Chat';
 import AIChatWidget from './components/AIChatWidget';
 import NeuralBackground from './components/NeuralBackground';
+import ScreenshotPrivacy from './components/ScreenshotPrivacy';
 import './styles/index.css';
 
 class RouteErrorBoundary extends React.Component {
@@ -104,6 +105,7 @@ function AppContent() {
       )}
       
       {showNeural && <NeuralBackground />}
+      <ScreenshotPrivacy />
       
       <div className="app-main-wrapper">
         <Routes>
