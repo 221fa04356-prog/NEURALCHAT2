@@ -2080,6 +2080,8 @@ export default function Chat() {
     });
 
     const [browserScale, setBrowserScale] = useState(1);
+    const [fontScaleMode, setFontScaleMode] = useState(() => localStorage.getItem('neuChat_fontScaleMode') || 'app');
+    const lastBrowserScaleRef = useRef(window.devicePixelRatio / (parseFloat(localStorage.getItem('neuChat_baseDPR')) || window.devicePixelRatio || 1));
     const screenshotMaskTimerRef = useRef(null);
     const screenshotShortcutLastTriggerRef = useRef(0);
     const screenshotMaskDismissAfterRef = useRef(0);
@@ -2212,26 +2214,40 @@ export default function Chat() {
     };
 
     useEffect(() => {
-        const handleResize = () => {
-            // Detect current browser zoom level relative to baseline
+        const handleViewportScaleChange = () => {
             const currentScale = window.devicePixelRatio / baseDPR;
+            const previousScale = lastBrowserScaleRef.current;
+            const browserScaleChanged = Math.abs(currentScale - previousScale) > 0.01;
+            lastBrowserScaleRef.current = currentScale;
             setBrowserScale(currentScale);
-
-            // Sync the "Font Size" setting with the browser zoom if they are close
-            const currentPercent = Math.round(currentScale * 100);
-            const matchingSize = fontSizesArr.find(s => parseInt(s) === currentPercent);
-            if (matchingSize && matchingSize !== selectedFontSize) {
-                setSelectedFontSize(matchingSize);
-                localStorage.setItem('neuChat_fontSize', matchingSize);
-            }
-
             setIsMobile(window.innerWidth <= 768);
+
+            if (browserScaleChanged) {
+                const currentPercent = Math.round(currentScale * 100);
+                const syncedSize = `${currentPercent}%${currentPercent === 100 ? ' (default)' : ''}`;
+                setFontScaleMode('browser');
+                localStorage.setItem('neuChat_fontScaleMode', 'browser');
+                setSelectedFontSize(syncedSize);
+                localStorage.setItem('neuChat_fontSize', syncedSize);
+            }
         };
 
-        window.addEventListener('resize', handleResize);
-        handleResize(); // Initial check
-        return () => window.removeEventListener('resize', handleResize);
-    }, [baseDPR, selectedFontSize]);
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                handleViewportScaleChange();
+            }
+        };
+
+        window.addEventListener('resize', handleViewportScaleChange);
+        window.addEventListener('focus', handleViewportScaleChange);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        handleViewportScaleChange();
+        return () => {
+            window.removeEventListener('resize', handleViewportScaleChange);
+            window.removeEventListener('focus', handleViewportScaleChange);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [baseDPR]);
 
     useEffect(() => {
         const clampRightPanelWidth = () => {
@@ -2243,40 +2259,38 @@ export default function Chat() {
         return () => window.removeEventListener('resize', clampRightPanelWidth);
     }, []);
 
-    useEffect(() => {
-        // Disable manual scaling logic on mobile to prevent interference with native browser responsiveness
-        if (window.innerWidth <= 768) {
-            const container = document.querySelector('.wa-app-container');
-            if (container) {
-                container.style.zoom = '1';
-                container.style.width = '100vw';
-                container.style.height = '100vh';
-            }
+    const applyAppContainerScale = useCallback((fontSizeValue = selectedFontSize, scaleMode = fontScaleMode) => {
+        const container = document.querySelector('.wa-app-container');
+        if (!container) return;
+
+        if (scaleMode === 'browser') {
+            container.style.zoom = '1';
+            container.style.width = '100vw';
+            container.style.height = '100vh';
+            container.style.transformOrigin = 'top left';
             return;
         }
 
-        const targetScale = parseInt(selectedFontSize) / 100;
-        const internalZoom = targetScale / browserScale;
+        const targetScale = parseInt(fontSizeValue) / 100;
+        const internalZoom = targetScale;
 
-        const container = document.querySelector('.wa-app-container');
-        if (container) {
-            // Apply zoom factor specifically to the app container
-            // and COMPENSATE dimensions to ensure it always fills 100% of the viewport.
-            // Support range from 25% (0.25) to 500% (5.0)
-            if (internalZoom >= 0.25 && internalZoom <= 5.0) {
-                container.style.zoom = internalZoom;
-                container.style.width = `${100 / internalZoom}vw`;
-                container.style.height = `${100 / internalZoom}vh`;
-                // Add transform-origin to ensure it scales from the top-left correctly
-                container.style.transformOrigin = 'top left';
-                document.body.style.backgroundColor = '#111b21';
-            } else {
-                container.style.zoom = '1';
-                container.style.width = '100vw';
-                container.style.height = '100vh';
-            }
+        if (internalZoom >= 0.25 && internalZoom <= 5.0) {
+            container.style.zoom = internalZoom;
+            container.style.width = `${100 / internalZoom}vw`;
+            container.style.height = `${100 / internalZoom}vh`;
+            container.style.transformOrigin = 'top left';
+            document.body.style.backgroundColor = '#111b21';
+        } else {
+            container.style.zoom = '1';
+            container.style.width = '100vw';
+            container.style.height = '100vh';
+            container.style.transformOrigin = 'top left';
         }
-    }, [selectedFontSize, browserScale]);
+    }, [selectedFontSize, fontScaleMode]);
+
+    useEffect(() => {
+        applyAppContainerScale(selectedFontSize, fontScaleMode);
+    }, [selectedFontSize, fontScaleMode, applyAppContainerScale]);
 
     useEffect(() => {
         const recoverLayoutAfterFullscreen = () => {
@@ -2286,16 +2300,16 @@ export default function Chat() {
 
             const container = document.querySelector('.wa-app-container');
             if (!container) return;
-
-            if (window.innerWidth <= 768) {
+            if (fontScaleMode === 'browser') {
                 container.style.zoom = '1';
                 container.style.width = '100vw';
                 container.style.height = '100vh';
+                container.style.transformOrigin = 'top left';
                 return;
             }
 
             const targetScale = parseInt(selectedFontSize) / 100;
-            const internalZoom = targetScale / currentScale;
+            const internalZoom = targetScale;
 
             if (internalZoom >= 0.25 && internalZoom <= 5.0) {
                 container.style.zoom = internalZoom;
@@ -2322,7 +2336,7 @@ export default function Chat() {
             document.removeEventListener('fullscreenchange', handleFullscreenChange);
             document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
         };
-    }, [baseDPR, selectedFontSize]);
+    }, [baseDPR, selectedFontSize, fontScaleMode]);
 
     useEffect(() => {
         const handleResize = () => setBrowserScale(window.devicePixelRatio || 1);
@@ -2331,8 +2345,11 @@ export default function Chat() {
     }, []);
 
     const handleFontSizeChange = (size) => {
+        setFontScaleMode('app');
+        localStorage.setItem('neuChat_fontScaleMode', 'app');
         setSelectedFontSize(size);
         localStorage.setItem('neuChat_fontSize', size);
+        applyAppContainerScale(size, 'app');
 
         // CALIBRATION: If user manually selects 100%, we recalibrate the baseline
         // to match the current browser state. This fix synchronizes the app and browser.
@@ -3181,9 +3198,9 @@ export default function Chat() {
 
 
     const getAppZoom = () => {
-        if (window.innerWidth <= 768) return 1;
+        if (fontScaleMode === 'browser') return 1;
         const targetScale = parseInt(selectedFontSize) / 100;
-        const zoom = targetScale / browserScale;
+        const zoom = targetScale;
         return (zoom >= 0.25 && zoom <= 5.0) ? zoom : 1;
     };
 
@@ -6323,11 +6340,8 @@ export default function Chat() {
             }
 
             // --- Synchronized Zoom Shortcuts ---
-            // Support standard browser shortcuts (Ctrl + =/-)
-            // We DON'T e.preventDefault() for native keys, so the browser zooms natively, 
-            // and our 'resize' listener handles the label sync.
-            if (e.ctrlKey && (e.key === '=' || e.key === '+' || e.key === '-')) {
-                // Let browser handle native zoom
+            // Let the browser handle its own zoom so the native Chrome zoom UI stays visible.
+            if (e.ctrlKey && (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '0')) {
                 return;
             }
 
