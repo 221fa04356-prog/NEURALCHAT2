@@ -1891,39 +1891,217 @@ html {
 }
 
 .wa-global-privacy-mask {
-    position: absolute;
+    position: fixed;
     inset: 0;
-    z-index: 50000;
+    z-index: 2147483200;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 32px;
     background:
-        radial-gradient(circle at center, rgba(56, 189, 248, 0.14), transparent 28%),
-        rgba(4, 10, 18, 0.38);
-    backdrop-filter: blur(20px) saturate(110%);
-    -webkit-backdrop-filter: blur(20px) saturate(110%);
+        radial-gradient(circle at 50% 20%, rgba(56, 189, 248, 0.16), transparent 22%),
+        radial-gradient(circle at 50% 50%, rgba(96, 165, 250, 0.11), transparent 28%),
+        linear-gradient(180deg, rgba(2, 6, 23, 0.78) 0%, rgba(2, 6, 23, 0.88) 100%);
+    backdrop-filter: blur(34px) saturate(108%);
+    -webkit-backdrop-filter: blur(34px) saturate(108%);
     pointer-events: none;
+    overflow: hidden;
+}
+
+.wa-dom-screenshot-mask {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483646;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    pointer-events: none;
+    background:
+        radial-gradient(circle at 50% 20%, rgba(24, 48, 88, 0.35), transparent 22%),
+        radial-gradient(circle at 50% 50%, rgba(28, 62, 110, 0.22), transparent 28%),
+        linear-gradient(180deg, #020817 0%, #040b1d 100%);
+    opacity: 1;
+    visibility: hidden;
+}
+
+.wa-dom-screenshot-mask.active {
+    display: flex;
+    visibility: visible;
+}
+
+.wa-dom-screenshot-mask__panel {
+    width: min(92vw, 560px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: clamp(24px, 4vw, 38px);
+    border-radius: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: linear-gradient(180deg, #08101d 0%, #0a1220 100%);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.42);
+    text-align: center;
+}
+
+.wa-dom-screenshot-mask__glyph {
+    width: clamp(76px, 11vw, 104px);
+    height: clamp(76px, 11vw, 104px);
+    border-radius: 28px;
+    display: grid;
+    place-items: center;
+    color: #dff6ff;
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: 0.16em;
+    background: linear-gradient(180deg, rgba(56, 189, 248, 0.22) 0%, rgba(37, 99, 235, 0.18) 100%);
+    border: 1px solid rgba(125, 211, 252, 0.26);
+    box-shadow: 0 18px 40px rgba(14, 165, 233, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.wa-dom-screenshot-mask__eyebrow {
+    color: rgba(125, 211, 252, 0.92);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+}
+
+.wa-dom-screenshot-mask__message {
+    color: #f8fafc;
+    font-size: clamp(22px, 2.5vw, 32px);
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    line-height: 1.15;
+    text-transform: uppercase;
+}
+
+.wa-dom-screenshot-mask__caption {
+    color: rgba(226, 232, 240, 0.82);
+    font-size: clamp(14px, 1.4vw, 16px);
+    line-height: 1.55;
+    max-width: 34ch;
+}
+
+.wa-dom-screenshot-mask__source {
+    margin-top: 4px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(125, 211, 252, 0.18);
+    background: rgba(15, 23, 42, 0.58);
+    color: rgba(191, 219, 254, 0.94);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.wa-global-privacy-mask::before,
+.wa-global-privacy-mask::after {
+    content: "";
+    position: absolute;
+    inset: auto;
+    border-radius: 999px;
+    opacity: 0.6;
+    filter: blur(20px);
+}
+
+.wa-global-privacy-mask::before {
+    width: min(46vw, 420px);
+    height: min(46vw, 420px);
+    background: rgba(56, 189, 248, 0.14);
+    top: 8%;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.wa-global-privacy-mask::after {
+    width: min(38vw, 320px);
+    height: min(38vw, 320px);
+    background: rgba(59, 130, 246, 0.12);
+    bottom: 10%;
+    right: 12%;
+}
+
+.wa-global-privacy-mask__panel {
+    position: relative;
+    z-index: 1;
+    width: min(92vw, 540px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: clamp(24px, 4vw, 38px);
+    border-radius: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background:
+        linear-gradient(180deg, rgba(8, 15, 26, 0.8) 0%, rgba(8, 15, 26, 0.62) 100%);
+    box-shadow:
+        0 30px 80px rgba(0, 0, 0, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    text-align: center;
+    animation: wa-screenshot-mask-enter 0.22s ease-out;
+}
+
+.wa-global-privacy-mask__glyph {
+    width: clamp(76px, 11vw, 104px);
+    height: clamp(76px, 11vw, 104px);
+    border-radius: 28px;
+    display: grid;
+    place-items: center;
+    color: #dff6ff;
+    background:
+        linear-gradient(180deg, rgba(56, 189, 248, 0.22) 0%, rgba(37, 99, 235, 0.18) 100%);
+    border: 1px solid rgba(125, 211, 252, 0.26);
+    box-shadow:
+        0 18px 40px rgba(14, 165, 233, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.wa-global-privacy-mask__eyebrow {
+    color: rgba(125, 211, 252, 0.92);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
 }
 
 .wa-global-privacy-mask__message {
     color: #f8fafc;
-    font-size: 18px;
+    font-size: clamp(22px, 2.5vw, 32px);
     font-weight: 800;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     text-align: center;
-    padding: 24px 32px;
-    border-radius: 18px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    background: rgba(8, 15, 26, 0.52);
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.28);
+    max-width: 14ch;
+    line-height: 1.15;
+}
+
+.wa-global-privacy-mask__caption {
+    color: rgba(226, 232, 240, 0.82);
+    font-size: clamp(14px, 1.4vw, 16px);
+    line-height: 1.55;
+    max-width: 34ch;
+}
+
+.wa-global-privacy-mask__source {
+    margin-top: 4px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(125, 211, 252, 0.18);
+    background: rgba(15, 23, 42, 0.58);
+    color: rgba(191, 219, 254, 0.94);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
 
 body.wa-screenshot-protection-active .wa-app-container > *:not(.wa-global-privacy-mask),
 html.wa-screenshot-protection-active .wa-app-container > *:not(.wa-global-privacy-mask) {
-    filter: blur(22px) saturate(0.3) brightness(0.72);
-    transform: scale(1.012);
+    filter: blur(30px) saturate(0.12) brightness(0.42);
+    transform: scale(1.022);
     transform-origin: center;
     transition: filter 0.08s linear, transform 0.08s linear;
 }
@@ -1931,6 +2109,97 @@ html.wa-screenshot-protection-active .wa-app-container > *:not(.wa-global-privac
 body.wa-screenshot-protection-active .wa-app-container,
 html.wa-screenshot-protection-active .wa-app-container {
     background: #050b14 !important;
+}
+
+@media (max-width: 768px) {
+    .wa-global-privacy-mask {
+        padding: 16px;
+    }
+
+    .wa-dom-screenshot-mask {
+        padding: 16px;
+    }
+
+    .wa-dom-screenshot-mask__panel {
+        width: min(100%, 420px);
+        gap: 12px;
+        padding: 22px 18px;
+        border-radius: 24px;
+    }
+
+    .wa-dom-screenshot-mask__glyph {
+        width: 72px;
+        height: 72px;
+        border-radius: 22px;
+    }
+
+    .wa-dom-screenshot-mask__message {
+        width: min(92vw, 320px);
+        font-size: 22px;
+        letter-spacing: 0.08em;
+        line-height: 1.3;
+    }
+
+    .wa-dom-screenshot-mask__caption {
+        max-width: 28ch;
+        font-size: 13px;
+    }
+
+    .wa-dom-screenshot-mask__source {
+        width: 100%;
+        padding: 10px 12px;
+        font-size: 11px;
+        line-height: 1.4;
+    }
+
+    .wa-global-privacy-mask__panel {
+        width: min(100%, 420px);
+        gap: 12px;
+        padding: 22px 18px;
+        border-radius: 24px;
+    }
+
+    .wa-global-privacy-mask__glyph {
+        width: 72px;
+        height: 72px;
+        border-radius: 22px;
+    }
+
+    .wa-global-privacy-mask__message {
+        width: min(92vw, 320px);
+        letter-spacing: 0.08em;
+        line-height: 1.35;
+    }
+
+    .wa-global-privacy-mask__caption {
+        max-width: 28ch;
+        font-size: 13px;
+    }
+
+    .wa-global-privacy-mask__source {
+        width: 100%;
+        padding: 10px 12px;
+        font-size: 11px;
+        line-height: 1.4;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .wa-global-privacy-mask__panel {
+        animation: none;
+    }
+}
+
+@keyframes wa-screenshot-mask-enter {
+    from {
+        opacity: 0;
+        transform: translateY(14px) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 .wa-message-scroller {
