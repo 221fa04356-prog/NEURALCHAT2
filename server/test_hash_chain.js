@@ -20,10 +20,16 @@ const verifyChain = async (type, id) => {
     
     let messages = [];
     if (type === 'p2p') {
+        const partnerId = process.argv[4];
+        if (!partnerId) {
+            console.log('\n⚠️ For P2P, you must provide TWO IDs to isolate a specific chat.');
+            console.log('Usage: node test_hash_chain.js p2p <your-id> <partner-id>');
+            process.exit(1);
+        }
         messages = await Message.find({
             $or: [
-                { user_id: id },
-                { receiver_id: id }
+                { user_id: id, receiver_id: partnerId },
+                { user_id: partnerId, receiver_id: id }
             ]
         }).sort({ created_at: 1 });
     } else if (type === 'group') {
