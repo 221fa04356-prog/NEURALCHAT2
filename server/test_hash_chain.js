@@ -43,10 +43,23 @@ const verifyChain = async (type, id) => {
         return;
     }
 
+    // Filter out legacy messages (sent before the blockchain update)
+    const securedMessages = messages.filter(m => m.message_hash);
+    
+    if (securedMessages.length === 0) {
+        console.log('Only legacy (unsecured) messages found. No blockchain messages to verify.');
+        return;
+    }
+
+    console.log(`Found ${messages.length - securedMessages.length} legacy messages (skipped).`);
+    console.log(`Verifying ${securedMessages.length} blockchain-secured messages...`);
+
     let isValid = true;
-    for (let i = 0; i < messages.length; i++) {
-        const msg = messages[i];
-        const prevHash = i === 0 ? 'GENESIS_BLOCK' : messages[i - 1].message_hash;
+    for (let i = 0; i < securedMessages.length; i++) {
+        const msg = securedMessages[i];
+        
+        // The first secured message might link back to a legacy message (undefined hash) or GENESIS_BLOCK
+        const prevHash = i === 0 ? msg.previous_message_hash : securedMessages[i - 1].message_hash;
 
         // Verify previous hash link
         if (msg.previous_message_hash !== prevHash) {
@@ -82,7 +95,7 @@ const verifyChain = async (type, id) => {
     }
 
     if (isValid) {
-        console.log('\n✅ CHAIN VERIFIED: All messages are authentic and untampered.');
+        console.log('\n✅ CHAIN VERIFIED: All secured messages are authentic and untampered.');
     } else {
         console.log('\n❌ CHAIN CORRUPTED: Evidence of tampering or missing blocks detected.');
     }
