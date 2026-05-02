@@ -1287,6 +1287,7 @@ export default function Chat() {
     const [showUnblockTooltip, setShowUnblockTooltip] = useState(false);
     const [blockConfirmTarget, setBlockConfirmTarget] = useState(null);
     const [reportConfirmTarget, setReportConfirmTarget] = useState(null);
+    const [commonGroupRedirectTarget, setCommonGroupRedirectTarget] = useState(null);
 
 
     const handleReaction = async (messageId, emoji, isGroup) => {
@@ -1345,6 +1346,8 @@ export default function Chat() {
     // --- File Upload State ---
     const [file, setFile] = useState(null);
     const [selectedFiles, setSelectedFiles] = useState([]);
+    const composerDraftsRef = useRef({});
+    const isRestoringComposerDraftRef = useRef(false);
     const fileInputRef = useRef(null);
     const filePreviewUrlCacheRef = useRef(new Map());
     const MAX_UPLOAD_BYTES = 1073741824;
@@ -3977,25 +3980,55 @@ export default function Chat() {
         return null;
     };
 
-    // Restore draft whenever active chat changes.
+    const clearCurrentComposerDraft = () => {
+        const draftKey = getCurrentChatDraftKey();
+        if (!draftKey) return;
+        delete composerDraftsRef.current[draftKey];
+        localStorage.removeItem(draftKey);
+    };
+
+    // Restore text and attachment drafts whenever active chat changes.
     useEffect(() => {
         const draftKey = getCurrentChatDraftKey();
         if (!draftKey) return;
+        isRestoringComposerDraftRef.current = true;
+        const savedComposerDraft = composerDraftsRef.current[draftKey] || {};
         const savedDraft = localStorage.getItem(draftKey);
-        setInput(savedDraft || '');
+        setInput(savedComposerDraft.input ?? savedDraft ?? '');
+        setFile(savedComposerDraft.file || null);
+        setSelectedFiles(Array.isArray(savedComposerDraft.selectedFiles) ? savedComposerDraft.selectedFiles : []);
+        setIsViewOnceMedia(!!savedComposerDraft.isViewOnceMedia);
+        setReplyingTo(savedComposerDraft.replyingTo || null);
+        setTypingLinkPreview(null);
+        setSuggestionApplied(false);
+        setTimeout(() => {
+            isRestoringComposerDraftRef.current = false;
+        }, 0);
     }, [selectedUser?._id, selectedUser?.id, selectedGroup?._id, selectedGroup?.id, selectedCommunity?._id, selectedCommunity?.id]);
 
-    // Persist draft for the current chat.
+    // Persist the current composer as a per-chat draft.
     useEffect(() => {
+        if (isRestoringComposerDraftRef.current) return;
         const draftKey = getCurrentChatDraftKey();
         if (!draftKey) return;
+        const filesSnapshot = Array.isArray(selectedFiles) ? selectedFiles : [];
+        const hasAttachmentDraft = !!file || filesSnapshot.length > 0;
+        const hasReplyDraft = !!replyingTo;
+        composerDraftsRef.current[draftKey] = {
+            input,
+            file,
+            selectedFiles: filesSnapshot,
+            isViewOnceMedia,
+            replyingTo
+        };
         const normalized = (input || '').trim();
-        if (normalized.length === 0) {
+        if (normalized.length === 0 && !hasAttachmentDraft && !hasReplyDraft) {
+            delete composerDraftsRef.current[draftKey];
             localStorage.removeItem(draftKey);
         } else {
             localStorage.setItem(draftKey, input);
         }
-    }, [input, selectedUser?._id, selectedUser?.id, selectedGroup?._id, selectedGroup?.id, selectedCommunity?._id, selectedCommunity?.id]);
+    }, [input, file, selectedFiles, isViewOnceMedia, replyingTo, selectedUser?._id, selectedUser?.id, selectedGroup?._id, selectedGroup?.id, selectedCommunity?._id, selectedCommunity?.id]);
 
     useEffect(() => {
         communitiesRef.current = communities;
@@ -6866,7 +6899,55 @@ export default function Chat() {
         setIsExitGroupConfirmOpen(true);
     };
 
-    const handleExitGroup = async (groupOverride = null, newAdminOverride = null) => {
+    const redirectToCommonGroup = (groupOverride = null) => {
+        const targetGroup = groupOverride || commonGroupRedirectTarget;
+        const targetGroupId = targetGroup?._id || targetGroup?.id;
+        if (!targetGroup || !targetGroupId) return;
+
+        setInput('');
+        setFile(null);
+        setTypingLinkPreview(null);
+        setReplyingTo(null);
+        setIsChatSelectionMode(false);
+        setIsForwardingMode(false);
+        setForwardSelectedMsgs([]);
+        setInfoMessage(null);
+        setIsMessageSearchOpen(false);
+        setIsStarredMessagesOpen(false);
+        setIsSharedMediaOpen(false);
+        setIsEditContactOpen(false);
+        setIsNotificationSettingsOpen(false);
+        setIsEventDetailsOpen(false);
+        setIsProfileOpen(false);
+        setIsNewChatOpen(false);
+        setIsNewGroupOpen(false);
+        setIsNewCommunityOpen(false);
+        setIsArchivedChatsOpen(false);
+        setIsGlobalStarredOpen(false);
+        setIsSettingsOpen(false);
+        setIsCommunityInfoOpen(false);
+        setIsCommunityGroupsListOpen(false);
+        setIsManageGroupsOpen(false);
+        setIsAddExistingGroupsOpen(false);
+        setIsConfirmAddGroupsOpen(false);
+        setIsCommunityAddMemberOpen(false);
+        setIsConfirmCommunityAddMembersOpen(false);
+        setShowScrollBtn(false);
+        setOpenDropdown(null);
+        setCommonGroupRedirectTarget(null);
+        if (selectedUserRef) selectedUserRef.current = null;
+        if (selectedGroupRef) selectedGroupRef.current = targetGroup;
+
+        setSelectedGroup(targetGroup);
+        setSelectedUser(null);
+        setSelectedCommunity(null);
+        setIsCommunityHomeOpen(false);
+        setIsContactInfoOpen(false);
+        fetchGroupMessages(targetGroupId);
+        setGroups(prev => prev.map(g => String(g._id || g.id) === String(targetGroupId) ? { ...g, unreadCount: 0 } : g));
+    };
+
+    const handleExitGroup = async (groupOverride = null, newAdminOverride = null, exitMode = 'exit') => {
         const activeGroup = groupOverride || exitGroupTarget || selectedGroupRef.current || selectedGroup;
         const groupId = activeGroup?._id || activeGroup?.id;
 
@@ -6912,7 +6993,7 @@ export default function Chat() {
             closeExitGroupModal();
             handleBackToChatList();
             setSnackbar({
-                message: res.data?.removed ? 'Group exited and closed.' : 'You exited the group.',
+                message: exitMode === 'delete' ? 'Exited and deleted group for you.' : (res.data?.removed ? 'Group exited and closed.' : 'You exited the group.'),
                 type: 'success',
                 variant: 'system'
             });
@@ -8221,6 +8302,42 @@ export default function Chat() {
         } catch (err) {
             console.error("Delete chat failed", err);
             setSnackbar({ message: 'Failed to delete chat', type: 'error', variant: 'system' });
+        }
+    };
+
+    const handleClearChatConfirm = async () => {
+        const activeTarget = deleteTarget || selectedUser || selectedGroup;
+        if (!activeTarget) return;
+
+        try {
+            const token = localStorage.getItem('token');
+            const targetId = activeTarget._id || activeTarget.id;
+            const isGroup = activeTarget.isGroup !== undefined
+                ? activeTarget.isGroup
+                : (activeTarget.is_group !== undefined ? activeTarget.is_group : !!selectedGroup);
+
+            await axios.post('/api/chat/chat/delete-history', {
+                contactId: targetId,
+                isGroup,
+                contactName: activeTarget.name
+            }, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            const currentId = selectedUser?._id || selectedUser?.id || selectedGroup?._id || selectedGroup?.id;
+            if (String(currentId) === String(targetId)) {
+                if (isGroup) setGroupMessages([]);
+                else setMessages([]);
+            }
+            if (!isGroup) fetchUsers();
+            else fetchGroups();
+
+            setIsClearChatConfirmOpen(false);
+            setDeleteTarget(null);
+            setSnackbar({ message: isGroup ? 'Group messages cleared' : 'Chat messages cleared', type: 'success', variant: 'system' });
+        } catch (err) {
+            console.error("Clear chat failed", err);
+            setSnackbar({ message: 'Failed to clear messages', type: 'error', variant: 'system' });
         }
     };
 
@@ -9714,6 +9831,7 @@ export default function Chat() {
             setSelectedFiles([]);
             setFile(null);
             setIsViewOnceMedia(false);
+            clearCurrentComposerDraft();
             for (let i = 0; i < filesBatch.length; i++) {
                 await handleSend(null, i === 0 ? firstCaption : '', null, null, currentViewOnce, filesBatch[i], true, true);
             }
@@ -9791,6 +9909,7 @@ export default function Chat() {
         setFile(null); // Clear file immediately from UI
         setSelectedFiles([]); // Clear selected files immediately from UI
         setIsViewOnceMedia(false);
+            clearCurrentComposerDraft();
             setReplyingTo(null); // Clear reply context immediately
             setTypingLinkPreview(null); // Clear typing preview immediately
             setSuggestionApplied(false); // Reset correction state for next message
@@ -11946,6 +12065,47 @@ export default function Chat() {
         INLINE_IMAGE_FILTERS.find((entry) => entry.id === filterId)?.css || 'none'
     );
 
+    const toHexByte = (value) => Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, '0');
+
+    const hueToRgb = (hue) => {
+        const c = 1;
+        const x = 1 - Math.abs(((hue / 60) % 2) - 1);
+        if (hue < 60) return [c, x, 0];
+        if (hue < 120) return [x, c, 0];
+        if (hue < 180) return [0, c, x];
+        if (hue < 240) return [0, x, c];
+        if (hue < 300) return [x, 0, c];
+        return [c, 0, x];
+    };
+
+    const getInlineRainbowColorFromPointer = (event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        if (!rect.width || !rect.height) return inlinePaintColor;
+        const x = clampUnit((event.clientX - rect.left) / rect.width);
+        const y = clampUnit((event.clientY - rect.top) / rect.height);
+        const hue = x * 360;
+        let [r, g, b] = hueToRgb(hue);
+        if (y < 0.45) {
+            const whiteMix = 1 - (y / 0.45);
+            r = r + (1 - r) * whiteMix;
+            g = g + (1 - g) * whiteMix;
+            b = b + (1 - b) * whiteMix;
+        } else {
+            const blackMix = (y - 0.45) / 0.55;
+            r *= (1 - blackMix);
+            g *= (1 - blackMix);
+            b *= (1 - blackMix);
+        }
+        return `#${toHexByte(r * 255)}${toHexByte(g * 255)}${toHexByte(b * 255)}`;
+    };
+
+    const handleInlineRainbowPointer = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget?.setPointerCapture?.(event.pointerId);
+        setInlinePaintColor(getInlineRainbowColorFromPointer(event));
+    };
+
     const rotateImageFile = async (sourceFile, rotationDegrees) => {
         if (!sourceFile || !sourceFile.type?.startsWith('image/')) return sourceFile;
         const normalized = normalizeRotationDegrees(rotationDegrees);
@@ -13268,7 +13428,7 @@ export default function Chat() {
                     </div>
                 )}
                 {file && file.type?.startsWith('image/') ? (
-                    <div style={{ width: '100%', maxWidth: isMobile ? 'calc(100vw - 24px)' : 760, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: isMobile ? 10 : 14, background: 'transparent' }}>
+                    <div style={{ width: '100%', maxWidth: isMobile ? 'calc(100vw - 24px)' : 760, height: '100%', maxHeight: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: isMobile ? 10 : 14, background: 'transparent', overflow: 'hidden' }}>
                         <div style={{
                             display: inlineImageEditMode && inlineFilterActive ? 'flex' : 'none',
                             width: '100%',
@@ -13355,14 +13515,14 @@ export default function Chat() {
                                 );
                             })}
                         </div>
-                        <div style={{ width: '100%', flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}>
+                        <div style={{ width: '100%', flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                             <div
                                 ref={inlineImageStageRef}
-                                style={{
-                                    position: 'relative',
-                                    display: 'inline-block',
-                                    maxWidth: '100%',
-                                    maxHeight: '100%',
+                                    style={{
+                                        position: 'relative',
+                                        display: 'inline-block',
+                                        maxWidth: '100%',
+                                        maxHeight: '100%',
                                     lineHeight: 0,
                                     transform: inlineImageEditMode
                                         ? `rotate(${inlineImageRotation}deg) scale(${getInlinePreviewRotateScale()})`
@@ -13384,7 +13544,9 @@ export default function Chat() {
                                     style={{
                                         display: 'block',
                                         maxWidth: '100%',
-                                        maxHeight: '100%',
+                                        maxHeight: inlineFilterActive
+                                            ? (isMobile ? 'calc(100vh - 310px)' : 'calc(100vh - 350px)')
+                                            : (isMobile ? 'calc(100vh - 230px)' : 'calc(100vh - 270px)'),
                                         width: 'auto',
                                         height: 'auto',
                                         objectFit: 'contain',
@@ -13943,8 +14105,14 @@ export default function Chat() {
                                     zIndex: 10,
                                     border: '1px solid rgba(15, 23, 42, 0.08)'
                                 }}>
-                                    <label
+                                    <div
                                         title="Rainbow color picker"
+                                        role="slider"
+                                        tabIndex={0}
+                                        onPointerDown={handleInlineRainbowPointer}
+                                        onPointerMove={(event) => {
+                                            if (event.buttons === 1) handleInlineRainbowPointer(event);
+                                        }}
                                         style={{
                                             display: 'block',
                                             position: 'relative',
@@ -13955,13 +14123,7 @@ export default function Chat() {
                                         }}
                                     >
                                         <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
-                                        <input
-                                            type="color"
-                                            value={inlinePaintColor}
-                                            onChange={(event) => setInlinePaintColor(event.target.value)}
-                                            style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'crosshair' }}
-                                        />
-                                    </label>
+                                    </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
                                         <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
                                         {inlinePaintColor.toUpperCase()}
@@ -14103,8 +14265,14 @@ export default function Chat() {
                                     zIndex: 10,
                                     border: '1px solid rgba(15, 23, 42, 0.08)'
                                 }}>
-                                    <label
+                                    <div
                                         title="Rainbow color picker"
+                                        role="slider"
+                                        tabIndex={0}
+                                        onPointerDown={handleInlineRainbowPointer}
+                                        onPointerMove={(event) => {
+                                            if (event.buttons === 1) handleInlineRainbowPointer(event);
+                                        }}
                                         style={{
                                             display: 'block',
                                             position: 'relative',
@@ -14115,13 +14283,7 @@ export default function Chat() {
                                         }}
                                     >
                                         <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
-                                        <input
-                                            type="color"
-                                            value={inlinePaintColor}
-                                            onChange={(event) => setInlinePaintColor(event.target.value)}
-                                            style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'crosshair' }}
-                                        />
-                                    </label>
+                                    </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
                                         <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
                                         {inlinePaintColor.toUpperCase()}
@@ -14263,10 +14425,9 @@ export default function Chat() {
                             </button>
                             {inlineTextPaletteOpen && (
                                 <div style={{ position: 'absolute', top: 'calc(100% + 10px)', left: '50%', transform: 'translateX(-50%)', width: 'min(420px, calc(100vw - 48px))', padding: 0, borderRadius: 14, background: '#ffffff', boxShadow: '0 18px 40px rgba(2, 6, 23, 0.28)', overflow: 'hidden', zIndex: 20, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
-                                    <label title="Rainbow color picker" style={{ display: 'block', position: 'relative', height: 136, width: '100%', cursor: 'pointer', background: 'linear-gradient(90deg, #ff4d4f 0%, #ffec3d 16%, #52d23d 32%, #33ceff 48%, #3b82f6 64%, #a855f7 80%, #ff2d8d 100%)' }}>
+                                    <div title="Rainbow color picker" role="slider" tabIndex={0} onPointerDown={handleInlineRainbowPointer} onPointerMove={(event) => { if (event.buttons === 1) handleInlineRainbowPointer(event); }} style={{ display: 'block', position: 'relative', height: 136, width: '100%', cursor: 'crosshair', background: 'linear-gradient(90deg, #ff4d4f 0%, #ffec3d 16%, #52d23d 32%, #33ceff 48%, #3b82f6 64%, #a855f7 80%, #ff2d8d 100%)' }}>
                                         <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
-                                        <input type="color" value={inlinePaintColor} onChange={(event) => setInlinePaintColor(event.target.value)} style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'crosshair' }} />
-                                    </label>
+                                    </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
                                         <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
                                         {inlinePaintColor.toUpperCase()}
@@ -15054,6 +15215,9 @@ export default function Chat() {
             const membersCount = activeTarget.members?.length || 0;
             const createdAt = activeTarget.created_at || new Date().toISOString();
             const creatorName = activeTarget.creatorName || (activeTarget.members && activeTarget.members.length > 0 ? activeTarget.members[0].name : 'Group Admin');
+            const activeTargetId = activeTarget._id || activeTarget.id;
+            const currentGroup = groups.find(g => String(g._id || g.id) === String(activeTargetId)) || activeTarget;
+            const isFavoriteGroup = !!currentGroup?.isFavorite;
 
             const bgColor = 'transparent';
             const itemBgColor = 'transparent';
@@ -15219,6 +15383,35 @@ export default function Chat() {
                                 </div>
                                 <ChevronRight size={20} color="#38bdf8" />
                             </div>
+                            <div className="clickable" onClick={() => handleToggleFavorite(activeTargetId, isFavoriteGroup)} style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
+                                {isFavoriteGroup ? <HeartOff size={24} color="#38bdf8" /> : <Heart size={24} color="#38bdf8" />}
+                                <span style={{ color: textColor, fontSize: 16 }}>{isFavoriteGroup ? 'Remove from favourites' : 'Add to favourites'}</span>
+                            </div>
+                            <div className="clickable" onClick={() => handleAddChatToList(activeTargetId, displayName)} style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
+                                <List size={24} color="#38bdf8" />
+                                <span style={{ color: textColor, fontSize: 16 }}>Add to list</span>
+                            </div>
+                            <div className="clickable" onClick={() => {
+                                setDeleteTarget({ _id: activeTargetId, id: activeTargetId, name: displayName, isGroup: true });
+                                setIsClearChatConfirmOpen(true);
+                            }} style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
+                                <Trash2 size={24} color="#38bdf8" />
+                                <span style={{ color: textColor, fontSize: 16 }}>Clear group</span>
+                            </div>
+                            {!activeTarget.isCommunityAnnouncements && (
+                                <div
+                                    className="clickable"
+                                    onClick={() => handleModerationAction('report', activeTarget._id || activeTarget.id, activeTarget)}
+                                    style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}
+                                >
+                                    <ThumbsDown size={24} color="#f87171" />
+                                    <span style={{ color: '#f87171', fontSize: 16 }}>Report group</span>
+                                </div>
+                            )}
+                            <div className="clickable" onClick={() => requestExitGroup(activeTarget)} style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
+                                <LogOut size={24} color="#f87171" />
+                                <span style={{ color: '#f87171', fontSize: 16 }}>Exit group</span>
+                            </div>
                         </div>
 
                         <div style={{ width: '100%', borderBottom: thickDivider }}></div>
@@ -15280,15 +15473,6 @@ export default function Chat() {
                                         </div>
                                     );
                                 })}
-                            </div>
-                        </div>
-
-                        <div style={{ width: '100%', borderBottom: thickDivider }}></div>
-
-                        <div style={{ background: itemBgColor, padding: '14px 0' }}>
-                            <div className="wa-setting-item clickable danger" style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 24, cursor: 'pointer' }} onClick={() => requestExitGroup(activeTarget)}>
-                                <LogOut size={24} color="#f87171" />
-                                <span style={{ color: '#f87171', fontSize: 16, width: '100%', fontWeight: 500 }}>Exit group</span>
                             </div>
                         </div>
 
@@ -15564,7 +15748,20 @@ export default function Chat() {
                                 return (
                                     <div className="wa-member-list">
                                         {commonGroups.map(g => (
-                                            <div key={g._id} className="wa-common-group-item">
+                                            <div
+                                                key={g._id}
+                                                className="wa-common-group-item"
+                                                role="button"
+                                                tabIndex={0}
+                                                onClick={() => setCommonGroupRedirectTarget(g)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                        e.preventDefault();
+                                                        setCommonGroupRedirectTarget(g);
+                                                    }
+                                                }}
+                                                style={{ cursor: 'pointer' }}
+                                            >
                                                 <div className="wa-group-avatar" style={{ background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                                     {g.icon ? <img src={g.icon} alt="grp" style={{ width: '100%', height: '100%', borderRadius: '50%' }} /> : <Users size={20} color="#abb4bb" />}
                                                 </div>
@@ -15585,10 +15782,16 @@ export default function Chat() {
                     {/* Chat actions */}
                     <div className="wa-contact-danger-zone">
                         {isGroup ? (
-                            <div className="wa-setting-item danger" onClick={() => { /* Exit Logic */ }}>
-                                <div className="wa-setting-icon"><XCircle size={20} color="#e53935" /></div>
-                                <div className="wa-setting-text">{t('contact_info.exit_group')}</div>
-                            </div>
+                            <>
+                                <div className="wa-setting-item danger" onClick={() => handleModerationAction('report', activeTargetId, activeTarget)}>
+                                    <div className="wa-setting-icon"><ThumbsDown size={20} color="#e53935" /></div>
+                                    <div className="wa-setting-text">{t('contact_info.report_group')}</div>
+                                </div>
+                                <div className="wa-setting-item danger" onClick={() => requestExitGroup(activeTarget)}>
+                                    <div className="wa-setting-icon"><XCircle size={20} color="#e53935" /></div>
+                                    <div className="wa-setting-text">{t('contact_info.exit_group')}</div>
+                                </div>
+                            </>
                         ) : (
                             <>
                                 <div className="wa-setting-item clickable" onClick={() => handleToggleFavorite(activeTargetId, isFavoriteContact)}>
@@ -15616,10 +15819,11 @@ export default function Chat() {
                         )}
                         <div className="wa-setting-item danger" onClick={() => {
                             setDeleteTarget({ _id: activeTargetId, id: activeTargetId, name: displayName, isGroup });
-                            setIsDeleteChatConfirmOpen(true);
+                            if (isGroup) setIsClearChatConfirmOpen(true);
+                            else setIsDeleteChatConfirmOpen(true);
                         }}>
                             <div className="wa-setting-icon"><Trash2 size={20} color="#e53935" /></div>
-                            <div className="wa-setting-text">{isGroup ? 'Delete group' : 'Delete chat'}</div>
+                            <div className="wa-setting-text">{isGroup ? 'Clear group' : 'Delete chat'}</div>
                         </div>
                     </div>
 
@@ -17576,6 +17780,12 @@ export default function Chat() {
                             </>
                         )}
 
+                        {isGroup && !isCommunity && (
+                            <div className="wa-dropdown-item delete" onClick={() => { requestExitGroup(data); setOpenDropdown(null); }}>
+                                <LogOut size={16} style={{ marginRight: 10 }} /> Exit group
+                            </div>
+                        )}
+
                         <div className="wa-dropdown-item delete" onClick={() => {
                             setDeleteTarget({ _id: id, id: id, name: displayName, isGroup, isCommunity: !!data.is_community });
                             setIsDeleteChatConfirmOpen(true);
@@ -17702,17 +17912,17 @@ export default function Chat() {
                                 <div className="wa-dropdown-item" onClick={() => handleAddChatToList(id, data.name || 'this chat')}>
                                     <List size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> Add to list
                                 </div>
-                                <div className="wa-dropdown-item" style={{ color: '#f43f5e' }} onClick={() => handleModerationAction('block', id, data)}>
+                                <div className="wa-dropdown-item danger-text" onClick={() => handleModerationAction('block', id, data)}>
                                     <Ban size={18} style={{ marginRight: 12, color: '#f43f5e' }} /> Block {data.name || 'contact'}
                                 </div>
-                                <div className="wa-dropdown-item" style={{ color: '#f43f5e' }} onClick={() => handleModerationAction('report', id, data)}>
+                                <div className="wa-dropdown-item danger-text" onClick={() => handleModerationAction('report', id, data)}>
                                     <ThumbsDown size={18} style={{ marginRight: 12, color: '#f43f5e' }} /> Report {data.name || 'contact'}
                                 </div>
                                 <div className="wa-dropdown-divider"></div>
                                 <div className="wa-dropdown-item" onClick={() => { setIsClearChatConfirmOpen(true); setOpenDropdown(null); }}>
                                     <Trash2 size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> Clear messages
                                 </div>
-                                <div className="wa-dropdown-item" style={{ color: '#f43f5e' }} onClick={() => {
+                                <div className="wa-dropdown-item danger-text" onClick={() => {
                                     setDeleteTarget({ _id: id, id, name: data.name, isGroup: false });
                                     setIsDeleteChatConfirmOpen(true);
                                     setOpenDropdown(null);
@@ -17757,14 +17967,14 @@ export default function Chat() {
                                 <div className="wa-dropdown-item" onClick={() => handleAddChatToList(id, data.name || 'this group')}>
                                     <List size={18} style={{ marginRight: 12, color: '#54656f' }} /> Add to list
                                 </div>
-                                <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => handleModerationAction('report', id, data)}>
+                                <div className="wa-dropdown-item danger-text" onClick={() => handleModerationAction('report', id, data)}>
                                     <ThumbsDown size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Report {data.isCommunityAnnouncements ? 'community' : 'group'}
                                 </div>
                                 <div className="wa-dropdown-divider"></div>
                                 <div className="wa-dropdown-item" onClick={() => { setIsClearChatConfirmOpen(true); setOpenDropdown(null); }}>
                                     <Trash2 size={18} style={{ marginRight: 12, color: '#54656f' }} /> Clear messages
                                 </div>
-                                <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => { requestExitGroup(selectedGroup); setOpenDropdown(null); }}>
+                                <div className="wa-dropdown-item danger-text" onClick={() => { requestExitGroup(selectedGroup); setOpenDropdown(null); }}>
                                     <LogOut size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Exit group
                                 </div>
                             </>
@@ -17785,10 +17995,10 @@ export default function Chat() {
                                     <Settings size={18} style={{ marginRight: 12, color: '#54656f' }} /> Community settings
                                 </div>
                                 <div className="wa-dropdown-divider"></div>
-                                <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => handleModerationAction('report', id, { ...data, is_community: true })}>
+                                <div className="wa-dropdown-item danger-text" onClick={() => handleModerationAction('report', id, { ...data, is_community: true })}>
                                     <ThumbsDown size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Report community
                                 </div>
-                                <div className="wa-dropdown-item" style={{ color: '#ea0038' }} onClick={() => {
+                                <div className="wa-dropdown-item danger-text" onClick={() => {
                                     handleExitCommunity(selectedCommunity);
                                     setOpenDropdown(null);
                                 }}>
@@ -22388,7 +22598,7 @@ export default function Chat() {
                                                     isMeMsg={isMeMsg}
                                                 />
                                             ) : (
-                                                <div className="wa-input-pill" style={{ background: 'white', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: (replyingTo || showGrammarBar) ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                                                <div className="wa-input-pill" style={{ background: 'rgba(8, 19, 39, 0.86)', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: (replyingTo || showGrammarBar) ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 16px 34px rgba(2, 6, 23, 0.28)', border: '1px solid rgba(148, 163, 184, 0.22)', backdropFilter: 'blur(14px) saturate(135%)' }}>
                                                     {renderGrammarBar()}
                                                     {replyingTo && (
                                                         <div className="wa-reply-preview-container">
@@ -22740,13 +22950,13 @@ export default function Chat() {
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', paddingTop: '20px' }}>
                                         {selectedGroup.isCommunityAnnouncements ? (
                                             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-                                                <div style={{ background: 'white', borderRadius: '12px', padding: '24px', maxWidth: '300px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                                                    <div style={{ width: 48, height: 48, background: '#f0f2f5', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-                                                        <Users size={24} color="#54656f" />
+                                                <div className="wa-group-welcome-card wa-community-welcome-card" style={{ padding: '24px', maxWidth: '360px', textAlign: 'center' }}>
+                                                    <div className="wa-group-welcome-avatar" style={{ width: 60, height: 60, borderRadius: 16, margin: '0 auto 16px' }}>
+                                                        <Users size={24} color="#38bdf8" />
                                                     </div>
-                                                    <div style={{ fontSize: 16, fontWeight: 500, color: '#111b21', marginBottom: 8 }}>Welcome to your community!</div>
-                                                    <div style={{ fontSize: 14, color: '#667781', lineHeight: '1.5', marginBottom: 16 }}>Send important admin updates to all your members at once.</div>
-                                                    <div style={{ fontSize: 14, fontWeight: 600, color: '#0EA5BE', cursor: 'pointer' }}>Manage community</div>
+                                                    <div className="wa-group-welcome-title" style={{ fontSize: 18, marginBottom: 8 }}>Welcome to your community!</div>
+                                                    <div className="wa-group-welcome-subtitle" style={{ fontSize: 14, lineHeight: '1.5', marginBottom: 16 }}>Send important admin updates to all your members at once.</div>
+                                                    <div className="wa-group-welcome-action" style={{ fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Manage community</div>
                                                 </div>
                                             </div>
                                         ) : (
@@ -23105,7 +23315,7 @@ export default function Chat() {
                                                     isMeMsg={isMeMsg}
                                                 />
                                             ) : (
-                                                <div className="wa-input-pill" style={{ background: 'white', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: (replyingTo || showGrammarBar) ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                                                <div className="wa-input-pill" style={{ background: 'rgba(8, 19, 39, 0.86)', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: (replyingTo || showGrammarBar) ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 16px 34px rgba(2, 6, 23, 0.28)', border: '1px solid rgba(148, 163, 184, 0.22)', backdropFilter: 'blur(14px) saturate(135%)' }}>
                                                     {renderGrammarBar()}
                                                     {replyingTo && (
                                                         <div className="wa-reply-preview-container">
@@ -25790,6 +26000,16 @@ export default function Chat() {
             />
 
             <ConfirmModal
+                isOpen={!!commonGroupRedirectTarget}
+                title={`Open ${commonGroupRedirectTarget?.name || 'this group'}?`}
+                message="You are viewing this contact's info. Do you want to redirect to the group chat or stay here?"
+                confirmText="Redirect"
+                cancelText="Stay here"
+                onConfirm={() => redirectToCommonGroup(commonGroupRedirectTarget)}
+                onCancel={() => setCommonGroupRedirectTarget(null)}
+            />
+
+            <ConfirmModal
                 isOpen={isDeleteChatConfirmOpen}
                 title={deleteTarget?.isGroup || (!deleteTarget && selectedGroup) ? "Delete group?" : "Delete chat?"}
                 message={deleteTarget?.isGroup || (!deleteTarget && selectedGroup)
@@ -25799,6 +26019,22 @@ export default function Chat() {
                 onConfirm={handleDeleteChatConfirm}
                 onCancel={() => {
                     setIsDeleteChatConfirmOpen(false);
+                    setDeleteTarget(null);
+                }}
+            />
+
+            <ConfirmModal
+                isOpen={isClearChatConfirmOpen}
+                title={deleteTarget?.isGroup || (!deleteTarget && selectedGroup) ? "Clear group?" : "Clear chat?"}
+                message={deleteTarget?.isGroup || (!deleteTarget && selectedGroup)
+                    ? `Clear all messages in "${deleteTarget?.name || selectedGroup?.name}" for you? The group will stay in your chat list.`
+                    : `Clear all messages with "${deleteTarget?.name || selectedUser?.name}" for you?`}
+                confirmText="Clear"
+                cancelText="Cancel"
+                confirmVariant="danger"
+                onConfirm={handleClearChatConfirm}
+                onCancel={() => {
+                    setIsClearChatConfirmOpen(false);
                     setDeleteTarget(null);
                 }}
             />
@@ -26069,20 +26305,30 @@ export default function Chat() {
 
                 return (
                     <div className="wa-mute-modal-overlay" onClick={closeExitGroupModal}>
-                        <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()}>
-                            <div className="wa-mute-modal-content">
-                                <div className="wa-mute-header-centered">
-                                    <div className="wa-mute-icon-wrapper">
-                                        <LogOut size={28} color="#f87171" />
-                                    </div>
-                                    <h3>{needsManualTransfer ? 'Assign a new group admin' : 'Exit this group?'}</h3>
+                        <div
+                            className="wa-mute-modal"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                                width: 'min(625px, calc(100vw - 32px))',
+                                borderRadius: 22,
+                                background: 'linear-gradient(180deg, rgba(8, 28, 46, 0.98), rgba(4, 18, 32, 0.98))',
+                                border: '1px solid rgba(56, 189, 248, 0.24)',
+                                boxShadow: '0 28px 70px rgba(2, 6, 23, 0.62), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+                                padding: 0
+                            }}
+                        >
+                            <div style={{ padding: '28px 30px 26px' }}>
+                                <div style={{ marginBottom: 26 }}>
+                                    <h3 style={{ margin: 0, color: '#f8fafc', fontSize: 26, fontWeight: 600 }}>
+                                        {needsManualTransfer ? 'Assign a new group admin' : `Exit group: "${activeGroup?.name || 'this group'}"?`}
+                                    </h3>
                                 </div>
 
-                                <div className="wa-mute-body">
-                                    <div className="wa-mute-description-centered">
+                                <div>
+                                    <div style={{ color: '#cbd5e1', fontSize: 18, lineHeight: 1.45, marginBottom: needsManualTransfer ? 20 : 76 }}>
                                         {needsManualTransfer
                                             ? 'Before you exit, choose another group member to become the new admin.'
-                                            : 'You will stop receiving messages from this group until someone adds you again.'}
+                                            : 'Only admins are notified when you leave a group.'}
                                     </div>
 
                                     {needsManualTransfer && (
@@ -26107,8 +26353,8 @@ export default function Chat() {
                                                                 gap: 12,
                                                                 padding: '12px 14px',
                                                                 borderRadius: 12,
-                                                                border: isSelected ? '1px solid #0EA5BE' : '1px solid #dfe5e7',
-                                                                background: isSelected ? 'rgba(14, 165, 190, 0.08)' : '#fff',
+                                                                border: isSelected ? '1px solid rgba(56, 189, 248, 0.62)' : '1px solid rgba(148, 163, 184, 0.18)',
+                                                                background: isSelected ? 'rgba(14, 165, 233, 0.16)' : 'rgba(15, 23, 42, 0.76)',
                                                                 cursor: 'pointer',
                                                                 textAlign: 'left'
                                                             }}
@@ -26117,8 +26363,8 @@ export default function Chat() {
                                                                 {(member.name || 'U').charAt(0).toUpperCase()}
                                                             </div>
                                                             <div style={{ flex: 1, minWidth: 0 }}>
-                                                                <div style={{ color: '#111b21', fontSize: 15, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{member.name || 'Member'}</div>
-                                                                <div style={{ color: '#667781', fontSize: 13 }}>{member.about || 'Available'}</div>
+                                                                <div style={{ color: '#f8fafc', fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{member.name || 'Member'}</div>
+                                                                <div style={{ color: '#94a3b8', fontSize: 13 }}>{member.about || 'Available'}</div>
                                                             </div>
                                                             {isSelected && <Check size={18} color="#0EA5BE" />}
                                                         </button>
@@ -26129,13 +26375,49 @@ export default function Chat() {
                                     )}
                                 </div>
 
-                                <div className="wa-mute-footer-centered">
-                                    <button className="wa-mute-btn-cancel" onClick={closeExitGroupModal}>Cancel</button>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 20 }}>
                                     <button
-                                        className="wa-mute-btn-confirm"
+                                        type="button"
+                                        onClick={closeExitGroupModal}
+                                        style={{ border: 'none', background: 'transparent', color: '#087f4f', fontSize: 16, fontWeight: 700, padding: '8px 22px', cursor: 'pointer' }}
+                                    >
+                                        Cancel
+                                    </button>
+                                    {!needsManualTransfer && (
+                                        <button
+                                            type="button"
+                                            onClick={() => handleExitGroup(activeGroup, null, 'delete')}
+                                            style={{
+                                                minWidth: 238,
+                                                borderRadius: 999,
+                                                border: '1px solid rgba(248, 113, 113, 0.36)',
+                                                background: 'rgba(244, 63, 94, 0.08)',
+                                                color: '#ff6b7d',
+                                                fontSize: 16,
+                                                fontWeight: 800,
+                                                padding: '13px 26px',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            Exit and delete for me
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
                                         onClick={() => handleExitGroup(activeGroup)}
                                         disabled={needsManualTransfer && (!exitGroupTransferTarget || candidateMembers.length === 0)}
-                                        style={{ background: '#f87171', opacity: needsManualTransfer && (!exitGroupTransferTarget || candidateMembers.length === 0) ? 0.6 : 1, cursor: needsManualTransfer && (!exitGroupTransferTarget || candidateMembers.length === 0) ? 'not-allowed' : 'pointer' }}
+                                        style={{
+                                            minWidth: needsManualTransfer ? 170 : 142,
+                                            borderRadius: 999,
+                                            border: 'none',
+                                            background: '#e9043d',
+                                            color: '#ffffff',
+                                            fontSize: 16,
+                                            fontWeight: 800,
+                                            padding: '14px 28px',
+                                            opacity: needsManualTransfer && (!exitGroupTransferTarget || candidateMembers.length === 0) ? 0.6 : 1,
+                                            cursor: needsManualTransfer && (!exitGroupTransferTarget || candidateMembers.length === 0) ? 'not-allowed' : 'pointer'
+                                        }}
                                     >
                                         {needsManualTransfer ? 'Assign and exit' : 'Exit group'}
                                     </button>
