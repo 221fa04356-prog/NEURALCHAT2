@@ -3915,11 +3915,25 @@ html.wa-screenshot-protection-active .wa-app-container {
 }
 
 .wa-dropdown-item.delete {
-    color: #3b4a54;
+    color: #ffffff;
+    font-weight: 800;
+    background: linear-gradient(135deg, #ff5b6e 0%, #f43f5e 58%, #be123c 100%);
+    box-shadow: 0 12px 26px rgba(244, 63, 94, 0.22), inset 0 1px 1px rgba(255, 255, 255, 0.24);
+    border-radius: 16px;
+    margin: 6px 10px;
+    justify-content: center;
+    transition: transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease;
 }
 
 .wa-dropdown-item.delete svg {
-    color: #8696a0;
+    color: #ffffff;
+}
+
+.wa-dropdown-item.delete:hover {
+    background: linear-gradient(135deg, #ff6c7d 0%, #fb4b69 56%, #d4144c 100%);
+    filter: brightness(1.04) saturate(1.08);
+    transform: translateY(-1px);
+    box-shadow: 0 16px 34px rgba(244, 63, 94, 0.3), 0 0 18px rgba(255, 91, 110, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.28);
 }
 
 .wa-dropdown-divider {
@@ -4355,15 +4369,37 @@ html.wa-screenshot-protection-active .wa-app-container {
 }
 
 .wa-setting-item.danger .wa-setting-text {
-    color: #e53935;
+    color: #ffffff;
+    font-weight: 850;
 }
 
 .wa-setting-item.danger .wa-setting-icon {
-    color: #e53935;
+    color: #ffffff;
 }
 
 .wa-setting-item.danger:hover {
-    background: #fef2f2;
+    background: linear-gradient(135deg, #ff6c7d 0%, #fb4b69 56%, #d4144c 100%);
+    box-shadow: 0 18px 38px rgba(244, 63, 94, 0.32), 0 0 22px rgba(255, 91, 110, 0.14), inset 0 1px 1px rgba(255, 255, 255, 0.28);
+}
+
+.wa-setting-item.danger {
+    margin: 8px 16px;
+    padding: 14px 18px;
+    border-radius: 18px;
+    color: #ffffff;
+    background: linear-gradient(135deg, #ff5b6e 0%, #f43f5e 58%, #be123c 100%);
+    box-shadow: 0 14px 30px rgba(244, 63, 94, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.24);
+    transition: transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease;
+}
+
+.wa-setting-item.danger:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.04) saturate(1.08);
+}
+
+.wa-setting-item.danger svg {
+    color: #ffffff !important;
+    stroke: #ffffff !important;
 }
 
 .wa-common-group-item {
@@ -5862,8 +5898,9 @@ html.wa-screenshot-protection-active .wa-app-container {
     min-height: 50px;
     padding: 0 24px;
     border-radius: 999px;
-    background: #ffffff;
-    border: 1px solid rgba(148, 163, 184, 0.38);
+    background: linear-gradient(135deg, #ff5b6e 0%, #f43f5e 58%, #be123c 100%);
+    border: none;
+    color: #ffffff;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -5872,29 +5909,32 @@ html.wa-screenshot-protection-active .wa-app-container {
     font-weight: 800;
     cursor: pointer;
     transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+    box-shadow: 0 14px 30px rgba(244, 63, 94, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.24);
 }
 
 .wa-blocked-action-btn.danger {
-    color: #e11d48;
+    color: #ffffff;
 }
 
 .wa-blocked-action-btn.success {
-    color: #059669;
+    background: linear-gradient(135deg, #22c6f3 0%, #2f8cff 58%, #5b6cff 100%);
+    color: #ffffff;
+    box-shadow: 0 14px 30px rgba(47, 140, 255, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.24);
 }
 
 .wa-blocked-action-btn:hover {
     transform: translateY(-1px);
-    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+    filter: brightness(1.05) saturate(1.08);
+    box-shadow: 0 18px 38px rgba(244, 63, 94, 0.32), 0 0 22px rgba(255, 91, 110, 0.14), inset 0 1px 1px rgba(255, 255, 255, 0.28);
 }
 
 .wa-blocked-action-btn.danger:hover {
-    background: #fff1f2;
-    border-color: rgba(225, 29, 72, 0.28);
+    background: linear-gradient(135deg, #ff6c7d 0%, #fb4b69 56%, #d4144c 100%);
 }
 
 .wa-blocked-action-btn.success:hover {
-    background: #ecfdf5;
-    border-color: rgba(5, 150, 105, 0.28);
+    background: linear-gradient(135deg, #2ed2ff 0%, #3a98ff 56%, #6374ff 100%);
+    box-shadow: 0 18px 38px rgba(47, 140, 255, 0.32), 0 0 22px rgba(34, 198, 243, 0.14), inset 0 1px 1px rgba(255, 255, 255, 0.28);
 }
 
 .wa-blocked-chat-note {
@@ -10941,17 +10981,30 @@ svg.wa-back-icon,
 }
 
 .wa-mute-modal-overlay {
-    background: rgba(2, 10, 22, 0.62) !important;
-    backdrop-filter: blur(10px) saturate(120%) !important;
-    -webkit-backdrop-filter: blur(10px) saturate(120%) !important;
+    background: rgba(2, 8, 20, 0.18) !important;
+    backdrop-filter: blur(7px) saturate(145%) !important;
+    -webkit-backdrop-filter: blur(7px) saturate(145%) !important;
+}
+
+.wa-encryption-modal-overlay {
+    background: rgba(2, 8, 20, 0.18) !important;
+    backdrop-filter: blur(7px) saturate(145%) !important;
+    -webkit-backdrop-filter: blur(7px) saturate(145%) !important;
 }
 
 .wa-mute-modal,
 .wa-encryption-modal {
-    background: linear-gradient(180deg, rgba(10, 30, 49, 0.98), rgba(7, 23, 39, 0.97)) !important;
+    background: linear-gradient(180deg, rgba(8, 28, 46, 0.99), rgba(4, 18, 32, 0.99)) !important;
     border: 1px solid rgba(56, 189, 248, 0.2) !important;
     color: #e5f4ff !important;
-    box-shadow: 0 24px 60px rgba(2, 6, 23, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+    box-shadow: 0 24px 60px rgba(2, 6, 23, 0.55), 0 0 34px rgba(56, 189, 248, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+.wa-encryption-modal {
+    background: linear-gradient(180deg, rgba(8, 28, 46, 0.99), rgba(4, 18, 32, 0.99)) !important;
+    backdrop-filter: blur(10px) saturate(135%) !important;
+    -webkit-backdrop-filter: blur(10px) saturate(135%) !important;
+    border-color: rgba(125, 211, 252, 0.28) !important;
 }
 
 .wa-mute-header-centered h3,
@@ -10976,7 +11029,7 @@ svg.wa-back-icon,
 }
 
 .wa-encryption-code-box {
-    background: rgba(5, 22, 38, 0.72) !important;
+    background: rgba(5, 22, 38, 0.54) !important;
     border-color: rgba(56, 189, 248, 0.22) !important;
 }
 
@@ -10992,17 +11045,26 @@ svg.wa-back-icon,
     color: #38d5ff !important;
 }
 
-.wa-mute-btn-cancel,
 .wa-mute-btn-confirm,
 .wa-encryption-btn-primary {
     background: linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%) !important;
     color: #ffffff !important;
+    border: 1px solid rgba(142, 210, 255, 0.34) !important;
     box-shadow: 0 10px 24px rgba(14, 165, 233, 0.22) !important;
 }
 
+.wa-mute-btn-cancel {
+    background: linear-gradient(135deg, rgba(42, 60, 82, 0.96) 0%, rgba(24, 38, 58, 0.96) 52%, rgba(12, 25, 42, 0.98) 100%) !important;
+    color: #f8fafc !important;
+    border: 1px solid rgba(148, 163, 184, 0.34) !important;
+    box-shadow: 0 10px 24px rgba(2, 6, 23, 0.28), inset 0 1px 1px rgba(255, 255, 255, 0.12) !important;
+}
+
 .wa-encryption-btn-secondary {
-    background: rgba(148, 163, 184, 0.16) !important;
-    color: #dbeafe !important;
+    background: linear-gradient(135deg, rgba(42, 60, 82, 0.96) 0%, rgba(24, 38, 58, 0.96) 52%, rgba(12, 25, 42, 0.98) 100%) !important;
+    color: #f8fafc !important;
+    border: 1px solid rgba(148, 163, 184, 0.34) !important;
+    box-shadow: 0 10px 24px rgba(2, 6, 23, 0.28), inset 0 1px 1px rgba(255, 255, 255, 0.12) !important;
 }
 
 .wa-mute-btn-cancel:hover,
@@ -11011,7 +11073,6 @@ svg.wa-back-icon,
     transform: none !important;
 }
 
-.wa-mute-btn-cancel:hover,
 .wa-mute-btn-confirm:hover,
 .wa-encryption-btn-primary:hover,
 .wa-lang-confirm-accept:hover,
@@ -11026,15 +11087,21 @@ svg.wa-back-icon,
     filter: brightness(1.08) saturate(1.08);
 }
 
+.wa-mute-btn-cancel:hover {
+    background: linear-gradient(135deg, rgba(55, 76, 103, 1) 0%, rgba(31, 50, 75, 0.98) 52%, rgba(16, 32, 53, 1) 100%) !important;
+    box-shadow: 0 12px 28px rgba(2, 6, 23, 0.32), inset 0 1px 1px rgba(255, 255, 255, 0.14) !important;
+    filter: brightness(1.08) saturate(1.08);
+}
+
 .wa-encryption-btn-secondary:hover,
 .wa-lang-confirm-cancel:hover,
 .wa-settings-btn-cancel:hover,
 .wa-unstar-btn.cancel:hover,
 .wa-forward-cancel-btn:hover,
 .wa-crop-retake-btn-footer:hover {
-    background: rgba(148, 163, 184, 0.26) !important;
+    background: linear-gradient(135deg, rgba(55, 76, 103, 1) 0%, rgba(31, 50, 75, 0.98) 52%, rgba(16, 32, 53, 1) 100%) !important;
     color: #f8fafc !important;
-    box-shadow: inset 0 0 0 1px rgba(203, 213, 225, 0.16), 0 10px 24px rgba(2, 6, 23, 0.18) !important;
+    box-shadow: 0 12px 28px rgba(2, 6, 23, 0.32), inset 0 1px 1px rgba(255, 255, 255, 0.14) !important;
 }
 
 .wa-unstar-btn.confirm:hover,
@@ -11052,6 +11119,76 @@ svg.wa-back-icon,
 .wa-lang-confirm-modal button:hover,
 .wa-unstar-confirm-bar button:hover {
     filter: brightness(1.08) saturate(1.08);
+}
+
+.wa-forward-modal-overlay,
+.wa-lang-confirm-overlay,
+.wa-settings-overlay,
+.wa-contact-detail-modal-overlay,
+.wa-view-once-modal-overlay {
+    background: rgba(2, 8, 20, 0.18) !important;
+    backdrop-filter: blur(7px) saturate(145%) !important;
+    -webkit-backdrop-filter: blur(7px) saturate(145%) !important;
+}
+
+.wa-forward-modal,
+.wa-lang-confirm-modal,
+.wa-contact-detail-modal,
+.wa-view-once-modal-content {
+    background: linear-gradient(180deg, rgba(8, 28, 46, 0.99), rgba(4, 18, 32, 0.99)) !important;
+    border: 1px solid rgba(56, 189, 248, 0.2) !important;
+    color: #e5f4ff !important;
+    box-shadow: 0 24px 60px rgba(2, 6, 23, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+.wa-contact-info-panel .wa-contact-settings-list,
+.wa-contact-info-panel .wa-contact-danger-zone {
+    border: 0 !important;
+}
+
+.wa-contact-info-panel .wa-setting-item,
+.wa-contact-info-panel .wa-profile-section {
+    border: 0 !important;
+    box-shadow: none !important;
+}
+
+.wa-contact-info-panel .wa-setting-item:not(.danger) {
+    background: transparent !important;
+}
+
+.wa-contact-info-panel .wa-setting-item:hover {
+    background: rgba(56, 189, 248, 0.1) !important;
+}
+
+.wa-contact-info-panel .wa-setting-item.danger:hover {
+    background: rgba(244, 63, 94, 0.08) !important;
+    box-shadow: none !important;
+}
+
+.wa-contact-info-panel .wa-setting-item.danger {
+    background: transparent !important;
+    box-shadow: none !important;
+    color: #ff5b6e !important;
+}
+
+.wa-contact-info-panel .wa-setting-item.danger .wa-setting-text,
+.wa-contact-info-panel .wa-setting-item.danger .wa-setting-icon {
+    color: #ff5b6e !important;
+}
+
+.wa-contact-info-panel .wa-setting-item.danger svg {
+    color: #ff5b6e !important;
+    stroke: #ff5b6e !important;
+}
+
+.wa-contact-info-panel .wa-common-group-item {
+    border-bottom: 0 !important;
+}
+
+.wa-contact-section-divider {
+    height: 1px !important;
+    margin: 0 30px !important;
+    background: rgba(255, 255, 255, 0.08) !important;
 }
 
 .wa-video-preview-container {
