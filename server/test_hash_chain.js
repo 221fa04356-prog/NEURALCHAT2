@@ -110,10 +110,57 @@ const runTest = async () => {
 
     if (!targetId && type !== 'list') {
         console.log('Usage: node test_hash_chain.js [ai|p2p|group] [ID]');
-        console.log('Example: node test_hash_chain.js ai 65f1234567890');
-        console.log('\nListing some users to test AI chat:');
-        const users = await mongoose.model('User').find().limit(5);
+        console.log('Example: node test_hash_chain.js group 65f1234567890\n');
+        
+        console.log('--- Listing some Users ---');
+        const users = await mongoose.model('User').find().limit(50);
         users.forEach(u => console.log(`${u.name}: ${u._id}`));
+
+        try {
+            console.log('\n--- Listing some Groups ---');
+            const groups = await mongoose.model('Group').find().limit(50);
+            const Community = mongoose.models.Community || require('./models/Community');
+            
+            for (const g of groups) {
+                let displayName = g.name;
+                
+                if (g.name === 'Announcements' || g.isAnnouncementGroup) {
+                    const community = await Community.findOne({ announcements: g._id });
+                    if (community) {
+                        displayName = `[Announcement] ${community.name}`;
+                    }
+                } else {
+                    const parentCommunity = await Community.findOne({ groups: g._id });
+                    if (parentCommunity) {
+                        displayName = `${g.name} (in ${parentCommunity.name})`;
+                    }
+                }
+                console.log(`${displayName}: ${g._id}`);
+            }
+        } catch(e) {
+            // Fallback if Group model issue
+            const Group = require('./models/Group');
+            const Community = require('./models/Community');
+            const groups = await Group.find().limit(50);
+            
+            for (const g of groups) {
+                let displayName = g.name;
+                
+                if (g.name === 'Announcements' || g.isAnnouncementGroup) {
+                    const community = await Community.findOne({ announcements: g._id });
+                    if (community) {
+                        displayName = `[Announcement] ${community.name}`;
+                    }
+                } else {
+                    const parentCommunity = await Community.findOne({ groups: g._id });
+                    if (parentCommunity) {
+                        displayName = `${g.name} (in ${parentCommunity.name})`;
+                    }
+                }
+                console.log(`${displayName}: ${g._id}`);
+            }
+        }
+        
         process.exit(0);
     }
 
