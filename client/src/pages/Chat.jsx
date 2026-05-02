@@ -1286,6 +1286,7 @@ export default function Chat() {
     const [unblockReason, setUnblockReason] = useState('');
     const [showUnblockTooltip, setShowUnblockTooltip] = useState(false);
     const [blockConfirmTarget, setBlockConfirmTarget] = useState(null);
+    const [reportConfirmTarget, setReportConfirmTarget] = useState(null);
 
 
     const handleReaction = async (messageId, emoji, isGroup) => {
@@ -7786,6 +7787,17 @@ export default function Chat() {
             setBlockConfirmTarget({
                 targetId: resolvedTargetId,
                 targetData: resolvedTargetData,
+                displayName
+            });
+            setOpenDropdown(null);
+            return;
+        }
+
+        if (action === 'report' && !targetData.__confirmed) {
+            setReportConfirmTarget({
+                targetId: resolvedTargetId,
+                targetData: resolvedTargetData,
+                targetType,
                 displayName
             });
             setOpenDropdown(null);
@@ -15298,6 +15310,12 @@ export default function Chat() {
             return mobile.startsWith(countryCode) ? mobile : `${countryCode} ${mobile}`;
         })();
         const displaySubtext = isGroup || activeTarget?.is_community ? (activeTarget.mobile || 'Available') : formattedContactNumber;
+        const activeTargetId = activeTarget?._id || activeTarget?.id;
+        const currentContact = !isGroup && activeTargetId
+            ? (users.find(contact => String(contact._id || contact.id) === String(activeTargetId)) || activeTarget)
+            : activeTarget;
+        const isFavoriteContact = !!currentContact?.isFavorite;
+        const isBlockedContact = !!currentContact?.blockedByMe;
 
         return (
             <div className={`wa-contact-info-panel ${isContactInfoOpen ? 'active' : ''}`}>
@@ -15564,7 +15582,7 @@ export default function Chat() {
 
                     <div className="wa-contact-section-divider"></div>
 
-                    {/* Block / Report / Exit */}
+                    {/* Chat actions */}
                     <div className="wa-contact-danger-zone">
                         {isGroup ? (
                             <div className="wa-setting-item danger" onClick={() => { /* Exit Logic */ }}>
@@ -15572,13 +15590,32 @@ export default function Chat() {
                                 <div className="wa-setting-text">{t('contact_info.exit_group')}</div>
                             </div>
                         ) : (
-                            <div className="wa-setting-item danger">
-                                <div className="wa-setting-icon"><HeartOff size={20} color="#e53935" /></div>
-                                <div className="wa-setting-text">{t('contact_info.block', { name: displayName })}</div>
-                            </div>
+                            <>
+                                <div className="wa-setting-item clickable" onClick={() => handleToggleFavorite(activeTargetId, isFavoriteContact)}>
+                                    <div className="wa-setting-icon">
+                                        {isFavoriteContact ? <HeartOff size={20} color="#6b7280" /> : <Heart size={20} color="#6b7280" />}
+                                    </div>
+                                    <div className="wa-setting-text">{isFavoriteContact ? 'Remove favourite' : 'Add to favourites'}</div>
+                                </div>
+                                <div className="wa-setting-item clickable" onClick={() => handleAddChatToList(activeTargetId, displayName)}>
+                                    <div className="wa-setting-icon"><List size={20} color="#6b7280" /></div>
+                                    <div className="wa-setting-text">Add to list</div>
+                                </div>
+                                <div className="wa-setting-item danger" onClick={() => {
+                                    if (isBlockedContact) handleUnblockChatUser();
+                                    else handleModerationAction('block', activeTargetId, currentContact);
+                                }}>
+                                    <div className="wa-setting-icon"><Ban size={20} color="#e53935" /></div>
+                                    <div className="wa-setting-text">{isBlockedContact ? `Unblock ${displayName}` : t('contact_info.block', { name: displayName })}</div>
+                                </div>
+                                <div className="wa-setting-item danger" onClick={() => handleModerationAction('report', activeTargetId, currentContact)}>
+                                    <div className="wa-setting-icon"><ThumbsDown size={20} color="#e53935" /></div>
+                                    <div className="wa-setting-text">{t('contact_info.report', { name: displayName })}</div>
+                                </div>
+                            </>
                         )}
                         <div className="wa-setting-item danger" onClick={() => {
-                            setDeleteTarget({ _id: activeTarget._id, id: activeTarget._id, name: displayName, isGroup });
+                            setDeleteTarget({ _id: activeTargetId, id: activeTargetId, name: displayName, isGroup });
                             setIsDeleteChatConfirmOpen(true);
                         }}>
                             <div className="wa-setting-icon"><Trash2 size={20} color="#e53935" /></div>
@@ -15702,7 +15739,7 @@ export default function Chat() {
 
         return (
             <div
-                className="wa-mute-modal-overlay"
+                className="wa-mute-modal-overlay wa-encryption-modal-overlay"
                 onClick={() => setIsEncryptionInfoOpen(false)}
                 style={{ zIndex: 5000 }}
             >
@@ -23345,13 +23382,22 @@ export default function Chat() {
                 <div
                     className="wa-mute-modal"
                     onClick={(e) => e.stopPropagation()}
-                    style={{ maxWidth: '450px', background: '#ffffff', borderRadius: '24px', padding: '32px', textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}
+                    style={{
+                        maxWidth: '450px',
+                        background: 'linear-gradient(180deg, rgba(10, 28, 46, 0.98) 0%, rgba(5, 22, 38, 0.98) 100%)',
+                        borderRadius: '24px',
+                        padding: '32px',
+                        textAlign: 'center',
+                        boxShadow: '0 28px 80px rgba(0, 8, 24, 0.42), inset 0 1px 0 rgba(255,255,255,0.08)',
+                        border: '1px solid rgba(14, 165, 190, 0.28)',
+                        color: '#eaf6ff'
+                    }}
                 >
-                    <div style={{ background: '#fff5f6', width: '80px', height: '80px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', border: '1px solid #fee2e2' }}>
+                    <div style={{ background: 'rgba(255, 245, 246, 0.96)', width: '80px', height: '80px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', border: '1px solid rgba(254, 226, 226, 0.9)', boxShadow: '0 14px 34px rgba(220, 38, 38, 0.16)' }}>
                         <ShieldAlert size={40} color="#dc2626" />
                     </div>
-                    <h2 style={{ color: '#111b21', fontSize: '24px', fontWeight: '700', marginBottom: '12px' }}>Messaging Suspended</h2>
-                    <p style={{ color: '#54656f', fontSize: '15px', lineHeight: '1.6', marginBottom: '24px' }}>
+                    <h2 style={{ color: '#f8fbff', fontSize: '24px', fontWeight: '800', marginBottom: '12px' }}>Messaging Suspended</h2>
+                    <p style={{ color: 'rgba(234, 246, 255, 0.72)', fontSize: '15px', lineHeight: '1.6', marginBottom: '24px' }}>
                         Access to messaging has been temporarily suspended following multiple breaches of our community standards regarding acceptable content.
                     </p>
 
@@ -23362,15 +23408,29 @@ export default function Chat() {
                                     value={unblockReason}
                                     onChange={(e) => setUnblockReason(e.target.value)}
                                     placeholder="Please provide a detailed justification for the restoration of your messaging privileges..."
-                                    style={{ width: '100%', padding: '16px', borderRadius: '12px', border: '1.5px solid #e9edef', marginBottom: '8px', minHeight: '120px', fontSize: '14px', outline: 'none', resize: 'none', transition: 'all 0.2s' }}
+                                    style={{
+                                        width: '100%',
+                                        padding: '16px',
+                                        borderRadius: '14px',
+                                        border: '1.5px solid rgba(14, 165, 190, 0.45)',
+                                        marginBottom: '8px',
+                                        minHeight: '120px',
+                                        fontSize: '14px',
+                                        outline: 'none',
+                                        resize: 'none',
+                                        transition: 'all 0.2s',
+                                        background: 'rgba(255,255,255,0.96)',
+                                        color: '#111827',
+                                        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.65), 0 12px 28px rgba(0, 8, 24, 0.18)'
+                                    }}
                                     onFocus={(e) => e.target.style.borderColor = '#0EA5BE'}
-                                    onBlur={(e) => e.target.style.borderColor = '#e9edef'}
+                                    onBlur={(e) => e.target.style.borderColor = 'rgba(14, 165, 190, 0.45)'}
                                 />
                                 <span style={{ position: 'absolute', top: '8px', right: '8px', color: '#dc2626', fontWeight: 'bold', fontSize: '20px' }}>*</span>
                             </div>
 
                             {!unblockReason.trim() && (
-                                <p style={{ color: '#dc2626', fontSize: '12px', textAlign: 'left', marginBottom: '24px', paddingLeft: '4px', fontWeight: '500' }}>
+                                <p style={{ color: '#ff6b7d', fontSize: '12px', textAlign: 'left', marginBottom: '24px', paddingLeft: '4px', fontWeight: '700' }}>
                                     This field is mandatory for the submission of an unblock request.
                                 </p>
                             )}
@@ -23383,15 +23443,15 @@ export default function Chat() {
                                         padding: '12px',
                                         borderRadius: '24px',
                                         border: 'none',
-                                        background: 'white',
-                                        color: '#54656f',
-                                        fontWeight: '600',
+                                        background: 'rgba(255,255,255,0.96)',
+                                        color: '#475569',
+                                        fontWeight: '800',
                                         cursor: 'pointer',
                                         boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
                                         transition: 'all 0.2s'
                                     }}
-                                    onMouseEnter={e => e.currentTarget.style.background = '#f8f9fa'}
-                                    onMouseLeave={e => e.currentTarget.style.background = 'white'}
+                                    onMouseEnter={e => e.currentTarget.style.background = '#f8fbff'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.96)'}
                                 >
                                     Cancel
                                 </button>
@@ -23406,11 +23466,11 @@ export default function Chat() {
                                             padding: '12px',
                                             borderRadius: '24px',
                                             border: 'none',
-                                            background: unblockReason.trim() ? '#0EA5BE' : '#E9EDEF',
-                                            color: unblockReason.trim() ? 'white' : '#AAB8C2',
-                                            fontWeight: '600',
+                                            background: unblockReason.trim() ? 'linear-gradient(135deg, #0ea5be 0%, #1a9cff 100%)' : 'rgba(233, 237, 239, 0.88)',
+                                            color: unblockReason.trim() ? 'white' : '#8fa2b1',
+                                            fontWeight: '800',
                                             cursor: unblockReason.trim() ? 'pointer' : 'not-allowed',
-                                            boxShadow: unblockReason.trim() ? '0 4px 12px rgba(14, 165, 190, 0.25)' : 'none',
+                                            boxShadow: unblockReason.trim() ? '0 14px 28px rgba(14, 165, 190, 0.28)' : 'none',
                                             transition: 'all 0.3s ease'
                                         }}
                                     >
@@ -23448,7 +23508,7 @@ export default function Chat() {
                             </div>
                         </>
                     ) : (
-                        <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '16px', color: '#15803d', fontWeight: '500', fontSize: '14px', marginBottom: '12px', border: '1px solid #dcfce7' }}>
+                        <div style={{ background: 'rgba(16, 185, 129, 0.14)', padding: '16px', borderRadius: '16px', color: '#86efac', fontWeight: '700', fontSize: '14px', marginBottom: '12px', border: '1px solid rgba(134, 239, 172, 0.34)' }}>
                             <CheckSquare size={18} style={{ verticalAlign: 'middle', marginRight: '8px' }} />
                             Your restoration request is currently under administrative review.
                         </div>
@@ -25564,50 +25624,81 @@ export default function Chat() {
 
             {/* Message Requests Modal */}
             {isRequestsModalOpen && (
-                <div className="wa-mute-modal-overlay" onClick={() => setIsRequestsModalOpen(false)} style={{ zIndex: 11000 }}>
-                    <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '450px', width: '90%' }}>
+                <div className="wa-mute-modal-overlay" onClick={() => setIsRequestsModalOpen(false)} style={{ zIndex: 11000, background: 'rgba(3, 10, 26, 0.62)', backdropFilter: 'blur(8px) saturate(135%)' }}>
+                    <div
+                        className="wa-mute-modal"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                            maxWidth: '450px',
+                            width: '90%',
+                            background: 'linear-gradient(180deg, rgba(10, 28, 46, 0.98) 0%, rgba(5, 22, 38, 0.98) 100%)',
+                            border: '1px solid rgba(14, 165, 190, 0.28)',
+                            borderRadius: '24px',
+                            boxShadow: '0 28px 80px rgba(0, 8, 24, 0.42), inset 0 1px 0 rgba(255,255,255,0.08)',
+                            color: '#eaf6ff'
+                        }}
+                    >
                         <div className="wa-mute-modal-content">
-                            <div className="wa-mute-header-centered" style={{ borderBottom: '1px solid #f0f2f5', paddingBottom: '15px' }}>
-                                <div className="wa-mute-icon-wrapper" style={{ background: '#f0f9fa' }}>
-                                    <MessageSquare size={28} color="#0EA5BE" />
+                            <div className="wa-mute-header-centered" style={{ borderBottom: '1px solid rgba(14, 165, 190, 0.28)', paddingBottom: '15px' }}>
+                                <div className="wa-mute-icon-wrapper" style={{ background: 'rgba(14, 165, 190, 0.16)', border: '1px solid rgba(14, 165, 190, 0.34)' }}>
+                                    <MessageSquare size={28} color="#38d5ef" />
                                 </div>
-                                <h3 style={{ margin: '10px 0 5px 0', fontSize: '20px', color: '#111b21' }}>Message Requests</h3>
-                                <p style={{ margin: 0, fontSize: '14px', color: '#667781' }}>People you haven't chatted with before</p>
+                                <h3 style={{ margin: '10px 0 5px 0', fontSize: '20px', color: '#f8fbff', fontWeight: 800 }}>Message Requests</h3>
+                                <p style={{ margin: 0, fontSize: '14px', color: 'rgba(234, 246, 255, 0.64)' }}>People you haven't chatted with before</p>
                             </div>
                             <div className="wa-mute-body" style={{ maxHeight: '400px', overflowY: 'auto', padding: '10px 0' }}>
                                 {messageRequests.length === 0 ? (
                                     <div style={{ textAlign: 'center', padding: '40px 0' }}>
-                                        <MessageSquare size={48} color="#dfe5e7" style={{ marginBottom: 15 }} />
-                                        <p style={{ color: '#667781', fontSize: '16px' }}>No pending requests</p>
+                                        <MessageSquare size={48} color="rgba(56, 213, 239, 0.45)" style={{ marginBottom: 15 }} />
+                                        <p style={{ color: 'rgba(234, 246, 255, 0.68)', fontSize: '16px' }}>No pending requests</p>
                                     </div>
                                 ) : (
                                     messageRequests.map(req => (
                                         <div
                                             key={req._id}
                                             onClick={() => openRequestConversation(req)}
-                                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 15px', borderBottom: '1px solid #f0f2f5', transition: 'background 0.2s', cursor: 'pointer' }}
-                                            onMouseEnter={(e) => e.currentTarget.style.background = '#f8f9fa'}
-                                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                                            style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'space-between',
+                                                padding: '12px 15px',
+                                                marginBottom: 8,
+                                                border: '1px solid rgba(14, 165, 190, 0.16)',
+                                                borderRadius: 14,
+                                                background: 'rgba(255,255,255,0.045)',
+                                                transition: 'background 0.2s, border-color 0.2s, transform 0.2s',
+                                                cursor: 'pointer'
+                                            }}
+                                            onMouseEnter={(e) => {
+                                                e.currentTarget.style.background = 'rgba(14, 165, 190, 0.11)';
+                                                e.currentTarget.style.borderColor = 'rgba(56, 213, 239, 0.34)';
+                                                e.currentTarget.style.transform = 'translateY(-1px)';
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                e.currentTarget.style.background = 'rgba(255,255,255,0.045)';
+                                                e.currentTarget.style.borderColor = 'rgba(14, 165, 190, 0.16)';
+                                                e.currentTarget.style.transform = 'translateY(0)';
+                                            }}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
-                                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
+                                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(226, 242, 249, 0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.24)' }}>
                                                     {(req.fromUserId?.avatar || req.fromUserId?.image)
                                                         ? <img src={req.fromUserId.avatar || req.fromUserId.image} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="avatar" />
-                                                        : <span style={{ fontSize: 18, color: '#54656f' }}>{(req.fromUserId?.name || 'U')[0].toUpperCase()}</span>
+                                                        : <span style={{ fontSize: 18, color: '#375467', fontWeight: 800 }}>{(req.fromUserId?.name || 'U')[0].toUpperCase()}</span>
                                                     }
                                                 </div>
                                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                                    <div style={{ fontWeight: 500, color: '#111b21', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{req.fromUserId?.name || 'New User'}</div>
-                                                    <div style={{ fontSize: 12, color: '#667781' }}>Wants to message you</div>
+                                                    <div style={{ fontWeight: 800, color: '#f8fbff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{req.fromUserId?.name || 'New User'}</div>
+                                                    <div style={{ fontSize: 12, color: 'rgba(234, 246, 255, 0.58)' }}>Wants to message you</div>
                                                 </div>
                                             </div>
                                             <div style={{ display: 'flex', gap: 8, marginLeft: 10 }}>
                                                 <button
                                                     onClick={(e) => { e.stopPropagation(); handleAcceptRequest(req._id); setIsRequestsModalOpen(false); }}
-                                                    style={{ padding: '8px 16px', borderRadius: '20px', border: 'none', background: '#0EA5BE', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                                                    style={{ padding: '8px 16px', borderRadius: '20px', border: 'none', background: 'linear-gradient(135deg, #0ea5be 0%, #1a9cff 100%)', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: 800, boxShadow: '0 10px 22px rgba(14, 165, 190, 0.22)' }}
                                                 >Accept</button>
                                                 <button
                                                     onClick={(e) => { e.stopPropagation(); handleRejectRequest(req._id); setIsRequestsModalOpen(false); }}
-                                                    style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #f15c6d', background: 'transparent', color: '#f15c6d', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                                                    style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid rgba(255, 91, 110, 0.75)', background: 'rgba(255, 91, 110, 0.08)', color: '#ff8fa0', cursor: 'pointer', fontSize: '13px', fontWeight: 800 }}
                                                 >Reject</button>
                                             </div>
                                         </div>
@@ -25615,7 +25706,7 @@ export default function Chat() {
                                 )}
                             </div>
                             <div className="wa-mute-footer-centered" style={{ paddingTop: '10px' }}>
-                                <button className="wa-mute-btn-cancel" onClick={() => setIsRequestsModalOpen(false)} style={{ background: '#f0f2f5', color: '#54656f', border: 'none', padding: '10px 20px', borderRadius: '20px', width: '100%', fontWeight: 500, cursor: 'pointer' }}>Close</button>
+                                <button className="wa-mute-btn-cancel" onClick={() => setIsRequestsModalOpen(false)} style={{ background: 'rgba(255,255,255,0.08)', color: '#eaf6ff', border: '1px solid rgba(148, 163, 184, 0.22)', padding: '10px 20px', borderRadius: '20px', width: '100%', fontWeight: 800, cursor: 'pointer' }}>Close</button>
                             </div>
                         </div>
                     </div>
@@ -25680,6 +25771,22 @@ export default function Chat() {
                     handleModerationAction('block', target.targetId, { ...target.targetData, __confirmed: true });
                 }}
                 onCancel={() => setBlockConfirmTarget(null)}
+            />
+
+            <ConfirmModal
+                isOpen={!!reportConfirmTarget}
+                title={`Report ${reportConfirmTarget?.displayName || 'this chat'}?`}
+                message="This report will be sent to the admin team for review."
+                confirmText="Report"
+                cancelText="Cancel"
+                confirmVariant="danger"
+                onConfirm={() => {
+                    if (!reportConfirmTarget) return;
+                    const target = reportConfirmTarget;
+                    setReportConfirmTarget(null);
+                    handleModerationAction('report', target.targetId, { ...target.targetData, __confirmed: true });
+                }}
+                onCancel={() => setReportConfirmTarget(null)}
             />
 
             <ConfirmModal

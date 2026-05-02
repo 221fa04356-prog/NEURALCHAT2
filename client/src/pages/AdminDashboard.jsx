@@ -408,14 +408,17 @@ export default function AdminDashboard() {
     const [actionAuditView, setActionAuditView] = useState(null);
     const scrollHideTimerRef = useRef(null);
 
+    const isBlockReportRestorationRequest = (user) => {
+        const reason = String(user?.unblockRequestReason || '').toLowerCase();
+        return Boolean(user?.unblockRequested && reason.includes('block/report'));
+    };
+
     const normalizedStats = useMemo(() => {
         if (!stats) return null;
 
         return {
             ...stats,
-            unblockRequests: typeof stats.unblockRequests === 'number'
-                ? stats.unblockRequests
-                : users.filter((user) => user.unblockRequested).length
+            unblockRequests: users.filter((user) => user.unblockRequested && !isBlockReportRestorationRequest(user)).length
         };
     }, [stats, users]);
 
@@ -2812,7 +2815,34 @@ export default function AdminDashboard() {
     };
 
     const renderActionTable = (actionType) => {
-        const details = resolvedActionDetails.filter(item => item.action === actionType);
+        const details = [...resolvedActionDetails]
+            .filter(item => item.action === actionType)
+            .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+        const requestRows = users
+            .filter(isBlockReportRestorationRequest)
+            .map(user => {
+                const userId = String(user.id || user._id || '');
+                const related = details.filter(detail => String(detail.targetId || '') === userId);
+                if (related.length === 0) return null;
+                const oldestRelated = [...related].sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0))[0];
+                return {
+                    id: `request-${actionType}-${userId}`,
+                    isRequestRow: true,
+                    userId,
+                    action: actionType,
+                    eventAction: 'request',
+                    targetType: 'requests',
+                    targetId: userId,
+                    targetName: user.name || oldestRelated?.targetName || 'Unknown member',
+                    targetLoginId: user.login_id || oldestRelated?.targetLoginId || '',
+                    reason: user.unblockRequestReason || 'Restoration requested',
+                    created_at: oldestRelated?.created_at,
+                    name: user.name || 'Unknown member',
+                    login_id: user.login_id || ''
+                };
+            })
+            .filter(Boolean);
+        const tableRows = [...details, ...requestRows];
         const title = actionType === 'block' ? 'Block Actions' : 'Report Actions';
         const emptyLabel = actionType === 'block' ? 'block actions' : 'report actions';
         const getTargetLoginLabel = (detail) => detail?.targetLoginId || 'N/A';
@@ -2829,10 +2859,19 @@ export default function AdminDashboard() {
             if (label === 'Reported') return '#facc15';
             return '#fb7185';
         };
-        const getStatusColor = (status) => status === 'unblocked' ? '#34d399' : '#fb7185';
-        const getStatusLabel = (status) => status === 'unblocked' ? 'Unblocked' : 'Blocked';
+        const getStatusColor = (status) => {
+            if (status === 'unblocked') return '#34d399';
+            if (status === 'reported') return '#facc15';
+            return '#fb7185';
+        };
+        const getStatusLabel = (status) => {
+            if (status === 'unblocked') return 'Unblocked';
+            if (status === 'reported') return 'Reported';
+            return 'Blocked';
+        };
         const getRawActionStatus = (detail) => {
             if (detail?.eventAction === 'unblock') return 'unblocked';
+            if (detail?.eventAction === 'report' || detail?.action === 'report') return 'reported';
             if (detail?.eventAction === 'block' || detail?.action === 'block') return 'blocked';
             return getEventActionLabel(detail).toLowerCase() === 'unblocked' ? 'unblocked' : 'blocked';
         };
@@ -2848,20 +2887,33 @@ export default function AdminDashboard() {
             return null;
         };
         const viewButtonStyle = {
-            border: '1px solid rgba(115, 168, 255, 0.36)',
-            background: 'rgba(20, 152, 255, 0.1)',
-            color: '#9ed6ff',
+            border: ADMIN_ACTION_BORDER,
+            background: ADMIN_ACTION_SURFACE,
+            color: '#ffffff',
             borderRadius: 999,
             padding: '7px 18px',
             fontWeight: 900,
             cursor: 'pointer',
-            minWidth: 104
+            minWidth: 104,
+            boxShadow: '0 12px 24px rgba(14, 165, 233, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.16)'
+        };
+        const auditTextButtonStyle = {
+            border: ADMIN_ACTION_BORDER,
+            background: ADMIN_ACTION_SURFACE,
+            color: '#ffffff',
+            borderRadius: 999,
+            cursor: 'pointer',
+            fontWeight: 900,
+            padding: '7px 16px',
+            boxShadow: '0 12px 24px rgba(14, 165, 233, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.16)'
         };
 
+        const isReportAction = actionType === 'report';
         const activeDetail = actionAuditView?.detail;
         const chosenStatus = actionAuditView?.selectedStatus;
         const chosenDetail = activeDetail && chosenStatus ? findActionDetailForStatus(activeDetail, chosenStatus) : null;
         const activeColor = chosenStatus ? getStatusColor(chosenStatus) : '#9ed6ff';
+        const isRequestAudit = activeDetail?.isRequestRow;
         const activeTime = chosenDetail?.created_at
             ? new Date(chosenDetail.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
             : 'N/A';
@@ -2882,7 +2934,7 @@ export default function AdminDashboard() {
                             </tr>
                         </thead>
                         <tbody>
-                            {details.map(detail => (
+                            {tableRows.map(detail => (
                                 <tr key={detail.id} style={{ borderTop: '1px solid rgba(148, 163, 184, 0.1)' }}>
                                     <td style={{ padding: '0.95rem 1.25rem', fontWeight: 800, color: OFFICIAL_TEXT_PRIMARY }}>
                                         {detail.name || 'Unknown member'}
@@ -2900,10 +2952,12 @@ export default function AdminDashboard() {
                                             View
                                         </button>
                                     </td>
-                                    <td style={{ padding: '0.95rem 1.25rem', textAlign: 'center', fontWeight: 700, textTransform: 'capitalize' }}>{detail.targetType || 'N/A'}</td>
+                                    <td style={{ padding: '0.95rem 1.25rem', textAlign: 'center', fontWeight: 700, textTransform: 'capitalize' }}>
+                                        {detail.isRequestRow ? 'Requests' : (detail.targetType || 'N/A')}
+                                    </td>
                                 </tr>
                             ))}
-                            {details.length === 0 && (
+                            {tableRows.length === 0 && (
                                 <tr>
                                 <td colSpan={4} style={{ padding: '1.5rem', textAlign: 'center', color: OFFICIAL_TEXT_MUTED, fontWeight: 700 }}>No {emptyLabel} yet.</td>
                                 </tr>
@@ -2919,9 +2973,9 @@ export default function AdminDashboard() {
                             position: 'fixed',
                             inset: 0,
                             zIndex: 10000,
-                            background: 'rgba(4, 12, 28, 0.16)',
-                            backdropFilter: 'blur(3px) saturate(120%)',
-                            WebkitBackdropFilter: 'blur(3px) saturate(120%)',
+                            background: 'rgba(3, 10, 26, 0.14)',
+                            backdropFilter: 'blur(8px) saturate(145%)',
+                            WebkitBackdropFilter: 'blur(8px) saturate(145%)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -2935,7 +2989,9 @@ export default function AdminDashboard() {
                                 borderRadius: 18,
                                 background: 'linear-gradient(180deg, rgba(10, 18, 36, 0.98), rgba(13, 23, 42, 0.96))',
                                 border: `1px solid ${activeColor}55`,
-                                boxShadow: `0 24px 70px rgba(2, 6, 23, 0.5), 0 0 0 1px ${activeColor}22`,
+                                boxShadow: `0 28px 80px rgba(2, 6, 23, 0.46), 0 0 0 1px ${activeColor}22, inset 0 1px 0 rgba(255, 255, 255, 0.12)`,
+                                backdropFilter: 'blur(10px) saturate(135%)',
+                                WebkitBackdropFilter: 'blur(10px) saturate(135%)',
                                 padding: 22,
                                 color: OFFICIAL_TEXT_PRIMARY,
                                 position: 'relative'
@@ -2946,7 +3002,7 @@ export default function AdminDashboard() {
                                     <button
                                         type="button"
                                         onClick={() => setActionAuditView(prev => ({ ...prev, selectedStatus: null }))}
-                                        style={{ border: 'none', background: 'transparent', color: '#9ed6ff', fontWeight: 900, cursor: 'pointer', padding: '6px 0', textAlign: 'left' }}
+                                        style={{ ...auditTextButtonStyle, justifySelf: 'start' }}
                                     >
                                         Back
                                     </button>
@@ -2955,22 +3011,53 @@ export default function AdminDashboard() {
                                 <button
                                     type="button"
                                     onClick={() => setActionAuditView(null)}
-                                    style={{ border: 'none', background: 'transparent', color: '#9ed6ff', cursor: 'pointer', justifySelf: 'end', fontWeight: 900, padding: '6px 0' }}
+                                    style={{ ...auditTextButtonStyle, justifySelf: 'end' }}
                                 >
                                     Close
                                 </button>
                             </div>
-                            {!chosenStatus ? (
+                            {isRequestAudit ? (
+                                <div style={{ display: 'grid', gap: 12, color: OFFICIAL_TEXT_SECONDARY, fontWeight: 700 }}>
+                                    <div style={{
+                                        padding: '14px 16px',
+                                        borderRadius: 14,
+                                        background: 'rgba(14, 165, 233, 0.12)',
+                                        border: '1px solid rgba(56, 189, 248, 0.34)',
+                                        color: '#9ed6ff',
+                                        fontSize: 22,
+                                        fontWeight: 950,
+                                        textAlign: 'center'
+                                    }}>
+                                        Requests
+                                    </div>
+                                    <div>User: <span style={{ color: OFFICIAL_TEXT_PRIMARY }}>{activeDetail.name || 'Unknown member'} ({activeDetail.login_id || 'N/A'})</span></div>
+                                    <div>Source: <span style={{ color: OFFICIAL_TEXT_PRIMARY }}>{title}</span></div>
+                                    <div>Reason:</div>
+                                    <div style={{
+                                        padding: '12px 14px',
+                                        borderRadius: 12,
+                                        background: 'rgba(255,255,255,0.04)',
+                                        border: '1px solid rgba(148, 163, 184, 0.14)',
+                                        color: OFFICIAL_TEXT_PRIMARY,
+                                        fontStyle: 'italic'
+                                    }}>
+                                        "{activeDetail.reason || 'No reason provided'}"
+                                    </div>
+                                </div>
+                            ) : !chosenStatus ? (
                                 <div style={{ display: 'grid', gap: 14 }}>
                                     <div style={{ color: OFFICIAL_TEXT_MUTED, fontWeight: 800, textAlign: 'center' }}>
-                                        Select which status you want to inspect for victim login ID {getTargetLoginLabel(activeDetail)}.
+                                        {isReportAction
+                                            ? `Inspect report action for victim login ID ${getTargetLoginLabel(activeDetail)}.`
+                                            : `Select which status you want to inspect for victim login ID ${getTargetLoginLabel(activeDetail)}.`}
                                     </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                                        {['blocked', 'unblocked'].map((status) => {
+                                    <div style={{ display: 'grid', gridTemplateColumns: isReportAction ? '1fr' : '1fr 1fr', gap: 12 }}>
+                                        {(isReportAction ? ['reported'] : ['blocked', 'unblocked']).map((status) => {
                                             const statusDetail = findActionDetailForStatus(activeDetail, status);
                                             const color = getStatusColor(status);
                                             const available = !!statusDetail;
                                             const isUnblocked = status === 'unblocked';
+                                            const isReported = status === 'reported';
                                             return (
                                                 <button
                                                     key={status}
@@ -2985,31 +3072,39 @@ export default function AdminDashboard() {
                                                     onMouseEnter={(event) => {
                                                         event.currentTarget.style.transform = 'translateY(-2px)';
                                                         event.currentTarget.style.filter = 'brightness(1.08) saturate(1.08)';
-                                                        event.currentTarget.style.boxShadow = isUnblocked
-                                                            ? '0 18px 36px rgba(47, 140, 255, 0.34), inset 0 1px 1px rgba(255,255,255,0.28)'
-                                                            : '0 18px 36px rgba(244, 63, 94, 0.34), inset 0 1px 1px rgba(255,255,255,0.28)';
+                                                        event.currentTarget.style.boxShadow = isReported
+                                                            ? '0 20px 42px rgba(244, 138, 0, 0.34), 0 0 28px rgba(255, 204, 21, 0.18), inset 0 1px 1px rgba(255,255,255,0.30)'
+                                                            : isUnblocked
+                                                                ? '0 20px 42px rgba(47, 140, 255, 0.38), 0 0 28px rgba(34, 198, 243, 0.16), inset 0 1px 1px rgba(255,255,255,0.30)'
+                                                                : '0 20px 42px rgba(244, 63, 94, 0.38), 0 0 28px rgba(255, 91, 110, 0.16), inset 0 1px 1px rgba(255,255,255,0.30)';
                                                     }}
                                                     onMouseLeave={(event) => {
                                                         event.currentTarget.style.transform = 'translateY(0)';
                                                         event.currentTarget.style.filter = 'none';
-                                                        event.currentTarget.style.boxShadow = isUnblocked
-                                                            ? '0 14px 30px rgba(47, 140, 255, 0.24), inset 0 1px 1px rgba(255,255,255,0.25)'
-                                                            : '0 14px 30px rgba(244, 63, 94, 0.24), inset 0 1px 1px rgba(255,255,255,0.25)';
+                                                        event.currentTarget.style.boxShadow = isReported
+                                                            ? '0 16px 34px rgba(244, 138, 0, 0.24), 0 0 18px rgba(255, 204, 21, 0.12), inset 0 1px 1px rgba(255,255,255,0.25)'
+                                                            : isUnblocked
+                                                                ? '0 16px 34px rgba(47, 140, 255, 0.28), 0 0 18px rgba(34, 198, 243, 0.12), inset 0 1px 1px rgba(255,255,255,0.25)'
+                                                                : '0 16px 34px rgba(244, 63, 94, 0.28), 0 0 18px rgba(255, 91, 110, 0.12), inset 0 1px 1px rgba(255,255,255,0.25)';
                                                     }}
                                                     style={{
                                                         minHeight: 54,
                                                         borderRadius: 16,
                                                         border: 'none',
-                                                        background: isUnblocked
-                                                            ? 'linear-gradient(135deg, #22c6f3 0%, #2f8cff 58%, #5b6cff 100%)'
-                                                            : 'linear-gradient(135deg, #ff5b6e 0%, #f43f5e 58%, #be123c 100%)',
+                                                        background: isReported
+                                                            ? 'linear-gradient(135deg, #ffcc15 0%, #f4b000 48%, #f08a00 100%)'
+                                                            : isUnblocked
+                                                                ? 'linear-gradient(135deg, #22c6f3 0%, #2f8cff 58%, #5b6cff 100%)'
+                                                                : 'linear-gradient(135deg, #ff5b6e 0%, #f43f5e 58%, #be123c 100%)',
                                                         color: '#ffffff',
                                                         fontWeight: 950,
                                                         fontSize: 16,
                                                         cursor: 'pointer',
-                                                        boxShadow: isUnblocked
-                                                            ? '0 14px 30px rgba(47, 140, 255, 0.24), inset 0 1px 1px rgba(255,255,255,0.25)'
-                                                            : '0 14px 30px rgba(244, 63, 94, 0.24), inset 0 1px 1px rgba(255,255,255,0.25)',
+                                                        boxShadow: isReported
+                                                            ? '0 16px 34px rgba(244, 138, 0, 0.24), 0 0 18px rgba(255, 204, 21, 0.12), inset 0 1px 1px rgba(255,255,255,0.25)'
+                                                            : isUnblocked
+                                                                ? '0 16px 34px rgba(47, 140, 255, 0.28), 0 0 18px rgba(34, 198, 243, 0.12), inset 0 1px 1px rgba(255,255,255,0.25)'
+                                                                : '0 16px 34px rgba(244, 63, 94, 0.28), 0 0 18px rgba(255, 91, 110, 0.12), inset 0 1px 1px rgba(255,255,255,0.25)',
                                                         display: 'inline-flex',
                                                         alignItems: 'center',
                                                         justifyContent: 'center',
@@ -3018,7 +3113,7 @@ export default function AdminDashboard() {
                                                         transition: 'transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease'
                                                     }}
                                                 >
-                                                    {isUnblocked ? <ShieldCheck size={18} /> : <Ban size={18} />}
+                                                    {isReported ? <AlertTriangle size={18} /> : isUnblocked ? <ShieldCheck size={18} /> : <Ban size={18} />}
                                                     {getStatusLabel(status)}
                                                 </button>
                                             );
@@ -3335,7 +3430,7 @@ export default function AdminDashboard() {
     };
 
     const renderUnblockRequests = () => {
-        const unblockReqs = users.filter(u => u.unblockRequested);
+        const unblockReqs = users.filter(u => u.unblockRequested && !isBlockReportRestorationRequest(u));
 
         if (unblockReqs.length === 0) {
             return (
@@ -4519,32 +4614,55 @@ export default function AdminDashboard() {
             {showUnethicalModal && unethicalAlerts.length > 0 && (
                 <div style={{
                     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999,
-                    background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    backdropFilter: 'blur(4px)'
+                    background: 'rgba(2, 8, 20, 0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    backdropFilter: 'blur(5px) saturate(135%)',
+                    WebkitBackdropFilter: 'blur(5px) saturate(135%)'
                 }} onClick={() => setShowUnethicalModal(false)}>
                     <div style={{
-                        background: 'rgba(255, 255, 255, 0.95)', borderRadius: '16px',
-                        boxShadow: '0 20px 50px rgba(0,0,0,0.2)',
+                        background: 'linear-gradient(180deg, rgba(10, 18, 36, 0.98) 0%, rgba(13, 23, 42, 0.96) 52%, rgba(9, 18, 37, 0.98) 100%)', borderRadius: '16px',
+                        border: '1px solid rgba(56, 189, 248, 0.22)',
+                        boxShadow: '0 28px 80px rgba(2, 6, 23, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
                         width: '450px', maxWidth: '90%',
                         overflow: 'hidden', animation: 'scaleIn 0.2s ease-out',
-                        backdropFilter: 'blur(10px)'
+                        backdropFilter: 'blur(18px) saturate(165%)',
+                        WebkitBackdropFilter: 'blur(18px) saturate(165%)'
                     }} onClick={e => e.stopPropagation()}>
                         <div style={{
-                            background: 'linear-gradient(135deg, #ef4444 0%, #fb7185 48%, #be123c 100%)', color: 'white', padding: '16px 20px',
-                            fontWeight: '700', fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                            background: 'linear-gradient(135deg, rgba(255, 82, 116, 0.98) 0%, rgba(235, 38, 82, 0.96) 54%, rgba(200, 15, 62, 0.98) 100%)',
+                            color: 'white',
+                            padding: '18px 22px',
+                            fontWeight: '700',
+                            fontSize: '1.1rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            borderBottom: '1px solid rgba(255, 255, 255, 0.18)',
+                            boxShadow: '0 12px 32px rgba(143, 18, 52, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.12)'
                         }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <AlertTriangle size={20} />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span style={{
+                                    width: 30,
+                                    height: 30,
+                                    borderRadius: '50%',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    background: 'rgba(255, 255, 255, 0.18)',
+                                    border: '1px solid rgba(255, 255, 255, 0.34)',
+                                    boxShadow: '0 0 18px rgba(255, 255, 255, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.22)'
+                                }}>
+                                    <AlertTriangle size={20} color="#ffffff" strokeWidth={2.6} />
+                                </span>
                                 Unethical Content Detected
                             </div>
                             <X size={20} style={{ cursor: 'pointer', opacity: 0.8 }} onClick={() => setShowUnethicalModal(false)} />
                         </div>
 
-                        <div style={{ padding: '0', maxHeight: '400px', overflowY: 'auto' }}>
+                        <div style={{ padding: '0', maxHeight: '400px', overflowY: 'auto', background: 'linear-gradient(180deg, rgba(10, 18, 36, 0.96) 0%, rgba(13, 23, 42, 0.94) 100%)' }}>
                             {!unethicalModalUser ? (
                                 // Level 1: List Users
-                                <div style={{ padding: '10px' }}>
-                                    <div style={{ padding: '10px', fontSize: '0.9rem', color: '#525f7f', fontWeight: '600' }}>
+                                <div style={{ padding: '14px 16px 16px' }}>
+                                    <div style={{ padding: '8px 2px 14px', fontSize: '0.9rem', color: 'rgba(255, 255, 255, 0.86)', fontWeight: '800' }}>
                                         Users with flagged messages:
                                     </div>
                                     {Object.values(groupedUnethicalAlerts).map(group => (
@@ -4552,48 +4670,53 @@ export default function AdminDashboard() {
                                             key={group.userId}
                                             onClick={() => setUnethicalModalUser(group)}
                                             style={{
-                                                padding: '12px 16px', margin: '6px',
-                                                background: 'linear-gradient(135deg, #ef4444 0%, #fb7185 48%, #be123c 100%)', border: '1px solid rgba(255,125,154,0.35)',
-                                                borderRadius: '8px', cursor: 'pointer',
+                                                padding: '14px 16px', margin: '0 0 10px',
+                                                background: 'linear-gradient(135deg, rgba(255, 84, 116, 0.98) 0%, rgba(204, 18, 65, 0.96) 100%)',
+                                                border: '1px solid rgba(255, 255, 255, 0.2)',
+                                                borderLeft: '4px solid rgba(255, 255, 255, 0.48)',
+                                                borderRadius: '12px',
+                                                cursor: 'pointer',
                                                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                                                 transition: 'all 0.2s',
-                                                boxShadow: '0 2px 5px rgba(0,0,0,0.05)'
+                                                boxShadow: '0 14px 30px rgba(143, 18, 52, 0.24), inset 0 1px 1px rgba(255,255,255,0.16)'
                                             }}
                                             onMouseOver={e => {
-                                                e.currentTarget.style.background = 'linear-gradient(135deg, #f43f5e 0%, #fb7185 48%, #9f1239 100%)';
+                                                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(255, 102, 132, 0.98) 0%, rgba(217, 24, 72, 0.96) 100%)';
+                                                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.34)';
                                                 e.currentTarget.style.transform = 'translateY(-2px)';
-                                                e.currentTarget.style.boxShadow = '0 5px 15px rgba(0,0,0,0.1)';
+                                                e.currentTarget.style.boxShadow = '0 18px 38px rgba(143, 18, 52, 0.32), 0 0 22px rgba(255, 255, 255, 0.12), inset 0 1px 1px rgba(255,255,255,0.2)';
                                             }}
                                             onMouseOut={e => {
-                                                e.currentTarget.style.background = 'linear-gradient(135deg, #ef4444 0%, #fb7185 48%, #be123c 100%)';
+                                                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(255, 84, 116, 0.98) 0%, rgba(204, 18, 65, 0.96) 100%)';
+                                                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
                                                 e.currentTarget.style.transform = 'translateY(0)';
-                                                e.currentTarget.style.boxShadow = '0 2px 5px rgba(0,0,0,0.05)';
+                                                e.currentTarget.style.boxShadow = '0 14px 30px rgba(143, 18, 52, 0.24), inset 0 1px 1px rgba(255,255,255,0.16)';
                                             }}
                                         >
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                                 <div>
                                                     <div className="user-name" style={{ fontWeight: '700', color: 'white', transition: 'color 0.2s' }}>{group.userName}</div>
-                                                    <div className="user-sub" style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.8)', transition: 'color 0.2s' }}>{group.alerts.length} Flagged Message{group.alerts.length > 1 ? 's' : ''}</div>
+                                                    <div className="user-sub" style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.88)', transition: 'color 0.2s' }}>{group.alerts.length} Flagged Message{group.alerts.length > 1 ? 's' : ''}</div>
                                                 </div>
                                             </div>
-                                            <ChevronDown className="user-icon" size={18} style={{ transform: 'rotate(-90deg)', color: 'rgba(255,255,255,0.8)', transition: 'color 0.2s' }} />
+                                            <ChevronDown className="user-icon" size={18} style={{ transform: 'rotate(-90deg)', color: 'white', transition: 'color 0.2s' }} />
                                         </div>
                                     ))}
                                 </div>
                             ) : (
                                 // Level 2: List Messages for User
                                 <div>
-                                    <div style={{ padding: '12px 20px', background: '#f8f9fe', borderBottom: '1px solid #e9ecef', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <div style={{ padding: '14px 20px', background: 'rgba(15, 23, 42, 0.72)', borderBottom: '1px solid rgba(56, 189, 248, 0.18)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                         <div
                                             onClick={() => setUnethicalModalUser(null)}
-                                            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem', color: '#525f7f', fontWeight: '600' }}
+                                            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem', color: 'white', fontWeight: '700' }}
                                         >
                                             <ChevronDown size={16} style={{ transform: 'rotate(90deg)' }} /> Back
                                         </div>
-                                        <div style={{ height: '20px', borderLeft: '1px solid #ccc', margin: '0 8px' }}></div>
-                                        <div style={{ fontWeight: '700', color: '#32325d' }}>{unethicalModalUser.userName}'s Messages</div>
+                                        <div style={{ height: '20px', borderLeft: '1px solid rgba(148, 163, 184, 0.24)', margin: '0 8px' }}></div>
+                                        <div style={{ fontWeight: '700', color: OFFICIAL_TEXT_PRIMARY }}>{unethicalModalUser.userName}'s Messages</div>
                                     </div>
-                                    <div style={{ padding: '10px' }}>
+                                    <div style={{ padding: '14px 16px' }}>
                                         {unethicalModalUser.alerts.map((alert, idx) => {
                                             const receiver = alert.receiverId ? (users.find(u => (u.id === alert.receiverId || u._id === alert.receiverId)) || { name: 'Unknown User' }) : { name: 'AI Assistant' };
                                             return (
@@ -4601,16 +4724,19 @@ export default function AdminDashboard() {
                                                     key={idx}
                                                     onClick={() => handleViewAlert(alert)}
                                                     style={{
-                                                        padding: '12px', margin: '8px 4px',
-                                                        background: 'white', border: '1px solid #e9ecef',
-                                                        borderRadius: '8px', cursor: 'pointer',
-                                                        boxShadow: '0 2px 5px rgba(0,0,0,0.03)',
+                                                        padding: '14px 16px', margin: '0 0 10px',
+                                                        background: 'linear-gradient(135deg, rgba(255, 84, 116, 0.92), rgba(204, 18, 65, 0.88))',
+                                                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                                                        borderLeft: '4px solid rgba(255, 255, 255, 0.48)',
+                                                        borderRadius: '12px',
+                                                        cursor: 'pointer',
+                                                        boxShadow: '0 12px 28px rgba(143, 18, 52, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
                                                         transition: 'transform 0.1s'
                                                     }}
                                                     onMouseOver={e => e.currentTarget.style.transform = 'translateY(-2px)'}
                                                     onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}
                                                 >
-                                                    <div style={{ fontSize: '0.9rem', color: '#32325d', marginBottom: '6px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                    <div style={{ fontSize: '0.92rem', color: OFFICIAL_TEXT_PRIMARY, marginBottom: '10px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                         {alert.type === 'audio' ? (
                                                             <>
                                                                 <Mic size={14} color="#0A7C8F" />
@@ -4621,14 +4747,14 @@ export default function AdminDashboard() {
                                                         )}
                                                     </div>
                                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                                        <div style={{ fontSize: '0.75rem', color: '#525f7f', fontWeight: '600' }}>
-                                                            Chatted with: <span style={{ color: '#0A7C8F' }}>{receiver.name}</span>
+                                                        <div style={{ fontSize: '0.76rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '700' }}>
+                                                            Chatted with: <span style={{ color: '#2bc9e4' }}>{receiver.name}</span>
                                                         </div>
                                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                                            <div style={{ fontSize: '0.75rem', fontWeight: '700', color: '#ff4d4d' }}>
+                                                            <div style={{ fontSize: '0.76rem', fontWeight: '800', color: '#ff7a8f', lineHeight: 1.45, paddingRight: 12 }}>
                                                                 Reason: {alert.reason || 'Unethical Content Detected'}
                                                             </div>
-                                                            <div style={{ fontSize: '0.7rem', color: '#8898aa' }}>
+                                                            <div style={{ fontSize: '0.7rem', color: OFFICIAL_TEXT_MUTED }}>
                                                                 {new Date(alert.createdAt).toLocaleDateString()}
                                                             </div>
                                                         </div>
