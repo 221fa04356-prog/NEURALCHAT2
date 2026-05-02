@@ -19,6 +19,7 @@ const { uploadLocalFileToGridFS } = require('../utils/gridfsMedia');
 const Groq = require('groq-sdk');
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const { detectUnsafeText } = require('../utils/moderation');
+const { calculateMessageHash } = require('../utils/messageHash');
 
 const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole']; // Precise bad words
 
@@ -1000,6 +1001,19 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             try { pollData = JSON.parse(pollData); } catch (e) { pollData = null; }
         }
 
+        // --- IMMUTABILITY HASH CHAINING ---
+        const lastMsgInGroup = await GroupMessage.findOne({ group_id: groupId }).sort({ created_at: -1 });
+        const previousHash = lastMsgInGroup ? lastMsgInGroup.message_hash : 'GENESIS_BLOCK';
+        const timestamp = new Date();
+        const messageHash = calculateMessageHash({
+            previousHash,
+            senderId,
+            groupId,
+            content: content || '',
+            ciphertext: req.body.ciphertext,
+            timestamp
+        });
+
         const msg = await GroupMessage.create({
             group_id: groupId,
             sender_id: senderId,
@@ -1022,7 +1036,12 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
 
             // Forwarded Data
             event: eventData || undefined,
-            poll: pollData || undefined
+            poll: pollData || undefined,
+
+            // Blockchain fields
+            message_hash: messageHash,
+            previous_message_hash: previousHash,
+            created_at: timestamp
         });
 
         const populated = await GroupMessage.findById(msg._id)
