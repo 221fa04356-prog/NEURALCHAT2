@@ -23,6 +23,7 @@ const { uploadLocalFileToGridFS, streamGridFSFileWithRange } = require('../utils
 const cloudinaryUpload = require('../middleware/multer');
 const { isCloudinaryConfigured } = require('../config/cloudinary');
 const { detectUnsafeText } = require('../utils/moderation');
+const { calculateMessageHash } = require('../utils/messageHash');
 
 const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole']; // Legacy fallback only
 
@@ -2049,6 +2050,25 @@ router.post('/send', authenticateToken, (req, res, next) => {
                 console.log(`[FORWARD] Orig: ${originalCount}, New: ${forwardCount}, to: ${toUserId}`);
             }
 
+            // --- IMMUTABILITY HASH CHAINING ---
+            const lastMsgInChat = await Message.findOne({
+                $or: [
+                    { user_id: userId, receiver_id: toUserId },
+                    { user_id: toUserId, receiver_id: userId }
+                ]
+            }).sort({ created_at: -1 });
+
+            const previousHash = lastMsgInChat ? lastMsgInChat.message_hash : 'GENESIS_BLOCK';
+            const timestamp = new Date();
+            const messageHash = calculateMessageHash({
+                previousHash,
+                senderId: userId,
+                receiverId: toUserId,
+                content: content || '',
+                ciphertext: req.body.ciphertext,
+                timestamp
+            });
+
             const msg = await Message.create({
                 user_id: userId,
                 receiver_id: toUserId,
@@ -2075,7 +2095,12 @@ router.post('/send', authenticateToken, (req, res, next) => {
 
                 // Forwarded Poll/Event
                 poll: poll || undefined,
-                event: event || undefined
+                event: event || undefined,
+
+                // Blockchain fields
+                message_hash: messageHash,
+                previous_message_hash: previousHash,
+                created_at: timestamp
             });
 
 
@@ -2112,6 +2137,18 @@ router.post('/send', authenticateToken, (req, res, next) => {
 
         // --- AI LOGIC BELOW (Only if no toUserId) ---
 
+        // --- IMMUTABILITY HASH CHAINING (AI Chat User Message) ---
+        const lastMsgInAIChat = await Message.findOne({ user_id: userId, receiver_id: null }).sort({ created_at: -1 });
+        const aiUserPrevHash = lastMsgInAIChat ? lastMsgInAIChat.message_hash : 'GENESIS_BLOCK';
+        const aiUserTs = new Date();
+        const aiUserHash = calculateMessageHash({
+            previousHash: aiUserPrevHash,
+            senderId: userId,
+            receiverId: 'AI_MODEL',
+            content: content || '',
+            timestamp: aiUserTs
+        });
+
         // Save User Message (for AI chat)
         await Message.create({
             user_id: userId,
@@ -2124,7 +2161,11 @@ router.post('/send', authenticateToken, (req, res, next) => {
             reply_to: reply_to || null,
 
             is_flagged: !!isFlagged,
-            flag_reason: flagReason
+            flag_reason: flagReason,
+
+            message_hash: aiUserHash,
+            previous_message_hash: aiUserPrevHash,
+            created_at: aiUserTs
         });
 
         // Prepare context for AI
@@ -2263,13 +2304,28 @@ router.post('/send', authenticateToken, (req, res, next) => {
             aiContent = "File uploaded successfully.";
         }
 
+        // --- IMMUTABILITY HASH CHAINING (AI Chat Model Response) ---
+        const lastMsgAfterUser = await Message.findOne({ user_id: userId, receiver_id: null }).sort({ created_at: -1 });
+        const aiModelPrevHash = lastMsgAfterUser ? lastMsgAfterUser.message_hash : 'GENESIS_BLOCK';
+        const aiModelTs = new Date();
+        const aiModelHash = calculateMessageHash({
+            previousHash: aiModelPrevHash,
+            senderId: 'AI_MODEL',
+            receiverId: userId,
+            content: aiContent,
+            timestamp: aiModelTs
+        });
+
         // Save AI Response
         await Message.create({
             user_id: userId,
             receiver_id: null,
             role: 'model',
             content: aiContent,
-            type: 'text'
+            type: 'text',
+            message_hash: aiModelHash,
+            previous_message_hash: aiModelPrevHash,
+            created_at: aiModelTs
         });
 
         res.json({ status: 'sent', aiResponse: aiContent });
@@ -2279,12 +2335,27 @@ router.post('/send', authenticateToken, (req, res, next) => {
         // Fallback
         try {
             const errorMsg = "Sorry, I encountered an error processing that. (" + (aiErr.message) + ")";
+            // --- IMMUTABILITY HASH CHAINING (AI Chat Fallback Response) ---
+            const lastMsgAfterErr = await Message.findOne({ user_id: userId, receiver_id: null }).sort({ created_at: -1 });
+            const aiErrPrevHash = lastMsgAfterErr ? lastMsgAfterErr.message_hash : 'GENESIS_BLOCK';
+            const aiErrTs = new Date();
+            const aiErrHash = calculateMessageHash({
+                previousHash: aiErrPrevHash,
+                senderId: 'AI_MODEL',
+                receiverId: userId,
+                content: errorMsg,
+                timestamp: aiErrTs
+            });
+
             await Message.create({
                 user_id: userId,
                 receiver_id: null,
                 role: 'model',
                 content: errorMsg,
-                type: 'text'
+                type: 'text',
+                message_hash: aiErrHash,
+                previous_message_hash: aiErrPrevHash,
+                created_at: aiErrTs
             });
             res.json({ status: 'sent', aiResponse: errorMsg });
         } catch (dbErr) {

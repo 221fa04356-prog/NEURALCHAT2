@@ -82,6 +82,8 @@ const groupMessageSchema = new mongoose.Schema({
         emoji: { type: String },
         created_at: { type: Date, default: Date.now }
     }],
+    message_hash: { type: String, unique: true, sparse: true },
+    previous_message_hash: { type: String, sparse: true },
     created_at: { type: Date, default: Date.now }
 }, {
     toJSON: { virtuals: true },
