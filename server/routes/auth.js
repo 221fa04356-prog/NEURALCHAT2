@@ -799,7 +799,8 @@ router.put('/update-profile', async (req, res) => {
                 screenshotDetection: privacySettings?.screenshotDetection !== false,
                 notifyOnScreenshot: privacySettings?.notifyOnScreenshot !== false,
                 blurOnScreenshot: privacySettings?.blurOnScreenshot === true,
-                addWatermark: privacySettings?.addWatermark === true
+                addWatermark: privacySettings?.addWatermark === true,
+                autoArchiveConversations: privacySettings?.autoArchiveConversations === true
             };
         }
 

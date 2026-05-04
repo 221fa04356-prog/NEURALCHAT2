@@ -117,7 +117,8 @@ const userSchema = new mongoose.Schema({
         screenshotDetection: { type: Boolean, default: true },
         notifyOnScreenshot: { type: Boolean, default: true },
         blurOnScreenshot: { type: Boolean, default: false },
-        addWatermark: { type: Boolean, default: false }
+        addWatermark: { type: Boolean, default: false },
+        autoArchiveConversations: { type: Boolean, default: false }
     }
 }, {
     toJSON: { virtuals: true },

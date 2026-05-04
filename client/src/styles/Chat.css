@@ -1639,8 +1639,13 @@ html {
     flex-direction: column;
     overflow-y: auto;
     background: rgba(15, 23, 42, 0.72);
+}
+
+.wa-user-list-content {
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 100%;
 }
 
 .wa-chat-list-end-note {
@@ -10702,10 +10707,6 @@ svg.wa-back-icon,
 @media (max-width: 768px) {
     .wa-user-list {
         flex: 1;
-    }
-
-    .wa-user-list-content {
-        flex: 0 0 auto;
     }
 
     .wa-chat-list-end-note {

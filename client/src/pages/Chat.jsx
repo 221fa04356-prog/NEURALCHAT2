@@ -1507,12 +1507,19 @@ export default function Chat() {
         return saved ? JSON.parse(saved) : [];
     }); // List of archived user/group IDs
 
+    const [manualUnarchiveList, setManualUnarchiveList] = useState(() => {
+        const userId = user.id || user._id;
+        const saved = localStorage.getItem(`manualUnarchiveList_${userId}`);
+        return saved ? JSON.parse(saved) : [];
+    });
+
     useEffect(() => {
         const userId = user.id || user._id;
         if (userId) {
             localStorage.setItem(`archivedChats_${userId}`, JSON.stringify(archivedChatIds));
+            localStorage.setItem(`manualUnarchiveList_${userId}`, JSON.stringify(manualUnarchiveList));
         }
-    }, [archivedChatIds, user.id, user._id]);
+    }, [archivedChatIds, manualUnarchiveList, user.id, user._id]);
     const [isArchivedChatsOpen, setIsArchivedChatsOpen] = useState(false);
     const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
     const [showAttachmentHint, setShowAttachmentHint] = useState(false);
@@ -3515,6 +3522,7 @@ export default function Chat() {
             notifyOnScreenshot: 'Screenshot notifications',
             blurOnScreenshot: 'Screenshot blur protection',
             addWatermark: 'Media watermark',
+            autoArchiveConversations: 'Auto-archive',
         };
         await persistPrivacySettings(next, `${labels[key] || 'Privacy setting'} updated`);
     };
@@ -3800,20 +3808,56 @@ export default function Chat() {
     const [isConfirmGroupAddMembersOpen, setIsConfirmGroupAddMembersOpen] = useState(false);
     const [communities, setCommunities] = useState([]);
     const [isCommunityHomeOpen, setIsCommunityHomeOpen] = useState(false);
+    const [selectedCommunity, setSelectedCommunity] = useState(null);
+    useEffect(() => { selectedCommunityRef.current = selectedCommunity; }, [selectedCommunity]);
+
+    const effectiveArchivedChatIds = useMemo(() => {
+        const ids = new Set(archivedChatIds.map(id => String(id)));
+        if (privacySettings?.autoArchiveConversations) {
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+            const checkAndAdd = (list) => {
+                if (!Array.isArray(list)) return;
+                list.forEach(item => {
+                    const id = String(item._id || item.id);
+                    // Skip if manually unarchived in this session
+                    if (manualUnarchiveList.includes(id)) return;
+
+                    // Skip if it is the currently active/selected chat
+                    const isSelected = (selectedUser && id === String(selectedUser._id)) || 
+                                     (selectedGroup && id === String(selectedGroup._id)) ||
+                                     (selectedCommunity && id === String(selectedCommunity?._id || selectedCommunity?.id));
+                    if (isSelected) return;
+
+                    // Skip if there are unread messages
+                    if (item.unreadCount > 0) return;
+
+                    const lastMsgDate = item.lastMessage?.created_at ? new Date(item.lastMessage.created_at) : null;
+                    if (lastMsgDate && lastMsgDate < thirtyDaysAgo) {
+                        ids.add(id);
+                    }
+                });
+            };
+
+            checkAndAdd(users);
+            checkAndAdd(groups);
+            checkAndAdd(communities);
+        }
+        return Array.from(ids);
+    }, [archivedChatIds, privacySettings?.autoArchiveConversations, users, groups, communities, manualUnarchiveList, selectedUser, selectedGroup, selectedCommunity]);
     const [isCommunityInfoOpen, setIsCommunityInfoOpen] = useState(false);
     const [isCommunityGroupsListOpen, setIsCommunityGroupsListOpen] = useState(false);
     const [isCommunitySettingsOpen, setIsCommunitySettingsOpen] = useState(false);
     const [isWhoCanAddGroupsModalOpen, setIsWhoCanAddGroupsModalOpen] = useState(false);
     const [communityInfoTab, setCommunityInfoTab] = useState('community'); // 'community' or 'announcements'
     const [pendingWhoCanAddGroups, setPendingWhoCanAddGroups] = useState('everyone');
-    const [selectedCommunity, setSelectedCommunity] = useState(null);
     const [activeViewOnceMsg, setActiveViewOnceMsg] = useState(null);
     const [viewOnceElapsed, setViewOnceElapsed] = useState(0);
     const [playbackPosition, setPlaybackPosition] = useState(0);
     const [playbackDuration, setPlaybackDuration] = useState(0);
     const pendingVoiceSeekRef = useRef(new Map());
     const [isMuting, setIsMuting] = useState(false);
-    useEffect(() => { selectedCommunityRef.current = selectedCommunity; }, [selectedCommunity]);
     const [isCommunityDescDismissed, setIsCommunityDescDismissed] = useState(false);
     const [adminContextMenu, setAdminContextMenu] = useState(null); // { member, x, y, communityId, isAdmin }
     const [isAssignOwnerModalOpen, setIsAssignOwnerModalOpen] = useState(false);
@@ -4446,7 +4490,7 @@ export default function Chat() {
             await Promise.all(ids.map(id => axios.post(`/api/chat/message/${id}/toggle`, { action: 'star', value: !allStarred }, {
                 headers: { 'Authorization': `Bearer ${token}` }
             })));
-            
+
             const updateStarred = (prev) => prev.map(m => (ids.includes(m._id) || ids.includes(m.id)) ? { ...m, is_starred: !allStarred } : m);
             setMessages(updateStarred);
             setGroupMessages(updateStarred);
@@ -5112,6 +5156,9 @@ export default function Chat() {
 
             const isActiveChat = currentSelected && String(senderId) === String(currentSelected._id);
 
+            // Clear manual unarchive status on new message
+            setManualUnarchiveList(prev => prev.filter(id => String(id) !== String(senderId)));
+
             if (isActiveChat) {
                 debugLog('[DEBUG] Active chat open with', senderId, '- adding and marking read.');
                 const nearBottom = isChatNearBottom();
@@ -5323,7 +5370,7 @@ export default function Chat() {
 
         const onStatusChange = (data) => {
             const isOnline = data.status === 'online' || data.isOnline === true;
-            
+
             setUsers(prev => {
                 let changed = false;
                 const newUsers = prev.map(u => {
@@ -5968,6 +6015,9 @@ export default function Chat() {
 
             const isMyOwnMessage = !!(myId && msgSenderId && String(myId) === String(msgSenderId));
 
+            // Clear manual unarchive status on group activity
+            setManualUnarchiveList(prev => prev.filter(id => String(id) !== String(data.groupId)));
+
 
 
             if (isCurrentGroup) {
@@ -6108,7 +6158,7 @@ export default function Chat() {
 
         const onGroupMessagesRead = (data) => {
             const myId = userRef.current?.id || userRef.current?._id;
-            
+
             // 1. Sync sidebar for the reader
             if (String(data.readerId) === String(myId)) {
                 setGroups(prev => prev.map(g => String(g._id) === String(data.groupId) ? { ...g, unreadCount: 0 } : g));
@@ -6471,11 +6521,11 @@ export default function Chat() {
                     return;
                 }
 
-                const isAnyRightPanelOpen = !!infoMessage || isMessageSearchOpen || isContactInfoOpen || 
-                                          isCommunityInfoOpen || isCommunityGroupsListOpen || 
-                                          isStarredMessagesOpen || isSharedMediaOpen || 
-                                          isEditContactOpen || isNotificationSettingsOpen || 
-                                          isEventDetailsOpen;
+                const isAnyRightPanelOpen = !!infoMessage || isMessageSearchOpen || isContactInfoOpen ||
+                    isCommunityInfoOpen || isCommunityGroupsListOpen ||
+                    isStarredMessagesOpen || isSharedMediaOpen ||
+                    isEditContactOpen || isNotificationSettingsOpen ||
+                    isEventDetailsOpen;
 
                 if (selectedUser || selectedGroup || selectedCommunity || isAnyRightPanelOpen) {
                     // Reset all panels and selection modes
@@ -7881,7 +7931,7 @@ export default function Chat() {
 
             if (isCommunity || isGroup) {
                 const commObj = communities.find(c => String(c.id) === String(targetId));
-                const targetGroupId = isCommunity 
+                const targetGroupId = isCommunity
                     ? String(commObj?.announcements?._id || commObj?.announcements?.id || commObj?.announcements)
                     : targetId;
 
@@ -7919,6 +7969,7 @@ export default function Chat() {
 
     const handleArchiveChat = (id, displayName) => {
         setArchivedChatIds(prev => [...new Set([...prev, id])]);
+        setManualUnarchiveList(prev => prev.filter(cid => cid !== id));
         setOpenDropdown(null);
         setSnackbar({
             message: `Chat ${displayName} is archived`,
@@ -7937,6 +7988,7 @@ export default function Chat() {
 
     const handleUnarchiveChat = (id, displayName) => {
         setArchivedChatIds(prev => prev.filter(cid => cid !== id));
+        setManualUnarchiveList(prev => [...new Set([...prev, id])]);
         setOpenDropdown(null);
         setSnackbar({
             message: `Chat ${displayName} is unarchived`,
@@ -9188,7 +9240,7 @@ export default function Chat() {
                 // Always focus the latest added file so it doesn't feel like items are overlapping in the first slot.
                 setFile(validFiles[validFiles.length - 1]);
             }
-            
+
             e.target.value = ''; // Reset input
             attachmentTypeRef.current = 'all';
         }
@@ -9791,25 +9843,25 @@ export default function Chat() {
         setFile(null); // Clear file immediately from UI
         setSelectedFiles([]); // Clear selected files immediately from UI
         setIsViewOnceMedia(false);
-            setReplyingTo(null); // Clear reply context immediately
-            setTypingLinkPreview(null); // Clear typing preview immediately
-            setSuggestionApplied(false); // Reset correction state for next message
-            setIsViewOnceVoice(false); // Reset view-once state for next message
-            setIsViewOnceMedia(false); // Reset media view-once state for next message
-            setInlineImageEditMode(false);
-            setInlineImageRotation(0);
-            setInlineCropActive(false);
-            setInlineCropRect(null);
-            setInlineFilterActive(false);
-            setInlineImageFilter('none');
-            setInlinePaintActive(false);
-            setInlinePaintStrokes([]);
-            setInlinePaintRedoStrokes([]);
-            setInlinePaintCurrentStroke(null);
-            setInlinePaintPaletteOpen(false);
-            setInlineTextActive(false);
-            setInlineTextDraft('');
-            setInlineTexts([]);
+        setReplyingTo(null); // Clear reply context immediately
+        setTypingLinkPreview(null); // Clear typing preview immediately
+        setSuggestionApplied(false); // Reset correction state for next message
+        setIsViewOnceVoice(false); // Reset view-once state for next message
+        setIsViewOnceMedia(false); // Reset media view-once state for next message
+        setInlineImageEditMode(false);
+        setInlineImageRotation(0);
+        setInlineCropActive(false);
+        setInlineCropRect(null);
+        setInlineFilterActive(false);
+        setInlineImageFilter('none');
+        setInlinePaintActive(false);
+        setInlinePaintStrokes([]);
+        setInlinePaintRedoStrokes([]);
+        setInlinePaintCurrentStroke(null);
+        setInlinePaintPaletteOpen(false);
+        setInlineTextActive(false);
+        setInlineTextDraft('');
+        setInlineTexts([]);
 
         try {
             const formData = new FormData();
@@ -9907,7 +9959,7 @@ export default function Chat() {
                     message: {
                         ...sentMsg,
                         // critically: use the global name for others, not local alias
-                        sender_id: { _id: user.id || user._id, name: userData.name } 
+                        sender_id: { _id: user.id || user._id, name: userData.name }
                     }
                 });
 
@@ -11220,8 +11272,8 @@ export default function Chat() {
     };
 
     const renderArchivedChatsDrawer = () => {
-        const archivedUsers = users.filter(u => archivedChatIds.includes(u._id));
-        const archivedGroups = groups.filter(g => archivedChatIds.includes(g._id));
+        const archivedUsers = users.filter(u => effectiveArchivedChatIds.includes(String(u._id)));
+        const archivedGroups = groups.filter(g => effectiveArchivedChatIds.includes(String(g._id)));
         const allArchived = [...archivedGroups, ...archivedUsers];
 
         return (
@@ -12178,9 +12230,9 @@ export default function Chat() {
                             ? '"Comic Sans MS", cursive'
                             : item.font === 'Oswald'
                                 ? 'Impact, sans-serif'
-                    : item.font === 'Monospace'
-                        ? '"Courier New", monospace'
-                        : 'Arial, sans-serif';
+                                : item.font === 'Monospace'
+                                    ? '"Courier New", monospace'
+                                    : 'Arial, sans-serif';
                 ctx.font = `700 ${fontSize}px ${fontFamily}`;
                 ctx.textAlign = item.align || 'center';
                 ctx.textBaseline = 'middle';
@@ -13056,719 +13108,719 @@ export default function Chat() {
         const hasCaptionText = !!(input || '').trim();
         const isPreviewSendBlockedByAI = hasCaptionText && (!suggestionApplied || isGrammarLoading || isGarbageMessage);
         return (
-        <div className="wa-file-preview-overlay" style={{
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            background: isMediaThemePreview ? '#061a2d' : '#0b141a',
-            position: 'relative',
-            zIndex: 1000
-        }}>
-            {isImagePreview && (
-                <div style={{
-                    height: 56,
-                    padding: '0 18px',
-                    background: 'transparent',
-                    borderBottom: 'none',
-                    display: 'grid',
-                    gridTemplateColumns: 'auto 1fr auto',
-                    alignItems: 'center',
-                    flexShrink: 0
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifySelf: 'start' }}>
-                        <button
-                            onClick={() => setIsDiscardPreviewConfirmOpen(true)}
-                            style={{ width: 32, height: 32, background: 'none', border: 'none', color: '#c1d2e2', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
-                            title="Close preview"
-                        >
-                            <X size={22} strokeWidth={2.2} />
-                        </button>
-                        {hasInlineUndo && (
+            <div className="wa-file-preview-overlay" style={{
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                background: isMediaThemePreview ? '#061a2d' : '#0b141a',
+                position: 'relative',
+                zIndex: 1000
+            }}>
+                {isImagePreview && (
+                    <div style={{
+                        height: 56,
+                        padding: '0 18px',
+                        background: 'transparent',
+                        borderBottom: 'none',
+                        display: 'grid',
+                        gridTemplateColumns: 'auto 1fr auto',
+                        alignItems: 'center',
+                        flexShrink: 0
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifySelf: 'start' }}>
                             <button
-                                type="button"
-                                onClick={undoInlineImageEdit}
+                                onClick={() => setIsDiscardPreviewConfirmOpen(true)}
                                 style={{ width: 32, height: 32, background: 'none', border: 'none', color: '#c1d2e2', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
-                                title="Undo edit"
+                                title="Close preview"
                             >
-                                <Undo2 size={22} strokeWidth={2.2} />
+                                <X size={22} strokeWidth={2.2} />
                             </button>
-                        )}
-                        {hasInlineRedo && (
+                            {hasInlineUndo && (
+                                <button
+                                    type="button"
+                                    onClick={undoInlineImageEdit}
+                                    style={{ width: 32, height: 32, background: 'none', border: 'none', color: '#c1d2e2', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+                                    title="Undo edit"
+                                >
+                                    <Undo2 size={22} strokeWidth={2.2} />
+                                </button>
+                            )}
+                            {hasInlineRedo && (
+                                <button
+                                    type="button"
+                                    onClick={redoInlineImageEdit}
+                                    style={{ width: 32, height: 32, background: 'none', border: 'none', color: '#c1d2e2', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, transform: 'scaleX(-1)' }}
+                                    title="Redo edit"
+                                >
+                                    <Undo2 size={22} strokeWidth={2.2} />
+                                </button>
+                            )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16, color: '#c1d2e2', justifySelf: 'center' }}>
                             <button
                                 type="button"
-                                onClick={redoInlineImageEdit}
-                                style={{ width: 32, height: 32, background: 'none', border: 'none', color: '#c1d2e2', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, transform: 'scaleX(-1)' }}
-                                title="Redo edit"
-                            >
-                                <Undo2 size={22} strokeWidth={2.2} />
-                            </button>
-                        )}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 16, color: '#c1d2e2', justifySelf: 'center' }}>
-                        <button
-                            type="button"
-                            title="Crop & Rotate"
-                            onClick={activateInlineCropMode}
-                            style={{
-                                width: 32,
-                                height: 32,
-                                borderRadius: 0,
-                                border: 'none',
-                                background: 'transparent',
-                                color: inlineImageEditMode && inlineCropActive ? '#22d3ee' : '#c1d2e2',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer'
-                            }}
-                        >
-                            <span style={{ display: 'inline-flex' }}>
-                                <Crop size={21} strokeWidth={2.1} />
-                            </span>
-                        </button>
-                        <button
-                            type="button"
-                            title="Filters"
-                            onClick={activateInlineFilterMode}
-                            style={{
-                                width: 32,
-                                height: 32,
-                                borderRadius: 0,
-                                border: 'none',
-                                background: 'transparent',
-                                color: inlineImageEditMode && inlineFilterActive ? '#22d3ee' : '#c1d2e2',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer'
-                            }}
-                        >
-                            <span style={{ display: 'inline-flex' }}>
-                                <SlidersHorizontal size={21} strokeWidth={2.1} />
-                            </span>
-                        </button>
-                        <button
-                            type="button"
-                            title="Brush"
-                            style={{
-                                width: 32,
-                                height: 32,
-                                borderRadius: 0,
-                                border: 'none',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                                color: inlineImageEditMode && inlinePaintActive ? '#22d3ee' : '#c1d2e2',
-                                background: 'transparent'
-                            }}
-                            onClick={() => {
-                                activateInlinePaintMode();
-                            }}
-                        >
-                            <span style={{ display: 'inline-flex' }}>
-                                <Pencil size={21} strokeWidth={2.1} />
-                            </span>
-                        </button>
-                        <button type="button" onClick={activateInlineTextMode} style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: inlineTextActive ? '#22d3ee' : '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Text">
-                            <span
-                                style={{ fontSize: 20, fontWeight: 400, lineHeight: 1, color: 'inherit' }}
-                            >
-                                Aa
-                            </span>
-                        </button>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'end', gap: 14 }}>
-                        {inlineImageEditMode && (inlineCropActive || inlineFilterActive || inlinePaintActive || inlineTextActive || hasInlineUndo) && (
-                            <button
-                                type="button"
-                                onClick={applyInlineImageEditsToPreview}
+                                title="Crop & Rotate"
+                                onClick={activateInlineCropMode}
                                 style={{
+                                    width: 32,
+                                    height: 32,
+                                    borderRadius: 0,
                                     border: 'none',
                                     background: 'transparent',
-                                    color: '#dbeafe',
-                                    fontSize: 16,
-                                    fontWeight: 500,
-                                    lineHeight: 1.2,
+                                    color: inlineImageEditMode && inlineCropActive ? '#22d3ee' : '#c1d2e2',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
                                     cursor: 'pointer'
                                 }}
                             >
-                                Done
+                                <span style={{ display: 'inline-flex' }}>
+                                    <Crop size={21} strokeWidth={2.1} />
+                                </span>
                             </button>
-                        )}
-                        <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDownload(getFilePreviewUrl(file), file.name || 'download'); }} title="Download">
-                            <Download size={22} strokeWidth={2.2} />
-                        </button>
-                    </div>
-                </div>
-            )}
-            {/* Header (non-image preview only) */}
-            {!isImagePreview && (
-                <div style={{
-                    padding: '16px 24px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    background: (isVideoPreview || isDocumentPreview) ? '#102b42' : '#0b141a',
-                    color: '#f8fafc',
-                    flexShrink: 0,
-                    borderBottom: (isVideoPreview || isDocumentPreview)
-                        ? '1px solid rgba(148, 163, 184, 0.2)'
-                        : '1px solid rgba(255, 255, 255, 0.1)',
-                    position: 'relative'
-                }}>
-                    <button
-                        onClick={() => {
-                            setIsDiscardPreviewConfirmOpen(true);
-                        }}
-                        style={{ background: 'none', border: 'none', color: (isVideoPreview || isDocumentPreview) ? '#c1d2e2' : '#aebac1', cursor: 'pointer', display: 'flex', padding: 4, zIndex: 2 }}
-                        title="Close preview"
-                    >
-                        <X size={24} />
-                    </button>
-
-                    {!(isVideoPreview || isDocumentPreview) && (
-                        <div style={{ position: 'absolute', left: 0, width: '100%', textAlign: 'center', pointerEvents: 'none' }}>
-                            <span style={{ fontSize: 18, fontWeight: 500, color: '#f8fafc' }}>Preview</span>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* Content Area */}
-            <div style={{
-                flex: 1,
-                minHeight: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
-                alignItems: 'center',
-                overflow: isImagePreview ? 'auto' : 'hidden',
-                padding: isImagePreview ? (isMobile ? '16px 12px 12px' : '24px 28px 18px') : '26px 40px 20px',
-                position: 'relative',
-                background: isImagePreview ? 'transparent' : (isMediaThemePreview ? '#041b2d' : '#0b141a'),
-                width: isImagePreview ? '100%' : (isMediaThemePreview ? imagePreviewCardWidth : '100%'),
-                margin: isImagePreview ? 0 : (isMediaThemePreview ? '20px auto 0' : '0'),
-                borderTopLeftRadius: isImagePreview ? 0 : (isMediaThemePreview ? 6 : 0),
-                borderTopRightRadius: isImagePreview ? 0 : (isMediaThemePreview ? 6 : 0)
-            }}>
-                {isDocumentPreview && (
-                    <div style={{
-                        width: '100%',
-                        maxWidth: 640,
-                        marginBottom: 16,
-                        fontSize: 16,
-                        fontWeight: 600,
-                        color: '#dbeafe',
-                        textAlign: 'center',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis'
-                    }}>
-                        {file?.name || 'Document'}
-                    </div>
-                )}
-                {file && file.type?.startsWith('image/') ? (
-                    <div style={{ width: '100%', maxWidth: isMobile ? 'calc(100vw - 24px)' : 760, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: isMobile ? 10 : 14, background: 'transparent' }}>
-                        <div style={{
-                            display: inlineImageEditMode && inlineFilterActive ? 'flex' : 'none',
-                            width: '100%',
-                            minHeight: isMobile ? 76 : 86,
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: isMobile ? 12 : 22,
-                            flexWrap: 'nowrap',
-                            overflowX: inlineFilterActive ? 'auto' : 'hidden',
-                            scrollbarWidth: 'none',
-                            pointerEvents: inlineImageEditMode && inlineFilterActive ? 'auto' : 'none',
-                            background: 'transparent',
-                            flexShrink: 0
-                        }}>
-                            {INLINE_IMAGE_FILTERS.map((filterOption) => {
-                                const isSelected = inlineImageFilter === filterOption.id;
-                                return (
-                                    <button
-                                        key={filterOption.id}
-                                        type="button"
-                                        onClick={() => setInlineImageFilter(filterOption.id)}
-                                        style={{
-                                            width: isMobile ? 58 : 74,
-                                            minWidth: isMobile ? 58 : 74,
-                                            border: 'none',
-                                            background: 'transparent',
-                                            color: isSelected ? '#22d3ee' : '#dbeafe',
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            alignItems: 'center',
-                                            gap: 7,
-                                            padding: 0,
-                                            cursor: 'pointer',
-                                            fontWeight: isSelected ? 700 : 600
-                                        }}
-                                        title={filterOption.label}
-                                    >
-                                        <span style={{
-                                            width: isMobile ? 48 : 60,
-                                            height: isMobile ? 44 : 58,
-                                            borderRadius: 7,
-                                            overflow: 'hidden',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            border: isSelected ? '2px solid #22d3ee' : '1px solid rgba(148, 163, 184, 0.35)',
-                                            background: '#071f33',
-                                            position: 'relative'
-                                        }}>
-                                            <img
-                                                src={getFilePreviewUrl(file)}
-                                                alt=""
-                                                style={{
-                                                    width: '100%',
-                                                    height: '100%',
-                                                    objectFit: 'cover',
-                                                    filter: filterOption.css
-                                                }}
-                                            />
-                                            {isSelected && (
-                                                <span style={{
-                                                    position: 'absolute',
-                                                    inset: 0,
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    background: 'rgba(14, 165, 190, 0.48)',
-                                                    color: '#e5faff'
-                                                }}>
-                                                    <Check size={18} strokeWidth={2.6} />
-                                                </span>
-                                            )}
-                                        </span>
-                                        <span style={{
-                                            fontSize: isMobile ? 12 : 16,
-                                            lineHeight: 1.1,
-                                            maxWidth: '100%',
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis'
-                                        }}>
-                                            {filterOption.label}
-                                        </span>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                        <div style={{ width: '100%', flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}>
-                            <div
-                                ref={inlineImageStageRef}
+                            <button
+                                type="button"
+                                title="Filters"
+                                onClick={activateInlineFilterMode}
                                 style={{
-                                    position: 'relative',
-                                    display: 'inline-block',
-                                    maxWidth: '100%',
-                                    maxHeight: '100%',
-                                    lineHeight: 0,
-                                    transform: inlineImageEditMode
-                                        ? `rotate(${inlineImageRotation}deg) scale(${getInlinePreviewRotateScale()})`
-                                        : 'none',
-                                    transformOrigin: 'center center',
-                                    transition: 'transform 140ms ease'
+                                    width: 32,
+                                    height: 32,
+                                    borderRadius: 0,
+                                    border: 'none',
+                                    background: 'transparent',
+                                    color: inlineImageEditMode && inlineFilterActive ? '#22d3ee' : '#c1d2e2',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer'
                                 }}
                             >
-                                <img
-                                    src={getFilePreviewUrl(file)}
-                                    alt="Preview"
-                                    onLoad={(event) => {
-                                        const target = event.currentTarget;
-                                        setInlineImageNaturalSize({
-                                            width: target.naturalWidth || 0,
-                                            height: target.naturalHeight || 0
-                                        });
-                                    }}
+                                <span style={{ display: 'inline-flex' }}>
+                                    <SlidersHorizontal size={21} strokeWidth={2.1} />
+                                </span>
+                            </button>
+                            <button
+                                type="button"
+                                title="Brush"
+                                style={{
+                                    width: 32,
+                                    height: 32,
+                                    borderRadius: 0,
+                                    border: 'none',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    color: inlineImageEditMode && inlinePaintActive ? '#22d3ee' : '#c1d2e2',
+                                    background: 'transparent'
+                                }}
+                                onClick={() => {
+                                    activateInlinePaintMode();
+                                }}
+                            >
+                                <span style={{ display: 'inline-flex' }}>
+                                    <Pencil size={21} strokeWidth={2.1} />
+                                </span>
+                            </button>
+                            <button type="button" onClick={activateInlineTextMode} style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: inlineTextActive ? '#22d3ee' : '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Text">
+                                <span
+                                    style={{ fontSize: 20, fontWeight: 400, lineHeight: 1, color: 'inherit' }}
+                                >
+                                    Aa
+                                </span>
+                            </button>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'end', gap: 14 }}>
+                            {inlineImageEditMode && (inlineCropActive || inlineFilterActive || inlinePaintActive || inlineTextActive || hasInlineUndo) && (
+                                <button
+                                    type="button"
+                                    onClick={applyInlineImageEditsToPreview}
                                     style={{
-                                        display: 'block',
+                                        border: 'none',
+                                        background: 'transparent',
+                                        color: '#dbeafe',
+                                        fontSize: 16,
+                                        fontWeight: 500,
+                                        lineHeight: 1.2,
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Done
+                                </button>
+                            )}
+                            <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDownload(getFilePreviewUrl(file), file.name || 'download'); }} title="Download">
+                                <Download size={22} strokeWidth={2.2} />
+                            </button>
+                        </div>
+                    </div>
+                )}
+                {/* Header (non-image preview only) */}
+                {!isImagePreview && (
+                    <div style={{
+                        padding: '16px 24px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        background: (isVideoPreview || isDocumentPreview) ? '#102b42' : '#0b141a',
+                        color: '#f8fafc',
+                        flexShrink: 0,
+                        borderBottom: (isVideoPreview || isDocumentPreview)
+                            ? '1px solid rgba(148, 163, 184, 0.2)'
+                            : '1px solid rgba(255, 255, 255, 0.1)',
+                        position: 'relative'
+                    }}>
+                        <button
+                            onClick={() => {
+                                setIsDiscardPreviewConfirmOpen(true);
+                            }}
+                            style={{ background: 'none', border: 'none', color: (isVideoPreview || isDocumentPreview) ? '#c1d2e2' : '#aebac1', cursor: 'pointer', display: 'flex', padding: 4, zIndex: 2 }}
+                            title="Close preview"
+                        >
+                            <X size={24} />
+                        </button>
+
+                        {!(isVideoPreview || isDocumentPreview) && (
+                            <div style={{ position: 'absolute', left: 0, width: '100%', textAlign: 'center', pointerEvents: 'none' }}>
+                                <span style={{ fontSize: 18, fontWeight: 500, color: '#f8fafc' }}>Preview</span>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* Content Area */}
+                <div style={{
+                    flex: 1,
+                    minHeight: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    overflow: isImagePreview ? 'auto' : 'hidden',
+                    padding: isImagePreview ? (isMobile ? '16px 12px 12px' : '24px 28px 18px') : '26px 40px 20px',
+                    position: 'relative',
+                    background: isImagePreview ? 'transparent' : (isMediaThemePreview ? '#041b2d' : '#0b141a'),
+                    width: isImagePreview ? '100%' : (isMediaThemePreview ? imagePreviewCardWidth : '100%'),
+                    margin: isImagePreview ? 0 : (isMediaThemePreview ? '20px auto 0' : '0'),
+                    borderTopLeftRadius: isImagePreview ? 0 : (isMediaThemePreview ? 6 : 0),
+                    borderTopRightRadius: isImagePreview ? 0 : (isMediaThemePreview ? 6 : 0)
+                }}>
+                    {isDocumentPreview && (
+                        <div style={{
+                            width: '100%',
+                            maxWidth: 640,
+                            marginBottom: 16,
+                            fontSize: 16,
+                            fontWeight: 600,
+                            color: '#dbeafe',
+                            textAlign: 'center',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                        }}>
+                            {file?.name || 'Document'}
+                        </div>
+                    )}
+                    {file && file.type?.startsWith('image/') ? (
+                        <div style={{ width: '100%', maxWidth: isMobile ? 'calc(100vw - 24px)' : 760, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: isMobile ? 10 : 14, background: 'transparent' }}>
+                            <div style={{
+                                display: inlineImageEditMode && inlineFilterActive ? 'flex' : 'none',
+                                width: '100%',
+                                minHeight: isMobile ? 76 : 86,
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: isMobile ? 12 : 22,
+                                flexWrap: 'nowrap',
+                                overflowX: inlineFilterActive ? 'auto' : 'hidden',
+                                scrollbarWidth: 'none',
+                                pointerEvents: inlineImageEditMode && inlineFilterActive ? 'auto' : 'none',
+                                background: 'transparent',
+                                flexShrink: 0
+                            }}>
+                                {INLINE_IMAGE_FILTERS.map((filterOption) => {
+                                    const isSelected = inlineImageFilter === filterOption.id;
+                                    return (
+                                        <button
+                                            key={filterOption.id}
+                                            type="button"
+                                            onClick={() => setInlineImageFilter(filterOption.id)}
+                                            style={{
+                                                width: isMobile ? 58 : 74,
+                                                minWidth: isMobile ? 58 : 74,
+                                                border: 'none',
+                                                background: 'transparent',
+                                                color: isSelected ? '#22d3ee' : '#dbeafe',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                alignItems: 'center',
+                                                gap: 7,
+                                                padding: 0,
+                                                cursor: 'pointer',
+                                                fontWeight: isSelected ? 700 : 600
+                                            }}
+                                            title={filterOption.label}
+                                        >
+                                            <span style={{
+                                                width: isMobile ? 48 : 60,
+                                                height: isMobile ? 44 : 58,
+                                                borderRadius: 7,
+                                                overflow: 'hidden',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                border: isSelected ? '2px solid #22d3ee' : '1px solid rgba(148, 163, 184, 0.35)',
+                                                background: '#071f33',
+                                                position: 'relative'
+                                            }}>
+                                                <img
+                                                    src={getFilePreviewUrl(file)}
+                                                    alt=""
+                                                    style={{
+                                                        width: '100%',
+                                                        height: '100%',
+                                                        objectFit: 'cover',
+                                                        filter: filterOption.css
+                                                    }}
+                                                />
+                                                {isSelected && (
+                                                    <span style={{
+                                                        position: 'absolute',
+                                                        inset: 0,
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        background: 'rgba(14, 165, 190, 0.48)',
+                                                        color: '#e5faff'
+                                                    }}>
+                                                        <Check size={18} strokeWidth={2.6} />
+                                                    </span>
+                                                )}
+                                            </span>
+                                            <span style={{
+                                                fontSize: isMobile ? 12 : 16,
+                                                lineHeight: 1.1,
+                                                maxWidth: '100%',
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis'
+                                            }}>
+                                                {filterOption.label}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <div style={{ width: '100%', flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}>
+                                <div
+                                    ref={inlineImageStageRef}
+                                    style={{
+                                        position: 'relative',
+                                        display: 'inline-block',
                                         maxWidth: '100%',
                                         maxHeight: '100%',
-                                        width: 'auto',
-                                        height: 'auto',
-                                        objectFit: 'contain',
-                                        filter: getInlineImageFilterCss()
+                                        lineHeight: 0,
+                                        transform: inlineImageEditMode
+                                            ? `rotate(${inlineImageRotation}deg) scale(${getInlinePreviewRotateScale()})`
+                                            : 'none',
+                                        transformOrigin: 'center center',
+                                        transition: 'transform 140ms ease'
                                     }}
-                                />
-                                {(inlinePaintStrokes.length > 0 || inlinePaintCurrentStroke) && (
-                                    <svg
-                                        viewBox="0 0 100 100"
-                                        preserveAspectRatio="none"
-                                        style={{
-                                            position: 'absolute',
-                                            inset: 0,
-                                            width: '100%',
-                                            height: '100%',
-                                            pointerEvents: 'none',
-                                            overflow: 'hidden'
+                                >
+                                    <img
+                                        src={getFilePreviewUrl(file)}
+                                        alt="Preview"
+                                        onLoad={(event) => {
+                                            const target = event.currentTarget;
+                                            setInlineImageNaturalSize({
+                                                width: target.naturalWidth || 0,
+                                                height: target.naturalHeight || 0
+                                            });
                                         }}
-                                    >
-                                        {[...inlinePaintStrokes, ...(inlinePaintCurrentStroke ? [inlinePaintCurrentStroke] : [])].map((stroke, strokeIndex) => (
-                                            <path
-                                                key={strokeIndex}
-                                                d={buildInlinePaintPath(stroke.points)}
-                                                fill="none"
-                                                stroke={stroke.color || '#33ceff'}
-                                                strokeWidth={Math.max(2, Number(stroke.size || 8))}
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                vectorEffect="non-scaling-stroke"
-                                            />
-                                        ))}
-                                    </svg>
-                                )}
-                                {inlineTexts.map((item) => (
-                                    <div
-                                        key={item.id}
                                         style={{
-                                            position: 'absolute',
-                                            left: `${clampUnit(item.x) * 100}%`,
-                                            top: `${clampUnit(item.y) * 100}%`,
-                                            transform: item.align === 'left'
-                                                ? 'translate(0, -50%)'
-                                                : item.align === 'right'
-                                                    ? 'translate(-100%, -50%)'
-                                                    : 'translate(-50%, -50%)',
-                                            color: item.color || '#ffffff',
-                                            fontSize: item.size || 28,
-                                            fontFamily: item.font === 'Serif'
-                                                ? 'Georgia, serif'
-                                                : item.font === 'Norican'
-                                                    ? 'cursive'
-                                                    : item.font === 'Bryndan Write'
-                                                        ? '"Comic Sans MS", cursive'
-                                                        : item.font === 'Oswald'
-                                                            ? 'Impact, sans-serif'
-                                                : item.font === 'Monospace'
-                                                    ? '"Courier New", monospace'
-                                                    : 'Arial, sans-serif',
-                                            fontWeight: 700,
-                                            textAlign: item.align || 'center',
-                                            textShadow: '0 2px 4px rgba(2, 6, 23, 0.8), 0 0 2px rgba(2, 6, 23, 0.9)',
-                                            pointerEvents: inlineImageEditMode && !inlineTextActive && !inlinePaintActive && !inlineCropActive ? 'auto' : 'none',
-                                            cursor: draggingInlineTextId === item.id ? 'grabbing' : 'grab',
-                                            whiteSpace: 'nowrap',
-                                            zIndex: 4,
-                                            background: item.background ? 'rgba(2, 18, 32, 0.78)' : 'transparent',
-                                            borderRadius: item.background ? 6 : 0,
-                                            padding: item.background ? '4px 10px' : 0,
-                                            touchAction: 'none'
+                                            display: 'block',
+                                            maxWidth: '100%',
+                                            maxHeight: '100%',
+                                            width: 'auto',
+                                            height: 'auto',
+                                            objectFit: 'contain',
+                                            filter: getInlineImageFilterCss()
                                         }}
-                                        onPointerDown={(event) => handleInlineTextPointerDown(event, item)}
-                                        onPointerMove={handleInlineTextPointerMove}
-                                        onPointerUp={handleInlineTextPointerUp}
-                                        onPointerCancel={handleInlineTextPointerUp}
-                                    >
-                                        {item.text}
-                                    </div>
-                                ))}
-                                {inlineImageEditMode && !inlineTextActive && !inlinePaintActive && !inlineCropActive && inlineTexts.length > 0 && (
-                                    <div
-                                        style={{
-                                            position: 'absolute',
-                                            inset: 0,
-                                            zIndex: 3,
-                                            pointerEvents: 'auto',
-                                            cursor: draggingInlineTextId ? 'grabbing' : 'default',
-                                            touchAction: 'none'
-                                        }}
-                                        onPointerMove={handleInlineTextPointerMove}
-                                        onPointerUp={handleInlineTextPointerUp}
-                                        onPointerCancel={handleInlineTextPointerUp}
                                     />
-                                )}
-                                {inlineImageEditMode && inlineTextActive && (
-                                    <div
-                                        style={{
-                                            position: 'absolute',
-                                            left: '50%',
-                                            top: '50%',
-                                            transform: 'translate(-50%, -50%)',
-                                            zIndex: 8,
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: 8,
-                                            padding: 4,
-                                            borderRadius: 9,
-                                            background: 'rgba(8, 30, 50, 0.96)',
-                                            border: '2px solid #33ceff',
-                                            boxShadow: '0 0 0 2px rgba(2, 12, 24, 0.85), 0 8px 20px rgba(2, 6, 23, 0.32)'
-                                        }}
-                                    >
-                                        <button
-                                            type="button"
-                                            title="Emoji"
-                                            className="wa-nav-icon-btn wa-inline-text-emoji-btn"
-                                            onClick={(event) => {
-                                                event.stopPropagation();
-                                                const rect = event.currentTarget.getBoundingClientRect();
-                                                setEmojiInsertTarget('inlineText');
-                                                setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
-                                                setShowInputEmojiPicker((prev) => !prev || emojiInsertTarget !== 'inlineText');
+                                    {(inlinePaintStrokes.length > 0 || inlinePaintCurrentStroke) && (
+                                        <svg
+                                            viewBox="0 0 100 100"
+                                            preserveAspectRatio="none"
+                                            style={{
+                                                position: 'absolute',
+                                                inset: 0,
+                                                width: '100%',
+                                                height: '100%',
+                                                pointerEvents: 'none',
+                                                overflow: 'hidden'
                                             }}
+                                        >
+                                            {[...inlinePaintStrokes, ...(inlinePaintCurrentStroke ? [inlinePaintCurrentStroke] : [])].map((stroke, strokeIndex) => (
+                                                <path
+                                                    key={strokeIndex}
+                                                    d={buildInlinePaintPath(stroke.points)}
+                                                    fill="none"
+                                                    stroke={stroke.color || '#33ceff'}
+                                                    strokeWidth={Math.max(2, Number(stroke.size || 8))}
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    vectorEffect="non-scaling-stroke"
+                                                />
+                                            ))}
+                                        </svg>
+                                    )}
+                                    {inlineTexts.map((item) => (
+                                        <div
+                                            key={item.id}
+                                            style={{
+                                                position: 'absolute',
+                                                left: `${clampUnit(item.x) * 100}%`,
+                                                top: `${clampUnit(item.y) * 100}%`,
+                                                transform: item.align === 'left'
+                                                    ? 'translate(0, -50%)'
+                                                    : item.align === 'right'
+                                                        ? 'translate(-100%, -50%)'
+                                                        : 'translate(-50%, -50%)',
+                                                color: item.color || '#ffffff',
+                                                fontSize: item.size || 28,
+                                                fontFamily: item.font === 'Serif'
+                                                    ? 'Georgia, serif'
+                                                    : item.font === 'Norican'
+                                                        ? 'cursive'
+                                                        : item.font === 'Bryndan Write'
+                                                            ? '"Comic Sans MS", cursive'
+                                                            : item.font === 'Oswald'
+                                                                ? 'Impact, sans-serif'
+                                                                : item.font === 'Monospace'
+                                                                    ? '"Courier New", monospace'
+                                                                    : 'Arial, sans-serif',
+                                                fontWeight: 700,
+                                                textAlign: item.align || 'center',
+                                                textShadow: '0 2px 4px rgba(2, 6, 23, 0.8), 0 0 2px rgba(2, 6, 23, 0.9)',
+                                                pointerEvents: inlineImageEditMode && !inlineTextActive && !inlinePaintActive && !inlineCropActive ? 'auto' : 'none',
+                                                cursor: draggingInlineTextId === item.id ? 'grabbing' : 'grab',
+                                                whiteSpace: 'nowrap',
+                                                zIndex: 4,
+                                                background: item.background ? 'rgba(2, 18, 32, 0.78)' : 'transparent',
+                                                borderRadius: item.background ? 6 : 0,
+                                                padding: item.background ? '4px 10px' : 0,
+                                                touchAction: 'none'
+                                            }}
+                                            onPointerDown={(event) => handleInlineTextPointerDown(event, item)}
+                                            onPointerMove={handleInlineTextPointerMove}
+                                            onPointerUp={handleInlineTextPointerUp}
+                                            onPointerCancel={handleInlineTextPointerUp}
+                                        >
+                                            {item.text}
+                                        </div>
+                                    ))}
+                                    {inlineImageEditMode && !inlineTextActive && !inlinePaintActive && !inlineCropActive && inlineTexts.length > 0 && (
+                                        <div
+                                            style={{
+                                                position: 'absolute',
+                                                inset: 0,
+                                                zIndex: 3,
+                                                pointerEvents: 'auto',
+                                                cursor: draggingInlineTextId ? 'grabbing' : 'default',
+                                                touchAction: 'none'
+                                            }}
+                                            onPointerMove={handleInlineTextPointerMove}
+                                            onPointerUp={handleInlineTextPointerUp}
+                                            onPointerCancel={handleInlineTextPointerUp}
+                                        />
+                                    )}
+                                    {inlineImageEditMode && inlineTextActive && (
+                                        <div
                                             style={{
                                                 position: 'absolute',
                                                 left: '50%',
-                                                top: -42,
-                                                transform: 'translateX(-50%)',
-                                                width: 34,
-                                                height: 34,
-                                                borderRadius: '50%',
-                                                border: '2px solid #ffffff',
-                                                background: 'rgba(15, 23, 42, 0.92)',
-                                                color: '#dbeafe',
-                                                display: 'inline-flex',
+                                                top: '50%',
+                                                transform: 'translate(-50%, -50%)',
+                                                zIndex: 8,
+                                                display: 'flex',
                                                 alignItems: 'center',
-                                                justifyContent: 'center',
-                                                boxShadow: '0 8px 18px rgba(2, 6, 23, 0.34)',
-                                                cursor: 'pointer'
+                                                gap: 8,
+                                                padding: 4,
+                                                borderRadius: 9,
+                                                background: 'rgba(8, 30, 50, 0.96)',
+                                                border: '2px solid #33ceff',
+                                                boxShadow: '0 0 0 2px rgba(2, 12, 24, 0.85), 0 8px 20px rgba(2, 6, 23, 0.32)'
                                             }}
                                         >
-                                            <Smile size={22} />
-                                        </button>
-                                        {!!inlineTextDraft.trim() && (
-                                            <div
+                                            <button
+                                                type="button"
+                                                title="Emoji"
+                                                className="wa-nav-icon-btn wa-inline-text-emoji-btn"
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    const rect = event.currentTarget.getBoundingClientRect();
+                                                    setEmojiInsertTarget('inlineText');
+                                                    setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
+                                                    setShowInputEmojiPicker((prev) => !prev || emojiInsertTarget !== 'inlineText');
+                                                }}
                                                 style={{
                                                     position: 'absolute',
-                                                    left: 0,
-                                                    bottom: 'calc(100% + 12px)',
-                                                    minWidth: 330,
-                                                    padding: '12px 14px 10px',
-                                                    borderRadius: 12,
-                                                    borderLeft: '3px solid #0EA5BE',
-                                                    background: 'rgba(230, 236, 242, 0.98)',
-                                                    boxShadow: '0 8px 24px rgba(2, 12, 24, 0.28)',
-                                                    color: '#027EB5'
+                                                    left: '50%',
+                                                    top: -42,
+                                                    transform: 'translateX(-50%)',
+                                                    width: 34,
+                                                    height: 34,
+                                                    borderRadius: '50%',
+                                                    border: '2px solid #ffffff',
+                                                    background: 'rgba(15, 23, 42, 0.92)',
+                                                    color: '#dbeafe',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    boxShadow: '0 8px 18px rgba(2, 6, 23, 0.34)',
+                                                    cursor: 'pointer'
                                                 }}
                                             >
-                                                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Neural Chat AI</div>
-                                                {getInlineTextAiIssue() ? (
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ef4444', fontSize: 13, fontWeight: 700 }}>
-                                                        <AlertCircle size={16} />
-                                                        {getInlineTextAiIssue()}
-                                                    </div>
-                                                ) : (
-                                                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                                        {[
-                                                            { id: 'basic', label: 'BASIC', color: '#059669' },
-                                                            { id: 'fluent', label: 'FLUENT', color: '#1d72d2' },
-                                                            { id: 'formal', label: 'FORMAL', color: '#6d4aff' }
-                                                        ].map((option) => (
-                                                            <button
-                                                                key={option.id}
-                                                                type="button"
-                                                                onClick={() => applyInlineTextAiStyle(option.id)}
-                                                                style={{
-                                                                    border: `1.5px solid ${option.color}`,
-                                                                    color: option.color,
-                                                                    background: '#ffffff',
-                                                                    borderRadius: 999,
-                                                                    padding: '6px 12px',
-                                                                    fontSize: 12,
-                                                                    fontWeight: 800,
-                                                                    letterSpacing: 0.4,
-                                                                    cursor: 'pointer',
-                                                                    display: 'inline-flex',
-                                                                    alignItems: 'center',
-                                                                    gap: 6
-                                                                }}
-                                                            >
-                                                                <MessageSquare size={12} />
-                                                                {option.label}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-                                        <input
-                                            autoFocus
-                                            value={inlineTextDraft}
-                                            onChange={(event) => setInlineTextDraft(event.target.value)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === 'Enter') commitInlineTextDraft();
-                                                if (event.key === 'Escape') clearInlineTextMode();
-                                            }}
-                                            placeholder="Type something"
-                                            style={{
-                                                width: 190,
-                                                height: 34,
-                                                borderRadius: 6,
-                                                border: '1px solid rgba(15, 23, 42, 0.25)',
-                                                outline: 'none',
-                                                padding: '0 10px',
-                                                fontSize: 18,
-                                                color: inlineTextBackground ? '#e0f7ff' : inlinePaintColor,
-                                                background: inlineTextBackground ? 'rgba(2, 18, 32, 0.88)' : '#ffffff',
-                                                borderColor: inlineTextBackground ? '#33ceff' : 'rgba(51, 206, 255, 0.7)',
-                                                textAlign: inlineTextAlign,
-                                                fontFamily: inlineTextFont === 'Serif'
-                                                    ? 'Georgia, serif'
-                                                    : inlineTextFont === 'Norican'
-                                                        ? 'cursive'
-                                                        : inlineTextFont === 'Bryndan Write'
-                                                            ? '"Comic Sans MS", cursive'
-                                                            : inlineTextFont === 'Oswald'
-                                                                ? 'Impact, sans-serif'
-                                                    : inlineTextFont === 'Monospace'
-                                                        ? '"Courier New", monospace'
-                                                        : 'Arial, sans-serif'
-                                            }}
-                                        />
-                                        <button
-                                            type="button"
-                                            title="Done"
-                                            onClick={commitInlineTextDraft}
-                                            disabled={!!getInlineTextAiIssue(inlineTextDraft) || !inlineTextDraft.trim()}
-                                            style={{
-                                                width: 34,
-                                                height: 34,
-                                                borderRadius: '50%',
-                                                border: 'none',
-                                                background: getInlineTextAiIssue(inlineTextDraft) || !inlineTextDraft.trim()
-                                                    ? 'rgba(148, 163, 184, 0.45)'
-                                                    : 'linear-gradient(135deg, #22d3ee, #3b82f6)',
-                                                color: '#ffffff',
-                                                display: 'inline-flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                cursor: getInlineTextAiIssue(inlineTextDraft) || !inlineTextDraft.trim() ? 'not-allowed' : 'pointer',
-                                                flexShrink: 0
-                                            }}
-                                        >
-                                            <Check size={20} strokeWidth={2.6} />
-                                        </button>
-                                    </div>
-                                )}
-                                {inlineImageEditMode && inlinePaintActive && (
-                                    <div
-                                        style={{
-                                            position: 'absolute',
-                                            inset: 0,
-                                            cursor: 'crosshair',
-                                            touchAction: 'none'
-                                        }}
-                                        onPointerDown={handleInlinePaintPointerDown}
-                                        onPointerMove={handleInlinePaintPointerMove}
-                                        onPointerUp={handleInlinePaintPointerUp}
-                                        onPointerCancel={handleInlinePaintPointerUp}
-                                        onPointerLeave={() => setInlinePaintCursorPoint(null)}
-                                    />
-                                )}
-                                {inlineImageEditMode && inlinePaintActive && inlinePaintCursorPoint && (
-                                    <div
-                                        style={{
-                                            position: 'absolute',
-                                            left: `${inlinePaintCursorPoint.x * 100}%`,
-                                            top: `${inlinePaintCursorPoint.y * 100}%`,
-                                            width: Math.max(12, Number(inlinePaintSize || 8)),
-                                            height: Math.max(12, Number(inlinePaintSize || 8)),
-                                            borderRadius: '50%',
-                                            transform: 'translate(-50%, -50%)',
-                                            pointerEvents: 'none',
-                                            zIndex: 4,
-                                            background: 'rgba(255, 255, 255, 0.16)',
-                                            border: `2px solid ${inlinePaintColor}`,
-                                            boxShadow: '0 2px 8px rgba(2, 6, 23, 0.45)',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center'
-                                        }}
-                                    >
-                                        <span style={{
-                                            width: 6,
-                                            height: 6,
-                                            borderRadius: '50%',
-                                            background: inlinePaintColor,
-                                            display: 'block'
-                                        }} />
-                                    </div>
-                                )}
-                            {inlineImageEditMode && inlineCropActive && (
-                                    <div
-                                        style={{
-                                            position: 'absolute',
-                                            inset: 0,
-                                            cursor: inlineCropDragMode === 'resize'
-                                                ? getInlineCropCursorForHandle(inlineCropResizeHandle)
-                                                : inlineCropCursor,
-                                            touchAction: 'none'
-                                        }}
-                                        onPointerDown={handleInlineCropPointerDown}
-                                        onPointerMove={handleInlineCropPointerMove}
-                                        onPointerUp={handleInlineCropPointerUp}
-                                        onPointerCancel={handleInlineCropPointerUp}
-                                        onPointerLeave={() => {
-                                            if (!inlineCropDragMode) setInlineCropCursor('default');
-                                        }}
-                                    >
-                                        {(() => {
-                                            const rect = normalizeCropRect(inlineCropRect) || { x: 0, y: 0, w: 1, h: 1 };
-                                            const left = `${rect.x * 100}%`;
-                                            const top = `${rect.y * 100}%`;
-                                            const width = `${rect.w * 100}%`;
-                                            const height = `${rect.h * 100}%`;
-                                            const handleStyle = {
-                                                position: 'absolute',
-                                                width: isMobile ? 10 : 12,
-                                                height: isMobile ? 10 : 12,
-                                                borderRadius: '50%',
-                                                background: '#102b42',
-                                                border: '2px solid #22d3ee',
-                                                boxShadow: '0 0 0 1px rgba(2, 12, 24, 0.85)'
-                                            };
-                                            return (
+                                                <Smile size={22} />
+                                            </button>
+                                            {!!inlineTextDraft.trim() && (
                                                 <div
                                                     style={{
                                                         position: 'absolute',
-                                                        left,
-                                                        top,
-                                                        width,
-                                                        height,
-                                                        border: '1.5px solid rgba(34, 211, 238, 0.85)',
-                                                        borderRadius: 2,
-                                                        boxShadow: 'none',
-                                                        pointerEvents: 'none',
-                                                        cursor: inlineCropCursor,
-                                                        willChange: 'left, top, width, height'
+                                                        left: 0,
+                                                        bottom: 'calc(100% + 12px)',
+                                                        minWidth: 330,
+                                                        padding: '12px 14px 10px',
+                                                        borderRadius: 12,
+                                                        borderLeft: '3px solid #0EA5BE',
+                                                        background: 'rgba(230, 236, 242, 0.98)',
+                                                        boxShadow: '0 8px 24px rgba(2, 12, 24, 0.28)',
+                                                        color: '#027EB5'
                                                     }}
                                                 >
-                                                    <span style={{ ...handleStyle, left: -7, top: -7 }} />
-                                                    <span style={{ ...handleStyle, left: '50%', top: -7, transform: 'translateX(-50%)' }} />
-                                                    <span style={{ ...handleStyle, right: -7, top: -7 }} />
-                                                    <span style={{ ...handleStyle, left: -7, top: '50%', transform: 'translateY(-50%)' }} />
-                                                    <span style={{ ...handleStyle, right: -7, top: '50%', transform: 'translateY(-50%)' }} />
-                                                    <span style={{ ...handleStyle, left: -7, bottom: -7 }} />
-                                                    <span style={{ ...handleStyle, left: '50%', bottom: -7, transform: 'translateX(-50%)' }} />
-                                                    <span style={{ ...handleStyle, right: -7, bottom: -7 }} />
+                                                    <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Neural Chat AI</div>
+                                                    {getInlineTextAiIssue() ? (
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ef4444', fontSize: 13, fontWeight: 700 }}>
+                                                            <AlertCircle size={16} />
+                                                            {getInlineTextAiIssue()}
+                                                        </div>
+                                                    ) : (
+                                                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                                            {[
+                                                                { id: 'basic', label: 'BASIC', color: '#059669' },
+                                                                { id: 'fluent', label: 'FLUENT', color: '#1d72d2' },
+                                                                { id: 'formal', label: 'FORMAL', color: '#6d4aff' }
+                                                            ].map((option) => (
+                                                                <button
+                                                                    key={option.id}
+                                                                    type="button"
+                                                                    onClick={() => applyInlineTextAiStyle(option.id)}
+                                                                    style={{
+                                                                        border: `1.5px solid ${option.color}`,
+                                                                        color: option.color,
+                                                                        background: '#ffffff',
+                                                                        borderRadius: 999,
+                                                                        padding: '6px 12px',
+                                                                        fontSize: 12,
+                                                                        fontWeight: 800,
+                                                                        letterSpacing: 0.4,
+                                                                        cursor: 'pointer',
+                                                                        display: 'inline-flex',
+                                                                        alignItems: 'center',
+                                                                        gap: 6
+                                                                    }}
+                                                                >
+                                                                    <MessageSquare size={12} />
+                                                                    {option.label}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </div>
-                                            );
-                                        })()}
-                                    </div>
-                                )}
+                                            )}
+                                            <input
+                                                autoFocus
+                                                value={inlineTextDraft}
+                                                onChange={(event) => setInlineTextDraft(event.target.value)}
+                                                onKeyDown={(event) => {
+                                                    if (event.key === 'Enter') commitInlineTextDraft();
+                                                    if (event.key === 'Escape') clearInlineTextMode();
+                                                }}
+                                                placeholder="Type something"
+                                                style={{
+                                                    width: 190,
+                                                    height: 34,
+                                                    borderRadius: 6,
+                                                    border: '1px solid rgba(15, 23, 42, 0.25)',
+                                                    outline: 'none',
+                                                    padding: '0 10px',
+                                                    fontSize: 18,
+                                                    color: inlineTextBackground ? '#e0f7ff' : inlinePaintColor,
+                                                    background: inlineTextBackground ? 'rgba(2, 18, 32, 0.88)' : '#ffffff',
+                                                    borderColor: inlineTextBackground ? '#33ceff' : 'rgba(51, 206, 255, 0.7)',
+                                                    textAlign: inlineTextAlign,
+                                                    fontFamily: inlineTextFont === 'Serif'
+                                                        ? 'Georgia, serif'
+                                                        : inlineTextFont === 'Norican'
+                                                            ? 'cursive'
+                                                            : inlineTextFont === 'Bryndan Write'
+                                                                ? '"Comic Sans MS", cursive'
+                                                                : inlineTextFont === 'Oswald'
+                                                                    ? 'Impact, sans-serif'
+                                                                    : inlineTextFont === 'Monospace'
+                                                                        ? '"Courier New", monospace'
+                                                                        : 'Arial, sans-serif'
+                                                }}
+                                            />
+                                            <button
+                                                type="button"
+                                                title="Done"
+                                                onClick={commitInlineTextDraft}
+                                                disabled={!!getInlineTextAiIssue(inlineTextDraft) || !inlineTextDraft.trim()}
+                                                style={{
+                                                    width: 34,
+                                                    height: 34,
+                                                    borderRadius: '50%',
+                                                    border: 'none',
+                                                    background: getInlineTextAiIssue(inlineTextDraft) || !inlineTextDraft.trim()
+                                                        ? 'rgba(148, 163, 184, 0.45)'
+                                                        : 'linear-gradient(135deg, #22d3ee, #3b82f6)',
+                                                    color: '#ffffff',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    cursor: getInlineTextAiIssue(inlineTextDraft) || !inlineTextDraft.trim() ? 'not-allowed' : 'pointer',
+                                                    flexShrink: 0
+                                                }}
+                                            >
+                                                <Check size={20} strokeWidth={2.6} />
+                                            </button>
+                                        </div>
+                                    )}
+                                    {inlineImageEditMode && inlinePaintActive && (
+                                        <div
+                                            style={{
+                                                position: 'absolute',
+                                                inset: 0,
+                                                cursor: 'crosshair',
+                                                touchAction: 'none'
+                                            }}
+                                            onPointerDown={handleInlinePaintPointerDown}
+                                            onPointerMove={handleInlinePaintPointerMove}
+                                            onPointerUp={handleInlinePaintPointerUp}
+                                            onPointerCancel={handleInlinePaintPointerUp}
+                                            onPointerLeave={() => setInlinePaintCursorPoint(null)}
+                                        />
+                                    )}
+                                    {inlineImageEditMode && inlinePaintActive && inlinePaintCursorPoint && (
+                                        <div
+                                            style={{
+                                                position: 'absolute',
+                                                left: `${inlinePaintCursorPoint.x * 100}%`,
+                                                top: `${inlinePaintCursorPoint.y * 100}%`,
+                                                width: Math.max(12, Number(inlinePaintSize || 8)),
+                                                height: Math.max(12, Number(inlinePaintSize || 8)),
+                                                borderRadius: '50%',
+                                                transform: 'translate(-50%, -50%)',
+                                                pointerEvents: 'none',
+                                                zIndex: 4,
+                                                background: 'rgba(255, 255, 255, 0.16)',
+                                                border: `2px solid ${inlinePaintColor}`,
+                                                boxShadow: '0 2px 8px rgba(2, 6, 23, 0.45)',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center'
+                                            }}
+                                        >
+                                            <span style={{
+                                                width: 6,
+                                                height: 6,
+                                                borderRadius: '50%',
+                                                background: inlinePaintColor,
+                                                display: 'block'
+                                            }} />
+                                        </div>
+                                    )}
+                                    {inlineImageEditMode && inlineCropActive && (
+                                        <div
+                                            style={{
+                                                position: 'absolute',
+                                                inset: 0,
+                                                cursor: inlineCropDragMode === 'resize'
+                                                    ? getInlineCropCursorForHandle(inlineCropResizeHandle)
+                                                    : inlineCropCursor,
+                                                touchAction: 'none'
+                                            }}
+                                            onPointerDown={handleInlineCropPointerDown}
+                                            onPointerMove={handleInlineCropPointerMove}
+                                            onPointerUp={handleInlineCropPointerUp}
+                                            onPointerCancel={handleInlineCropPointerUp}
+                                            onPointerLeave={() => {
+                                                if (!inlineCropDragMode) setInlineCropCursor('default');
+                                            }}
+                                        >
+                                            {(() => {
+                                                const rect = normalizeCropRect(inlineCropRect) || { x: 0, y: 0, w: 1, h: 1 };
+                                                const left = `${rect.x * 100}%`;
+                                                const top = `${rect.y * 100}%`;
+                                                const width = `${rect.w * 100}%`;
+                                                const height = `${rect.h * 100}%`;
+                                                const handleStyle = {
+                                                    position: 'absolute',
+                                                    width: isMobile ? 10 : 12,
+                                                    height: isMobile ? 10 : 12,
+                                                    borderRadius: '50%',
+                                                    background: '#102b42',
+                                                    border: '2px solid #22d3ee',
+                                                    boxShadow: '0 0 0 1px rgba(2, 12, 24, 0.85)'
+                                                };
+                                                return (
+                                                    <div
+                                                        style={{
+                                                            position: 'absolute',
+                                                            left,
+                                                            top,
+                                                            width,
+                                                            height,
+                                                            border: '1.5px solid rgba(34, 211, 238, 0.85)',
+                                                            borderRadius: 2,
+                                                            boxShadow: 'none',
+                                                            pointerEvents: 'none',
+                                                            cursor: inlineCropCursor,
+                                                            willChange: 'left, top, width, height'
+                                                        }}
+                                                    >
+                                                        <span style={{ ...handleStyle, left: -7, top: -7 }} />
+                                                        <span style={{ ...handleStyle, left: '50%', top: -7, transform: 'translateX(-50%)' }} />
+                                                        <span style={{ ...handleStyle, right: -7, top: -7 }} />
+                                                        <span style={{ ...handleStyle, left: -7, top: '50%', transform: 'translateY(-50%)' }} />
+                                                        <span style={{ ...handleStyle, right: -7, top: '50%', transform: 'translateY(-50%)' }} />
+                                                        <span style={{ ...handleStyle, left: -7, bottom: -7 }} />
+                                                        <span style={{ ...handleStyle, left: '50%', bottom: -7, transform: 'translateX(-50%)' }} />
+                                                        <span style={{ ...handleStyle, right: -7, bottom: -7 }} />
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                        </div>
-                        <div style={{
-                            display: inlineImageEditMode && inlineCropActive ? 'flex' : 'none',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: 22,
-                            flexWrap: 'nowrap',
-                            padding: '8px 0 0',
-                            color: '#94a3b8',
-                            whiteSpace: 'nowrap',
-                            flexShrink: 0,
-                            position: 'relative',
-                            zIndex: 2,
-                            minHeight: isMobile ? 32 : 34,
-                            maxWidth: '100%',
-                            overflowX: 'visible',
-                            scrollbarWidth: 'none',
-                            pointerEvents: inlineImageEditMode && inlineCropActive ? 'auto' : 'none',
-                            background: 'transparent'
-                        }}>
-                            <>
+                            <div style={{
+                                display: inlineImageEditMode && inlineCropActive ? 'flex' : 'none',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 22,
+                                flexWrap: 'nowrap',
+                                padding: '8px 0 0',
+                                color: '#94a3b8',
+                                whiteSpace: 'nowrap',
+                                flexShrink: 0,
+                                position: 'relative',
+                                zIndex: 2,
+                                minHeight: isMobile ? 32 : 34,
+                                maxWidth: '100%',
+                                overflowX: 'visible',
+                                scrollbarWidth: 'none',
+                                pointerEvents: inlineImageEditMode && inlineCropActive ? 'auto' : 'none',
+                                background: 'transparent'
+                            }}>
+                                <>
                                     <button
                                         type="button"
                                         onClick={() => applyInlineRotateStep(-90)}
@@ -13822,95 +13874,67 @@ export default function Chat() {
                                     >
                                         Reset
                                     </button>
-                            </>
-                        </div>
-                        <div style={{
-                            display: 'none',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: isMobile ? 12 : 14,
-                            flexWrap: 'nowrap',
-                            padding: isMobile ? '10px 16px' : '14px 22px',
-                            color: '#c1d2e2',
-                            flexShrink: 0,
-                            minHeight: isMobile ? 46 : 54,
-                            width: '100%',
-                            margin: '8px auto 0',
-                            overflow: 'visible',
-                            scrollbarWidth: 'none',
-                            background: 'transparent',
-                            borderBottom: 'none',
-                            boxShadow: 'none',
-                            position: 'relative'
-                        }}>
-                            {[
-                                { color: '#3f3f46', label: 'Charcoal' },
-                                { color: '#9ca3af', label: 'Gray' },
-                                { color: '#ffffff', label: 'White' },
-                                { color: '#33ceff', label: 'Cyan' },
-                                { color: '#52d23d', label: 'Green' },
-                                { color: '#a855f7', label: 'Purple' },
-                                { color: '#f7931e', label: 'Orange' },
-                                { color: '#ff4d4f', label: 'Red' }
-                            ].map((paintOption) => (
+                                </>
+                            </div>
+                            <div style={{
+                                display: 'none',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: isMobile ? 12 : 14,
+                                flexWrap: 'nowrap',
+                                padding: isMobile ? '10px 16px' : '14px 22px',
+                                color: '#c1d2e2',
+                                flexShrink: 0,
+                                minHeight: isMobile ? 46 : 54,
+                                width: '100%',
+                                margin: '8px auto 0',
+                                overflow: 'visible',
+                                scrollbarWidth: 'none',
+                                background: 'transparent',
+                                borderBottom: 'none',
+                                boxShadow: 'none',
+                                position: 'relative'
+                            }}>
+                                {[
+                                    { color: '#3f3f46', label: 'Charcoal' },
+                                    { color: '#9ca3af', label: 'Gray' },
+                                    { color: '#ffffff', label: 'White' },
+                                    { color: '#33ceff', label: 'Cyan' },
+                                    { color: '#52d23d', label: 'Green' },
+                                    { color: '#a855f7', label: 'Purple' },
+                                    { color: '#f7931e', label: 'Orange' },
+                                    { color: '#ff4d4f', label: 'Red' }
+                                ].map((paintOption) => (
+                                    <button
+                                        key={paintOption.color}
+                                        type="button"
+                                        title={paintOption.label}
+                                        aria-label={paintOption.label}
+                                        onClick={() => setInlinePaintColor(paintOption.color)}
+                                        style={{
+                                            width: 20,
+                                            height: 20,
+                                            borderRadius: '50%',
+                                            border: inlinePaintColor === paintOption.color
+                                                ? '2px solid #33ceff'
+                                                : (paintOption.color === '#ffffff' ? '1px solid #94a3b8' : 'none'),
+                                            background: paintOption.color,
+                                            cursor: 'pointer',
+                                            flexShrink: 0,
+                                            boxShadow: inlinePaintColor === paintOption.color ? '0 0 0 2px rgba(2, 12, 24, 0.9)' : 'none'
+                                        }}
+                                    />
+                                ))}
                                 <button
-                                    key={paintOption.color}
                                     type="button"
-                                    title={paintOption.label}
-                                    aria-label={paintOption.label}
-                                    onClick={() => setInlinePaintColor(paintOption.color)}
+                                    title="More colors"
+                                    onClick={() => setInlinePaintPaletteOpen((prev) => !prev)}
                                     style={{
-                                        width: 20,
-                                        height: 20,
-                                        borderRadius: '50%',
-                                        border: inlinePaintColor === paintOption.color
-                                            ? '2px solid #33ceff'
-                                            : (paintOption.color === '#ffffff' ? '1px solid #94a3b8' : 'none'),
-                                        background: paintOption.color,
-                                        cursor: 'pointer',
-                                        flexShrink: 0,
-                                        boxShadow: inlinePaintColor === paintOption.color ? '0 0 0 2px rgba(2, 12, 24, 0.9)' : 'none'
-                                    }}
-                                />
-                            ))}
-                            <button
-                                type="button"
-                                title="More colors"
-                                onClick={() => setInlinePaintPaletteOpen((prev) => !prev)}
-                                style={{
-                                    width: 30,
-                                    height: 30,
-                                    border: 'none',
-                                    background: 'transparent',
-                                    color: inlinePaintPaletteOpen ? '#33ceff' : '#94a3b8',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    cursor: 'pointer',
-                                    flexShrink: 0
-                                }}
-                            >
-                                <ChevronUp size={20} />
-                            </button>
-                            <span style={{ width: isMobile ? 18 : 28, flexShrink: 0 }} />
-                            {[
-                                { size: 3, label: 'Thin brush' },
-                                { size: 6, label: 'Normal brush' },
-                                { size: 10, label: 'Thick brush' },
-                                { size: 16, label: 'Extra thick brush' }
-                            ].map((paintOption) => (
-                                <button
-                                    key={paintOption.size}
-                                    type="button"
-                                    title={paintOption.label}
-                                    aria-label={paintOption.label}
-                                    onClick={() => setInlinePaintSize(paintOption.size)}
-                                    style={{
-                                        width: 28,
-                                        height: 28,
+                                        width: 30,
+                                        height: 30,
                                         border: 'none',
-                                        borderRadius: '50%',
                                         background: 'transparent',
+                                        color: inlinePaintPaletteOpen ? '#33ceff' : '#94a3b8',
                                         display: 'inline-flex',
                                         alignItems: 'center',
                                         justifyContent: 'center',
@@ -13918,619 +13942,647 @@ export default function Chat() {
                                         flexShrink: 0
                                     }}
                                 >
-                                    <span style={{
-                                        width: paintOption.size,
-                                        height: paintOption.size,
-                                        borderRadius: '50%',
-                                        background: inlinePaintSize === paintOption.size ? '#33ceff' : '#b8c4cc',
-                                        display: 'block',
-                                        boxShadow: inlinePaintSize === paintOption.size ? '0 0 0 2px rgba(51, 206, 255, 0.18)' : 'none'
-                                    }} />
+                                    <ChevronUp size={20} />
                                 </button>
-                            ))}
-                            {inlinePaintPaletteOpen && (
-                                <div style={{
-                                    position: 'absolute',
-                                    bottom: 'calc(100% + 12px)',
-                                    left: '50%',
-                                    transform: 'translateX(-20%)',
-                                    width: 'min(420px, calc(100vw - 48px))',
-                                    padding: 0,
-                                    borderRadius: 14,
-                                    background: '#ffffff',
-                                    boxShadow: '0 18px 40px rgba(2, 6, 23, 0.28)',
-                                    overflow: 'hidden',
-                                    zIndex: 10,
-                                    border: '1px solid rgba(15, 23, 42, 0.08)'
-                                }}>
-                                    <label
-                                        title="Rainbow color picker"
+                                <span style={{ width: isMobile ? 18 : 28, flexShrink: 0 }} />
+                                {[
+                                    { size: 3, label: 'Thin brush' },
+                                    { size: 6, label: 'Normal brush' },
+                                    { size: 10, label: 'Thick brush' },
+                                    { size: 16, label: 'Extra thick brush' }
+                                ].map((paintOption) => (
+                                    <button
+                                        key={paintOption.size}
+                                        type="button"
+                                        title={paintOption.label}
+                                        aria-label={paintOption.label}
+                                        onClick={() => setInlinePaintSize(paintOption.size)}
                                         style={{
-                                            display: 'block',
-                                            position: 'relative',
-                                            height: 136,
-                                            width: '100%',
+                                            width: 28,
+                                            height: 28,
+                                            border: 'none',
+                                            borderRadius: '50%',
+                                            background: 'transparent',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
                                             cursor: 'pointer',
-                                            background: 'linear-gradient(90deg, #ff4d4f 0%, #ffec3d 16%, #52d23d 32%, #33ceff 48%, #3b82f6 64%, #a855f7 80%, #ff2d8d 100%)'
+                                            flexShrink: 0
                                         }}
                                     >
-                                        <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
-                                        <input
-                                            type="color"
-                                            value={inlinePaintColor}
-                                            onChange={(event) => setInlinePaintColor(event.target.value)}
-                                            style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'crosshair' }}
-                                        />
-                                    </label>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
-                                        <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
-                                        {inlinePaintColor.toUpperCase()}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                        <div style={{
-                            display: inlineImageEditMode && inlinePaintActive ? 'flex' : 'none',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: isMobile ? 10 : 12,
-                            flexWrap: 'nowrap',
-                            padding: isMobile ? '9px 12px' : '10px 18px',
-                            color: '#c1d2e2',
-                            minHeight: isMobile ? 44 : 52,
-                            width: 'fit-content',
-                            maxWidth: 'calc(100% - 32px)',
-                            position: 'absolute',
-                            left: '50%',
-                            top: isMobile ? 6 : 10,
-                            transform: 'translateX(-50%)',
-                            overflow: 'visible',
-                            scrollbarWidth: 'none',
-                            background: 'linear-gradient(180deg, rgba(8, 30, 50, 0.96), rgba(6, 24, 42, 0.94))',
-                            border: '1px solid rgba(56, 189, 248, 0.18)',
-                            borderRadius: 16,
-                            boxShadow: '0 14px 34px rgba(2, 6, 23, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
-                            backdropFilter: 'blur(14px)',
-                            WebkitBackdropFilter: 'blur(14px)',
-                            zIndex: 120,
-                            pointerEvents: inlineImageEditMode && inlinePaintActive ? 'auto' : 'none'
-                        }}>
-                            {[
-                                { color: '#3f3f46', label: 'Charcoal' },
-                                { color: '#9ca3af', label: 'Gray' },
-                                { color: '#ffffff', label: 'White' },
-                                { color: '#33ceff', label: 'Cyan' },
-                                { color: '#52d23d', label: 'Green' },
-                                { color: '#a855f7', label: 'Purple' },
-                                { color: '#f7931e', label: 'Orange' },
-                                { color: '#ff4d4f', label: 'Red' }
-                            ].map((paintOption) => (
-                                <button
-                                    key={paintOption.color}
-                                    type="button"
-                                    title={paintOption.label}
-                                    aria-label={paintOption.label}
-                                    onClick={() => setInlinePaintColor(paintOption.color)}
-                                    style={{
-                                        width: 24,
-                                        height: 24,
-                                        borderRadius: '50%',
-                                        border: inlinePaintColor === paintOption.color
-                                            ? '2px solid #33ceff'
-                                            : (paintOption.color === '#ffffff' ? '1px solid #94a3b8' : 'none'),
-                                        background: paintOption.color,
-                                        cursor: 'pointer',
-                                        flexShrink: 0,
-                                        padding: 0,
-                                        boxSizing: 'border-box',
-                                        boxShadow: inlinePaintColor === paintOption.color ? '0 0 0 2px rgba(2, 12, 24, 0.9)' : 'none'
-                                    }}
-                                />
-                            ))}
-                            <button
-                                type="button"
-                                title="More colors"
-                                onClick={() => setInlinePaintPaletteOpen((prev) => !prev)}
-                                style={{
-                                    width: 34,
-                                    height: 34,
-                                    border: 'none',
-                                    background: 'transparent',
-                                    color: inlinePaintPaletteOpen ? '#33ceff' : '#94a3b8',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    cursor: 'pointer',
-                                    flexShrink: 0
-                                }}
-                            >
-                                <ChevronUp size={30} strokeWidth={2.5} />
-                            </button>
-                            <span style={{ width: 0, flexShrink: 0 }} />
-                            {[
-                                { size: 4, dot: 7, label: 'Thin brush' },
-                                { size: 8, dot: 12, label: 'Normal brush' },
-                                { size: 14, dot: 18, label: 'Thick brush' },
-                                { size: 22, dot: 25, label: 'Extra thick brush' }
-                            ].map((paintOption) => (
-                                <button
-                                    key={paintOption.size}
-                                    type="button"
-                                    title={paintOption.label}
-                                    aria-label={paintOption.label}
-                                    onClick={() => setInlinePaintSize(paintOption.size)}
-                                    style={{
-                                        width: 34,
-                                        height: 34,
-                                        border: inlinePaintSize === paintOption.size ? '1px solid rgba(51, 206, 255, 0.6)' : '1px solid transparent',
-                                        borderRadius: '50%',
-                                        background: inlinePaintSize === paintOption.size ? 'rgba(51, 206, 255, 0.12)' : 'transparent',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        cursor: 'pointer',
-                                        flexShrink: 0,
-                                        padding: 0,
-                                        boxSizing: 'border-box'
-                                    }}
-                                >
-                                    <span style={{
-                                        width: paintOption.dot,
-                                        height: paintOption.dot,
-                                        minWidth: paintOption.dot,
-                                        minHeight: paintOption.dot,
-                                        borderRadius: '50%',
-                                        background: inlinePaintSize === paintOption.size ? '#33ceff' : '#b8c4cc',
-                                        display: 'block',
-                                        aspectRatio: '1 / 1',
-                                        flex: '0 0 auto',
-                                        boxShadow: inlinePaintSize === paintOption.size ? '0 0 10px rgba(51, 206, 255, 0.42)' : 'none'
-                                    }} />
-                                </button>
-                            ))}
-                            {inlinePaintPaletteOpen && (
-                                <div style={{
-                                    position: 'absolute',
-                                    top: 'calc(100% + 10px)',
-                                    left: '50%',
-                                    transform: 'translateX(-50%)',
-                                    width: 'min(420px, calc(100vw - 48px))',
-                                    padding: 0,
-                                    borderRadius: 14,
-                                    background: '#ffffff',
-                                    boxShadow: '0 18px 40px rgba(2, 6, 23, 0.28)',
-                                    overflow: 'hidden',
-                                    zIndex: 10,
-                                    border: '1px solid rgba(15, 23, 42, 0.08)'
-                                }}>
-                                    <label
-                                        title="Rainbow color picker"
-                                        style={{
+                                        <span style={{
+                                            width: paintOption.size,
+                                            height: paintOption.size,
+                                            borderRadius: '50%',
+                                            background: inlinePaintSize === paintOption.size ? '#33ceff' : '#b8c4cc',
                                             display: 'block',
-                                            position: 'relative',
-                                            height: 136,
-                                            width: '100%',
-                                            cursor: 'pointer',
-                                            background: 'linear-gradient(90deg, #ff4d4f 0%, #ffec3d 16%, #52d23d 32%, #33ceff 48%, #3b82f6 64%, #a855f7 80%, #ff2d8d 100%)'
-                                        }}
-                                    >
-                                        <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
-                                        <input
-                                            type="color"
-                                            value={inlinePaintColor}
-                                            onChange={(event) => setInlinePaintColor(event.target.value)}
-                                            style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'crosshair' }}
-                                        />
-                                    </label>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
-                                        <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
-                                        {inlinePaintColor.toUpperCase()}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                        <div style={{
-                            display: inlineImageEditMode && inlineTextActive ? 'flex' : 'none',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: isMobile ? 10 : 12,
-                            flexWrap: 'nowrap',
-                            padding: isMobile ? '9px 12px' : '10px 18px',
-                            color: '#dbeafe',
-                            minHeight: isMobile ? 44 : 52,
-                            width: 'fit-content',
-                            maxWidth: 'calc(100% - 32px)',
-                            position: 'absolute',
-                            left: '50%',
-                            top: isMobile ? 6 : 10,
-                            transform: 'translateX(-50%)',
-                            overflow: 'visible',
-                            scrollbarWidth: 'none',
-                            background: 'linear-gradient(180deg, rgba(8, 30, 50, 0.96), rgba(6, 24, 42, 0.94))',
-                            border: '1px solid rgba(56, 189, 248, 0.18)',
-                            borderRadius: 16,
-                            boxShadow: '0 14px 34px rgba(2, 6, 23, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
-                            backdropFilter: 'blur(14px)',
-                            WebkitBackdropFilter: 'blur(14px)',
-                            zIndex: 120,
-                            pointerEvents: inlineImageEditMode && inlineTextActive ? 'auto' : 'none'
-                        }}>
-                            {[
-                                { color: '#3f3f46', label: 'Charcoal' },
-                                { color: '#9ca3af', label: 'Gray' },
-                                { color: '#ffffff', label: 'White' },
-                                { color: '#33ceff', label: 'Cyan' },
-                                { color: '#52d23d', label: 'Green' },
-                                { color: '#a855f7', label: 'Purple' },
-                                { color: '#f7931e', label: 'Orange' },
-                                { color: '#ff4d4f', label: 'Red' }
-                            ].map((paintOption) => (
-                                <button
-                                    key={paintOption.color}
-                                    type="button"
-                                    title={paintOption.label}
-                                    aria-label={paintOption.label}
-                                    onClick={() => setInlinePaintColor(paintOption.color)}
-                                    style={{
-                                        width: 20,
-                                        height: 20,
-                                        borderRadius: '50%',
-                                        border: inlinePaintColor === paintOption.color
-                                            ? '2px solid #33ceff'
-                                            : (paintOption.color === '#ffffff' ? '1px solid #94a3b8' : 'none'),
-                                        background: paintOption.color,
-                                        cursor: 'pointer',
-                                        flexShrink: 0,
+                                            boxShadow: inlinePaintSize === paintOption.size ? '0 0 0 2px rgba(51, 206, 255, 0.18)' : 'none'
+                                        }} />
+                                    </button>
+                                ))}
+                                {inlinePaintPaletteOpen && (
+                                    <div style={{
+                                        position: 'absolute',
+                                        bottom: 'calc(100% + 12px)',
+                                        left: '50%',
+                                        transform: 'translateX(-20%)',
+                                        width: 'min(420px, calc(100vw - 48px))',
                                         padding: 0,
-                                        boxSizing: 'border-box',
-                                        boxShadow: inlinePaintColor === paintOption.color ? '0 0 0 2px rgba(2, 12, 24, 0.9)' : 'none'
-                                    }}
-                                />
-                            ))}
-                            <button
-                                type="button"
-                                title="More colors"
-                                onClick={() => setInlineTextPaletteOpen((prev) => !prev)}
-                                style={{ width: 34, height: 34, border: 'none', background: 'transparent', color: inlineTextPaletteOpen ? '#33ceff' : '#94a3b8', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
-                            >
-                                <ChevronUp size={28} strokeWidth={2.5} />
-                            </button>
-                            <div className="wa-inline-font-control" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 8, whiteSpace: 'nowrap', position: 'relative' }}>
-                                <span style={{ width: 24, height: 24, borderRadius: '50%', background: '#5f6b75', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#dbeafe', fontWeight: 700 }}>A</span>
-                                <button
-                                    type="button"
-                                    onClick={() => setInlineTextFontOpen((prev) => !prev)}
-                                    style={{ border: 'none', background: 'transparent', color: '#dbeafe', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 16, padding: 0 }}
-                                >
-                                    {inlineTextFont}
-                                    <ChevronUp size={22} strokeWidth={2.4} />
-                                </button>
-                                {inlineTextFontOpen && (
-                                    <div style={{ position: 'absolute', top: 'calc(100% + 10px)', left: '50%', transform: 'translateX(-50%)', minWidth: 322, background: '#ffffff', color: '#0f172a', borderRadius: 18, boxShadow: '0 16px 36px rgba(2, 6, 23, 0.28)', overflow: 'hidden', zIndex: 20, padding: '14px 14px 12px' }}>
-                                        {[
-                                            { name: 'Sans Serif', family: 'Arial, sans-serif', weight: 400 },
-                                            { name: 'Serif', family: 'Georgia, serif', weight: 400 },
-                                            { name: 'Norican', family: 'cursive', weight: 700 },
-                                            { name: 'Bryndan Write', family: '"Comic Sans MS", cursive', weight: 700 },
-                                            { name: 'Oswald', family: 'Impact, sans-serif', weight: 700 },
-                                            { name: 'Monospace', family: '"Courier New", monospace', weight: 700 }
-                                        ].map((fontOption) => (
-                                            <button
-                                                key={fontOption.name}
-                                                type="button"
-                                                onClick={() => { setInlineTextFont(fontOption.name); setInlineTextFontOpen(false); }}
-                                                className="wa-inline-font-option"
-                                                style={{ width: '100%', border: 'none', background: '#ffffff', color: '#0f172a', textAlign: 'left', padding: '9px 28px', cursor: 'pointer', fontSize: fontOption.name === 'Bryndan Write' ? 25 : fontOption.name === 'Oswald' ? 25 : 20, fontFamily: fontOption.family, fontWeight: fontOption.weight, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                                            >
-                                                {fontOption.name}
-                                                {inlineTextFont === fontOption.name && <Check size={20} />}
-                                            </button>
-                                        ))}
-                                        <div style={{ height: 1, background: '#e5e7eb', margin: '8px 0 10px' }} />
-                                        <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
-                                            {[
-                                                { id: 'left', label: 'Left align', Icon: AlignLeft },
-                                                { id: 'center', label: 'Center align', Icon: AlignCenter },
-                                                { id: 'right', label: 'Right align', Icon: AlignRight }
-                                            ].map(({ id, label, Icon }) => (
-                                                <button
-                                                    key={id}
-                                                    type="button"
-                                                    title={label}
-                                                    onClick={() => setInlineTextAlign(id)}
-                                                    style={{ width: 42, height: 34, border: 'none', background: 'transparent', color: inlineTextAlign === id ? '#0f172a' : '#6b7280', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-                                                >
-                                                    <Icon size={23} />
-                                                </button>
-                                            ))}
+                                        borderRadius: 14,
+                                        background: '#ffffff',
+                                        boxShadow: '0 18px 40px rgba(2, 6, 23, 0.28)',
+                                        overflow: 'hidden',
+                                        zIndex: 10,
+                                        border: '1px solid rgba(15, 23, 42, 0.08)'
+                                    }}>
+                                        <label
+                                            title="Rainbow color picker"
+                                            style={{
+                                                display: 'block',
+                                                position: 'relative',
+                                                height: 136,
+                                                width: '100%',
+                                                cursor: 'pointer',
+                                                background: 'linear-gradient(90deg, #ff4d4f 0%, #ffec3d 16%, #52d23d 32%, #33ceff 48%, #3b82f6 64%, #a855f7 80%, #ff2d8d 100%)'
+                                            }}
+                                        >
+                                            <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
+                                            <input
+                                                type="color"
+                                                value={inlinePaintColor}
+                                                onChange={(event) => setInlinePaintColor(event.target.value)}
+                                                style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'crosshair' }}
+                                            />
+                                        </label>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
+                                            <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
+                                            {inlinePaintColor.toUpperCase()}
                                         </div>
                                     </div>
                                 )}
                             </div>
+                            <div style={{
+                                display: inlineImageEditMode && inlinePaintActive ? 'flex' : 'none',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: isMobile ? 10 : 12,
+                                flexWrap: 'nowrap',
+                                padding: isMobile ? '9px 12px' : '10px 18px',
+                                color: '#c1d2e2',
+                                minHeight: isMobile ? 44 : 52,
+                                width: 'fit-content',
+                                maxWidth: 'calc(100% - 32px)',
+                                position: 'absolute',
+                                left: '50%',
+                                top: isMobile ? 6 : 10,
+                                transform: 'translateX(-50%)',
+                                overflow: 'visible',
+                                scrollbarWidth: 'none',
+                                background: 'linear-gradient(180deg, rgba(8, 30, 50, 0.96), rgba(6, 24, 42, 0.94))',
+                                border: '1px solid rgba(56, 189, 248, 0.18)',
+                                borderRadius: 16,
+                                boxShadow: '0 14px 34px rgba(2, 6, 23, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+                                backdropFilter: 'blur(14px)',
+                                WebkitBackdropFilter: 'blur(14px)',
+                                zIndex: 120,
+                                pointerEvents: inlineImageEditMode && inlinePaintActive ? 'auto' : 'none'
+                            }}>
+                                {[
+                                    { color: '#3f3f46', label: 'Charcoal' },
+                                    { color: '#9ca3af', label: 'Gray' },
+                                    { color: '#ffffff', label: 'White' },
+                                    { color: '#33ceff', label: 'Cyan' },
+                                    { color: '#52d23d', label: 'Green' },
+                                    { color: '#a855f7', label: 'Purple' },
+                                    { color: '#f7931e', label: 'Orange' },
+                                    { color: '#ff4d4f', label: 'Red' }
+                                ].map((paintOption) => (
+                                    <button
+                                        key={paintOption.color}
+                                        type="button"
+                                        title={paintOption.label}
+                                        aria-label={paintOption.label}
+                                        onClick={() => setInlinePaintColor(paintOption.color)}
+                                        style={{
+                                            width: 24,
+                                            height: 24,
+                                            borderRadius: '50%',
+                                            border: inlinePaintColor === paintOption.color
+                                                ? '2px solid #33ceff'
+                                                : (paintOption.color === '#ffffff' ? '1px solid #94a3b8' : 'none'),
+                                            background: paintOption.color,
+                                            cursor: 'pointer',
+                                            flexShrink: 0,
+                                            padding: 0,
+                                            boxSizing: 'border-box',
+                                            boxShadow: inlinePaintColor === paintOption.color ? '0 0 0 2px rgba(2, 12, 24, 0.9)' : 'none'
+                                        }}
+                                    />
+                                ))}
+                                <button
+                                    type="button"
+                                    title="More colors"
+                                    onClick={() => setInlinePaintPaletteOpen((prev) => !prev)}
+                                    style={{
+                                        width: 34,
+                                        height: 34,
+                                        border: 'none',
+                                        background: 'transparent',
+                                        color: inlinePaintPaletteOpen ? '#33ceff' : '#94a3b8',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: 'pointer',
+                                        flexShrink: 0
+                                    }}
+                                >
+                                    <ChevronUp size={30} strokeWidth={2.5} />
+                                </button>
+                                <span style={{ width: 0, flexShrink: 0 }} />
+                                {[
+                                    { size: 4, dot: 7, label: 'Thin brush' },
+                                    { size: 8, dot: 12, label: 'Normal brush' },
+                                    { size: 14, dot: 18, label: 'Thick brush' },
+                                    { size: 22, dot: 25, label: 'Extra thick brush' }
+                                ].map((paintOption) => (
+                                    <button
+                                        key={paintOption.size}
+                                        type="button"
+                                        title={paintOption.label}
+                                        aria-label={paintOption.label}
+                                        onClick={() => setInlinePaintSize(paintOption.size)}
+                                        style={{
+                                            width: 34,
+                                            height: 34,
+                                            border: inlinePaintSize === paintOption.size ? '1px solid rgba(51, 206, 255, 0.6)' : '1px solid transparent',
+                                            borderRadius: '50%',
+                                            background: inlinePaintSize === paintOption.size ? 'rgba(51, 206, 255, 0.12)' : 'transparent',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            cursor: 'pointer',
+                                            flexShrink: 0,
+                                            padding: 0,
+                                            boxSizing: 'border-box'
+                                        }}
+                                    >
+                                        <span style={{
+                                            width: paintOption.dot,
+                                            height: paintOption.dot,
+                                            minWidth: paintOption.dot,
+                                            minHeight: paintOption.dot,
+                                            borderRadius: '50%',
+                                            background: inlinePaintSize === paintOption.size ? '#33ceff' : '#b8c4cc',
+                                            display: 'block',
+                                            aspectRatio: '1 / 1',
+                                            flex: '0 0 auto',
+                                            boxShadow: inlinePaintSize === paintOption.size ? '0 0 10px rgba(51, 206, 255, 0.42)' : 'none'
+                                        }} />
+                                    </button>
+                                ))}
+                                {inlinePaintPaletteOpen && (
+                                    <div style={{
+                                        position: 'absolute',
+                                        top: 'calc(100% + 10px)',
+                                        left: '50%',
+                                        transform: 'translateX(-50%)',
+                                        width: 'min(420px, calc(100vw - 48px))',
+                                        padding: 0,
+                                        borderRadius: 14,
+                                        background: '#ffffff',
+                                        boxShadow: '0 18px 40px rgba(2, 6, 23, 0.28)',
+                                        overflow: 'hidden',
+                                        zIndex: 10,
+                                        border: '1px solid rgba(15, 23, 42, 0.08)'
+                                    }}>
+                                        <label
+                                            title="Rainbow color picker"
+                                            style={{
+                                                display: 'block',
+                                                position: 'relative',
+                                                height: 136,
+                                                width: '100%',
+                                                cursor: 'pointer',
+                                                background: 'linear-gradient(90deg, #ff4d4f 0%, #ffec3d 16%, #52d23d 32%, #33ceff 48%, #3b82f6 64%, #a855f7 80%, #ff2d8d 100%)'
+                                            }}
+                                        >
+                                            <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
+                                            <input
+                                                type="color"
+                                                value={inlinePaintColor}
+                                                onChange={(event) => setInlinePaintColor(event.target.value)}
+                                                style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'crosshair' }}
+                                            />
+                                        </label>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
+                                            <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
+                                            {inlinePaintColor.toUpperCase()}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            <div style={{
+                                display: inlineImageEditMode && inlineTextActive ? 'flex' : 'none',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: isMobile ? 10 : 12,
+                                flexWrap: 'nowrap',
+                                padding: isMobile ? '9px 12px' : '10px 18px',
+                                color: '#dbeafe',
+                                minHeight: isMobile ? 44 : 52,
+                                width: 'fit-content',
+                                maxWidth: 'calc(100% - 32px)',
+                                position: 'absolute',
+                                left: '50%',
+                                top: isMobile ? 6 : 10,
+                                transform: 'translateX(-50%)',
+                                overflow: 'visible',
+                                scrollbarWidth: 'none',
+                                background: 'linear-gradient(180deg, rgba(8, 30, 50, 0.96), rgba(6, 24, 42, 0.94))',
+                                border: '1px solid rgba(56, 189, 248, 0.18)',
+                                borderRadius: 16,
+                                boxShadow: '0 14px 34px rgba(2, 6, 23, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+                                backdropFilter: 'blur(14px)',
+                                WebkitBackdropFilter: 'blur(14px)',
+                                zIndex: 120,
+                                pointerEvents: inlineImageEditMode && inlineTextActive ? 'auto' : 'none'
+                            }}>
+                                {[
+                                    { color: '#3f3f46', label: 'Charcoal' },
+                                    { color: '#9ca3af', label: 'Gray' },
+                                    { color: '#ffffff', label: 'White' },
+                                    { color: '#33ceff', label: 'Cyan' },
+                                    { color: '#52d23d', label: 'Green' },
+                                    { color: '#a855f7', label: 'Purple' },
+                                    { color: '#f7931e', label: 'Orange' },
+                                    { color: '#ff4d4f', label: 'Red' }
+                                ].map((paintOption) => (
+                                    <button
+                                        key={paintOption.color}
+                                        type="button"
+                                        title={paintOption.label}
+                                        aria-label={paintOption.label}
+                                        onClick={() => setInlinePaintColor(paintOption.color)}
+                                        style={{
+                                            width: 20,
+                                            height: 20,
+                                            borderRadius: '50%',
+                                            border: inlinePaintColor === paintOption.color
+                                                ? '2px solid #33ceff'
+                                                : (paintOption.color === '#ffffff' ? '1px solid #94a3b8' : 'none'),
+                                            background: paintOption.color,
+                                            cursor: 'pointer',
+                                            flexShrink: 0,
+                                            padding: 0,
+                                            boxSizing: 'border-box',
+                                            boxShadow: inlinePaintColor === paintOption.color ? '0 0 0 2px rgba(2, 12, 24, 0.9)' : 'none'
+                                        }}
+                                    />
+                                ))}
+                                <button
+                                    type="button"
+                                    title="More colors"
+                                    onClick={() => setInlineTextPaletteOpen((prev) => !prev)}
+                                    style={{ width: 34, height: 34, border: 'none', background: 'transparent', color: inlineTextPaletteOpen ? '#33ceff' : '#94a3b8', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+                                >
+                                    <ChevronUp size={28} strokeWidth={2.5} />
+                                </button>
+                                <div className="wa-inline-font-control" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 8, whiteSpace: 'nowrap', position: 'relative' }}>
+                                    <span style={{ width: 24, height: 24, borderRadius: '50%', background: '#5f6b75', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#dbeafe', fontWeight: 700 }}>A</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setInlineTextFontOpen((prev) => !prev)}
+                                        style={{ border: 'none', background: 'transparent', color: '#dbeafe', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 16, padding: 0 }}
+                                    >
+                                        {inlineTextFont}
+                                        <ChevronUp size={22} strokeWidth={2.4} />
+                                    </button>
+                                    {inlineTextFontOpen && (
+                                        <div style={{ position: 'absolute', top: 'calc(100% + 10px)', left: '50%', transform: 'translateX(-50%)', minWidth: 322, background: '#ffffff', color: '#0f172a', borderRadius: 18, boxShadow: '0 16px 36px rgba(2, 6, 23, 0.28)', overflow: 'hidden', zIndex: 20, padding: '14px 14px 12px' }}>
+                                            {[
+                                                { name: 'Sans Serif', family: 'Arial, sans-serif', weight: 400 },
+                                                { name: 'Serif', family: 'Georgia, serif', weight: 400 },
+                                                { name: 'Norican', family: 'cursive', weight: 700 },
+                                                { name: 'Bryndan Write', family: '"Comic Sans MS", cursive', weight: 700 },
+                                                { name: 'Oswald', family: 'Impact, sans-serif', weight: 700 },
+                                                { name: 'Monospace', family: '"Courier New", monospace', weight: 700 }
+                                            ].map((fontOption) => (
+                                                <button
+                                                    key={fontOption.name}
+                                                    type="button"
+                                                    onClick={() => { setInlineTextFont(fontOption.name); setInlineTextFontOpen(false); }}
+                                                    className="wa-inline-font-option"
+                                                    style={{ width: '100%', border: 'none', background: '#ffffff', color: '#0f172a', textAlign: 'left', padding: '9px 28px', cursor: 'pointer', fontSize: fontOption.name === 'Bryndan Write' ? 25 : fontOption.name === 'Oswald' ? 25 : 20, fontFamily: fontOption.family, fontWeight: fontOption.weight, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                                                >
+                                                    {fontOption.name}
+                                                    {inlineTextFont === fontOption.name && <Check size={20} />}
+                                                </button>
+                                            ))}
+                                            <div style={{ height: 1, background: '#e5e7eb', margin: '8px 0 10px' }} />
+                                            <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+                                                {[
+                                                    { id: 'left', label: 'Left align', Icon: AlignLeft },
+                                                    { id: 'center', label: 'Center align', Icon: AlignCenter },
+                                                    { id: 'right', label: 'Right align', Icon: AlignRight }
+                                                ].map(({ id, label, Icon }) => (
+                                                    <button
+                                                        key={id}
+                                                        type="button"
+                                                        title={label}
+                                                        onClick={() => setInlineTextAlign(id)}
+                                                        style={{ width: 42, height: 34, border: 'none', background: 'transparent', color: inlineTextAlign === id ? '#0f172a' : '#6b7280', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                                    >
+                                                        <Icon size={23} />
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setInlineTextBackground((prev) => !prev)}
+                                    title="Background"
+                                    style={{ border: 'none', background: 'transparent', color: '#dbeafe', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 16, whiteSpace: 'nowrap' }}
+                                >
+                                    <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlineTextBackground ? '#5f6b75' : 'transparent', border: '1px solid #94a3b8', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Check size={16} />
+                                    </span>
+                                    Background
+                                </button>
+                                <button type="button" title="Delete text" onClick={clearInlineTextMode} style={{ border: 'none', background: 'transparent', color: '#cbd5e1', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
+                                    <Trash2 size={24} />
+                                </button>
+                                {inlineTextPaletteOpen && (
+                                    <div style={{ position: 'absolute', top: 'calc(100% + 10px)', left: '50%', transform: 'translateX(-50%)', width: 'min(420px, calc(100vw - 48px))', padding: 0, borderRadius: 14, background: '#ffffff', boxShadow: '0 18px 40px rgba(2, 6, 23, 0.28)', overflow: 'hidden', zIndex: 20, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+                                        <label title="Rainbow color picker" style={{ display: 'block', position: 'relative', height: 136, width: '100%', cursor: 'pointer', background: 'linear-gradient(90deg, #ff4d4f 0%, #ffec3d 16%, #52d23d 32%, #33ceff 48%, #3b82f6 64%, #a855f7 80%, #ff2d8d 100%)' }}>
+                                            <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
+                                            <input type="color" value={inlinePaintColor} onChange={(event) => setInlinePaintColor(event.target.value)} style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'crosshair' }} />
+                                        </label>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
+                                            <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
+                                            {inlinePaintColor.toUpperCase()}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ) : file && file.type?.startsWith('video/') ? (
+                        <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                            <video
+                                src={getFilePreviewUrl(file)}
+                                controls
+                                autoPlay
+                                playsInline
+                                muted
+                                preload="auto"
+                                controlsList="nodownload"
+                                style={{
+                                    maxWidth: '100%',
+                                    maxHeight: '100%',
+                                    borderRadius: 12,
+                                    border: '1px solid rgba(56,189,248,0.22)',
+                                    boxShadow: '0 10px 30px rgba(2, 12, 24, 0.55)',
+                                    background: '#071224'
+                                }}
+                            />
+                        </div>
+                    ) : isAudioPreview ? (
+                        <div style={{ width: '100%', maxWidth: 700, textAlign: 'center' }}>
+                            <div style={{ marginBottom: 14, fontSize: 18, fontWeight: 500, color: '#e9edef' }}>{file?.name}</div>
+                            <audio src={getFilePreviewUrl(file)} controls style={{ width: '100%' }} />
+                        </div>
+                    ) : (
+                        <div style={{
+                            textAlign: 'center',
+                            padding: '40px 32px',
+                            background: 'linear-gradient(180deg, rgba(15, 38, 58, 0.82), rgba(10, 28, 44, 0.82))',
+                            borderRadius: 12,
+                            boxShadow: '0 8px 24px rgba(2,12,24,0.45)',
+                            color: '#e9edef',
+                            border: '1px solid rgba(56, 189, 248, 0.18)',
+                            minWidth: 340,
+                            maxWidth: 640
+                        }}>
+                            <div style={{
+                                width: 96,
+                                height: 96,
+                                margin: '0 auto 16px',
+                                borderRadius: 12,
+                                background: 'rgba(9, 29, 47, 0.75)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                            }}>
+                                <FileText size={44} color="#8696a0" />
+                            </div>
+                            <div style={{ fontSize: 14, color: '#8db2c9', marginBottom: 8 }}>No preview available</div>
+                            <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8, color: '#e9edef', wordBreak: 'break-word' }}>{file?.name || 'File'}</div>
+                            <div style={{ fontSize: 14, color: '#8db2c9' }}>
+                                {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} - {getDisplayFileType(file)}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Footer / Caption Input Tray */}
+                <div style={{
+                    padding: '20px 24px 30px',
+                    background: isImagePreview ? 'transparent' : (isMediaThemePreview ? '#041b2d' : '#0b141a'),
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 20,
+                    position: 'relative',
+                    borderTop: isImagePreview ? 'none' : (isMediaThemePreview ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(255, 255, 255, 0.1)'),
+                    width: isMediaThemePreview ? imagePreviewCardWidth : '100%',
+                    margin: isMediaThemePreview ? '0 auto 26px' : '0',
+                    borderBottomLeftRadius: isMediaThemePreview ? 6 : 0,
+                    borderBottomRightRadius: isMediaThemePreview ? 6 : 0
+                }}>
+                    {/* Thumbnails Tray (Above Input, Left-Aligned) */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingLeft: 10 }}>
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'center', overflowX: 'auto', padding: '4px 0' }}>
+                            {filesInTray.map((f, idx) => (
+                                <div key={`${f.name}-${f.size}-${f.lastModified}-${idx}`} className="wa-file-tray-item" style={{
+                                    width: 50, height: 50, borderRadius: 8,
+                                    border: f === file ? '2px solid #22d3ee' : '2px solid rgba(56, 189, 248, 0.25)',
+                                    overflow: 'hidden', cursor: 'pointer',
+                                    background: '#0d2238', display: 'flex', justifyContent: 'center', alignItems: 'center',
+                                    flexShrink: 0,
+                                    position: 'relative'
+                                }} onClick={() => {
+                                    setFile(f);
+                                    const fExt = String(f?.name || '').split('.').pop().toLowerCase();
+                                    const isDocFile = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'].includes(fExt);
+                                    if (isDocFile) setIsViewOnceMedia(false);
+                                }}>
+                                    {f.type?.startsWith('image/') ? (
+                                        <img src={getFilePreviewUrl(f)} style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#061a2d' }} alt={`thumb-${idx}`} />
+                                    ) : f.type?.startsWith('video/') ? (
+                                        <div style={{ width: '100%', height: '100%', background: 'linear-gradient(180deg, rgba(10, 35, 58, 0.95), rgba(8, 28, 46, 0.95))', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+                                            <Play size={14} color="#b9d8ea" fill="#b9d8ea" />
+                                        </div>
+                                    ) : (
+                                        <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(180deg, rgba(10, 35, 58, 0.95), rgba(8, 28, 46, 0.95))' }}>
+                                            <FileText color="#9cc5dd" size={16} />
+                                            <span style={{ marginTop: 2, fontSize: 8, lineHeight: 1, fontWeight: 700, letterSpacing: 0.2, color: '#b9d8ea' }}>
+                                                {((f.name?.split('.').pop() || 'FILE').toUpperCase()).slice(0, 4)}
+                                            </span>
+                                        </div>
+                                    )}
+                                    <div
+                                        className="wa-file-remove-btn"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            const updated = filesInTray.filter((_, i) => i !== idx);
+                                            setSelectedFiles(updated);
+                                            if (f === file) {
+                                                setFile(updated.length ? updated[0] : null);
+                                            }
+                                        }}
+                                        style={{
+                                            position: 'absolute', top: 2, right: 2,
+                                            display: 'flex',
+                                            alignItems: 'center', justifyContent: 'center', color: '#111b21',
+                                            zIndex: 10
+                                        }}
+                                    >
+                                        <X size={18} strokeWidth={2.5} />
+                                    </div>
+                                </div>
+                            ))}
+
+                            <div style={{
+                                width: 50, height: 50, borderRadius: 8, border: '2px dashed rgba(255, 255, 255, 0.2)',
+                                display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer',
+                                flexShrink: 0, color: '#94c9e6', transition: 'all 0.2s',
+                                background: 'rgba(8, 26, 42, 0.72)'
+                            }}
+                                onMouseOver={(e) => e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.6)'}
+                                onMouseOut={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)'}
+                                onClick={() => document.getElementById('add-more-preview-files')?.click()}>
+                                <Plus size={24} />
+                                <input type="file" id="add-more-preview-files" multiple onChange={(e) => { handleFileSelect(e); }} style={{ display: 'none' }} />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Caption Input Row (Full Width) */}
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16, width: '100%' }}>
+                        <div style={{
+                            background: 'rgba(17, 43, 66, 0.88)',
+                            borderRadius: 24,
+                            border: '1px solid rgba(56, 189, 248, 0.2)',
+                            padding: '9px 13px',
+                            flex: 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 12,
+                            position: 'relative'
+                        }}>
+                            {(showGrammarBar && (grammarSuggestions || isGrammarLoading) && !isGarbageMessage) && (
+                                <div
+                                    style={{
+                                        position: 'absolute',
+                                        left: 0,
+                                        bottom: 'calc(100% + 10px)',
+                                        width: '100%',
+                                        zIndex: 8
+                                    }}
+                                >
+                                    {renderGrammarBar({ floating: true })}
+                                </div>
+                            )}
                             <button
                                 type="button"
-                                onClick={() => setInlineTextBackground((prev) => !prev)}
-                                title="Background"
-                                style={{ border: 'none', background: 'transparent', color: '#dbeafe', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 16, whiteSpace: 'nowrap' }}
+                                className={`wa-nav-icon-btn ${showInputEmojiPicker ? 'active' : ''}`}
+                                onClick={(e) => {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    setEmojiInsertTarget('chat');
+                                    setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
+                                    setShowInputEmojiPicker(!showInputEmojiPicker);
+                                }}
+                                style={{ width: 28, height: 28, minWidth: 28, border: 'none', background: 'transparent', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                title="Emoji"
                             >
-                                <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlineTextBackground ? '#5f6b75' : 'transparent', border: '1px solid #94a3b8', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <Check size={16} />
-                                </span>
-                                Background
+                                <Smile size={22} color={showInputEmojiPicker ? "#0EA5BE" : "#8696a0"} />
                             </button>
-                            <button type="button" title="Delete text" onClick={clearInlineTextMode} style={{ border: 'none', background: 'transparent', color: '#cbd5e1', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
-                                <Trash2 size={24} />
-                            </button>
-                            {inlineTextPaletteOpen && (
-                                <div style={{ position: 'absolute', top: 'calc(100% + 10px)', left: '50%', transform: 'translateX(-50%)', width: 'min(420px, calc(100vw - 48px))', padding: 0, borderRadius: 14, background: '#ffffff', boxShadow: '0 18px 40px rgba(2, 6, 23, 0.28)', overflow: 'hidden', zIndex: 20, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
-                                    <label title="Rainbow color picker" style={{ display: 'block', position: 'relative', height: 136, width: '100%', cursor: 'pointer', background: 'linear-gradient(90deg, #ff4d4f 0%, #ffec3d 16%, #52d23d 32%, #33ceff 48%, #3b82f6 64%, #a855f7 80%, #ff2d8d 100%)' }}>
-                                        <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
-                                        <input type="color" value={inlinePaintColor} onChange={(event) => setInlinePaintColor(event.target.value)} style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'crosshair' }} />
-                                    </label>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
-                                        <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
-                                        {inlinePaintColor.toUpperCase()}
-                                    </div>
+                            <input
+                                type="text"
+                                id="caption-input"
+                                name="caption"
+                                aria-label="Add a caption"
+                                style={{
+                                    flex: 1,
+                                    background: 'transparent',
+                                    border: 'none',
+                                    outline: 'none',
+                                    color: '#e5f4ff',
+                                    fontSize: 14
+                                }}
+                                placeholder="Add a caption..."
+                                value={input}
+                                onChange={e => setInput(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter') handleSend(e);
+                                }}
+                                autoFocus
+                            />
+                            {canUseViewOnceForCurrentFile && (
+                                <div style={{ cursor: 'pointer' }} onClick={() => setIsViewOnceMedia(!isViewOnceMedia)} title="View once">
+                                    <ViewOnceBadge size={22} color={isViewOnceMedia ? "#0EA5BE" : "#8696a0"} />
                                 </div>
                             )}
                         </div>
-                    </div>
-                ) : file && file.type?.startsWith('video/') ? (
-                    <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                        <video
-                            src={getFilePreviewUrl(file)}
-                            controls
-                            autoPlay
-                            playsInline
-                            muted
-                            preload="auto"
-                            controlsList="nodownload"
-                            style={{
-                                maxWidth: '100%',
-                                maxHeight: '100%',
-                                borderRadius: 12,
-                                border: '1px solid rgba(56,189,248,0.22)',
-                                boxShadow: '0 10px 30px rgba(2, 12, 24, 0.55)',
-                                background: '#071224'
-                            }}
-                        />
-                    </div>
-                ) : isAudioPreview ? (
-                    <div style={{ width: '100%', maxWidth: 700, textAlign: 'center' }}>
-                        <div style={{ marginBottom: 14, fontSize: 18, fontWeight: 500, color: '#e9edef' }}>{file?.name}</div>
-                        <audio src={getFilePreviewUrl(file)} controls style={{ width: '100%' }} />
-                    </div>
-                ) : (
-                    <div style={{
-                        textAlign: 'center',
-                        padding: '40px 32px',
-                        background: 'linear-gradient(180deg, rgba(15, 38, 58, 0.82), rgba(10, 28, 44, 0.82))',
-                        borderRadius: 12,
-                        boxShadow: '0 8px 24px rgba(2,12,24,0.45)',
-                        color: '#e9edef',
-                        border: '1px solid rgba(56, 189, 248, 0.18)',
-                        minWidth: 340,
-                        maxWidth: 640
-                    }}>
-                        <div style={{
-                            width: 96,
-                            height: 96,
-                            margin: '0 auto 16px',
-                            borderRadius: 12,
-                            background: 'rgba(9, 29, 47, 0.75)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                        }}>
-                            <FileText size={44} color="#8696a0" />
-                        </div>
-                        <div style={{ fontSize: 14, color: '#8db2c9', marginBottom: 8 }}>No preview available</div>
-                        <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8, color: '#e9edef', wordBreak: 'break-word' }}>{file?.name || 'File'}</div>
-                        <div style={{ fontSize: 14, color: '#8db2c9' }}>
-                            {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} - {getDisplayFileType(file)}
-                        </div>
-                    </div>
-                )}
-            </div>
 
-            {/* Footer / Caption Input Tray */}
-            <div style={{
-                padding: '20px 24px 30px',
-                background: isImagePreview ? 'transparent' : (isMediaThemePreview ? '#041b2d' : '#0b141a'),
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 20,
-                position: 'relative',
-                borderTop: isImagePreview ? 'none' : (isMediaThemePreview ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(255, 255, 255, 0.1)'),
-                width: isMediaThemePreview ? imagePreviewCardWidth : '100%',
-                margin: isMediaThemePreview ? '0 auto 26px' : '0',
-                borderBottomLeftRadius: isMediaThemePreview ? 6 : 0,
-                borderBottomRightRadius: isMediaThemePreview ? 6 : 0
-            }}>
-                {/* Thumbnails Tray (Above Input, Left-Aligned) */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingLeft: 10 }}>
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', overflowX: 'auto', padding: '4px 0' }}>
-                        {filesInTray.map((f, idx) => (
-                            <div key={`${f.name}-${f.size}-${f.lastModified}-${idx}`} className="wa-file-tray-item" style={{
-                                width: 50, height: 50, borderRadius: 8,
-                                border: f === file ? '2px solid #22d3ee' : '2px solid rgba(56, 189, 248, 0.25)',
-                                overflow: 'hidden', cursor: 'pointer',
-                                background: '#0d2238', display: 'flex', justifyContent: 'center', alignItems: 'center',
-                                flexShrink: 0,
-                                position: 'relative'
-                            }} onClick={() => {
-                                setFile(f);
-                                const fExt = String(f?.name || '').split('.').pop().toLowerCase();
-                                const isDocFile = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'].includes(fExt);
-                                if (isDocFile) setIsViewOnceMedia(false);
-                            }}>
-                                {f.type?.startsWith('image/') ? (
-                                    <img src={getFilePreviewUrl(f)} style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#061a2d' }} alt={`thumb-${idx}`} />
-                                ) : f.type?.startsWith('video/') ? (
-                                    <div style={{ width: '100%', height: '100%', background: 'linear-gradient(180deg, rgba(10, 35, 58, 0.95), rgba(8, 28, 46, 0.95))', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-                                        <Play size={14} color="#b9d8ea" fill="#b9d8ea" />
-                                    </div>
-                                ) : (
-                                    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(180deg, rgba(10, 35, 58, 0.95), rgba(8, 28, 46, 0.95))' }}>
-                                        <FileText color="#9cc5dd" size={16} />
-                                        <span style={{ marginTop: 2, fontSize: 8, lineHeight: 1, fontWeight: 700, letterSpacing: 0.2, color: '#b9d8ea' }}>
-                                            {((f.name?.split('.').pop() || 'FILE').toUpperCase()).slice(0, 4)}
-                                        </span>
-                                    </div>
-                                )}
-                                <div 
-                                    className="wa-file-remove-btn"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        const updated = filesInTray.filter((_, i) => i !== idx);
-                                        setSelectedFiles(updated);
-                                        if (f === file) {
-                                            setFile(updated.length ? updated[0] : null);
-                                        }
-                                    }}
-                                    style={{
-                                        position: 'absolute', top: 2, right: 2, 
-                                        display: 'flex', 
-                                        alignItems: 'center', justifyContent: 'center', color: '#111b21',
-                                        zIndex: 10
-                                    }}
-                                >
-                                    <X size={18} strokeWidth={2.5} />
-                                </div>
-                            </div>
-                        ))}
-
-                        <div style={{
-                            width: 50, height: 50, borderRadius: 8, border: '2px dashed rgba(255, 255, 255, 0.2)',
-                            display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer',
-                            flexShrink: 0, color: '#94c9e6', transition: 'all 0.2s',
-                            background: 'rgba(8, 26, 42, 0.72)'
-                        }} 
-                        onMouseOver={(e) => e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.6)'}
-                        onMouseOut={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)'}
-                        onClick={() => document.getElementById('add-more-preview-files')?.click()}>
-                            <Plus size={24} />
-                            <input type="file" id="add-more-preview-files" multiple onChange={(e) => { handleFileSelect(e); }} style={{ display: 'none' }} />
-                        </div>
-                    </div>
-                </div>
-
-                {/* Caption Input Row (Full Width) */}
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16, width: '100%' }}>
-                    <div style={{
-                        background: 'rgba(17, 43, 66, 0.88)',
-                        borderRadius: 24,
-                        border: '1px solid rgba(56, 189, 248, 0.2)',
-                        padding: '9px 13px',
-                        flex: 1,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 12,
-                        position: 'relative'
-                    }}>
-                        {(showGrammarBar && (grammarSuggestions || isGrammarLoading) && !isGarbageMessage) && (
-                            <div
+                        <div style={{ position: 'relative', width: 50, height: 50, flexShrink: 0 }}>
+                            <button
+                                onClick={handleSend}
+                                disabled={isPreviewSendBlockedByAI}
+                                title={isPreviewSendBlockedByAI ? 'Please apply AI grammar suggestion first' : 'Send'}
                                 style={{
-                                    position: 'absolute',
-                                    left: 0,
-                                    bottom: 'calc(100% + 10px)',
-                                    width: '100%',
-                                    zIndex: 8
+                                    width: 50,
+                                    height: 50,
+                                    borderRadius: '50%',
+                                    background: isPreviewSendBlockedByAI ? '#1b4d71' : 'linear-gradient(135deg, #2fb8ff 0%, #4f63ff 100%)',
+                                    border: 'none',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: isPreviewSendBlockedByAI ? 'not-allowed' : 'pointer',
+                                    boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+                                    opacity: isPreviewSendBlockedByAI ? 0.6 : 1,
+                                    flexShrink: 0
                                 }}
                             >
-                                {renderGrammarBar({ floating: true })}
-                            </div>
-                        )}
-                        <button
-                            type="button"
-                            className={`wa-nav-icon-btn ${showInputEmojiPicker ? 'active' : ''}`}
-                            onClick={(e) => {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                setEmojiInsertTarget('chat');
-                                setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
-                                setShowInputEmojiPicker(!showInputEmojiPicker);
-                            }}
-                            style={{ width: 28, height: 28, minWidth: 28, border: 'none', background: 'transparent', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-                            title="Emoji"
-                        >
-                            <Smile size={22} color={showInputEmojiPicker ? "#0EA5BE" : "#8696a0"} />
-                        </button>
-                        <input
-                            type="text"
-                            id="caption-input"
-                            name="caption"
-                            aria-label="Add a caption"
-                            style={{
-                                flex: 1,
-                                background: 'transparent',
-                                border: 'none',
-                                outline: 'none',
-                                color: '#e5f4ff',
-                                fontSize: 14
-                            }}
-                            placeholder="Add a caption..."
-                            value={input}
-                            onChange={e => setInput(e.target.value)}
-                            onKeyDown={e => {
-                                if (e.key === 'Enter') handleSend(e);
-                            }}
-                            autoFocus
-                        />
-                        {canUseViewOnceForCurrentFile && (
-                            <div style={{ cursor: 'pointer' }} onClick={() => setIsViewOnceMedia(!isViewOnceMedia)} title="View once">
-                                <ViewOnceBadge size={22} color={isViewOnceMedia ? "#0EA5BE" : "#8696a0"} />
-                            </div>
-                        )}
-                    </div>
-
-                    <div style={{ position: 'relative', width: 50, height: 50, flexShrink: 0 }}>
-                        <button
-                            onClick={handleSend}
-                            disabled={isPreviewSendBlockedByAI}
-                            title={isPreviewSendBlockedByAI ? 'Please apply AI grammar suggestion first' : 'Send'}
-                            style={{
-                                width: 50,
-                                height: 50,
-                                borderRadius: '50%',
-                                background: isPreviewSendBlockedByAI ? '#1b4d71' : 'linear-gradient(135deg, #2fb8ff 0%, #4f63ff 100%)',
-                                border: 'none',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: isPreviewSendBlockedByAI ? 'not-allowed' : 'pointer',
-                                boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
-                                opacity: isPreviewSendBlockedByAI ? 0.6 : 1,
-                                flexShrink: 0
-                            }}
-                        >
-                            <Send size={24} color={isPreviewSendBlockedByAI ? "#9bb5c9" : "#06263c"} />
-                        </button>
-                        {previewFileCount > 0 && (
-                            <span style={{
-                                position: 'absolute',
-                                top: -7,
-                                right: -6,
-                                minWidth: 20,
-                                height: 20,
-                                padding: '0 6px',
-                                borderRadius: 999,
-                                background: '#3b82f6',
-                                color: '#ffffff',
-                                fontSize: 12,
-                                fontWeight: 700,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                border: '2px solid #041b2d',
-                                lineHeight: 1
-                            }}>
-                                {previewFileCount > 99 ? '99+' : previewFileCount}
-                            </span>
-                        )}
+                                <Send size={24} color={isPreviewSendBlockedByAI ? "#9bb5c9" : "#06263c"} />
+                            </button>
+                            {previewFileCount > 0 && (
+                                <span style={{
+                                    position: 'absolute',
+                                    top: -7,
+                                    right: -6,
+                                    minWidth: 20,
+                                    height: 20,
+                                    padding: '0 6px',
+                                    borderRadius: 999,
+                                    background: '#3b82f6',
+                                    color: '#ffffff',
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    border: '2px solid #041b2d',
+                                    lineHeight: 1
+                                }}>
+                                    {previewFileCount > 99 ? '99+' : previewFileCount}
+                                </span>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
         );
     };
     const renderSearchSidebar = () => (
@@ -15200,16 +15252,16 @@ export default function Chat() {
                             {(() => {
                                 const starredCount = groupMessages.filter(m => m.is_starred).length;
                                 return (
-                            <div className="clickable" onClick={() => { setIsContactInfoOpen(false); setIsStarredMessagesOpen(true); }} style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                    <Star size={24} color="#38bdf8" />
-                                    <span style={{ color: textColor, fontSize: 16 }}>Starred messages</span>
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <span style={{ color: subTextColor, fontSize: 15 }}>{starredCount}</span>
-                                    <ChevronRight size={20} color="#38bdf8" />
-                                </div>
-                            </div>
+                                    <div className="clickable" onClick={() => { setIsContactInfoOpen(false); setIsStarredMessagesOpen(true); }} style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                            <Star size={24} color="#38bdf8" />
+                                            <span style={{ color: textColor, fontSize: 16 }}>Starred messages</span>
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <span style={{ color: subTextColor, fontSize: 15 }}>{starredCount}</span>
+                                            <ChevronRight size={20} color="#38bdf8" />
+                                        </div>
+                                    </div>
                                 );
                             })()}
                             <div className="clickable" onClick={() => { setIsContactInfoOpen(false); setIsNotificationSettingsOpen(true); }} style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
@@ -15244,8 +15296,8 @@ export default function Chat() {
                                     const isCurrentUserOwner = String(activeTarget.admin?._id || activeTarget.admin || activeTarget.creatorId || '') === currentUserId;
                                     const isCurrentUserAdmin = isCurrentUserOwner || (activeTarget.admins || []).some(a => String(a?._id || a) === currentUserId);
                                     const isTargetOwner = String(activeTarget.admin?._id || activeTarget.admin || activeTarget.creatorId || '') === String(m._id || m.id);
-                                    const isGroupAdmin = String(activeTarget.admin?._id || activeTarget.admin || activeTarget.creatorId || '') === String(m._id) || 
-                                                       (activeTarget.admins || []).some(a => String(a?._id || a) === String(m._id));
+                                    const isGroupAdmin = String(activeTarget.admin?._id || activeTarget.admin || activeTarget.creatorId || '') === String(m._id) ||
+                                        (activeTarget.admins || []).some(a => String(a?._id || a) === String(m._id));
                                     const canManageThisMember = isCurrentUserAdmin && !isMe && !isTargetOwner;
 
                                     return (
@@ -15403,30 +15455,30 @@ export default function Chat() {
                         const totalCount = mediaMsgs.length + linkMsgs.length + docMsgs.length;
                         const previewItems = [...mediaMsgs, ...linkMsgs, ...docMsgs].slice(0, 4);
                         return (
-                    <div className="wa-contact-info-item clickable" onClick={() => { setSharedMediaTab('media'); setIsSharedMediaOpen(true); }}>
-                        <div className="wa-info-item-row" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 8 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                                <span className="wa-info-item-text" style={{ color: '#f8fafc' }}>{t('contact_info.media_links_docs')}</span>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                    <span className="wa-info-item-count">
-                                        {totalCount}
-                                    </span>
-                                    <ChevronDown size={20} color="#38bdf8" style={{ transform: 'rotate(-90deg)' }} />
+                            <div className="wa-contact-info-item clickable" onClick={() => { setSharedMediaTab('media'); setIsSharedMediaOpen(true); }}>
+                                <div className="wa-info-item-row" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 8 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                                        <span className="wa-info-item-text" style={{ color: '#f8fafc' }}>{t('contact_info.media_links_docs')}</span>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                            <span className="wa-info-item-count">
+                                                {totalCount}
+                                            </span>
+                                            <ChevronDown size={20} color="#38bdf8" style={{ transform: 'rotate(-90deg)' }} />
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 12, fontSize: 12, color: '#94a3b8' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                            <Image size={14} /> <span>{mediaMsgs.length} Media</span>
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                            <LinkIcon size={14} /> <span>{linkMsgs.length} Links</span>
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                            <FileText size={14} /> <span>{docMsgs.length} Docs</span>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                            <div style={{ display: 'flex', gap: 12, fontSize: 12, color: '#94a3b8' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                    <Image size={14} /> <span>{mediaMsgs.length} Media</span>
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                    <LinkIcon size={14} /> <span>{linkMsgs.length} Links</span>
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                    <FileText size={14} /> <span>{docMsgs.length} Docs</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="wa-media-preview-row">
+                                <div className="wa-media-preview-row">
                                     <>
                                         {previewItems.map((m, i) => {
                                             const previewUrl = getMessageMediaUrl(m);
@@ -15493,8 +15545,8 @@ export default function Chat() {
                                             <div key={`empty-${i}`} className="wa-media-thumb" style={{ background: 'rgba(255, 255, 255, 0.03)', flexShrink: 0, border: '1px solid rgba(255, 255, 255, 0.05)' }}></div>
                                         ))}
                                     </>
-                        </div>
-                    </div>
+                                </div>
+                            </div>
                         );
                     })()}
 
@@ -17519,7 +17571,7 @@ export default function Chat() {
                         onContextMenu={(e) => { e.preventDefault(); setOpenDropdown(null); }}
                     />
                     <div className="wa-dropdown-menu contact-dropdown active-fixed" style={menuStyle} onWheel={forwardWheelToChat} onClick={(e) => e.stopPropagation()}>
-                        {archivedChatIds.includes(id) ? (
+                        {effectiveArchivedChatIds.includes(String(id)) ? (
                             <div className="wa-dropdown-item" onClick={() => handleUnarchiveChat(id, displayName)}>
                                 <Archive size={16} style={{ marginRight: 10 }} /> {isCommunity ? 'Unarchive community' : (isGroup ? 'Unarchive group' : 'Unarchive chat')}
                             </div>
@@ -19816,15 +19868,15 @@ export default function Chat() {
     const totalUnread = users.filter(u => (u.unreadCount || 0) > 0).length +
         groups.filter(g => (g.unreadCount || 0) > 0).length +
         communities.filter(c => (c.unreadCount || 0) > 0).length;
-    const totalActiveUnread = users.filter(u => !archivedChatIds.includes(u._id) && (u.unreadCount || 0) > 0).length +
-        groups.filter(g => !archivedChatIds.includes(g._id || g.id) && (g.unreadCount || 0) > 0).length +
-        communities.filter(c => !archivedChatIds.includes(c._id || c.id) && (c.unreadCount || 0) > 0).length;
-    const totalUnreadArchived = users.filter(u => archivedChatIds.includes(u._id) && (u.unreadCount || 0) > 0).length +
-        groups.filter(g => archivedChatIds.includes(g._id) && (g.unreadCount || 0) > 0).length +
-        communities.filter(c => archivedChatIds.includes(c.id || c._id) && (c.unreadCount || 0) > 0).length;
-    const totalFavorites = users.filter(u => u.isFavorite && !archivedChatIds.includes(u._id)).length +
-        groups.filter(g => g.isFavorite && !archivedChatIds.includes(g._id)).length +
-        communities.filter(c => c.isFavorite && !archivedChatIds.includes(c.id || c._id)).length;
+    const totalActiveUnread = users.filter(u => !effectiveArchivedChatIds.includes(String(u._id)) && (u.unreadCount || 0) > 0).length +
+        groups.filter(g => !effectiveArchivedChatIds.includes(String(g._id || g.id)) && (g.unreadCount || 0) > 0).length +
+        communities.filter(c => !effectiveArchivedChatIds.includes(String(c._id || c.id)) && (c.unreadCount || 0) > 0).length;
+    const totalUnreadArchived = users.filter(u => effectiveArchivedChatIds.includes(String(u._id)) && (u.unreadCount || 0) > 0).length +
+        groups.filter(g => effectiveArchivedChatIds.includes(String(g._id)) && (g.unreadCount || 0) > 0).length +
+        communities.filter(c => effectiveArchivedChatIds.includes(String(c.id || c._id)) && (c.unreadCount || 0) > 0).length;
+    const totalFavorites = users.filter(u => u.isFavorite && !effectiveArchivedChatIds.includes(String(u._id))).length +
+        groups.filter(g => g.isFavorite && !effectiveArchivedChatIds.includes(String(g._id))).length +
+        communities.filter(c => c.isFavorite && !effectiveArchivedChatIds.includes(String(c.id || c._id))).length;
     const totalUnreadGroups = groups.filter(g => (g.unreadCount || 0) > 0).length;
 
     const getCustomListUnread = (list) => {
@@ -19833,7 +19885,7 @@ export default function Chat() {
             const g = groups.find(x => String(x._id || x.id) === String(memberId));
             const c = communities.find(x => String(x._id || x.id) === String(memberId));
             const target = u || g || c;
-            return acc + ((target && !archivedChatIds.includes(target._id || target.id) && target.unreadCount > 0) ? 1 : 0);
+            return acc + ((target && !effectiveArchivedChatIds.includes(String(target._id || target.id)) && target.unreadCount > 0) ? 1 : 0);
         }, 0);
     };
 
@@ -19992,7 +20044,7 @@ export default function Chat() {
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '0 14px' }}>
                 {[...users, ...groups, ...communities].filter(item => {
-                    if (archivedChatIds.includes(item._id || item.id)) return false;
+                    if (effectiveArchivedChatIds.includes(String(item._id || item.id))) return false;
                     const name = item.name || (item.firstName ? `${item.firstName} ${item.lastName || ''}` : 'Unknown');
                     return name.toLowerCase().includes(searchListQuery.toLowerCase());
                 }).map(item => {
@@ -20742,7 +20794,7 @@ export default function Chat() {
                                         }
 
 
-                                        if (archivedChatIds.includes(item._id)) return false;
+                                        if (effectiveArchivedChatIds.includes(String(item._id))) return false;
 
                                         // If not searching and on "All" tab, hide users with no history/no pinning/no active requests
                                         if (!searchQuery.trim() && filterType === 'all' && !item.is_group && !item.is_community) {
@@ -20782,185 +20834,185 @@ export default function Chat() {
                                         return dateB - dateA;
                                     });
 
-                            if (displayItems.length === 0) {
-                                if (!searchQuery.trim() && filterType === 'all') {
-                                    return (
-                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 30px', textAlign: 'center', color: '#94a3b8' }}>
-                                            <div style={{ background: 'rgba(56, 189, 248, 0.05)', borderRadius: '50%', padding: '24px', marginBottom: '16px', border: '1px solid rgba(56, 189, 248, 0.1)' }}>
-                                                <Plus size={40} color="#0EA5BE" style={{ opacity: 0.8 }} />
+                                if (displayItems.length === 0) {
+                                    if (!searchQuery.trim() && filterType === 'all') {
+                                        return (
+                                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 30px', textAlign: 'center', color: '#94a3b8' }}>
+                                                <div style={{ background: 'rgba(56, 189, 248, 0.05)', borderRadius: '50%', padding: '24px', marginBottom: '16px', border: '1px solid rgba(56, 189, 248, 0.1)' }}>
+                                                    <Plus size={40} color="#0EA5BE" style={{ opacity: 0.8 }} />
+                                                </div>
+                                                <p style={{ fontSize: '15px', color: '#f8fafc', marginBottom: '8px', fontWeight: '600' }}>No chats yet</p>
+                                                <p style={{ fontSize: '13px', lineHeight: '1.5', marginBottom: '24px' }}>Start a fresh conversation with your colleagues or friends.</p>
+                                                <button
+                                                    className="wa-start-chat-btn"
+                                                    style={{
+                                                        background: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 48%, #4f46e5 100%)',
+                                                        color: 'white',
+                                                        borderRadius: '24px',
+                                                        padding: '10px 24px',
+                                                        fontSize: '14px',
+                                                        fontWeight: '600',
+                                                        width: 'auto',
+                                                        height: 'auto',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '8px',
+                                                        boxShadow: '0 12px 28px rgba(14, 165, 233, 0.2)'
+                                                    }}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        if (users.length === 0) fetchUsers();
+                                                        setIsNewChatOpen(true);
+                                                    }}
+                                                >
+                                                    <Plus size={18} />
+                                                    Start Chat
+                                                </button>
                                             </div>
-                                            <p style={{ fontSize: '15px', color: '#f8fafc', marginBottom: '8px', fontWeight: '600' }}>No chats yet</p>
-                                            <p style={{ fontSize: '13px', lineHeight: '1.5', marginBottom: '24px' }}>Start a fresh conversation with your colleagues or friends.</p>
-                                            <button
-                                                className="wa-start-chat-btn"
-                                                style={{
-                                                    background: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 48%, #4f46e5 100%)',
-                                                    color: 'white',
-                                                    borderRadius: '24px',
-                                                    padding: '10px 24px',
-                                                    fontSize: '14px',
-                                                    fontWeight: '600',
-                                                    width: 'auto',
-                                                    height: 'auto',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '8px',
-                                                    boxShadow: '0 12px 28px rgba(14, 165, 233, 0.2)'
-                                                }}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    if (users.length === 0) fetchUsers();
-                                                    setIsNewChatOpen(true);
-                                                }}
-                                            >
-                                                <Plus size={18} />
-                                                Start Chat
-                                            </button>
+                                        );
+                                    }
+                                    return (
+                                        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#8696a0', fontSize: '14px' }}>
+                                            No results found
                                         </div>
                                     );
                                 }
-                                return (
-                                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0', fontSize: '14px' }}>
-                                        No results found
-                                    </div>
-                                );
-                            }
 
                                 return displayItems.map(item => {
-                                const isGroup = item.is_group;
-                                const displayName = item.is_community ? (item.name || 'Community') : (isGroup ? (item.name || 'Unnamed Group') : getContactDisplayName(item));
+                                    const isGroup = item.is_group;
+                                    const displayName = item.is_community ? (item.name || 'Community') : (isGroup ? (item.name || 'Unnamed Group') : getContactDisplayName(item));
 
-                                const renderHighlightedContent = (content) => {
-                                    if (!searchQuery || !content) return content;
-                                    const parts = content.split(new RegExp(`(${searchQuery})`, 'gi'));
-                                    return parts.map((part, i) =>
-                                        part.toLowerCase() === searchQuery.toLowerCase() ? (
-                                            <span key={i} style={{ background: '#ffef96', color: 'black' }}>{part}</span>
-                                        ) : (part)
-                                    );
-                                };
+                                    const renderHighlightedContent = (content) => {
+                                        if (!searchQuery || !content) return content;
+                                        const parts = content.split(new RegExp(`(${searchQuery})`, 'gi'));
+                                        return parts.map((part, i) =>
+                                            part.toLowerCase() === searchQuery.toLowerCase() ? (
+                                                <span key={i} style={{ background: '#ffef96', color: 'black' }}>{part}</span>
+                                            ) : (part)
+                                        );
+                                    };
 
-                                const renderCommunityAvatar = () => {
-                                    if (item.icon) {
-                                        return <img src={item.icon} alt={displayName} style={{ width: '100%', height: '100%', borderRadius: '12px', objectFit: 'cover' }} />;
-                                    }
-                                    return (
-                                        <div style={{ position: 'relative', width: '100%', height: '100%', background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.2) 0%, rgba(79, 70, 229, 0.2) 100%)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'inset 0 0 15px rgba(56, 189, 248, 0.1)' }}>
-                                            <div style={{ position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, background: 'linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%)', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid rgba(15, 23, 42, 0.8)', boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>
-                                                <Users size={12} />
-                                            </div>
-                                            <Users size={24} color="#38bdf8" style={{ filter: 'drop-shadow(0 0 8px rgba(56, 189, 248, 0.4))' }} />
-                                        </div>
-                                    );
-                                };
-                                const chatHoverPreview = getChatHoverPreview(item, isGroup || item.is_community);
-
-                                return (
-                                    <div
-                                        key={item._id}
-                                        className={`wa-user-item ${((item.is_community && selectedCommunity?.id === item.id) || (isGroup && selectedGroup?._id === item._id) || (!isGroup && selectedUser?._id === item._id)) ? 'active' : ''}`}
-                                        data-chat-preview={chatHoverPreview || undefined}
-                                        onClick={() => {
-                                            setIsContactInfoOpen(false);
-                                            setIsCommunityInfoOpen(false);
-                                            setIsMessageSearchOpen(false);
-                                            setIsStarredMessagesOpen(false);
-                                            setIsSharedMediaOpen(false);
-                                            setIsEditContactOpen(false);
-                                            setIsCommunitySettingsOpen(false);
-
-                                            if (item.is_community) {
-                                                setSelectedCommunity(item);
-                                                setIsCommunityHomeOpen(true);
-                                                setSelectedGroup(null);
-                                                setSelectedUser(null);
-                                                setCommunities(prev => prev.map(c => String(c.id) === String(item.id) ? { ...c, unreadCount: 0 } : c));
-                                                // Fetch announcements messages
-                                                const annId = item.announcements?._id || item.announcements?.id || item.announcements;
-                                                if (annId) fetchGroupMessages(annId);
-                                                return;
-                                            }
-                                            if (isGroup) {
-                                                setSelectedGroup(item);
-                                                setSelectedUser(null);
-                                                setInput('');
-                                                setFile(null);
-                                                setTypingLinkPreview(null);
-                                                setReplyingTo(null);
-                                                setIsChatSelectionMode(false);
-                                                setIsForwardingMode(false);
-                                                setForwardSelectedMsgs([]);
-                                                fetchGroupMessages(item._id);
-                                                setGroups(prev => prev.map(g => g._id === item._id ? { ...g, unreadCount: 0 } : g));
-                                            } else {
-                                                handleUserSelect(item);
-                                                setSelectedGroup(null);
-                                            }
-                                        }}
-                                        onContextMenu={(e) => { e.preventDefault(); setDropdownPos({ x: e.clientX, y: e.clientY }); setOpenDropdown({ type: 'contact', id: item._id, data: item }); }}
-                                        onTouchStart={(e) => { e.persist(); longPressTimer.current = setTimeout(() => { setOpenDropdown({ type: 'contact', id: item._id, data: item }); }, 600); }}
-                                        onTouchEnd={() => clearTimeout(longPressTimer.current)}
-                                        onTouchMove={() => clearTimeout(longPressTimer.current)}
-                                    >
-                                        <div className="wa-avatar" style={(isGroup || item.is_community) ? { background: 'rgba(56, 189, 248, 0.1)', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: item.is_community ? '12px' : '50%', border: '1px solid rgba(56, 189, 248, 0.2)' } : {}}>
-                                            {item.is_community ? (
-                                                renderCommunityAvatar()
-                                            ) : isGroup ? (
-                                                item.icon ? (
-                                                    <img src={item.icon} alt={displayName} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                                                ) : (
-                                                    <Users size={22} color="#38bdf8" />
-                                                )
-                                            ) : (
-                                                getVisibleUserAvatar(item) ? (
-                                                    <img src={getVisibleUserAvatar(item)} alt={displayName} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                                                ) : (
-                                                    <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#38bdf8' }}>
-                                                        {displayName.charAt(0).toUpperCase()}
-                                                    </span>
-                                                )
-                                            )}
-                                        </div>
-                                        <div className="wa-chat-info">
-                                            <div className="wa-chat-row-top">
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-                                                    <span className="wa-chat-name" style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{displayName}</span>
+                                    const renderCommunityAvatar = () => {
+                                        if (item.icon) {
+                                            return <img src={item.icon} alt={displayName} style={{ width: '100%', height: '100%', borderRadius: '12px', objectFit: 'cover' }} />;
+                                        }
+                                        return (
+                                            <div style={{ position: 'relative', width: '100%', height: '100%', background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.2) 0%, rgba(79, 70, 229, 0.2) 100%)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'inset 0 0 15px rgba(56, 189, 248, 0.1)' }}>
+                                                <div style={{ position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, background: 'linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%)', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid rgba(15, 23, 42, 0.8)', boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>
+                                                    <Users size={12} />
                                                 </div>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                                    <span className="wa-chat-time">{formatTime(item.lastMessage?.created_at || item.created_at)}</span>
-                                                    <div className={`wa-dropdown-trigger ${(openDropdown?.type === 'contact' && openDropdown?.id === item._id) ? 'active' : ''}`} onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setDropdownPos({ x: e.clientX, y: e.clientY });
-                                                        setOpenDropdown({ type: 'contact', id: item._id, data: item });
-                                                    }}>
-                                                        <ChevronDown size={18} />
+                                                <Users size={24} color="#38bdf8" style={{ filter: 'drop-shadow(0 0 8px rgba(56, 189, 248, 0.4))' }} />
+                                            </div>
+                                        );
+                                    };
+                                    const chatHoverPreview = getChatHoverPreview(item, isGroup || item.is_community);
+
+                                    return (
+                                        <div
+                                            key={item._id}
+                                            className={`wa-user-item ${((item.is_community && selectedCommunity?.id === item.id) || (isGroup && selectedGroup?._id === item._id) || (!isGroup && selectedUser?._id === item._id)) ? 'active' : ''}`}
+                                            data-chat-preview={chatHoverPreview || undefined}
+                                            onClick={() => {
+                                                setIsContactInfoOpen(false);
+                                                setIsCommunityInfoOpen(false);
+                                                setIsMessageSearchOpen(false);
+                                                setIsStarredMessagesOpen(false);
+                                                setIsSharedMediaOpen(false);
+                                                setIsEditContactOpen(false);
+                                                setIsCommunitySettingsOpen(false);
+
+                                                if (item.is_community) {
+                                                    setSelectedCommunity(item);
+                                                    setIsCommunityHomeOpen(true);
+                                                    setSelectedGroup(null);
+                                                    setSelectedUser(null);
+                                                    setCommunities(prev => prev.map(c => String(c.id) === String(item.id) ? { ...c, unreadCount: 0 } : c));
+                                                    // Fetch announcements messages
+                                                    const annId = item.announcements?._id || item.announcements?.id || item.announcements;
+                                                    if (annId) fetchGroupMessages(annId);
+                                                    return;
+                                                }
+                                                if (isGroup) {
+                                                    setSelectedGroup(item);
+                                                    setSelectedUser(null);
+                                                    setInput('');
+                                                    setFile(null);
+                                                    setTypingLinkPreview(null);
+                                                    setReplyingTo(null);
+                                                    setIsChatSelectionMode(false);
+                                                    setIsForwardingMode(false);
+                                                    setForwardSelectedMsgs([]);
+                                                    fetchGroupMessages(item._id);
+                                                    setGroups(prev => prev.map(g => g._id === item._id ? { ...g, unreadCount: 0 } : g));
+                                                } else {
+                                                    handleUserSelect(item);
+                                                    setSelectedGroup(null);
+                                                }
+                                            }}
+                                            onContextMenu={(e) => { e.preventDefault(); setDropdownPos({ x: e.clientX, y: e.clientY }); setOpenDropdown({ type: 'contact', id: item._id, data: item }); }}
+                                            onTouchStart={(e) => { e.persist(); longPressTimer.current = setTimeout(() => { setOpenDropdown({ type: 'contact', id: item._id, data: item }); }, 600); }}
+                                            onTouchEnd={() => clearTimeout(longPressTimer.current)}
+                                            onTouchMove={() => clearTimeout(longPressTimer.current)}
+                                        >
+                                            <div className="wa-avatar" style={(isGroup || item.is_community) ? { background: 'rgba(56, 189, 248, 0.1)', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: item.is_community ? '12px' : '50%', border: '1px solid rgba(56, 189, 248, 0.2)' } : {}}>
+                                                {item.is_community ? (
+                                                    renderCommunityAvatar()
+                                                ) : isGroup ? (
+                                                    item.icon ? (
+                                                        <img src={item.icon} alt={displayName} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                                                    ) : (
+                                                        <Users size={22} color="#38bdf8" />
+                                                    )
+                                                ) : (
+                                                    getVisibleUserAvatar(item) ? (
+                                                        <img src={getVisibleUserAvatar(item)} alt={displayName} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                                                    ) : (
+                                                        <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#38bdf8' }}>
+                                                            {displayName.charAt(0).toUpperCase()}
+                                                        </span>
+                                                    )
+                                                )}
+                                            </div>
+                                            <div className="wa-chat-info">
+                                                <div className="wa-chat-row-top">
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                                                        <span className="wa-chat-name" style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{displayName}</span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                        <span className="wa-chat-time">{formatTime(item.lastMessage?.created_at || item.created_at)}</span>
+                                                        <div className={`wa-dropdown-trigger ${(openDropdown?.type === 'contact' && openDropdown?.id === item._id) ? 'active' : ''}`} onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setDropdownPos({ x: e.clientX, y: e.clientY });
+                                                            setOpenDropdown({ type: 'contact', id: item._id, data: item });
+                                                        }}>
+                                                            <ChevronDown size={18} />
+                                                        </div>
                                                     </div>
                                                 </div>
-                                            </div>
-                                            <div className="wa-chat-row-bottom">
-                                                <span className="wa-chat-last-msg">
-                                                    {(() => {
-                                                        const isRestricted = (item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000);
-                                                        if (isRestricted) {
-                                                            return <span style={{ color: '#ef4444', fontStyle: 'italic' }}>Messaging restricted</span>;
-                                                        }
-                                                        const preview = renderLastMessagePreview(item.lastMessage, isGroup || item.is_community, '', item._id || item.id);
-                                                        return typeof preview === 'string' ? renderHighlightedContent(preview) : preview;
-                                                    })()}
-                                                </span>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                                    {item.isFavorite && <Heart size={14} color="#8696a0" />}
-                                                    {item.isMuted && <BellOff size={14} color="#8696a0" />}
-                                                    {item.isPinned && <Pin size={14} color="#8696a0" style={{ transform: 'rotate(45deg)' }} />}
-                                                    {item.unreadCount > 0 && !(item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000) && (
-                                                        <div className="wa-unread-badge">{item.unreadCount}</div>
-                                                    )}
+                                                <div className="wa-chat-row-bottom">
+                                                    <span className="wa-chat-last-msg">
+                                                        {(() => {
+                                                            const isRestricted = (item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000);
+                                                            if (isRestricted) {
+                                                                return <span style={{ color: '#ef4444', fontStyle: 'italic' }}>Messaging restricted</span>;
+                                                            }
+                                                            const preview = renderLastMessagePreview(item.lastMessage, isGroup || item.is_community, '', item._id || item.id);
+                                                            return typeof preview === 'string' ? renderHighlightedContent(preview) : preview;
+                                                        })()}
+                                                    </span>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                        {item.isFavorite && <Heart size={14} color="#8696a0" />}
+                                                        {item.isMuted && <BellOff size={14} color="#8696a0" />}
+                                                        {item.isPinned && <Pin size={14} color="#8696a0" style={{ transform: 'rotate(45deg)' }} />}
+                                                        {item.unreadCount > 0 && !(item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000) && (
+                                                            <div className="wa-unread-badge">{item.unreadCount}</div>
+                                                        )}
+                                                    </div>
                                                 </div>
+                                                {/* {renderDropdownMenu('contact', item._id, item)} */}
                                             </div>
-                                            {/* {renderDropdownMenu('contact', item._id, item)} */}
                                         </div>
-                                    </div>
-                                );
+                                    );
                                 });
                             })()}
                         </div>
@@ -21064,24 +21116,24 @@ export default function Chat() {
                         height: '100%',
                         cursor: 'col-resize',
                         zIndex: 100
-                                        }}
-                                    >
-                                        <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
-                                        <input
-                                            type="color"
-                                            value={inlinePaintColor}
-                                            onChange={(event) => setInlinePaintColor(event.target.value)}
-                                            style={{
-                                                position: 'absolute',
-                                                inset: 0,
-                                                opacity: 0,
-                                                width: '100%',
-                                                height: '100%',
-                                                cursor: 'crosshair'
-                                            }}
-                                        />
-                                    </div>
-                                )}
+                    }}
+                >
+                    <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
+                    <input
+                        type="color"
+                        value={inlinePaintColor}
+                        onChange={(event) => setInlinePaintColor(event.target.value)}
+                        style={{
+                            position: 'absolute',
+                            inset: 0,
+                            opacity: 0,
+                            width: '100%',
+                            height: '100%',
+                            cursor: 'crosshair'
+                        }}
+                    />
+                </div>
+            )}
         </div >
     );
 
@@ -23609,17 +23661,17 @@ export default function Chat() {
                     <div style={{ padding: '20px 24px', display: 'flex', justifyContent: 'flex-end', background: '#202c33', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
                         <button
                             onClick={handleSendPoll}
-                            style={{ 
-                                background: '#0EA5BE', 
-                                width: '56px', 
-                                height: '56px', 
-                                borderRadius: '50%', 
-                                border: 'none', 
-                                color: '#fff', 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                justifyContent: 'center', 
-                                cursor: 'pointer', 
+                            style={{
+                                background: '#0EA5BE',
+                                width: '56px',
+                                height: '56px',
+                                borderRadius: '50%',
+                                border: 'none',
+                                color: '#fff',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
                                 boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
                                 transition: 'transform 0.2s, background 0.2s'
                             }}
@@ -23638,17 +23690,17 @@ export default function Chat() {
         if (!isPollDetailsOpen || !pollDetails) return null;
 
         return (
-            <div className={`wa-contact-info-panel active`} style={{ 
-                background: 'rgba(15, 23, 42, 0.95)', 
-                display: 'flex', 
-                flexDirection: 'column', 
-                height: '100%', 
-                overflow: 'hidden', 
-                borderLeft: '1px solid rgba(255, 255, 255, 0.1)', 
-                width: isMobile ? '100%' : '400px', 
-                position: 'absolute', 
-                right: 0, 
-                top: 0, 
+            <div className={`wa-contact-info-panel active`} style={{
+                background: 'rgba(15, 23, 42, 0.95)',
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%',
+                overflow: 'hidden',
+                borderLeft: '1px solid rgba(255, 255, 255, 0.1)',
+                width: isMobile ? '100%' : '400px',
+                position: 'absolute',
+                right: 0,
+                top: 0,
                 zIndex: 100,
                 backdropFilter: 'blur(15px)'
             }}>
@@ -24890,7 +24942,7 @@ export default function Chat() {
                                             <p className="wa-settings-item-desc">Archive inactive chats after 30 days.</p>
                                         </div>
                                         <label className="wa-settings-toggle">
-                                            <input type="checkbox" />
+                                            <input type="checkbox" checked={privacySettings.autoArchiveConversations || false} onChange={() => togglePrivacyBooleanSetting('autoArchiveConversations')} />
                                             <span className="wa-settings-toggle-slider" />
                                         </label>
                                     </div>
@@ -26575,14 +26627,14 @@ export default function Chat() {
             {/* Edit Event Modal */}
             {isEventEditOpen && eventEditTarget && (
                 <div className="wa-mute-modal-overlay" onClick={() => setIsEventEditOpen(false)} style={{ zIndex: 30000 }}>
-                <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px', width: '94%', borderRadius: '16px', padding: 0, background: '#0b2236', boxShadow: '0 17px 50px rgba(0,0,0,0.35)', overflow: 'hidden', border: '1px solid rgba(14, 165, 190, 0.25)' }}>
-                    <div style={{ padding: '18px 20px' }}>
-                        <div style={{ padding: '0 0 15px 0', display: 'flex', alignItems: 'center', position: 'relative' }}>
-                            <div style={{ flex: 1, textAlign: 'center' }}>
-                                <h3 style={{ margin: 0, fontSize: '19px', fontWeight: '500', color: '#f8fafc', whiteSpace: 'nowrap' }}>Edit event</h3>
+                    <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px', width: '94%', borderRadius: '16px', padding: 0, background: '#0b2236', boxShadow: '0 17px 50px rgba(0,0,0,0.35)', overflow: 'hidden', border: '1px solid rgba(14, 165, 190, 0.25)' }}>
+                        <div style={{ padding: '18px 20px' }}>
+                            <div style={{ padding: '0 0 15px 0', display: 'flex', alignItems: 'center', position: 'relative' }}>
+                                <div style={{ flex: 1, textAlign: 'center' }}>
+                                    <h3 style={{ margin: 0, fontSize: '19px', fontWeight: '500', color: '#f8fafc', whiteSpace: 'nowrap' }}>Edit event</h3>
+                                </div>
+                                <button onClick={() => setIsEventEditOpen(false)} style={{ position: 'absolute', right: 0, background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={24} /></button>
                             </div>
-                            <button onClick={() => setIsEventEditOpen(false)} style={{ position: 'absolute', right: 0, background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={24} /></button>
-                        </div>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                                 <input value={eventName} onChange={(e) => setEventName(e.target.value)} placeholder="Event name" style={{ padding: '10px', borderRadius: 8, border: '1px solid #dbe4ea', background: '#f8fafc', color: '#111b21' }} />
