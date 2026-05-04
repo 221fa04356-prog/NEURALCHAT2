@@ -288,6 +288,45 @@ const resolveMessageMediaUrls = (msg, isGroupChat = false) => {
     };
 };
 
+const DelayedMessageImage = memo(({ messageKey, src, msg, retryUrl, onLoaded, onError }) => {
+    const [showLoading, setShowLoading] = useState(false);
+    const [isLoaded, setIsLoaded] = useState(false);
+
+    useEffect(() => {
+        setShowLoading(false);
+        setIsLoaded(false);
+        const timer = setTimeout(() => setShowLoading(true), 360);
+        return () => clearTimeout(timer);
+    }, [src]);
+
+    return (
+        <>
+            {showLoading && !isLoaded && (
+                <div className="wa-msg-image-loading" aria-hidden="true">
+                    <Camera size={22} />
+                    <span>Loading image</span>
+                </div>
+            )}
+            <img
+                key={`${messageKey}:${src}`}
+                src={src}
+                alt="Sent"
+                className="wa-msg-image"
+                onLoad={(event) => {
+                    setIsLoaded(true);
+                    setShowLoading(false);
+                    onLoaded(msg, event);
+                }}
+                onError={(event) => {
+                    setShowLoading(false);
+                    onError(msg, retryUrl, event);
+                }}
+            />
+        </>
+    );
+});
+DelayedMessageImage.displayName = 'DelayedMessageImage';
+
 const sanitizeClipboardPayloadText = (rawText) => {
     const text = typeof rawText === 'string' ? rawText : '';
     if (!text) return '';
@@ -383,12 +422,22 @@ const MessageList = memo(({
     const [failedMediaKeys, setFailedMediaKeys] = useState(() => new Set());
     const [failedMediaUrls, setFailedMediaUrls] = useState(() => new Set());
     const [mediaUrlOverrides, setMediaUrlOverrides] = useState(() => new Map());
+    const [loadedMediaKeys, setLoadedMediaKeys] = useState(() => new Set());
     const [videoPlayingByKey, setVideoPlayingByKey] = useState(() => new Map());
     const [videoPipKey, setVideoPipKey] = useState('');
     const [videoPipPosterByKey, setVideoPipPosterByKey] = useState(() => new Map());
     const [videoOverlayVisibleByKey, setVideoOverlayVisibleByKey] = useState(() => new Map());
     const [activeVideoKey, setActiveVideoKey] = useState('');
-    const [locallyConsumedViewOnceIds, setLocallyConsumedViewOnceIds] = useState(() => new Set());
+    const viewOnceStorageKey = `wa_view_once_consumed_${String(user?.id || user?._id || 'anon')}`;
+    const [locallyConsumedViewOnceIds, setLocallyConsumedViewOnceIds] = useState(() => {
+        try {
+            const raw = sessionStorage.getItem(viewOnceStorageKey);
+            const arr = raw ? JSON.parse(raw) : [];
+            return new Set(Array.isArray(arr) ? arr.map((id) => String(id || '')) : []);
+        } catch (_) {
+            return new Set();
+        }
+    });
     const [viewOncePreview, setViewOncePreview] = useState(null); // { url, type }
     const videoRefs = useRef(new Map());
     const videoOverlayTimersRef = useRef(new Map());
@@ -495,21 +544,45 @@ const MessageList = memo(({
     };
 
     useEffect(() => {
+        try {
+            sessionStorage.setItem(viewOnceStorageKey, JSON.stringify(Array.from(locallyConsumedViewOnceIds)));
+        } catch (_) { }
+    }, [locallyConsumedViewOnceIds, viewOnceStorageKey]);
+
+    const markViewOnceConsumedLocally = useCallback((msg) => {
+        const key = String(msg?._id || msg?.id || '');
+        if (!key) return;
+        setLocallyConsumedViewOnceIds((prev) => {
+            if (prev.has(key)) return prev;
+            const next = new Set(prev);
+            next.add(key);
+            return next;
+        });
+    }, []);
+
+    useEffect(() => {
         if (typeof onViewOncePreviewOpenChange === 'function') {
             onViewOncePreviewOpenChange(!!viewOncePreview);
-        }
-        if (typeof document !== 'undefined') {
-            document.body.classList.toggle('wa-view-once-open', !!viewOncePreview);
         }
         return () => {
             if (typeof onViewOncePreviewOpenChange === 'function') {
                 onViewOncePreviewOpenChange(false);
             }
-            if (typeof document !== 'undefined') {
-                document.body.classList.remove('wa-view-once-open');
-            }
         };
     }, [viewOncePreview, onViewOncePreviewOpenChange]);
+
+    useEffect(() => {
+        if (!viewOncePreview) return undefined;
+        const handleViewOnceEscape = (event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            setViewOncePreview(null);
+        };
+        window.addEventListener('keydown', handleViewOnceEscape, true);
+        return () => window.removeEventListener('keydown', handleViewOnceEscape, true);
+    }, [viewOncePreview]);
 
     const getMessageKey = useCallback((msg) => String(msg?._id || msg?.id || ''), []);
     const normalizeMediaCompareUrl = useCallback((url) => {
@@ -547,8 +620,18 @@ const MessageList = memo(({
     const handleMediaError = useCallback((msg, retryUrl, event) => {
         const messageKey = getMessageKey(msg);
         const mediaEl = event?.currentTarget;
+        const failedSrc = normalizeMediaCompareUrl(mediaEl?.currentSrc || mediaEl?.src || '');
+        if (messageKey && failedSrc) {
+            const loadKey = `${messageKey}:${failedSrc}`;
+            setLoadedMediaKeys((prev) => {
+                if (!prev.has(loadKey)) return prev;
+                const next = new Set(prev);
+                next.delete(loadKey);
+                return next;
+            });
+        }
         if (messageKey && retryUrl && mediaEl) {
-            const currentSrc = normalizeMediaCompareUrl(mediaEl.currentSrc || mediaEl.src || '');
+            const currentSrc = failedSrc;
             const normalizedRetryUrl = normalizeMediaCompareUrl(retryUrl);
             const hasAlreadyRetried = mediaUrlOverrides.get(messageKey) === retryUrl;
             if (!hasAlreadyRetried && currentSrc && currentSrc !== normalizedRetryUrl) {
@@ -563,6 +646,19 @@ const MessageList = memo(({
         }
         markMediaFailed(msg, event);
     }, [getMessageKey, markMediaFailed, mediaUrlOverrides, normalizeMediaCompareUrl]);
+    const handleMediaLoaded = useCallback((msg, event) => {
+        const messageKey = getMessageKey(msg);
+        const mediaEl = event?.currentTarget;
+        const loadedSrc = normalizeMediaCompareUrl(mediaEl?.currentSrc || mediaEl?.src || '');
+        if (!messageKey || !loadedSrc) return;
+        const loadKey = `${messageKey}:${loadedSrc}`;
+        setLoadedMediaKeys((prev) => {
+            if (prev.has(loadKey)) return prev;
+            const next = new Set(prev);
+            next.add(loadKey);
+            return next;
+        });
+    }, [getMessageKey, normalizeMediaCompareUrl]);
     const captureVideoPoster = useCallback((msg) => {
         const messageKey = getMessageKey(msg);
         if (!messageKey) return;
@@ -979,7 +1075,8 @@ const MessageList = memo(({
             if (['csv'].includes(fileExt)) return 'CSV';
             if (['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods'].includes(fileExt)) return 'XLS';
             if (['ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'].includes(fileExt)) return 'PPT';
-            if (['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt', 'txt'].includes(fileExt)) return 'DOC';
+            if (['txt'].includes(fileExt)) return 'TXT';
+            if (['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt'].includes(fileExt)) return 'DOC';
             if (['zip', 'rar', '7z', 'tar', 'gz'].includes(fileExt)) return 'ZIP';
             return 'FILE';
         };
@@ -996,6 +1093,10 @@ const MessageList = memo(({
         const absoluteFileUrl = normalizedCandidateUrl && failedMediaUrls.has(normalizedCandidateUrl)
             ? ''
             : candidateFileUrl;
+        const mediaLoadKey = absoluteFileUrl
+            ? `${messageKey}:${normalizeMediaCompareUrl(absoluteFileUrl)}`
+            : '';
+        const isImageLoading = msg.type === 'image' && !!absoluteFileUrl && !loadedMediaKeys.has(mediaLoadKey);
         const isLikelyLocalOrPrivatePreview = (() => {
             if (!absoluteFileUrl) return true;
             try {
@@ -1033,7 +1134,8 @@ const MessageList = memo(({
             if (['pdf'].includes(fileExt)) return 'PDF Document';
             if (['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'csv', 'ods'].includes(fileExt)) return 'Spreadsheet';
             if (['ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'].includes(fileExt)) return 'Presentation';
-            if (['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt', 'txt'].includes(fileExt)) return 'Text Document';
+            if (['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt'].includes(fileExt)) return 'Word Document';
+            if (['txt'].includes(fileExt)) return 'Text Document';
             return 'Document';
         };
         const docTypeName = getDocTypeName();
@@ -1330,14 +1432,14 @@ const MessageList = memo(({
                         ) : (
                             <>
                                 {msg.is_view_once && isViewOnceConsumed && msg.type !== 'audio' ? (
-                                    <div className="wa-spent-view-once-media" onClick={() => setSnackbar({ message: 'Already seen', type: 'info', variant: 'system' })} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', color: '#8696a0', fontSize: 14, cursor: 'pointer' }}>
+                                    <div className="wa-spent-view-once-media" draggable={false} onDragStart={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()} onClick={() => setSnackbar({ message: 'Already seen', type: 'info', variant: 'system' })} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', color: '#8696a0', fontSize: 14, cursor: 'pointer' }}>
                                         <ViewOnceBadge size={20} />
                                         <span>{msg.type === 'image' ? 'Photo' : msg.type === 'file' ? 'File' : 'Video'}</span>
                                     </div>
                                 ) : (
                                     <>
                                         {msg.type === 'image' && (
-                                            <div className="wa-msg-image-container" onClick={(e) => {
+                                            <div className={`wa-msg-image-container ${isImageLoading ? 'is-loading' : ''} ${!absoluteFileUrl && !msg.is_view_once ? 'is-unavailable' : ''}`} onClick={(e) => {
                                                 if (isForwardingMode) return;
                                                 e.stopPropagation();
                                                 if (msg.is_view_once) {
@@ -1346,15 +1448,11 @@ const MessageList = memo(({
                                                         return;
                                                     }
                                                     if (isMe) {
-                                                        setLocallyConsumedViewOnceIds((prev) => {
-                                                            if (prev.has(messageKey)) return prev;
-                                                            const next = new Set(prev);
-                                                            next.add(messageKey);
-                                                            return next;
-                                                        });
+                                                        markViewOnceConsumedLocally(msg);
                                                         setSnackbar({ message: 'Viewed once. Marked as seen.', type: 'info', variant: 'system' });
                                                     }
                                                     if (!isMe) {
+                                                        markViewOnceConsumedLocally(msg);
                                                         markMessageViewed(msg._id || msg.id);
                                                     }
                                                     const openUrl = absoluteFileUrl || msg.file_path || msg.filePath;
@@ -1393,16 +1491,18 @@ const MessageList = memo(({
                                                         <span>View once photo</span>
                                                     </div>
                                                 ) : absoluteFileUrl ? (
-                                                    <img
-                                                        key={`${messageKey}:${absoluteFileUrl}`}
+                                                    <DelayedMessageImage
+                                                        messageKey={messageKey}
                                                         src={absoluteFileUrl}
-                                                        alt="Sent"
-                                                        className="wa-msg-image"
-                                                        onError={(event) => handleMediaError(msg, retryFileUrl, event)}
+                                                        msg={msg}
+                                                        retryUrl={retryFileUrl}
+                                                        onLoaded={handleMediaLoaded}
+                                                        onError={handleMediaError}
                                                     />
                                                 ) : (
-                                                    <div className="wa-deleted-tag">
-                                                        <XCircle size={16} /> Media unavailable
+                                                    <div className="wa-msg-image-unavailable">
+                                                        <XCircle size={18} />
+                                                        <span>Image unavailable</span>
                                                     </div>
                                                 )}
                                             </div>
@@ -1426,15 +1526,11 @@ const MessageList = memo(({
                                                             return;
                                                         }
                                                         if (isMe) {
-                                                            setLocallyConsumedViewOnceIds((prev) => {
-                                                                if (prev.has(messageKey)) return prev;
-                                                                const next = new Set(prev);
-                                                                next.add(messageKey);
-                                                                return next;
-                                                            });
+                                                            markViewOnceConsumedLocally(msg);
                                                             setSnackbar({ message: 'Viewed once. Marked as seen.', type: 'info', variant: 'system' });
                                                         }
                                                         if (!isMe) {
+                                                            markViewOnceConsumedLocally(msg);
                                                             markMessageViewed(msg._id || msg.id);
                                                         }
                                                         const openUrl = absoluteFileUrl || msg.file_path || msg.filePath;
@@ -1780,11 +1876,23 @@ const MessageList = memo(({
                                     let lp = msg.link_preview;
                                     if (!lp || !lp.title) return null;
                                     return (
-                                        <div className="wa-link-preview-card" onClick={(e) => { e.stopPropagation(); window.open(lp.url, '_blank'); }} style={{ cursor: 'pointer', marginTop: 8 }}>
-                                            {lp.image && <img src={lp.image} alt="" style={{ width: '100%', borderRadius: '8px' }} />}
-                                            <div style={{ padding: 8 }}>
-                                                <div style={{ fontWeight: 600, fontSize: 13 }}>{lp.title}</div>
-                                                <div style={{ fontSize: 12, color: '#667781' }}>{lp.domain}</div>
+                                        <div className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''}`} onClick={(e) => { e.stopPropagation(); window.open(lp.url, '_blank'); }} style={{ cursor: 'pointer', marginTop: 8 }}>
+                                            {lp.image && (
+                                                <div className="wa-link-preview-image">
+                                                    <img
+                                                        src={lp.image}
+                                                        alt=""
+                                                        onError={(event) => {
+                                                            event.currentTarget.closest('.wa-link-preview-image')?.remove();
+                                                            event.currentTarget.closest('.wa-link-preview-card')?.classList.add('no-image');
+                                                        }}
+                                                    />
+                                                </div>
+                                            )}
+                                            <div className="wa-link-preview-content">
+                                                <div className="wa-link-preview-title">{lp.title}</div>
+                                                {lp.description && <div className="wa-link-preview-description">{lp.description}</div>}
+                                                <div className="wa-link-preview-domain">{lp.domain}</div>
                                             </div>
                                         </div>
                                     );
@@ -2087,47 +2195,46 @@ const MessageList = memo(({
         );
     };
 
-    const chatWrapperRect = (typeof window !== 'undefined')
-        ? document.querySelector('.wa-main-chat-wrapper')?.getBoundingClientRect()
-        : null;
-    const chatHeaderRect = (typeof window !== 'undefined')
-        ? document.querySelector('.wa-chat-header')?.getBoundingClientRect()
-        : null;
-    const overlayTop = Math.max(0, Math.floor((chatHeaderRect?.bottom || chatWrapperRect?.top || 0) - 1));
-    const overlayLeft = Math.max(0, Math.floor(chatWrapperRect?.left || 0));
-    const overlayWidth = Math.max(0, Math.floor(chatWrapperRect?.width || window.innerWidth || 0));
-    const overlayHeight = Math.max(0, Math.floor((window.innerHeight || 0) - overlayTop));
-
     return (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
             {viewOncePreview && (
                 <div
                     onClick={() => setViewOncePreview(null)}
+                    className="wa-view-once-media-privacy-overlay"
+                    onDragStart={(e) => e.preventDefault()}
+                    onContextMenu={(e) => e.preventDefault()}
+                    onPointerMove={(e) => {
+                        if (e.buttons) e.preventDefault();
+                    }}
                     style={{
-                        position: 'fixed',
-                        top: overlayTop,
-                        left: overlayLeft,
-                        width: overlayWidth || '100vw',
-                        height: overlayHeight,
-                        zIndex: 2147483000,
-                        background: 'linear-gradient(180deg, rgba(4, 22, 44, 0.985) 0%, rgba(2, 18, 36, 0.985) 100%)',
-                        backdropFilter: 'none',
+                        position: 'absolute',
+                        inset: 0,
+                        zIndex: 35,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        padding: 18
+                        padding: '0 12px 12px',
+                        boxSizing: 'border-box',
+                        backdropFilter: 'blur(34px) saturate(130%)',
+                        WebkitBackdropFilter: 'blur(34px) saturate(130%)'
                     }}
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}
                             style={{
-                                width: 'min(92vw, 760px)',
-                                maxHeight: '88vh',
+                                width: 'min(92%, 960px)',
+                                height: 'auto',
+                                maxHeight: '100%',
                                 borderRadius: 12,
                                 overflow: 'hidden',
-                                border: '1px solid rgba(56, 189, 248, 0.3)',
-                                background: '#06243d',
-                                boxShadow: '0 10px 34px rgba(0,0,0,0.45)'
+                                border: '1px solid rgba(56, 189, 248, 0.28)',
+                                background: 'rgba(8, 34, 58, 0.34)',
+                                boxShadow: '0 16px 42px rgba(0,0,0,0.28)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                backdropFilter: 'blur(18px) saturate(120%)',
+                                WebkitBackdropFilter: 'blur(18px) saturate(120%)'
                             }}
                         >
                         {viewOncePreview.type === 'video' ? (
@@ -2135,14 +2242,21 @@ const MessageList = memo(({
                                 src={viewOncePreview.url}
                                 controls
                                 autoPlay
+                                preload="auto"
                                 playsInline
-                                style={{ width: '100%', maxHeight: '88vh', display: 'block', background: '#06243d' }}
+                                draggable={false}
+                                onDragStart={(e) => e.preventDefault()}
+                                onContextMenu={(e) => e.preventDefault()}
+                                style={{ width: '100%', maxHeight: 'calc(100vh - 180px)', display: 'block', background: 'transparent', objectFit: 'contain' }}
                             />
                         ) : (
                             <img
                                 src={viewOncePreview.url}
                                 alt="View once"
-                                style={{ width: '100%', maxHeight: '88vh', objectFit: 'contain', display: 'block', background: '#06243d' }}
+                                draggable={false}
+                                onDragStart={(e) => e.preventDefault()}
+                                onContextMenu={(e) => e.preventDefault()}
+                                style={{ width: '100%', maxHeight: 'calc(100vh - 180px)', objectFit: 'contain', display: 'block', background: 'transparent' }}
                             />
                         )}
                     </div>

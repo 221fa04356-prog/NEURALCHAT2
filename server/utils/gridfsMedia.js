@@ -21,7 +21,10 @@ const getBucket = () => {
 const uploadLocalFileToGridFS = (absPath, filename, metadata = {}) => new Promise((resolve, reject) => {
     const bucket = getBucket();
     const readStream = fs.createReadStream(absPath);
-    const uploadStream = bucket.openUploadStream(filename, { metadata });
+    const uploadStream = bucket.openUploadStream(filename, {
+        metadata,
+        contentType: metadata.mimeType || metadata.contentType || getContentTypeFromName(filename)
+    });
 
     readStream.on('error', reject);
     uploadStream.on('error', reject);
@@ -140,7 +143,10 @@ const streamGridFSFileWithRange = async (req, res, fileId) => {
     }
 
     const fileSize = fileDoc.length;
-    const contentType = getContentTypeFromName(fileDoc.filename);
+    const contentType = fileDoc.contentType ||
+        fileDoc.metadata?.mimeType ||
+        fileDoc.metadata?.contentType ||
+        getContentTypeFromName(fileDoc.filename);
     const parsedRange = parseRangeHeader(req.headers.range, fileSize);
 
     if (parsedRange) {

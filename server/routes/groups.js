@@ -127,7 +127,7 @@ const upload = multer({
     storage,
     fileFilter: (req, file, cb) => {
         const allowedTypes = [
-            'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+            'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff', 'image/heic', 'image/heif', 'image/avif', 'image/svg+xml',
             'application/pdf',
             'application/msword',
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -136,17 +136,17 @@ const upload = multer({
             'application/vnd.ms-powerpoint',
             'application/vnd.openxmlformats-officedocument.presentationml.presentation',
             'text/plain', 'text/csv',
-            'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/webm', 'audio/wav', 'audio/x-m4a', 'audio/opus'
+            'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/webm', 'audio/wav', 'audio/x-m4a', 'audio/opus', 'audio/aac', 'audio/flac', 'audio/amr', 'audio/x-ms-wma'
         ];
         const ext = path.extname(file.originalname).toLowerCase();
         const allowedExts = [
-            '.jpg', '.jpeg', '.png', '.gif', '.webp',
+            '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.heic', '.heif', '.avif', '.svg',
             '.doc', '.docx', '.docm', '.dot', '.dotx', '.rtf', '.odt',
             '.pdf', '.txt', '.csv',
             '.xls', '.xlsx', '.xlsm', '.xlsb', '.xlt', '.xltx', '.ods',
             '.ppt', '.pptx', '.pptm', '.pot', '.potx', '.pps', '.ppsx', '.odp',
-            '.mp3', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.flac',
-            '.mp4', '.avi', '.mkv', '.mov', '.webm', '.m4v'
+            '.mp3', '.m4a', '.ogg', '.oga', '.opus', '.wav', '.aac', '.flac', '.amr', '.weba', '.wma',
+            '.mp4', '.avi', '.mkv', '.mov', '.webm', '.m4v', '.3gp', '.3g2', '.mpeg', '.mpg', '.wmv', '.flv', '.ogv'
         ];
 
         const mime = (file.mimetype || '').toLowerCase();
