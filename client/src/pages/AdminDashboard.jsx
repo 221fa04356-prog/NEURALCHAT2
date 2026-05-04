@@ -817,7 +817,13 @@ export default function AdminDashboard() {
             return;
         }
         if (alert.type === 'moderation_action') {
-            setActiveTab(alert.action === 'report' ? 'report-actions' : 'block-actions');
+            const tabAction = alert.action === 'report' ? 'report' : 'block';
+            await fetchStats();
+            setActiveTab(tabAction === 'report' ? 'report-actions' : 'block-actions');
+            setHighlightedRedirectRow({
+                kind: `moderation:${tabAction}`,
+                id: `${alert.userId || alert.actorId || ''}:${alert.targetId || ''}`
+            });
             setShowNotifications(false);
             return;
         }
@@ -908,7 +914,7 @@ export default function AdminDashboard() {
         }
 
         return () => clearTimeout(timer);
-    }, [highlightedRedirectRow, activeTab, users, resets]);
+    }, [highlightedRedirectRow, activeTab, users, resets, resolvedActionDetails]);
 
     useEffect(() => {
         fetchData();
@@ -1063,14 +1069,19 @@ export default function AdminDashboard() {
         socket.on('chat_moderation_action', (data) => {
             fetchStats();
             const actionLabel = data?.action === 'block' ? 'Block' : data?.action === 'unblock' ? 'Unblock' : 'Report';
-            const message = `${actionLabel} action recorded`;
+            const actorName = data?.actorName || data?.userName || data?.memberName || 'Unknown member';
+            const targetName = data?.targetName || data?.partnerName || data?.receiverName || 'Unknown target';
+            const message = `${actorName} ${actionLabel.toLowerCase()}ed ${targetName}`;
             showSnackbar(message, 'info');
             pushAdminNotification({
                 id: `moderation-${data?.action || 'action'}-${data?.actorId || data?.userId || 'admin'}-${data?.targetId || data?.messageId || Date.now()}-${data?.timestamp || Date.now()}`,
                 type: 'moderation_action',
                 action: data?.action || 'report',
-                userName: data?.actorName || data?.userName || data?.memberName || 'Admin',
-                targetName: data?.targetName || data?.partnerName || data?.receiverName || '',
+                actorId: data?.actorId || data?.userId || '',
+                userId: data?.actorId || data?.userId || '',
+                targetId: data?.targetId || '',
+                userName: actorName,
+                targetName,
                 message,
                 timestamp: data?.timestamp ? new Date(data.timestamp) : new Date()
             });
@@ -2157,7 +2168,7 @@ export default function AdminDashboard() {
                                         ) : alert.type === 'unblock_request' ? (
                                             `Reason: "${alert.reason || 'No reason provided'}"`
                                         ) : alert.type === 'moderation_action' ? (
-                                            alert.targetName ? `${alert.message} for ${alert.targetName}` : alert.message
+                                            alert.message || `${alert.userName || 'Someone'} ${alert.action === 'block' ? 'blocked' : alert.action === 'unblock' ? 'unblocked' : 'reported'} ${alert.targetName || 'someone'}`
                                         ) : alert.type === 'registration' ? (
                                             `New user: ${alert.email || alert.login_id || alert.userId}`
                                         ) : alert.type === 'reset' ? (
@@ -2836,6 +2847,7 @@ export default function AdminDashboard() {
                     targetName: user.name || oldestRelated?.targetName || 'Unknown member',
                     targetLoginId: user.login_id || oldestRelated?.targetLoginId || '',
                     reason: user.unblockRequestReason || 'Restoration requested',
+                    resolutionStatus: 'pending',
                     created_at: oldestRelated?.created_at,
                     name: user.name || 'Unknown member',
                     login_id: user.login_id || ''
@@ -2869,6 +2881,12 @@ export default function AdminDashboard() {
             if (status === 'reported') return 'Reported';
             return 'Blocked';
         };
+        const getResolutionLabel = (detail) => (
+            detail?.resolutionStatus === 'solved' ? 'Already solved' : 'Pending'
+        );
+        const getResolutionColor = (detail) => (
+            detail?.resolutionStatus === 'solved' ? '#34d399' : '#fbbf24'
+        );
         const getRawActionStatus = (detail) => {
             if (detail?.eventAction === 'unblock') return 'unblocked';
             if (detail?.eventAction === 'report' || detail?.action === 'report') return 'reported';
@@ -2927,15 +2945,31 @@ export default function AdminDashboard() {
                     <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', color: OFFICIAL_TEXT_SECONDARY }}>
                         <thead>
                             <tr style={{ background: 'rgba(15, 23, 42, 0.72)' }}>
-                                <th style={{ width: '22%', padding: '0.85rem 1.25rem', textAlign: 'left', color: '#9ed6ff', fontSize: '0.78rem' }}>Member</th>
-                                <th style={{ width: '22%', padding: '0.85rem 1rem', textAlign: 'center', color: '#9ed6ff', fontSize: '0.78rem' }}>Victim Login ID</th>
-                                <th style={{ width: '24%', padding: '0.85rem 1rem', textAlign: 'center', color: '#9ed6ff', fontSize: '0.78rem' }}>Action</th>
-                                <th style={{ width: '32%', padding: '0.85rem 1.25rem', textAlign: 'center', color: '#9ed6ff', fontSize: '0.78rem' }}>Type</th>
+                                <th style={{ width: '21%', padding: '0.85rem 1.25rem', textAlign: 'left', color: '#9ed6ff', fontSize: '0.78rem' }}>Member</th>
+                                <th style={{ width: '21%', padding: '0.85rem 1rem', textAlign: 'center', color: '#9ed6ff', fontSize: '0.78rem' }}>Victim Login ID</th>
+                                <th style={{ width: '20%', padding: '0.85rem 1rem', textAlign: 'center', color: '#9ed6ff', fontSize: '0.78rem' }}>Action</th>
+                                <th style={{ width: '20%', padding: '0.85rem 1rem', textAlign: 'center', color: '#9ed6ff', fontSize: '0.78rem' }}>Status</th>
+                                <th style={{ width: '18%', padding: '0.85rem 1.25rem', textAlign: 'center', color: '#9ed6ff', fontSize: '0.78rem' }}>Type</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {tableRows.map(detail => (
-                                <tr key={detail.id} style={{ borderTop: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                            {tableRows.map(detail => {
+                                const redirectKey = `moderation:${actionType}:${String(detail.userId || '')}:${String(detail.targetId || '')}`;
+                                const isHighlighted = Boolean(
+                                    highlightedRedirectRow &&
+                                    highlightedRedirectRow.kind === `moderation:${actionType}` &&
+                                    highlightedRedirectRow.id === `${String(detail.userId || '')}:${String(detail.targetId || '')}`
+                                );
+                                return (
+                                <tr
+                                    key={detail.id}
+                                    data-redirect-row={redirectKey}
+                                    style={{
+                                        borderTop: '1px solid rgba(148, 163, 184, 0.1)',
+                                        background: isHighlighted ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
+                                        boxShadow: isHighlighted ? 'inset 0 0 0 1px rgba(56, 189, 248, 0.45), 0 16px 36px rgba(2, 6, 23, 0.18)' : 'none'
+                                    }}
+                                >
                                     <td style={{ padding: '0.95rem 1.25rem', fontWeight: 800, color: OFFICIAL_TEXT_PRIMARY }}>
                                         {detail.name || 'Unknown member'}
                                         <div style={{ color: OFFICIAL_TEXT_MUTED, fontSize: '0.72rem', fontWeight: 700 }}>{detail.login_id || 'N/A'}</div>
@@ -2952,14 +2986,32 @@ export default function AdminDashboard() {
                                             View
                                         </button>
                                     </td>
+                                    <td style={{ padding: '0.95rem 1rem', textAlign: 'center' }}>
+                                        <span style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            borderRadius: 999,
+                                            padding: '6px 12px',
+                                            fontSize: '0.72rem',
+                                            fontWeight: 900,
+                                            color: getResolutionColor(detail),
+                                            background: `${getResolutionColor(detail)}18`,
+                                            border: `1px solid ${getResolutionColor(detail)}55`,
+                                            whiteSpace: 'nowrap'
+                                        }}>
+                                            {getResolutionLabel(detail)}
+                                        </span>
+                                    </td>
                                     <td style={{ padding: '0.95rem 1.25rem', textAlign: 'center', fontWeight: 700, textTransform: 'capitalize' }}>
                                         {detail.isRequestRow ? 'Requests' : (detail.targetType || 'N/A')}
                                     </td>
                                 </tr>
-                            ))}
+                                );
+                            })}
                             {tableRows.length === 0 && (
                                 <tr>
-                                <td colSpan={4} style={{ padding: '1.5rem', textAlign: 'center', color: OFFICIAL_TEXT_MUTED, fontWeight: 700 }}>No {emptyLabel} yet.</td>
+                                <td colSpan={5} style={{ padding: '1.5rem', textAlign: 'center', color: OFFICIAL_TEXT_MUTED, fontWeight: 700 }}>No {emptyLabel} yet.</td>
                                 </tr>
                             )}
                         </tbody>
@@ -3032,6 +3084,7 @@ export default function AdminDashboard() {
                                     </div>
                                     <div>User: <span style={{ color: OFFICIAL_TEXT_PRIMARY }}>{activeDetail.name || 'Unknown member'} ({activeDetail.login_id || 'N/A'})</span></div>
                                     <div>Source: <span style={{ color: OFFICIAL_TEXT_PRIMARY }}>{title}</span></div>
+                                    <div>Status: <span style={{ color: getResolutionColor(activeDetail) }}>{getResolutionLabel(activeDetail)}</span></div>
                                     <div>Reason:</div>
                                     <div style={{
                                         padding: '12px 14px',
@@ -3124,6 +3177,7 @@ export default function AdminDashboard() {
                                 <div style={{ display: 'grid', gap: 12, color: OFFICIAL_TEXT_SECONDARY, fontWeight: 700 }}>
                                     <div>Member: <span style={{ color: OFFICIAL_TEXT_PRIMARY }}>{activeDetail.name || 'Unknown member'} ({activeDetail.login_id || 'N/A'})</span></div>
                                     <div>Victim Login ID: <span style={{ color: OFFICIAL_TEXT_PRIMARY }}>{getTargetLoginLabel(activeDetail)}</span></div>
+                                    <div>Status: <span style={{ color: getResolutionColor(activeDetail) }}>{getResolutionLabel(activeDetail)}</span></div>
                                     {chosenDetail ? (
                                         <>
                                             <div style={{

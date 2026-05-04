@@ -648,7 +648,7 @@ router.get('/stats', async (req, res) => {
             return acc;
         }, {});
         const [targetUsers, targetGroups, targetCommunities] = await Promise.all([
-            targetIdsByType.p2p?.size ? User.find({ _id: { $in: [...targetIdsByType.p2p] } }).select('name login_id mobile email __enc_name __enc_mobile __enc_email') : [],
+            targetIdsByType.p2p?.size ? User.find({ _id: { $in: [...targetIdsByType.p2p] } }).select('name login_id mobile email messagingBlocked unblockRequested unblockRequestReason __enc_name __enc_mobile __enc_email') : [],
             targetIdsByType.group?.size ? Group.find({ _id: { $in: [...targetIdsByType.group] } }).select('name members').lean() : [],
             targetIdsByType.community?.size ? Community.find({ _id: { $in: [...targetIdsByType.community] } }).select('name members').lean() : []
         ]);
@@ -659,7 +659,10 @@ router.get('/stats', async (req, res) => {
                     name: targetObj.name || 'Unknown user',
                     login_id: targetObj.login_id || '',
                     mobile: targetObj.mobile || '',
-                    email: targetObj.email || ''
+                    email: targetObj.email || '',
+                    messagingBlocked: !!targetObj.messagingBlocked,
+                    unblockRequested: !!targetObj.unblockRequested,
+                    unblockRequestReason: targetObj.unblockRequestReason || ''
                 }];
             }),
             ...targetGroups.map(target => [`group:${String(target._id)}`, {
@@ -692,6 +695,10 @@ router.get('/stats', async (req, res) => {
                 targetMobile: targetInfo.mobile || '',
                 targetEmail: targetInfo.email || '',
                 targetMembers: targetInfo.members || 0,
+                resolutionStatus: log.target_type === 'p2p'
+                    ? (targetInfo.unblockRequested ? 'pending' : (targetInfo.messagingBlocked ? 'pending' : 'solved'))
+                    : 'pending',
+                unblockRequestReason: targetInfo.unblockRequestReason || '',
                 reason: log.reason || '',
                 created_at: log.created_at,
                 name: actor?.name || 'Unknown member',

@@ -950,11 +950,27 @@ router.post('/moderation-action', authenticateToken, async (req, res) => {
         }
 
         if (req.io) {
+            const [actorInfo, resolvedTargetInfo] = await Promise.all([
+                User.findById(actorId).select('name login_id __enc_name').lean(),
+                targetType === 'p2p'
+                    ? User.findById(targetId).select('name login_id __enc_name').lean()
+                    : targetType === 'group'
+                        ? Group.findById(targetId).select('name').lean()
+                        : Community.findById(targetId).select('name').lean()
+            ]);
+            const actorName = actorInfo?.name || actorInfo?.login_id || 'Unknown member';
+            const resolvedTargetName = resolvedTargetInfo?.name || String(targetName || '').slice(0, 160) || 'Unknown target';
+
             req.io.to('admins').emit('chat_moderation_action', {
+                id: String(log._id),
                 action,
                 targetType,
                 targetId,
                 actorId,
+                actorName,
+                actorLoginId: actorInfo?.login_id || '',
+                targetName: resolvedTargetName,
+                targetLoginId: resolvedTargetInfo?.login_id || '',
                 created_at: log.created_at,
                 targetLocked,
                 targetActionCount

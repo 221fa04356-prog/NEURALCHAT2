@@ -20,10 +20,16 @@ const verifyChain = async (type, id) => {
     
     let messages = [];
     if (type === 'p2p') {
+        const partnerId = process.argv[4];
+        if (!partnerId) {
+            console.log('\n⚠️ For P2P, you must provide TWO IDs to isolate a specific chat.');
+            console.log('Usage: node test_hash_chain.js p2p <your-id> <partner-id>');
+            process.exit(1);
+        }
         messages = await Message.find({
             $or: [
-                { user_id: id },
-                { receiver_id: id }
+                { user_id: id, receiver_id: partnerId },
+                { user_id: partnerId, receiver_id: id }
             ]
         }).sort({ created_at: 1 });
     } else if (type === 'group') {
@@ -37,10 +43,23 @@ const verifyChain = async (type, id) => {
         return;
     }
 
+    // Filter out legacy messages (sent before the blockchain update)
+    const securedMessages = messages.filter(m => m.message_hash);
+    
+    if (securedMessages.length === 0) {
+        console.log('Only legacy (unsecured) messages found. No blockchain messages to verify.');
+        return;
+    }
+
+    console.log(`Found ${messages.length - securedMessages.length} legacy messages (skipped).`);
+    console.log(`Verifying ${securedMessages.length} blockchain-secured messages...`);
+
     let isValid = true;
-    for (let i = 0; i < messages.length; i++) {
-        const msg = messages[i];
-        const prevHash = i === 0 ? 'GENESIS_BLOCK' : messages[i - 1].message_hash;
+    for (let i = 0; i < securedMessages.length; i++) {
+        const msg = securedMessages[i];
+        
+        // The first secured message might link back to a legacy message (undefined hash) or GENESIS_BLOCK
+        const prevHash = i === 0 ? msg.previous_message_hash : securedMessages[i - 1].message_hash;
 
         // Verify previous hash link
         if (msg.previous_message_hash !== prevHash) {
@@ -76,7 +95,7 @@ const verifyChain = async (type, id) => {
     }
 
     if (isValid) {
-        console.log('\n✅ CHAIN VERIFIED: All messages are authentic and untampered.');
+        console.log('\n✅ CHAIN VERIFIED: All secured messages are authentic and untampered.');
     } else {
         console.log('\n❌ CHAIN CORRUPTED: Evidence of tampering or missing blocks detected.');
     }
@@ -91,10 +110,57 @@ const runTest = async () => {
 
     if (!targetId && type !== 'list') {
         console.log('Usage: node test_hash_chain.js [ai|p2p|group] [ID]');
-        console.log('Example: node test_hash_chain.js ai 65f1234567890');
-        console.log('\nListing some users to test AI chat:');
-        const users = await mongoose.model('User').find().limit(5);
+        console.log('Example: node test_hash_chain.js group 65f1234567890\n');
+        
+        console.log('--- Listing some Users ---');
+        const users = await mongoose.model('User').find().limit(50);
         users.forEach(u => console.log(`${u.name}: ${u._id}`));
+
+        try {
+            console.log('\n--- Listing some Groups ---');
+            const groups = await mongoose.model('Group').find().limit(50);
+            const Community = mongoose.models.Community || require('./models/Community');
+            
+            for (const g of groups) {
+                let displayName = g.name;
+                
+                if (g.name === 'Announcements' || g.isAnnouncementGroup) {
+                    const community = await Community.findOne({ announcements: g._id });
+                    if (community) {
+                        displayName = `[Announcement] ${community.name}`;
+                    }
+                } else {
+                    const parentCommunity = await Community.findOne({ groups: g._id });
+                    if (parentCommunity) {
+                        displayName = `${g.name} (in ${parentCommunity.name})`;
+                    }
+                }
+                console.log(`${displayName}: ${g._id}`);
+            }
+        } catch(e) {
+            // Fallback if Group model issue
+            const Group = require('./models/Group');
+            const Community = require('./models/Community');
+            const groups = await Group.find().limit(50);
+            
+            for (const g of groups) {
+                let displayName = g.name;
+                
+                if (g.name === 'Announcements' || g.isAnnouncementGroup) {
+                    const community = await Community.findOne({ announcements: g._id });
+                    if (community) {
+                        displayName = `[Announcement] ${community.name}`;
+                    }
+                } else {
+                    const parentCommunity = await Community.findOne({ groups: g._id });
+                    if (parentCommunity) {
+                        displayName = `${g.name} (in ${parentCommunity.name})`;
+                    }
+                }
+                console.log(`${displayName}: ${g._id}`);
+            }
+        }
+        
         process.exit(0);
     }
 
