@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, memo, useCallback, useMemo } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useRef, memo, useCallback, useMemo } from 'react';
 import { flushSync } from 'react-dom';
 import axios from 'axios';
 import ImageEditorModal from '../components/ImageEditorModal';
@@ -10,7 +10,7 @@ import {
     MessageSquare, CircleDashed, Users, MoreVertical, Plus, Megaphone,
     Search, Settings, Phone, Video, Paperclip, Smile, Send, Mic, MicOff, Pause, PauseCircle, PlayCircle, StopCircle,
     ArrowLeft, CheckCheck, CheckCircle, User as UserIcon, FileText, Calendar, X, Star, ChevronDown, ChevronRight, ChevronLeft, Bell,
-    Info, Reply, Copy, Forward, Pin, CheckSquare, Download, Trash2, Archive, BellOff, HeartOff, XCircle, Lock, List, Heart, ThumbsDown, Share, Pencil, Image, StarOff, Camera, Link2 as LinkIcon,
+    Info, Reply, Copy, Forward, Pin, CheckSquare, Download, Trash2, Archive, BellOff, HeartOff, XCircle, Lock, List, Heart, ThumbsDown, Share, Pencil, Image as ImageIcon, StarOff, Camera, Link2 as LinkIcon,
     LayoutGrid, UserPlus, ArrowRight, Share2, Crop, Check, RotateCcw, Undo2, Minus, Delete, User, Play, MapPin, IndianRupee, Sticker, PlusCircle,
     ShieldCheck, Monitor, BellRing, Laptop, LogOut, Globe, Clock, Mail, Briefcase, ExternalLink,
     ShieldAlert, Fingerprint, HardDrive, Keyboard, HelpCircle, Settings2, Volume2, MonitorSmartphone, Shield, SlidersHorizontal,
@@ -1280,6 +1280,7 @@ export default function Chat() {
 
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
+    const [isComposerMultiline, setIsComposerMultiline] = useState(false);
     const [isMessagingBlocked, setIsMessagingBlocked] = useState(false);
     const [unblockRequested, setUnblockRequested] = useState(false);
     const [showUnblockModal, setShowUnblockModal] = useState(false);
@@ -1346,20 +1347,28 @@ export default function Chat() {
     // --- File Upload State ---
     const [file, setFile] = useState(null);
     const [selectedFiles, setSelectedFiles] = useState([]);
+    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
     const composerDraftsRef = useRef({});
     const isRestoringComposerDraftRef = useRef(false);
     const fileInputRef = useRef(null);
     const filePreviewUrlCacheRef = useRef(new Map());
     const MAX_UPLOAD_BYTES = 1073741824;
     const DOCUMENT_EXTENSIONS = ['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt', 'pdf', 'txt', 'csv', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods', 'ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'];
-    const MEDIA_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'avi', 'mkv', 'mov', 'webm', 'm4v'];
-    const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'ogg', 'opus', 'wav', 'aac', 'flac'];
+    const MEDIA_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'heic', 'heif', 'avif', 'svg', 'mp4', 'avi', 'mkv', 'mov', 'webm', 'm4v', '3gp', '3g2', 'mpeg', 'mpg', 'wmv', 'flv', 'ogv'];
+    const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'ogg', 'oga', 'opus', 'wav', 'aac', 'flac', 'amr', 'weba', 'wma'];
     const ALL_ATTACHMENT_EXTENSIONS = Array.from(new Set([...DOCUMENT_EXTENSIONS, ...MEDIA_EXTENSIONS, ...AUDIO_EXTENSIONS]));
     const extensionListToAcceptAttr = (extensions) => extensions.map((ext) => `.${ext}`).join(',');
     const DOCUMENT_ACCEPT_ATTR = extensionListToAcceptAttr(DOCUMENT_EXTENSIONS);
-    const MEDIA_ACCEPT_ATTR = `${extensionListToAcceptAttr(MEDIA_EXTENSIONS)},video/*,image/*`;
+    const MEDIA_ACCEPT_ATTR = `${extensionListToAcceptAttr(MEDIA_EXTENSIONS)},image/*,video/*`;
     const AUDIO_ACCEPT_ATTR = `${extensionListToAcceptAttr(AUDIO_EXTENSIONS)},audio/*`;
-    const ALL_ATTACHMENT_ACCEPT_ATTR = `${extensionListToAcceptAttr(ALL_ATTACHMENT_EXTENSIONS)},video/*,image/*,audio/*`;
+    const ALL_ATTACHMENT_ACCEPT_ATTR = `${extensionListToAcceptAttr(ALL_ATTACHMENT_EXTENSIONS)},image/*,video/*,audio/*`;
+    const ALLOWED_FILES_LABEL = 'Allowed files';
+    const ALLOWED_FILE_GROUPS = [
+        'Images: JPG, PNG, GIF, WebP, HEIC, AVIF, SVG',
+        'Videos: MP4, WebM, MOV, MKV, AVI, 3GP',
+        'Documents: PDF, Word, Excel, PowerPoint, TXT, CSV',
+        'Audio: MP3, WAV, M4A, OGG, OPUS, FLAC'
+    ];
 
     const [showViewOnceModal, setShowViewOnceModal] = useState(false);
     const [viewOnceMsg, setViewOnceMsg] = useState(null);
@@ -1367,6 +1376,7 @@ export default function Chat() {
     const [isViewOnceMedia, setIsViewOnceMedia] = useState(false);
     const [isDiscardPreviewConfirmOpen, setIsDiscardPreviewConfirmOpen] = useState(false);
     const [inlineImageEditMode, setInlineImageEditMode] = useState(false);
+    const [isApplyingInlineImageEdits, setIsApplyingInlineImageEdits] = useState(false);
     const [inlineImageRotation, setInlineImageRotation] = useState(0);
     const [inlineImageNaturalSize, setInlineImageNaturalSize] = useState({ width: 0, height: 0 });
     const [inlineCropActive, setInlineCropActive] = useState(false);
@@ -1376,10 +1386,12 @@ export default function Chat() {
     const [inlineCropStart, setInlineCropStart] = useState(null); // normalized point
     const [inlineCropMoveOffset, setInlineCropMoveOffset] = useState(null); // normalized delta
     const [inlineCropCursor, setInlineCropCursor] = useState('default');
+    const [inlineCropPreset, setInlineCropPreset] = useState('fit');
     const [inlineFilterActive, setInlineFilterActive] = useState(false);
     const [inlineImageFilter, setInlineImageFilter] = useState('none');
     const [inlinePaintActive, setInlinePaintActive] = useState(false);
     const [inlinePaintColor, setInlinePaintColor] = useState('#33ceff');
+    const [inlineRainbowPoint, setInlineRainbowPoint] = useState({ x: 0.48, y: 0.45 });
     const [inlinePaintSize, setInlinePaintSize] = useState(8);
     const [inlinePaintStrokes, setInlinePaintStrokes] = useState([]);
     const [inlinePaintRedoStrokes, setInlinePaintRedoStrokes] = useState([]);
@@ -1400,6 +1412,11 @@ export default function Chat() {
     const [inlineTextDragOffset, setInlineTextDragOffset] = useState({ x: 0, y: 0 });
     const [inlineRedoEdits, setInlineRedoEdits] = useState([]);
     const inlineImageStageRef = useRef(null);
+    const inlinePreviewSlotRef = useRef(null);
+    const [inlinePreviewSlotSize, setInlinePreviewSlotSize] = useState({ width: 0, height: 0 });
+    const [inlineEditSourceFile, setInlineEditSourceFile] = useState(null);
+    const preservedInlineImageSizeRef = useRef(null);
+    const inlineImageEditSessionsRef = useRef(new Map());
 
     useEffect(() => {
         if (!file) return;
@@ -1409,10 +1426,15 @@ export default function Chat() {
         }
     }, [file]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         setInlineImageEditMode(false);
         setInlineImageRotation(0);
-        setInlineImageNaturalSize({ width: 0, height: 0 });
+        if (preservedInlineImageSizeRef.current?.width && preservedInlineImageSizeRef.current?.height) {
+            setInlineImageNaturalSize(preservedInlineImageSizeRef.current);
+            preservedInlineImageSizeRef.current = null;
+        } else {
+            setInlineImageNaturalSize({ width: 0, height: 0 });
+        }
         setInlineCropActive(false);
         setInlineCropRect(null);
         setInlineCropDragMode(null);
@@ -1420,10 +1442,12 @@ export default function Chat() {
         setInlineCropStart(null);
         setInlineCropMoveOffset(null);
         setInlineCropCursor('default');
+        setInlineCropPreset('fit');
         setInlineFilterActive(false);
         setInlineImageFilter('none');
         setInlinePaintActive(false);
         setInlinePaintColor('#33ceff');
+        setInlineRainbowPoint({ x: 0.48, y: 0.45 });
         setInlinePaintSize(8);
         setInlinePaintStrokes([]);
         setInlinePaintRedoStrokes([]);
@@ -1442,6 +1466,7 @@ export default function Chat() {
         setDraggingInlineTextId(null);
         setInlineTextDragOffset({ x: 0, y: 0 });
         setInlineRedoEdits([]);
+        setInlineEditSourceFile(null);
     }, [file]);
 
     useEffect(() => {
@@ -1456,6 +1481,22 @@ export default function Chat() {
             window.removeEventListener('touchcancel', stopDrag);
         };
     }, [inlineCropDragMode]);
+
+    useEffect(() => {
+        const slot = inlinePreviewSlotRef.current;
+        if (!slot || typeof ResizeObserver === 'undefined') return;
+        const updateSlotSize = () => {
+            const rect = slot.getBoundingClientRect();
+            setInlinePreviewSlotSize({
+                width: Math.max(0, Math.floor(rect.width || 0)),
+                height: Math.max(0, Math.floor(rect.height || 0))
+            });
+        };
+        updateSlotSize();
+        const observer = new ResizeObserver(updateSlotSize);
+        observer.observe(slot);
+        return () => observer.disconnect();
+    }, [file, inlineFilterActive, inlineCropActive, selectedFiles.length, isMobile]);
 
     const [selfPlayedMsgs, setSelfPlayedMsgs] = useState(() => {
         const saved = localStorage.getItem(`selfPlayedMsgs_${user.id || user._id}`);
@@ -1537,7 +1578,6 @@ export default function Chat() {
     const [newChatSearchQuery, setNewChatSearchQuery] = useState('');
     const [groupSearchQuery, setGroupSearchQuery] = useState('');
     const [selectedGroupMembers, setSelectedGroupMembers] = useState([]);
-    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
     const [isMessageSearchOpen, setIsMessageSearchOpen] = useState(false);
 
     const isChatNearBottom = () => {
@@ -1728,6 +1768,24 @@ export default function Chat() {
         return start <= end ? current >= start && current < end : current >= start || current < end;
     };
 
+    const isChatMutedForCurrentUser = (chatId) => {
+        const myId = userRef.current?.id || userRef.current?._id;
+        if (!myId || !chatId) return false;
+
+        const mutedKey = `mutedChats_${myId}`;
+        const mutedMap = JSON.parse(localStorage.getItem(mutedKey)) || {};
+        const muteUntil = mutedMap[String(chatId)];
+
+        if (muteUntil === 'Always') return true;
+        if (muteUntil && Date.now() < Number(muteUntil)) return true;
+
+        if (muteUntil) {
+            delete mutedMap[String(chatId)];
+            localStorage.setItem(mutedKey, JSON.stringify(mutedMap));
+        }
+
+        return false;
+    };
     const showIncomingNotification = ({ senderName, senderAvatar, message, type = 'info', duration = 6000, onReply, isGroup = false }) => {
         const settings = notificationSettingsRef.current;
         if (!settings.masterEnabled || isQuietHoursActive(settings)) return;
@@ -1764,6 +1822,7 @@ export default function Chat() {
     };
     const [reactionDetails, setReactionDetails] = useState(null); // { msg, isGroup }
     const [typingLinkPreview, setTypingLinkPreview] = useState(null); // For typing preview overlay
+    const [composerPreviewImageErrors, setComposerPreviewImageErrors] = useState({});
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [msgToDelete, setMsgToDelete] = useState(null);
     const msgToDeleteRef = useRef(null);
@@ -3012,29 +3071,9 @@ export default function Chat() {
         setTimeout(() => setOpeningFile(null), 5000);
 
         const ext = fileName.split('.').pop().toLowerCase();
-        const microsoftProtocols = {
-            'docx': 'ms-word:ofe|u|',
-            'doc': 'ms-word:ofe|u|',
-            'docm': 'ms-word:ofe|u|',
-            'dotx': 'ms-word:ofe|u|',
-            'dot': 'ms-word:ofe|u|',
-            'rtf': 'ms-word:ofe|u|',
-            'xlsx': 'ms-excel:ofe|u|',
-            'xls': 'ms-excel:ofe|u|',
-            'xlsm': 'ms-excel:ofe|u|',
-            'xlsb': 'ms-excel:ofe|u|',
-            'xltx': 'ms-excel:ofe|u|',
-            'xlt': 'ms-excel:ofe|u|',
-            'pptx': 'ms-powerpoint:ofe|u|',
-            'ppt': 'ms-powerpoint:ofe|u|',
-            'pptm': 'ms-powerpoint:ofe|u|',
-            'potx': 'ms-powerpoint:ofe|u|',
-            'pot': 'ms-powerpoint:ofe|u|',
-            'ppsx': 'ms-powerpoint:ofe|u|',
-            'pps': 'ms-powerpoint:ofe|u|'
-        };
+        const documentOpenExtensions = ['pdf', 'docx', 'doc', 'docm', 'dotx', 'dot', 'rtf', 'odt', 'txt', 'csv', 'xlsx', 'xls', 'xlsm', 'xlsb', 'xltx', 'xlt', 'ods', 'pptx', 'ppt', 'pptm', 'potx', 'pot', 'ppsx', 'pps', 'odp'];
 
-        if (microsoftProtocols[ext]) {
+        if (documentOpenExtensions.includes(ext)) {
             let absolutePath = filePath;
             if (!filePath.startsWith('http')) {
                 const apiOrigin = getDirectApiOrigin();
@@ -3063,8 +3102,23 @@ export default function Chat() {
                 }
             } catch (_) { }
 
+            const openWithRetry = async () => {
+                let lastError = null;
+                for (let attempt = 0; attempt < 2; attempt += 1) {
+                    try {
+                        await openViaWindowsHelper(helperSource, fileName, ext);
+                        return;
+                    } catch (error) {
+                        lastError = error;
+                        if (error?.code === 'APP_NOT_FOUND') break;
+                        await new Promise(resolve => setTimeout(resolve, 650));
+                    }
+                }
+                throw lastError || new Error('Helper open failed');
+            };
+
             try {
-                await openViaWindowsHelper(helperSource, fileName, ext);
+                await openWithRetry();
                 setIsWaitingForApp(false);
                 setAppNotFoundInfo(null);
                 return;
@@ -3374,6 +3428,7 @@ export default function Chat() {
     const [showGrammarBar, setShowGrammarBar] = useState(false);
     const [suggestionApplied, setSuggestionApplied] = useState(false);
     const [isGarbageMessage, setIsGarbageMessage] = useState(false);
+    const lastGrammarAlertRef = useRef('');
 
     const [isEditingProfileName, setIsEditingProfileName] = useState(false);
 
@@ -3646,6 +3701,7 @@ export default function Chat() {
     const [cameraPurpose, setCameraPurpose] = useState('profile');
     const [cameraStream, setCameraStream] = useState(null);
     const [capturedImage, setCapturedImage] = useState(null);
+    const [isCameraCapturedFile, setIsCameraCapturedFile] = useState(false);
 
     useEffect(() => {
         if (user.id || user._id) {
@@ -3861,6 +3917,11 @@ export default function Chat() {
     const [playbackDuration, setPlaybackDuration] = useState(0);
     const pendingVoiceSeekRef = useRef(new Map());
     const [isMuting, setIsMuting] = useState(false);
+    useEffect(() => {
+        document.body.classList.toggle('wa-view-once-open', !!activeViewOnceMsg);
+        return () => document.body.classList.remove('wa-view-once-open');
+    }, [activeViewOnceMsg]);
+    useEffect(() => { selectedCommunityRef.current = selectedCommunity; }, [selectedCommunity]);
     const [isCommunityDescDismissed, setIsCommunityDescDismissed] = useState(false);
     const [adminContextMenu, setAdminContextMenu] = useState(null); // { member, x, y, communityId, isAdmin }
     const [isAssignOwnerModalOpen, setIsAssignOwnerModalOpen] = useState(false);
@@ -4810,9 +4871,9 @@ export default function Chat() {
                         setSuggestionApplied(false);
                         setShowGrammarBar(true);
                     } else {
-                        setSnackbar({ message: "made with proper grammar", type: 'success', duration: 5000, variant: 'system' });
                         setSuggestionApplied(true);
-                        setShowGrammarBar(false);
+                        setShowGrammarBar(true);
+                        setGrammarSuggestions(null);
                     }
                 } else {
                     setSuggestionApplied(false); // NOW we block because suggestions are visible
@@ -4820,7 +4881,7 @@ export default function Chat() {
                 }
             } catch (err) {
                 console.error("Grammar check failed", err);
-                setShowGrammarBar(false);
+                setShowGrammarBar(true);
                 setSuggestionApplied(true); // Don't block if API fails
             } finally {
                 setIsGrammarLoading(false);
@@ -4830,6 +4891,24 @@ export default function Chat() {
         return () => clearTimeout(timer);
     }, [input, file, typingLinkPreview]);
 
+    useEffect(() => {
+        if (!isGarbageMessage) {
+            lastGrammarAlertRef.current = '';
+            return;
+        }
+
+        const issue = getInlineTextAiIssue(input) || 'Please write a meaningful word or sentence.';
+        if (!issue || issue === lastGrammarAlertRef.current) return;
+
+        lastGrammarAlertRef.current = issue;
+        setSnackbar({
+            message: issue,
+            type: 'error',
+            variant: 'system',
+            duration: 4500,
+            forceShow: true
+        });
+    }, [isGarbageMessage, input, setSnackbar]);
     const applyGrammarSuggestion = (text) => {
         const trimmedInput = input.trim();
         const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(trimmedInput);
@@ -4846,16 +4925,49 @@ export default function Chat() {
 
     const renderGrammarBar = (options = {}) => {
         const { floating = false } = options;
-        if (!showGrammarBar || (!isGarbageMessage && !grammarSuggestions && !isGrammarLoading)) return null;
-
+        if (!showGrammarBar || (!isGarbageMessage && !grammarSuggestions && !isGrammarLoading && !suggestionApplied)) return null;
+        const renderLevelPills = (disabled = false) => (
+            <>
+                <div
+                    className={`wa-grammar-pill-wrapper ${disabled ? 'disabled' : ''}`}
+                    onClick={() => !disabled && grammarSuggestions?.basic && applyGrammarSuggestion(grammarSuggestions.basic)}
+                    aria-disabled={disabled}
+                >
+                    <span className="pill-tag basic">
+                        <MessageSquare size={11} strokeWidth={2.5} />
+                        BASIC
+                    </span>
+                </div>
+                <div
+                    className={`wa-grammar-pill-wrapper ${disabled ? 'disabled' : ''}`}
+                    onClick={() => !disabled && grammarSuggestions?.fluent && applyGrammarSuggestion(grammarSuggestions.fluent)}
+                    aria-disabled={disabled}
+                >
+                    <span className="pill-tag fluent">
+                        <MessageSquare size={11} strokeWidth={2.5} />
+                        FLUENT
+                    </span>
+                </div>
+                <div
+                    className={`wa-grammar-pill-wrapper ${disabled ? 'disabled' : ''}`}
+                    onClick={() => !disabled && grammarSuggestions?.formal && applyGrammarSuggestion(grammarSuggestions.formal)}
+                    aria-disabled={disabled}
+                >
+                    <span className="pill-tag formal">
+                        <MessageSquare size={11} strokeWidth={2.5} />
+                        FORMAL
+                    </span>
+                </div>
+            </>
+        );
         return (
             <div
                 className="wa-grammar-bar"
                 style={{
                     display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'stretch',
-                    gap: '8px',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: '10px',
                     margin: floating ? 0 : undefined,
                     borderLeft: floating ? '3px solid #0EA5BE' : undefined,
                     background: floating ? 'rgba(230, 236, 242, 0.98)' : undefined,
@@ -4868,15 +4980,15 @@ export default function Chat() {
                     display: 'flex',
                     flex: 1,
                     flexDirection: 'column',
-                    gap: '4px',
+                    gap: '3px',
                     overflow: 'hidden',
-                    borderLeft: isGarbageMessage ? '4px solid #ef4444' : '4px solid transparent',
-                    paddingLeft: isGarbageMessage ? '12px' : '0',
+                    borderLeft: '4px solid transparent',
+                    paddingLeft: '0',
                     transition: 'all 0.3s ease'
                 }}>
                     <div className="wa-grammar-header-inner" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ color: isGarbageMessage ? '#ef4444' : '#027EB5', fontSize: '13px', fontWeight: '600', whiteSpace: 'nowrap' }}>
-                            {isGarbageMessage ? 'System Alert' : 'Neural Chat AI'}
+                        <span style={{ color: '#027EB5', fontSize: '13px', fontWeight: '600', whiteSpace: 'nowrap' }}>
+                            Neural Chat AI
                         </span>
                         {isGrammarLoading && (
                             <div className="wa-grammar-loader-dots">
@@ -4889,39 +5001,22 @@ export default function Chat() {
 
                     <div className="wa-grammar-options">
                         {isGarbageMessage ? (
-                            <div className="wa-grammar-alert-text" style={{ color: '#ef4444', fontSize: '14px', padding: '4px 0', display: 'flex', alignItems: 'flex-start', gap: '8px', fontWeight: '500' }}>
-                                <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-                                <span>{getInlineTextAiIssue(input) || 'Please write a meaningful word or sentence to start the chat'}</span>
-                            </div>
+                            renderLevelPills(true)
                         ) : grammarSuggestions ? (
-                            <>
-                                <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.basic)}>
-                                    <span className="pill-tag basic">
-                                        <MessageSquare size={11} strokeWidth={2.5} />
-                                        BASIC
-                                    </span>
-                                </div>
-                                <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.fluent)}>
-                                    <span className="pill-tag fluent">
-                                        <MessageSquare size={11} strokeWidth={2.5} />
-                                        FLUENT
-                                    </span>
-                                </div>
-                                <div className="wa-grammar-pill-wrapper" onClick={() => applyGrammarSuggestion(grammarSuggestions.formal)}>
-                                    <span className="pill-tag formal">
-                                        <MessageSquare size={11} strokeWidth={2.5} />
-                                        FORMAL
-                                    </span>
-                                </div>
-                            </>
+                            renderLevelPills(false)
+                        ) : suggestionApplied ? (
+                            <div style={{ color: '#087f5b', fontSize: '13px', fontWeight: 700, padding: 0, display: 'flex', alignItems: 'center', gap: 7 }}>
+                                <Check size={15} strokeWidth={2.6} />
+                                <span>Text looks good</span>
+                            </div>
                         ) : (
-                            <div style={{ color: '#667781', fontSize: '12px', paddingLeft: '4px' }}>AI is thinking...</div>
+                            renderLevelPills(true)
                         )}
                     </div>
 
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '2px 0 0 4px', flexShrink: 0 }}>
                     <X
                         size={18}
                         style={{ cursor: 'pointer', color: '#667781', opacity: 0.7 }}
@@ -4954,26 +5049,36 @@ export default function Chat() {
         if (!typingLinkPreview?.title) return null;
         const previewUrl = typingLinkPreview.url || input;
         const isYoutube = !!getYouTubeVideoId(previewUrl);
+        const previewImage = typingLinkPreview.image || '';
+        const hasPreviewImage = !!previewImage && !composerPreviewImageErrors[previewImage];
         return (
-            <div className="wa-typing-link-preview wa-typing-link-preview-full">
-                <button
-                    type="button"
-                    className="wa-typing-preview-close"
-                    onClick={() => setTypingLinkPreview(null)}
-                    aria-label="Close link preview"
-                >
-                    <X size={18} />
-                </button>
+            <div className="wa-typing-link-preview wa-typing-link-preview-full" style={{ position: 'relative' }}>
                 <div
-                    className={`wa-link-preview-card ${!typingLinkPreview.image ? 'no-image' : ''} ${isYoutube ? 'youtube' : ''}`}
+                    className={`wa-link-preview-card ${!hasPreviewImage ? 'no-image' : ''} ${isYoutube ? 'youtube' : ''}`}
                     onClick={(event) => {
                         event.stopPropagation();
                         if (isYoutube) setPreviewVideoUrl(previewUrl);
                     }}
                 >
-                    {typingLinkPreview.image && (
+                    <button
+                        type="button"
+                        className="wa-link-preview-close"
+                        onClick={(event) => { event.stopPropagation(); setTypingLinkPreview(null); }}
+                        aria-label="Close link preview"
+
+                    >
+                        <X size={18} />
+                    </button>
+                    {hasPreviewImage && (
                         <div className="wa-link-preview-image">
-                            <img src={typingLinkPreview.image} alt={typingLinkPreview.title} />
+                            <img
+                                src={previewImage}
+                                alt=""
+                                onError={(event) => {
+                                    event.currentTarget.removeAttribute('src');
+                                    setComposerPreviewImageErrors(prev => ({ ...prev, [previewImage]: true }));
+                                }}
+                            />
                             {isYoutube && renderYoutubePlayPipButton(previewUrl)}
                         </div>
                     )}
@@ -5226,7 +5331,7 @@ export default function Chat() {
                 const mutedKey = `mutedChats_${userRef.current?.id || userRef.current?._id}`;
                 const mutedMap = JSON.parse(localStorage.getItem(mutedKey)) || {};
 
-                if (!mutedMap[senderId]) {
+                if (!isChatMutedForCurrentUser(senderId)) {
                     const sender = (usersRef.current || []).find(u => String(u._id || u.id) === String(senderId));
                     const senderName = sender ? (sender.name || sender.firstName || sender.username || 'Someone') : 'Someone';
                     const senderAvatar = sender ? sender.avatar : null;
@@ -6094,7 +6199,7 @@ export default function Chat() {
                 const mutedKey = `mutedChats_${myId}`;
                 const mutedMap = JSON.parse(localStorage.getItem(mutedKey)) || {};
 
-                if (!mutedMap[data.groupId] && !isMyOwnMessage) {
+                if (!isChatMutedForCurrentUser(data.groupId) && !isMyOwnMessage) {
                     const senderName = data.message.sender_id?.name || 'Group Member';
                     const groupInfo = (groupsRef.current || []).find(g => String(g._id) === String(data.groupId));
                     const groupName = groupInfo?.name || 'Group';
@@ -8124,6 +8229,51 @@ export default function Chat() {
         setOpenDropdown(null);
     };
 
+    // TEMP_MUTE_TEST_START: remove after 5-second mute test is confirmed.
+    const handleFiveSecondMuteTest = () => {
+        const myId = user.id || user._id;
+        const actualId = selectedUser?._id || selectedUser?.id;
+        const actualName = selectedUser ? getContactDisplayName(selectedUser) : 'Chat';
+
+        if (!myId || !actualId) return;
+
+        const mutedKey = `mutedChats_${myId}`;
+        const mutedMap = JSON.parse(localStorage.getItem(mutedKey)) || {};
+        const muteUntil = Date.now() + 5000;
+
+        mutedMap[String(actualId)] = muteUntil;
+        localStorage.setItem(mutedKey, JSON.stringify(mutedMap));
+
+        setSelectedUser(prev => prev && String(prev._id || prev.id) === String(actualId) ? { ...prev, isMuted: true, muteUntil } : prev);
+        setUsers(prev => prev.map(u => String(u._id || u.id) === String(actualId) ? { ...u, isMuted: true, muteUntil } : u));
+        fetchUsers();
+
+        setSnackbar({
+            message: `Sample test: notifications muted for ${actualName} for 5 seconds`,
+            type: 'info',
+            variant: 'system',
+            forceShow: true
+        });
+
+        setTimeout(() => {
+            const latestMap = JSON.parse(localStorage.getItem(mutedKey)) || {};
+            if (String(latestMap[String(actualId)]) !== String(muteUntil)) return;
+
+            delete latestMap[String(actualId)];
+            localStorage.setItem(mutedKey, JSON.stringify(latestMap));
+            setSelectedUser(prev => prev && String(prev._id || prev.id) === String(actualId) ? { ...prev, isMuted: false, muteUntil: null } : prev);
+            setUsers(prev => prev.map(u => String(u._id || u.id) === String(actualId) ? { ...u, isMuted: false, muteUntil: null } : u));
+            fetchUsers();
+
+            setSnackbar({
+                message: `Sample test ended: notifications unmuted for ${actualName}`,
+                type: 'success',
+                variant: 'system',
+                forceShow: true
+            });
+        }, 5000);
+    };
+    // TEMP_MUTE_TEST_END
     const handleUnmuteAction = (targetId, name) => {
         const myId = user.id || user._id;
         const mutedKey = `mutedChats_${myId}`;
@@ -9258,17 +9408,32 @@ export default function Chat() {
 
 
     const getAllowedExtensionsForAttachmentType = () => {
-        if (attachmentTypeRef.current === 'document') {
-            return DOCUMENT_EXTENSIONS;
-        }
-        if (attachmentTypeRef.current === 'media') {
-            return MEDIA_EXTENSIONS;
-        }
-        if (attachmentTypeRef.current === 'audio') {
-            return AUDIO_EXTENSIONS;
-        }
+        // Composer uploads should not reject a valid file just because it was
+        // chosen from a different attachment shortcut.
         return ALL_ATTACHMENT_EXTENSIONS;
     };
+
+    const resizeMessageComposer = (textarea) => {
+        if (!textarea) return;
+        textarea.style.height = 'auto';
+        const singleLineLimit = 48;
+        const isMultiline = textarea.scrollHeight > singleLineLimit;
+        setIsComposerMultiline(isMultiline);
+        if (!isMultiline) {
+            textarea.style.height = '';
+            textarea.style.overflowY = 'hidden';
+            return;
+        }
+        const nextHeight = Math.min(textarea.scrollHeight, 120);
+        textarea.style.height = `${nextHeight}px`;
+        textarea.style.overflowY = textarea.scrollHeight > 120 ? 'auto' : 'hidden';
+    };
+
+    useEffect(() => {
+        requestAnimationFrame(() => {
+            document.querySelectorAll('.wa-input-box').forEach(resizeMessageComposer);
+        });
+    }, [input]);
 
     const isAllowedFile = (selectedFile, allowedExtensions) => {
         if (!selectedFile) return false;
@@ -9276,9 +9441,9 @@ export default function Chat() {
         if (allowedExtensions.includes(extension)) return true;
 
         const mime = (selectedFile.type || '').toLowerCase();
-        const canUseImageMime = allowedExtensions.some((ext) => ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext));
-        const canUseVideoMime = allowedExtensions.some((ext) => ['mp4', 'avi', 'mkv', 'mov', 'webm', 'm4v'].includes(ext));
-        const canUseAudioMime = allowedExtensions.some((ext) => ['mp3', 'm4a', 'ogg', 'opus', 'wav', 'aac', 'flac'].includes(ext));
+        const canUseImageMime = allowedExtensions.some((ext) => ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'heic', 'heif', 'avif', 'svg'].includes(ext));
+        const canUseVideoMime = allowedExtensions.some((ext) => ['mp4', 'avi', 'mkv', 'mov', 'webm', 'm4v', '3gp', '3g2', 'mpeg', 'mpg', 'wmv', 'flv', 'ogv'].includes(ext));
+        const canUseAudioMime = allowedExtensions.some((ext) => ['mp3', 'm4a', 'ogg', 'oga', 'opus', 'wav', 'aac', 'flac', 'amr', 'weba', 'wma'].includes(ext));
         if (canUseImageMime && mime.startsWith('image/')) return true;
         if (canUseVideoMime && mime.startsWith('video/')) return true;
         if (canUseAudioMime && mime.startsWith('audio/')) return true;
@@ -9315,11 +9480,12 @@ export default function Chat() {
         return allowedExtensions.some(ext => officeMimeAllowed[ext]?.includes(mime));
     };
 
-    const addSelectedFile = (nextFile) => {
+    const addSelectedFile = (nextFile, options = {}) => {
         if (!nextFile) return;
         setSelectedFiles(prev => [...prev, nextFile]);
         setFile(nextFile);
         setIsViewOnceMedia(false);
+        setIsCameraCapturedFile(!!options.fromCamera);
     };
 
     const handleFileSelect = (e) => {
@@ -9343,6 +9509,7 @@ export default function Chat() {
             if (validFiles.length > 0) {
                 // New media/doc selection defaults to normal send (not view-once).
                 setIsViewOnceMedia(false);
+                setIsCameraCapturedFile(false);
                 setSelectedFiles(prev => {
                     const merged = [...prev, ...validFiles];
                     const seen = new Set();
@@ -9883,6 +10050,7 @@ export default function Chat() {
             setSelectedFiles([]);
             setFile(null);
             setIsViewOnceMedia(false);
+            setIsCameraCapturedFile(false);
             clearCurrentComposerDraft();
             for (let i = 0; i < filesBatch.length; i++) {
                 await handleSend(null, i === 0 ? firstCaption : '', null, null, currentViewOnce, filesBatch[i], true, true);
@@ -9961,12 +10129,14 @@ export default function Chat() {
         setFile(null); // Clear file immediately from UI
         setSelectedFiles([]); // Clear selected files immediately from UI
         setIsViewOnceMedia(false);
+        setIsCameraCapturedFile(false);
         clearCurrentComposerDraft();
         setReplyingTo(null); // Clear reply context immediately
         setTypingLinkPreview(null); // Clear typing preview immediately
         setSuggestionApplied(false); // Reset correction state for next message
         setIsViewOnceVoice(false); // Reset view-once state for next message
         setIsViewOnceMedia(false); // Reset media view-once state for next message
+        setIsCameraCapturedFile(false);
         setInlineImageEditMode(false);
         setInlineImageRotation(0);
         setInlineCropActive(false);
@@ -10664,6 +10834,7 @@ export default function Chat() {
                     videoRef.current.srcObject = stream;
                 }
             }, 100);
+            return true;
         } catch (err) {
             console.error("Camera access error:", err);
             if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
@@ -10671,6 +10842,7 @@ export default function Chat() {
             } else {
                 setSnackbar({ message: "Camera not available: " + err.message, type: 'error' });
             }
+            return false;
         }
     };
 
@@ -10722,14 +10894,21 @@ export default function Chat() {
             canvas.width = videoRef.current.videoWidth;
             canvas.height = videoRef.current.videoHeight;
             const ctx = canvas.getContext('2d');
-            ctx.translate(canvas.width, 0);
-            ctx.scale(-1, 1);
             ctx.drawImage(videoRef.current, 0, 0);
 
-            setCapturedImage(canvas.toDataURL('image/png'));
+            const capturedDataUrl = canvas.toDataURL('image/png');
+            setCapturedImage(capturedDataUrl);
 
             if (cameraPurpose === 'chat') {
-                setCameraModal('editor');
+                const byteString = atob(capturedDataUrl.split(',')[1]);
+                const mimeString = capturedDataUrl.split(',')[0].split(':')[1].split(';')[0];
+                const bytes = new Uint8Array(byteString.length);
+                for (let i = 0; i < byteString.length; i += 1) {
+                    bytes[i] = byteString.charCodeAt(i);
+                }
+                const fileObj = new File([bytes], `camera_capture_${Date.now()}.png`, { type: mimeString || "image/png" });
+                addSelectedFile(fileObj, { fromCamera: true });
+                setCameraModal('none');
             } else {
                 setCameraModal('adjust');
                 setImageScale(1);
@@ -10738,10 +10917,28 @@ export default function Chat() {
 
             // Stop camera stream once captured
             if (cameraStream) {
-                cameraStream.getTracks().forEach(track => track.stop());
-                setCameraStream(null);
+                const streamToStop = cameraStream;
+                if (cameraPurpose === 'chat') {
+                    setTimeout(() => {
+                        streamToStop.getTracks().forEach(track => track.stop());
+                        setCameraStream(null);
+                    }, 80);
+                } else {
+                    streamToStop.getTracks().forEach(track => track.stop());
+                    setCameraStream(null);
+                }
             }
         }
+    };
+
+    const handleRetakeCameraCapture = async () => {
+        setCameraPurpose('chat');
+        const opened = await startCamera();
+        if (!opened) return;
+        setFile(null);
+        setSelectedFiles([]);
+        setIsViewOnceMedia(false);
+        setIsCameraCapturedFile(false);
     };
 
     const handleEditorDone = async (dataUrl) => {
@@ -11321,6 +11518,16 @@ export default function Chat() {
         );
     };
 
+    const renderAllowedFilesHint = () => (
+        <>
+            <div className="wa-attachment-hint-title">{ALLOWED_FILES_LABEL}</div>
+            <ul className="wa-attachment-hint-list">
+                {ALLOWED_FILE_GROUPS.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+            <div className="wa-attachment-hint-limit">Maximum file size: 1GB</div>
+        </>
+    );
+
     const renderAttachmentMenu = () => {
         if (!isAttachmentMenuOpen) return null;
         const items = [
@@ -11335,7 +11542,7 @@ export default function Chat() {
                 }
             },
             {
-                icon: Image, label: t('chat_window.photos_videos'), color: '#0084ff', onClick: () => {
+                icon: ImageIcon, label: t('chat_window.photos_videos'), color: '#0084ff', onClick: () => {
                     attachmentTypeRef.current = 'media';
                     if (fileInputRef.current) {
                         fileInputRef.current.accept = MEDIA_ACCEPT_ATTR;
@@ -11378,6 +11585,9 @@ export default function Chat() {
 
         return (
             <div className={`wa-attachment-menu ${isAttachmentMenuOpen ? 'active' : ''}`} ref={attachmentMenuRef} style={{ padding: '6px' }}>
+                <div className="wa-attachment-menu-allowed">
+                    {renderAllowedFilesHint()}
+                </div>
                 {items.map((item, idx) => (
                     <div key={idx} className="wa-attachment-item" onClick={item.onClick} style={{ padding: '8px 12px' }}>
                         <div className="wa-attachment-item-icon">
@@ -11814,7 +12024,7 @@ export default function Chat() {
                                             <span>{t('new_chat.take_photo')}</span>
                                         </div>
                                         <div className="wa-group-icon-menu-item">
-                                            <Image size={20} color="#54656f" />
+                                            <ImageIcon size={20} color="#54656f" />
                                             <span>{t('new_chat.upload_photo')}</span>
                                         </div>
                                         <div className="wa-group-icon-menu-item">
@@ -12099,6 +12309,33 @@ export default function Chat() {
         return created;
     };
 
+    const releaseFilePreviewUrl = (selectedFile) => {
+        if (!selectedFile) return;
+        const cache = filePreviewUrlCacheRef.current;
+        const existing = cache.get(selectedFile);
+        if (!existing) return;
+        URL.revokeObjectURL(existing);
+        cache.delete(selectedFile);
+    };
+
+    const readImageFileSize = async (imageFile) => {
+        if (!imageFile || !imageFile.type?.startsWith('image/')) return null;
+        const objectUrl = URL.createObjectURL(imageFile);
+        try {
+            return await new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => resolve({
+                    width: img.naturalWidth || img.width || 0,
+                    height: img.naturalHeight || img.height || 0
+                });
+                img.onerror = () => resolve(null);
+                img.src = objectUrl;
+            });
+        } finally {
+            URL.revokeObjectURL(objectUrl);
+        }
+    };
+
     const normalizeRotationDegrees = (value) => {
         const numeric = Number(value || 0);
         return ((numeric % 360) + 360) % 360;
@@ -12130,11 +12367,62 @@ export default function Chat() {
         return [c, 0, x];
     };
 
-    const getInlineRainbowColorFromPointer = (event) => {
+    const hexToRgb = (hexColor) => {
+        const normalized = String(hexColor || '').replace('#', '').trim();
+        if (!/^[0-9a-f]{6}$/i.test(normalized)) return null;
+        return {
+            r: parseInt(normalized.slice(0, 2), 16),
+            g: parseInt(normalized.slice(2, 4), 16),
+            b: parseInt(normalized.slice(4, 6), 16)
+        };
+    };
+
+    const getInlineRainbowPointFromColor = (hexColor) => {
+        const rgb = hexToRgb(hexColor);
+        if (!rgb) return inlineRainbowPoint;
+        const r = rgb.r / 255;
+        const g = rgb.g / 255;
+        const b = rgb.b / 255;
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        const delta = max - min;
+
+        let hue = 0;
+        if (delta > 0.0001) {
+            if (max === r) hue = 60 * (((g - b) / delta) % 6);
+            else if (max === g) hue = 60 * ((b - r) / delta + 2);
+            else hue = 60 * ((r - g) / delta + 4);
+        }
+        if (hue < 0) hue += 360;
+
+        const saturation = max <= 0 ? 0 : delta / max;
+        const y = max < 0.45
+            ? 0.45 + ((1 - max / 0.45) * 0.55)
+            : saturation * 0.45;
+
+        return {
+            x: clampUnit(hue / 360),
+            y: clampUnit(y)
+        };
+    };
+
+    const setInlinePaintColorWithMarker = (hexColor) => {
+        setInlinePaintColor(hexColor);
+        setInlineRainbowPoint(getInlineRainbowPointFromColor(hexColor));
+    };
+
+    const getInlineRainbowPointFromPointer = (event) => {
         const rect = event.currentTarget.getBoundingClientRect();
-        if (!rect.width || !rect.height) return inlinePaintColor;
-        const x = clampUnit((event.clientX - rect.left) / rect.width);
-        const y = clampUnit((event.clientY - rect.top) / rect.height);
+        if (!rect.width || !rect.height) return inlineRainbowPoint;
+        return {
+            x: clampUnit((event.clientX - rect.left) / rect.width),
+            y: clampUnit((event.clientY - rect.top) / rect.height)
+        };
+    };
+
+    const getInlineRainbowColorFromPoint = (point) => {
+        const x = clampUnit(point?.x ?? inlineRainbowPoint.x);
+        const y = clampUnit(point?.y ?? inlineRainbowPoint.y);
         const hue = x * 360;
         let [r, g, b] = hueToRgb(hue);
         if (y < 0.45) {
@@ -12155,7 +12443,9 @@ export default function Chat() {
         event.preventDefault();
         event.stopPropagation();
         event.currentTarget?.setPointerCapture?.(event.pointerId);
-        setInlinePaintColor(getInlineRainbowColorFromPointer(event));
+        const point = getInlineRainbowPointFromPointer(event);
+        setInlineRainbowPoint(point);
+        setInlinePaintColor(getInlineRainbowColorFromPoint(point));
     };
 
     const rotateImageFile = async (sourceFile, rotationDegrees) => {
@@ -12234,10 +12524,12 @@ export default function Chat() {
                 img.src = objectUrl;
             });
 
-            const sx = Math.round(rect.x * imageEl.width);
-            const sy = Math.round(rect.y * imageEl.height);
-            const sw = Math.max(1, Math.round(rect.w * imageEl.width));
-            const sh = Math.max(1, Math.round(rect.h * imageEl.height));
+            const sourceWidth = imageEl.naturalWidth || imageEl.width;
+            const sourceHeight = imageEl.naturalHeight || imageEl.height;
+            const sx = Math.floor(rect.x * sourceWidth);
+            const sy = Math.floor(rect.y * sourceHeight);
+            const sw = Math.max(1, Math.min(sourceWidth - sx, Math.ceil(rect.w * sourceWidth)));
+            const sh = Math.max(1, Math.min(sourceHeight - sy, Math.ceil(rect.h * sourceHeight)));
 
             const canvas = document.createElement('canvas');
             canvas.width = sw;
@@ -12246,7 +12538,9 @@ export default function Chat() {
             if (!ctx) return sourceFile;
             ctx.drawImage(imageEl, sx, sy, sw, sh, 0, 0, sw, sh);
 
-            const outMime = sourceFile.type || 'image/png';
+            const outMime = sourceFile.type === 'image/jpeg' || sourceFile.type === 'image/webp'
+                ? sourceFile.type
+                : 'image/png';
             const outBlob = await new Promise((resolve, reject) => {
                 canvas.toBlob((blob) => {
                     if (blob) resolve(blob);
@@ -12254,7 +12548,9 @@ export default function Chat() {
                 }, outMime, 0.92);
             });
 
-            return new File([outBlob], sourceFile.name || `image_${Date.now()}.png`, {
+            const baseName = (sourceFile.name || 'image').replace(/\.[^.]+$/, '');
+            const extension = outMime === 'image/jpeg' ? 'jpg' : outMime === 'image/webp' ? 'webp' : 'png';
+            return new File([outBlob], `${baseName}_cropped_${Date.now()}.${extension}`, {
                 type: outBlob.type || outMime,
                 lastModified: Date.now()
             });
@@ -12405,8 +12701,9 @@ export default function Chat() {
                     const padY = fontSize * 0.25;
                     ctx.fillStyle = 'rgba(2, 18, 32, 0.78)';
                     ctx.fillRect(x - metrics.width / 2 - padX, y - fontSize / 2 - padY, metrics.width + padX * 2, fontSize + padY * 2);
+                } else {
+                    ctx.strokeText(item.text, x, y);
                 }
-                ctx.strokeText(item.text, x, y);
                 ctx.fillStyle = item.color || '#ffffff';
                 ctx.fillText(item.text, x, y);
             });
@@ -12461,25 +12758,65 @@ export default function Chat() {
         return `${candidate.name}|${candidate.size}|${candidate.lastModified}|${candidate.type}`;
     };
 
-    const replaceActivePreviewFile = (nextFile) => {
+    const getInlineImageEditSession = (candidate = file) => {
+        const signature = getFileSignature(candidate);
+        return signature ? inlineImageEditSessionsRef.current.get(signature) : null;
+    };
+
+    const rememberInlineImageEditSession = (editedFile, session) => {
+        const signature = getFileSignature(editedFile);
+        if (!signature || !session?.sourceFile) return;
+        inlineImageEditSessionsRef.current.set(signature, session);
+    };
+
+    const replaceActivePreviewFile = (nextFile, nextImageSize = null, sourceFile = null) => {
         if (!nextFile) return;
-        const currentSig = getFileSignature(file);
+        const currentFile = sourceFile || file || (selectedFiles.length > 0 ? selectedFiles[0] : null);
+        const currentSig = getFileSignature(currentFile);
         if (!currentSig) {
             setFile(nextFile);
+            if (nextImageSize?.width && nextImageSize?.height) {
+                preservedInlineImageSizeRef.current = nextImageSize;
+                setInlineImageNaturalSize(nextImageSize);
+            }
             return;
         }
         setSelectedFiles((prev) => {
-            if (!prev.length) return prev;
-            return prev.map((entry) => (getFileSignature(entry) === currentSig ? nextFile : entry));
+            if (!prev.length) return [nextFile];
+            let replaced = false;
+            const nextFiles = prev.map((entry) => {
+                if (getFileSignature(entry) !== currentSig) return entry;
+                replaced = true;
+                releaseFilePreviewUrl(entry);
+                return nextFile;
+            });
+            if (replaced) return nextFiles;
+
+            const activeIndex = prev.findIndex((entry) => entry === currentFile);
+            if (activeIndex >= 0) {
+                const fallbackFiles = [...prev];
+                releaseFilePreviewUrl(fallbackFiles[activeIndex]);
+                fallbackFiles[activeIndex] = nextFile;
+                return fallbackFiles;
+            }
+
+            return [nextFile, ...prev];
         });
+        releaseFilePreviewUrl(currentFile);
+        if (nextImageSize?.width && nextImageSize?.height) {
+            preservedInlineImageSizeRef.current = nextImageSize;
+            setInlineImageNaturalSize(nextImageSize);
+        }
         setFile(nextFile);
     };
 
     const resetInlineImageEditState = () => {
         setInlineImageEditMode(false);
+        setInlineEditSourceFile(null);
         setInlineImageRotation(0);
         clearInlineCropMode();
         setInlineCropRect(null);
+        setInlineCropPreset('fit');
         clearInlineFilterMode();
         setInlineImageFilter('none');
         clearInlinePaintMode();
@@ -12493,10 +12830,36 @@ export default function Chat() {
     };
 
     const applyInlineImageEditsToPreview = async () => {
-        if (!file || !file.type?.startsWith('image/')) return;
-        const editedFile = await applyInlineImageEditsToFile(file);
-        replaceActivePreviewFile(editedFile);
-        resetInlineImageEditState();
+        if (isApplyingInlineImageEdits) return;
+        const activePreviewFile = file || (selectedFiles.length > 0 ? selectedFiles[0] : null);
+        const sourceForEdits = inlineEditSourceFile || activePreviewFile;
+        if (!activePreviewFile || !sourceForEdits || !sourceForEdits.type?.startsWith('image/')) return;
+        setIsApplyingInlineImageEdits(true);
+        try {
+            const existingSession = getInlineImageEditSession(activePreviewFile);
+            const sessionSourceFile = inlineEditSourceFile || existingSession?.sourceFile || activePreviewFile;
+            const sessionCropRect = normalizeCropRect(inlineCropRect);
+            const editedFile = await applyInlineImageEditsToFile(sourceForEdits);
+            const editedImageSize = await readImageFileSize(editedFile);
+            if (sessionCropRect) {
+                rememberInlineImageEditSession(editedFile, {
+                    sourceFile: sessionSourceFile,
+                    sourceImageSize: inlineImageNaturalSize?.width && inlineImageNaturalSize?.height
+                        ? inlineImageNaturalSize
+                        : null,
+                    cropRect: sessionCropRect,
+                    rotation: normalizeRotationDegrees(inlineImageRotation),
+                    filter: inlineImageFilter
+                });
+            }
+            replaceActivePreviewFile(editedFile, editedImageSize, activePreviewFile);
+            resetInlineImageEditState();
+        } catch (err) {
+            console.error('Failed to apply image edits', err);
+            setSnackbar({ message: 'Could not apply image edits', type: 'error', variant: 'system' });
+        } finally {
+            setIsApplyingInlineImageEdits(false);
+        }
     };
 
     const applyInlineRotateStep = (degrees) => {
@@ -12505,6 +12868,7 @@ export default function Chat() {
         setInlineImageEditMode(true);
         setInlineCropActive(true);
         setInlineCropRect((prev) => normalizeCropRect(prev) || { x: 0, y: 0, w: 1, h: 1 });
+        setInlineCropPreset('custom');
     };
 
     const getInlineStageMetrics = () => {
@@ -12612,6 +12976,62 @@ export default function Chat() {
         setInlineCropCursor('default');
     };
 
+    const getInlineCropImageAspect = () => {
+        const naturalWidth = inlineImageNaturalSize?.width || 1;
+        const naturalHeight = inlineImageNaturalSize?.height || 1;
+        const normalizedRotation = normalizeRotationDegrees(inlineImageRotation);
+        return normalizedRotation === 90 || normalizedRotation === 270
+            ? naturalHeight / naturalWidth
+            : naturalWidth / naturalHeight;
+    };
+
+    const buildCenteredCropForAspect = (targetAspect) => {
+        const imageAspect = getInlineCropImageAspect();
+        if (!Number.isFinite(targetAspect) || targetAspect <= 0 || !Number.isFinite(imageAspect) || imageAspect <= 0) {
+            return { x: 0, y: 0, w: 1, h: 1 };
+        }
+
+        let w = 1;
+        let h = 1;
+        if (targetAspect > imageAspect) {
+            h = imageAspect / targetAspect;
+        } else {
+            w = targetAspect / imageAspect;
+        }
+        w = Math.max(INLINE_CROP_MIN_SIZE, Math.min(1, w));
+        h = Math.max(INLINE_CROP_MIN_SIZE, Math.min(1, h));
+        return {
+            x: (1 - w) / 2,
+            y: (1 - h) / 2,
+            w,
+            h
+        };
+    };
+
+    const applyInlineCropPreset = (preset) => {
+        setInlineImageEditMode(true);
+        setInlineCropActive(true);
+        setInlineCropDragMode(null);
+        setInlineCropResizeHandle(null);
+        setInlineCropStart(null);
+        setInlineCropMoveOffset(null);
+        setInlineCropCursor('default');
+        setInlineCropPreset(preset);
+        if (preset === 'square') {
+            setInlineCropRect(buildCenteredCropForAspect(1));
+            return;
+        }
+        if (preset === '16:9') {
+            setInlineCropRect(buildCenteredCropForAspect(16 / 9));
+            return;
+        }
+        if (preset === '9:16') {
+            setInlineCropRect(buildCenteredCropForAspect(9 / 16));
+            return;
+        }
+        setInlineCropRect({ x: 0, y: 0, w: 1, h: 1 });
+    };
+
     const clearInlineFilterMode = () => {
         setInlineFilterActive(false);
     };
@@ -12636,12 +13056,30 @@ export default function Chat() {
             clearInlineCropMode();
             return;
         }
+        const activePreviewFile = file || (selectedFiles.length > 0 ? selectedFiles[0] : null);
+        const editSession = getInlineImageEditSession(activePreviewFile);
+        if (editSession?.sourceFile) {
+            setInlineEditSourceFile(editSession.sourceFile);
+            if (editSession.sourceImageSize?.width && editSession.sourceImageSize?.height) {
+                setInlineImageNaturalSize(editSession.sourceImageSize);
+            }
+            setInlineImageRotation(editSession.rotation || 0);
+            if (editSession.filter && editSession.filter !== 'none') {
+                setInlineImageFilter(editSession.filter);
+                setInlineFilterActive(false);
+            }
+            setInlineCropRect(normalizeCropRect(editSession.cropRect) || { x: 0, y: 0, w: 1, h: 1 });
+            setInlineCropPreset('custom');
+        } else {
+            setInlineEditSourceFile(null);
+            setInlineCropRect((prev) => normalizeCropRect(prev) || { x: 0, y: 0, w: 1, h: 1 });
+            setInlineCropPreset('fit');
+        }
         setInlineImageEditMode(true);
         clearInlineFilterMode();
         clearInlinePaintMode();
         clearInlineTextMode();
         setInlineCropActive(true);
-        setInlineCropRect((prev) => normalizeCropRect(prev) || { x: 0, y: 0, w: 1, h: 1 });
     };
 
     const activateInlineFilterMode = () => {
@@ -12693,6 +13131,46 @@ export default function Chat() {
         const rotatedHeight = stageWidth;
         const fitScale = Math.min(parentWidth / rotatedWidth, parentHeight / rotatedHeight, 1);
         return Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1;
+    };
+
+    const getInlinePreviewStageStyle = () => {
+        const naturalWidth = inlineImageNaturalSize?.width || 0;
+        const naturalHeight = inlineImageNaturalSize?.height || 0;
+        const fallbackPreviewHeight = inlineFilterActive
+            ? (isMobile ? 'calc(100vh - 330px)' : 'calc(100vh - 390px)')
+            : (isMobile ? 'calc(100vh - 250px)' : 'calc(100vh - 330px)');
+        const measuredMaxHeight = inlinePreviewSlotSize.height
+            ? `${Math.max(120, inlinePreviewSlotSize.height - 2)}px`
+            : fallbackPreviewHeight;
+        const measuredMaxWidth = inlinePreviewSlotSize.width
+            ? `${Math.max(160, inlinePreviewSlotSize.width - 2)}px`
+            : '100%';
+        const aspectRatio = naturalWidth && naturalHeight
+            ? `${naturalWidth} / ${naturalHeight}`
+            : '16 / 9';
+        const widthFromHeight = naturalWidth && naturalHeight
+            ? `calc(${measuredMaxHeight} * ${naturalWidth / naturalHeight})`
+            : '1120px';
+
+        return {
+            position: 'relative',
+            display: 'block',
+            width: `min(${measuredMaxWidth}, 1120px, ${widthFromHeight})`,
+            height: 'auto',
+            maxWidth: '100%',
+            maxHeight: measuredMaxHeight,
+            aspectRatio,
+            lineHeight: 0,
+            overflow: 'visible',
+            flex: '0 1 auto',
+            minWidth: 0,
+            minHeight: 0,
+            transform: inlineImageEditMode
+                ? `rotate(${inlineImageRotation}deg) scale(${getInlinePreviewRotateScale()})`
+                : 'none',
+            transformOrigin: 'center center',
+            transition: 'transform 140ms ease'
+        };
     };
 
     const handleInlineCropPointerDown = (event) => {
@@ -12762,6 +13240,7 @@ export default function Chat() {
         event.stopPropagation();
 
         if (inlineCropDragMode === 'draw' && inlineCropStart) {
+            setInlineCropPreset('custom');
             setInlineCropRect(buildInlineCropRectFromPoints(inlineCropStart, point));
             return;
         }
@@ -12772,6 +13251,7 @@ export default function Chat() {
             const safeRect = normalizeCropRect(inlineCropRect) || { x: 0, y: 0, w: 1, h: 1 };
             const clampedX = Math.min(nextX, Math.max(0, 1 - safeRect.w));
             const clampedY = Math.min(nextY, Math.max(0, 1 - safeRect.h));
+            setInlineCropPreset('custom');
             setInlineCropRect({ ...safeRect, x: clampedX, y: clampedY });
             return;
         }
@@ -12797,6 +13277,7 @@ export default function Chat() {
                 bottom = Math.max(Math.min(1, point.y), top + minSize);
             }
 
+            setInlineCropPreset('custom');
             setInlineCropRect({
                 x: left,
                 y: top,
@@ -12945,6 +13426,26 @@ export default function Chat() {
             .join(' ');
     };
 
+    const INLINE_TEXT_BACKGROUND_COLOR = 'rgba(2, 18, 32, 0.78)';
+
+    const getInlineTextStageRect = () => normalizeCropRect(inlineCropRect) || { x: 0, y: 0, w: 1, h: 1 };
+
+    const mapInlineTextPointToStage = (point) => {
+        const rect = getInlineTextStageRect();
+        return {
+            x: rect.x + clampUnit(point?.x) * rect.w,
+            y: rect.y + clampUnit(point?.y) * rect.h
+        };
+    };
+
+    const mapInlineTextPointFromStage = (point) => {
+        const rect = getInlineTextStageRect();
+        return {
+            x: rect.w ? clampUnit((clampUnit(point?.x) - rect.x) / rect.w) : 0.5,
+            y: rect.h ? clampUnit((clampUnit(point?.y) - rect.y) / rect.h) : 0.5
+        };
+    };
+
     const commitInlineTextDraft = () => {
         const text = inlineTextDraft.trim();
         if (!text) return;
@@ -12981,8 +13482,9 @@ export default function Chat() {
     };
 
     const handleInlineTextPointerDown = (event, item) => {
-        const point = getInlineStagePoint(event);
-        if (!point) return;
+        const stagePoint = getInlineStagePoint(event);
+        if (!stagePoint) return;
+        const point = mapInlineTextPointFromStage(stagePoint);
         event.preventDefault();
         event.stopPropagation();
         event.currentTarget?.setPointerCapture?.(event.pointerId);
@@ -12995,8 +13497,9 @@ export default function Chat() {
 
     const handleInlineTextPointerMove = (event) => {
         if (!draggingInlineTextId) return;
-        const point = getInlineStagePoint(event);
-        if (!point) return;
+        const stagePoint = getInlineStagePoint(event);
+        if (!stagePoint) return;
+        const point = mapInlineTextPointFromStage(stagePoint);
         event.preventDefault();
         event.stopPropagation();
         setInlineTexts((items) => items.map((item) => (
@@ -13173,6 +13676,7 @@ export default function Chat() {
         const repetitiveWord = words.length >= 3 && words.every((word) => word === words[0]);
         const repetitiveChars = /(.)\1{4,}/i.test(text);
         const lettersOnly = normalizedText.replace(/[^a-z]/g, '');
+        const hasSentenceLikeText = words.length >= 4 && lettersOnly.length >= 18 && hasVowels;
         const uniqueLetters = new Set(lettersOnly).size;
         const consonantRuns = lettersOnly.match(/[^aeiouy]{4,}/gi) || [];
         const repeatedPairs = /([a-z]{2,3})\1{1,}/i.test(lettersOnly);
@@ -13180,7 +13684,7 @@ export default function Chat() {
         const consonantHeavyNonsense = lettersOnly.length >= 5 && consonantRuns.some((run) => run.length >= 4) && !/(th|sh|ch|ph|wh|ck)/i.test(lettersOnly);
         const alphabetRuns = ['abcdefghijklmnopqrstuvwxyz', 'zyxwvutsrqponmlkjihgfedcba', 'qwertyuiop', 'poiuytrewq', 'asdfghjkl', 'lkjhgfdsa', 'zxcvbnm', 'mnbvcxz'];
         const alphabetSpam = lettersOnly.length >= 3 && alphabetRuns.some((run) => run.includes(lettersOnly));
-        const probablyGarbage = !isEmojiPresent && (
+        const probablyGarbage = !isEmojiPresent && !hasSentenceLikeText && (
             (text.length >= 3 && !hasVowels && !hasNumbers) ||
             repetitiveChars ||
             repetitiveWord ||
@@ -13263,10 +13767,11 @@ export default function Chat() {
         const isAudioPreview = !!file && file.type?.startsWith('audio/');
         const isDocumentPreview = !!file && !isImagePreview && !isVideoPreview && !isAudioPreview;
         const canUseViewOnceForCurrentFile = isImagePreview || isVideoPreview || isAudioPreview;
-        const isMediaThemePreview = isImagePreview || isVideoPreview || isDocumentPreview;
+        const isMediaThemePreview = isImagePreview || isVideoPreview || isDocumentPreview || isAudioPreview;
         const imagePreviewCardWidth = 'min(900px, calc(100% - 44px))';
         const hasCaptionText = !!(input || '').trim();
         const isPreviewSendBlockedByAI = hasCaptionText && (!suggestionApplied || isGrammarLoading || isGarbageMessage);
+        const inlinePreviewFile = inlineImageEditMode && inlineEditSourceFile ? inlineEditSourceFile : file;
         return (
             <div className="wa-file-preview-overlay" style={{
                 height: '100%',
@@ -13395,17 +13900,29 @@ export default function Chat() {
                                 <button
                                     type="button"
                                     onClick={applyInlineImageEditsToPreview}
+                                    disabled={isApplyingInlineImageEdits}
                                     style={{
                                         border: 'none',
                                         background: 'transparent',
-                                        color: '#dbeafe',
+                                        color: isApplyingInlineImageEdits ? '#94a3b8' : '#dbeafe',
                                         fontSize: 16,
                                         fontWeight: 500,
                                         lineHeight: 1.2,
-                                        cursor: 'pointer'
+                                        cursor: isApplyingInlineImageEdits ? 'wait' : 'pointer'
                                     }}
                                 >
-                                    Done
+                                    {isApplyingInlineImageEdits ? 'Applying...' : 'Done'}
+                                </button>
+                            )}
+                            {isCameraCapturedFile && (
+                                <button
+                                    type="button"
+                                    onClick={handleRetakeCameraCapture}
+                                    style={{ border: 'none', background: 'transparent', color: '#dbeafe', fontSize: 15, fontWeight: 500, lineHeight: 1.2, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                    title="Retake photo"
+                                >
+                                    <RotateCcw size={16} strokeWidth={2.2} />
+                                    <span>Retake</span>
                                 </button>
                             )}
                             <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDownload(getFilePreviewUrl(file), file.name || 'download'); }} title="Download">
@@ -13420,10 +13937,10 @@ export default function Chat() {
                         padding: '16px 24px',
                         display: 'flex',
                         alignItems: 'center',
-                        background: (isVideoPreview || isDocumentPreview) ? '#102b42' : '#0b141a',
+                        background: isMediaThemePreview ? '#102b42' : '#0b141a',
                         color: '#f8fafc',
                         flexShrink: 0,
-                        borderBottom: (isVideoPreview || isDocumentPreview)
+                        borderBottom: isMediaThemePreview
                             ? '1px solid rgba(148, 163, 184, 0.2)'
                             : '1px solid rgba(255, 255, 255, 0.1)',
                         position: 'relative'
@@ -13432,13 +13949,13 @@ export default function Chat() {
                             onClick={() => {
                                 setIsDiscardPreviewConfirmOpen(true);
                             }}
-                            style={{ background: 'none', border: 'none', color: (isVideoPreview || isDocumentPreview) ? '#c1d2e2' : '#aebac1', cursor: 'pointer', display: 'flex', padding: 4, zIndex: 2 }}
+                            style={{ background: 'none', border: 'none', color: isMediaThemePreview ? '#c1d2e2' : '#aebac1', cursor: 'pointer', display: 'flex', padding: 4, zIndex: 2 }}
                             title="Close preview"
                         >
                             <X size={24} />
                         </button>
 
-                        {!(isVideoPreview || isDocumentPreview) && (
+                        {!isMediaThemePreview && (
                             <div style={{ position: 'absolute', left: 0, width: '100%', textAlign: 'center', pointerEvents: 'none' }}>
                                 <span style={{ fontSize: 18, fontWeight: 500, color: '#f8fafc' }}>Preview</span>
                             </div>
@@ -13455,11 +13972,11 @@ export default function Chat() {
                     justifyContent: 'center',
                     alignItems: 'center',
                     overflow: isImagePreview ? 'auto' : 'hidden',
-                    padding: isImagePreview ? (isMobile ? '16px 12px 12px' : '24px 28px 18px') : '26px 40px 20px',
+                    padding: isImagePreview ? (isMobile ? '16px 12px 12px' : '24px 28px 18px') : (isAudioPreview ? '18px 40px 14px' : '26px 40px 20px'),
                     position: 'relative',
                     background: isImagePreview ? 'transparent' : (isMediaThemePreview ? '#041b2d' : '#0b141a'),
                     width: isImagePreview ? '100%' : (isMediaThemePreview ? imagePreviewCardWidth : '100%'),
-                    margin: isImagePreview ? 0 : (isMediaThemePreview ? '20px auto 0' : '0'),
+                    margin: isImagePreview ? 0 : (isMediaThemePreview ? (isAudioPreview ? '14px auto 0' : '20px auto 0') : '0'),
                     borderTopLeftRadius: isImagePreview ? 0 : (isMediaThemePreview ? 6 : 0),
                     borderTopRightRadius: isImagePreview ? 0 : (isMediaThemePreview ? 6 : 0)
                 }}>
@@ -13480,7 +13997,7 @@ export default function Chat() {
                         </div>
                     )}
                     {file && file.type?.startsWith('image/') ? (
-                        <div style={{ width: '100%', maxWidth: isMobile ? 'calc(100vw - 24px)' : 760, height: '100%', maxHeight: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: isMobile ? 10 : 14, background: 'transparent', overflow: 'hidden' }}>
+                        <div style={{ width: '100%', maxWidth: isMobile ? 'calc(100vw - 24px)' : 'calc(100vw - 96px)', height: '100%', maxHeight: '100%', minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: isMobile ? 10 : 14, background: 'transparent', overflow: 'hidden' }}>
                             <div style={{
                                 display: inlineImageEditMode && inlineFilterActive ? 'flex' : 'none',
                                 width: '100%',
@@ -13531,7 +14048,7 @@ export default function Chat() {
                                                 position: 'relative'
                                             }}>
                                                 <img
-                                                    src={getFilePreviewUrl(file)}
+                                                    src={getFilePreviewUrl(inlinePreviewFile)}
                                                     alt=""
                                                     style={{
                                                         width: '100%',
@@ -13567,24 +14084,13 @@ export default function Chat() {
                                     );
                                 })}
                             </div>
-                            <div style={{ width: '100%', flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                            <div ref={inlinePreviewSlotRef} style={{ width: '100%', flex: '1 1 auto', minHeight: 0, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                                 <div
                                     ref={inlineImageStageRef}
-                                    style={{
-                                        position: 'relative',
-                                        display: 'inline-block',
-                                        maxWidth: '100%',
-                                        maxHeight: '100%',
-                                        lineHeight: 0,
-                                        transform: inlineImageEditMode
-                                            ? `rotate(${inlineImageRotation}deg) scale(${getInlinePreviewRotateScale()})`
-                                            : 'none',
-                                        transformOrigin: 'center center',
-                                        transition: 'transform 140ms ease'
-                                    }}
+                                    style={getInlinePreviewStageStyle()}
                                 >
                                     <img
-                                        src={getFilePreviewUrl(file)}
+                                        src={getFilePreviewUrl(inlinePreviewFile)}
                                         alt="Preview"
                                         onLoad={(event) => {
                                             const target = event.currentTarget;
@@ -13595,12 +14101,10 @@ export default function Chat() {
                                         }}
                                         style={{
                                             display: 'block',
-                                            maxWidth: '100%',
-                                            maxHeight: inlineFilterActive
-                                                ? (isMobile ? 'calc(100vh - 310px)' : 'calc(100vh - 350px)')
-                                                : (isMobile ? 'calc(100vh - 230px)' : 'calc(100vh - 270px)'),
-                                            width: 'auto',
-                                            height: 'auto',
+                                            width: '100%',
+                                            height: '100%',
+                                            minWidth: 0,
+                                            minHeight: 0,
                                             objectFit: 'contain',
                                             filter: getInlineImageFilterCss()
                                         }}
@@ -13632,51 +14136,56 @@ export default function Chat() {
                                             ))}
                                         </svg>
                                     )}
-                                    {inlineTexts.map((item) => (
-                                        <div
-                                            key={item.id}
-                                            style={{
-                                                position: 'absolute',
-                                                left: `${clampUnit(item.x) * 100}%`,
-                                                top: `${clampUnit(item.y) * 100}%`,
-                                                transform: item.align === 'left'
-                                                    ? 'translate(0, -50%)'
-                                                    : item.align === 'right'
-                                                        ? 'translate(-100%, -50%)'
-                                                        : 'translate(-50%, -50%)',
-                                                color: item.color || '#ffffff',
-                                                fontSize: item.size || 28,
-                                                fontFamily: item.font === 'Serif'
-                                                    ? 'Georgia, serif'
-                                                    : item.font === 'Norican'
-                                                        ? 'cursive'
-                                                        : item.font === 'Bryndan Write'
-                                                            ? '"Comic Sans MS", cursive'
-                                                            : item.font === 'Oswald'
-                                                                ? 'Impact, sans-serif'
-                                                                : item.font === 'Monospace'
-                                                                    ? '"Courier New", monospace'
-                                                                    : 'Arial, sans-serif',
-                                                fontWeight: 700,
-                                                textAlign: item.align || 'center',
-                                                textShadow: '0 2px 4px rgba(2, 6, 23, 0.8), 0 0 2px rgba(2, 6, 23, 0.9)',
-                                                pointerEvents: inlineImageEditMode && !inlineTextActive && !inlinePaintActive && !inlineCropActive ? 'auto' : 'none',
-                                                cursor: draggingInlineTextId === item.id ? 'grabbing' : 'grab',
-                                                whiteSpace: 'nowrap',
-                                                zIndex: 4,
-                                                background: item.background ? 'rgba(2, 18, 32, 0.78)' : 'transparent',
-                                                borderRadius: item.background ? 6 : 0,
-                                                padding: item.background ? '4px 10px' : 0,
-                                                touchAction: 'none'
-                                            }}
-                                            onPointerDown={(event) => handleInlineTextPointerDown(event, item)}
-                                            onPointerMove={handleInlineTextPointerMove}
-                                            onPointerUp={handleInlineTextPointerUp}
-                                            onPointerCancel={handleInlineTextPointerUp}
-                                        >
-                                            {item.text}
-                                        </div>
-                                    ))}
+                                    {inlineTexts.map((item) => {
+                                        const stagePoint = mapInlineTextPointToStage(item);
+                                        const textSize = Number(item.size || 28);
+                                        return (
+                                            <div
+                                                key={item.id}
+                                                style={{
+                                                    position: 'absolute',
+                                                    left: `${stagePoint.x * 100}%`,
+                                                    top: `${stagePoint.y * 100}%`,
+                                                    transform: item.align === 'left'
+                                                        ? 'translate(0, -50%)'
+                                                        : item.align === 'right'
+                                                            ? 'translate(-100%, -50%)'
+                                                            : 'translate(-50%, -50%)',
+                                                    color: item.color || '#ffffff',
+                                                    fontSize: item.size || 28,
+                                                    fontFamily: item.font === 'Serif'
+                                                        ? 'Georgia, serif'
+                                                        : item.font === 'Norican'
+                                                            ? 'cursive'
+                                                            : item.font === 'Bryndan Write'
+                                                                ? '"Comic Sans MS", cursive'
+                                                                : item.font === 'Oswald'
+                                                                    ? 'Impact, sans-serif'
+                                                                    : item.font === 'Monospace'
+                                                                        ? '"Courier New", monospace'
+                                                                        : 'Arial, sans-serif',
+                                                    fontWeight: 700,
+                                                    textAlign: item.align || 'center',
+                                                    textShadow: item.background ? 'none' : '0 2px 4px rgba(2, 6, 23, 0.8), 0 0 2px rgba(2, 6, 23, 0.9)',
+                                                    pointerEvents: inlineImageEditMode && !inlineTextActive && !inlinePaintActive && !inlineCropActive ? 'auto' : 'none',
+                                                    cursor: draggingInlineTextId === item.id ? 'grabbing' : 'grab',
+                                                    whiteSpace: 'nowrap',
+                                                    zIndex: 4,
+                                                    background: item.background ? INLINE_TEXT_BACKGROUND_COLOR : 'transparent',
+                                                    borderRadius: 0,
+                                                    padding: item.background ? `${textSize * 0.25}px ${textSize * 0.45}px` : 0,
+                                                    lineHeight: 1,
+                                                    touchAction: 'none'
+                                                }}
+                                                onPointerDown={(event) => handleInlineTextPointerDown(event, item)}
+                                                onPointerMove={handleInlineTextPointerMove}
+                                                onPointerUp={handleInlineTextPointerUp}
+                                                onPointerCancel={handleInlineTextPointerUp}
+                                            >
+                                                {item.text}
+                                            </div>
+                                        );
+                                    })}
                                     {inlineImageEditMode && !inlineTextActive && !inlinePaintActive && !inlineCropActive && inlineTexts.length > 0 && (
                                         <div
                                             style={{
@@ -13696,8 +14205,8 @@ export default function Chat() {
                                         <div
                                             style={{
                                                 position: 'absolute',
-                                                left: '50%',
-                                                top: '50%',
+                                                left: `${mapInlineTextPointToStage({ x: 0.5, y: 0.5 }).x * 100}%`,
+                                                top: `${mapInlineTextPointToStage({ x: 0.5, y: 0.5 }).y * 100}%`,
                                                 transform: 'translate(-50%, -50%)',
                                                 zIndex: 8,
                                                 display: 'flex',
@@ -13745,9 +14254,12 @@ export default function Chat() {
                                                 <div
                                                     style={{
                                                         position: 'absolute',
-                                                        left: 0,
-                                                        bottom: 'calc(100% + 12px)',
+                                                        left: '50%',
+                                                        bottom: 'calc(100% + 16px)',
+                                                        transform: 'translateX(-50%)',
+                                                        width: 'max-content',
                                                         minWidth: 330,
+                                                        maxWidth: 'min(420px, calc(100vw - 56px))',
                                                         padding: '12px 14px 10px',
                                                         borderRadius: 12,
                                                         borderLeft: '3px solid #0EA5BE',
@@ -13758,9 +14270,9 @@ export default function Chat() {
                                                 >
                                                     <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Neural Chat AI</div>
                                                     {getInlineTextAiIssue() ? (
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ef4444', fontSize: 13, fontWeight: 700 }}>
-                                                            <AlertCircle size={16} />
-                                                            {getInlineTextAiIssue()}
+                                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, color: '#ef4444', fontSize: 13, fontWeight: 700, lineHeight: 1.25, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+                                                            <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                                                            <span>{getInlineTextAiIssue()}</span>
                                                         </div>
                                                     ) : (
                                                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -13813,8 +14325,8 @@ export default function Chat() {
                                                     outline: 'none',
                                                     padding: '0 10px',
                                                     fontSize: 18,
-                                                    color: inlineTextBackground ? '#e0f7ff' : inlinePaintColor,
-                                                    background: inlineTextBackground ? 'rgba(2, 18, 32, 0.88)' : '#ffffff',
+                                                    color: inlinePaintColor,
+                                                    background: inlineTextBackground ? INLINE_TEXT_BACKGROUND_COLOR : '#ffffff',
                                                     borderColor: inlineTextBackground ? '#33ceff' : 'rgba(51, 206, 255, 0.7)',
                                                     textAlign: inlineTextAlign,
                                                     fontFamily: inlineTextFont === 'Serif'
@@ -13923,40 +14435,59 @@ export default function Chat() {
                                                 const top = `${rect.y * 100}%`;
                                                 const width = `${rect.w * 100}%`;
                                                 const height = `${rect.h * 100}%`;
+                                                const right = `${Math.max(0, 1 - rect.x - rect.w) * 100}%`;
+                                                const bottom = `${Math.max(0, 1 - rect.y - rect.h) * 100}%`;
                                                 const handleStyle = {
                                                     position: 'absolute',
-                                                    width: isMobile ? 10 : 12,
-                                                    height: isMobile ? 10 : 12,
+                                                    width: isMobile ? 14 : 16,
+                                                    height: isMobile ? 14 : 16,
                                                     borderRadius: '50%',
-                                                    background: '#102b42',
+                                                    background: '#f8fbff',
                                                     border: '2px solid #22d3ee',
-                                                    boxShadow: '0 0 0 1px rgba(2, 12, 24, 0.85)'
+                                                    boxShadow: '0 0 0 1px rgba(2, 12, 24, 0.92), 0 4px 10px rgba(2, 6, 23, 0.36)'
+                                                };
+                                                const shadeStyle = {
+                                                    position: 'absolute',
+                                                    background: 'rgba(2, 8, 18, 0.74)',
+                                                    backdropFilter: 'brightness(0.72)',
+                                                    WebkitBackdropFilter: 'brightness(0.72)',
+                                                    pointerEvents: 'none'
                                                 };
                                                 return (
-                                                    <div
-                                                        style={{
-                                                            position: 'absolute',
-                                                            left,
-                                                            top,
-                                                            width,
-                                                            height,
-                                                            border: '1.5px solid rgba(34, 211, 238, 0.85)',
-                                                            borderRadius: 2,
-                                                            boxShadow: 'none',
-                                                            pointerEvents: 'none',
-                                                            cursor: inlineCropCursor,
-                                                            willChange: 'left, top, width, height'
-                                                        }}
-                                                    >
-                                                        <span style={{ ...handleStyle, left: -7, top: -7 }} />
-                                                        <span style={{ ...handleStyle, left: '50%', top: -7, transform: 'translateX(-50%)' }} />
-                                                        <span style={{ ...handleStyle, right: -7, top: -7 }} />
-                                                        <span style={{ ...handleStyle, left: -7, top: '50%', transform: 'translateY(-50%)' }} />
-                                                        <span style={{ ...handleStyle, right: -7, top: '50%', transform: 'translateY(-50%)' }} />
-                                                        <span style={{ ...handleStyle, left: -7, bottom: -7 }} />
-                                                        <span style={{ ...handleStyle, left: '50%', bottom: -7, transform: 'translateX(-50%)' }} />
-                                                        <span style={{ ...handleStyle, right: -7, bottom: -7 }} />
-                                                    </div>
+                                                    <>
+                                                        <div style={{ ...shadeStyle, left: 0, top: 0, right: 0, height: top }} />
+                                                        <div style={{ ...shadeStyle, left: 0, top, width: left, height }} />
+                                                        <div style={{ ...shadeStyle, right: 0, top, width: right, height }} />
+                                                        <div style={{ ...shadeStyle, left: 0, right: 0, bottom: 0, height: bottom }} />
+                                                        <div
+                                                            style={{
+                                                                position: 'absolute',
+                                                                left,
+                                                                top,
+                                                                width,
+                                                                height,
+                                                                border: '2px solid rgba(34, 211, 238, 0.95)',
+                                                                borderRadius: 2,
+                                                                boxShadow: '0 0 0 1px rgba(2, 12, 24, 0.7)',
+                                                                pointerEvents: 'none',
+                                                                cursor: inlineCropCursor,
+                                                                willChange: 'left, top, width, height'
+                                                            }}
+                                                        >
+                                                            <span style={{ position: 'absolute', left: '33.333%', top: 0, bottom: 0, borderLeft: '1px solid rgba(248, 251, 255, 0.45)' }} />
+                                                            <span style={{ position: 'absolute', left: '66.666%', top: 0, bottom: 0, borderLeft: '1px solid rgba(248, 251, 255, 0.45)' }} />
+                                                            <span style={{ position: 'absolute', top: '33.333%', left: 0, right: 0, borderTop: '1px solid rgba(248, 251, 255, 0.45)' }} />
+                                                            <span style={{ position: 'absolute', top: '66.666%', left: 0, right: 0, borderTop: '1px solid rgba(248, 251, 255, 0.45)' }} />
+                                                            <span style={{ ...handleStyle, left: -9, top: -9 }} />
+                                                            <span style={{ ...handleStyle, left: '50%', top: -9, transform: 'translateX(-50%)' }} />
+                                                            <span style={{ ...handleStyle, right: -9, top: -9 }} />
+                                                            <span style={{ ...handleStyle, left: -9, top: '50%', transform: 'translateY(-50%)' }} />
+                                                            <span style={{ ...handleStyle, right: -9, top: '50%', transform: 'translateY(-50%)' }} />
+                                                            <span style={{ ...handleStyle, left: -9, bottom: -9 }} />
+                                                            <span style={{ ...handleStyle, left: '50%', bottom: -9, transform: 'translateX(-50%)' }} />
+                                                            <span style={{ ...handleStyle, right: -9, bottom: -9 }} />
+                                                        </div>
+                                                    </>
                                                 );
                                             })()}
                                         </div>
@@ -14015,9 +14546,7 @@ export default function Chat() {
                                         type="button"
                                         onClick={() => {
                                             setInlineImageRotation(0);
-                                            setInlineCropRect({ x: 0, y: 0, w: 1, h: 1 });
-                                            setInlineCropActive(true);
-                                            setInlineImageEditMode(true);
+                                            applyInlineCropPreset('fit');
                                             setInlineCropResizeHandle(null);
                                             setInlineCropDragMode(null);
                                             setInlineCropStart(null);
@@ -14036,6 +14565,32 @@ export default function Chat() {
                                     >
                                         Reset
                                     </button>
+                                    <span style={{ width: 1, height: 24, background: 'rgba(148, 163, 184, 0.28)', display: 'inline-block' }} />
+                                    {[
+                                        { id: 'fit', label: 'Fit' },
+                                        { id: 'square', label: 'Square' },
+                                        { id: '16:9', label: '16:9' },
+                                        { id: '9:16', label: '9:16' }
+                                    ].map((preset) => (
+                                        <button
+                                            key={preset.id}
+                                            type="button"
+                                            onClick={() => applyInlineCropPreset(preset.id)}
+                                            style={{
+                                                border: '1px solid rgba(148, 163, 184, 0.35)',
+                                                background: inlineCropPreset === preset.id ? 'rgba(34, 211, 238, 0.16)' : 'transparent',
+                                                color: inlineCropPreset === preset.id ? '#67e8f9' : '#c1d2e2',
+                                                borderRadius: 999,
+                                                padding: isMobile ? '5px 9px' : '6px 12px',
+                                                fontSize: isMobile ? 12 : 13,
+                                                fontWeight: 700,
+                                                cursor: 'pointer',
+                                                whiteSpace: 'nowrap'
+                                            }}
+                                        >
+                                            {preset.label}
+                                        </button>
+                                    ))}
                                 </>
                             </div>
                             <div style={{
@@ -14072,7 +14627,7 @@ export default function Chat() {
                                         type="button"
                                         title={paintOption.label}
                                         aria-label={paintOption.label}
-                                        onClick={() => setInlinePaintColor(paintOption.color)}
+                                        onClick={() => setInlinePaintColorWithMarker(paintOption.color)}
                                         style={{
                                             width: 20,
                                             height: 20,
@@ -14175,6 +14730,7 @@ export default function Chat() {
                                             }}
                                         >
                                             <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
+                                            <span style={{ position: 'absolute', left: `${inlineRainbowPoint.x * 100}%`, top: `${inlineRainbowPoint.y * 100}%`, width: 22, height: 22, borderRadius: '50%', transform: 'translate(-50%, -50%)', background: inlinePaintColor, border: '3px solid #ffffff', boxShadow: '0 0 0 2px rgba(15, 23, 42, 0.72), 0 6px 14px rgba(2, 6, 23, 0.34)', pointerEvents: 'none' }} />
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
                                             <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
@@ -14224,7 +14780,7 @@ export default function Chat() {
                                         type="button"
                                         title={paintOption.label}
                                         aria-label={paintOption.label}
-                                        onClick={() => setInlinePaintColor(paintOption.color)}
+                                        onClick={() => setInlinePaintColorWithMarker(paintOption.color)}
                                         style={{
                                             width: 24,
                                             height: 24,
@@ -14335,6 +14891,7 @@ export default function Chat() {
                                             }}
                                         >
                                             <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
+                                            <span style={{ position: 'absolute', left: `${inlineRainbowPoint.x * 100}%`, top: `${inlineRainbowPoint.y * 100}%`, width: 22, height: 22, borderRadius: '50%', transform: 'translate(-50%, -50%)', background: inlinePaintColor, border: '3px solid #ffffff', boxShadow: '0 0 0 2px rgba(15, 23, 42, 0.72), 0 6px 14px rgba(2, 6, 23, 0.34)', pointerEvents: 'none' }} />
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
                                             <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
@@ -14384,7 +14941,7 @@ export default function Chat() {
                                         type="button"
                                         title={paintOption.label}
                                         aria-label={paintOption.label}
-                                        onClick={() => setInlinePaintColor(paintOption.color)}
+                                        onClick={() => setInlinePaintColorWithMarker(paintOption.color)}
                                         style={{
                                             width: 20,
                                             height: 20,
@@ -14479,6 +15036,7 @@ export default function Chat() {
                                     <div style={{ position: 'absolute', top: 'calc(100% + 10px)', left: '50%', transform: 'translateX(-50%)', width: 'min(420px, calc(100vw - 48px))', padding: 0, borderRadius: 14, background: '#ffffff', boxShadow: '0 18px 40px rgba(2, 6, 23, 0.28)', overflow: 'hidden', zIndex: 20, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
                                         <div title="Rainbow color picker" role="slider" tabIndex={0} onPointerDown={handleInlineRainbowPointer} onPointerMove={(event) => { if (event.buttons === 1) handleInlineRainbowPointer(event); }} style={{ display: 'block', position: 'relative', height: 136, width: '100%', cursor: 'crosshair', background: 'linear-gradient(90deg, #ff4d4f 0%, #ffec3d 16%, #52d23d 32%, #33ceff 48%, #3b82f6 64%, #a855f7 80%, #ff2d8d 100%)' }}>
                                             <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
+                                            <span style={{ position: 'absolute', left: `${inlineRainbowPoint.x * 100}%`, top: `${inlineRainbowPoint.y * 100}%`, width: 22, height: 22, borderRadius: '50%', transform: 'translate(-50%, -50%)', background: inlinePaintColor, border: '3px solid #ffffff', boxShadow: '0 0 0 2px rgba(15, 23, 42, 0.72), 0 6px 14px rgba(2, 6, 23, 0.34)', pointerEvents: 'none' }} />
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', color: '#0f172a', fontSize: 16, fontWeight: 500 }}>
                                             <span style={{ width: 24, height: 24, borderRadius: '50%', background: inlinePaintColor, display: 'inline-block' }} />
@@ -14509,9 +15067,19 @@ export default function Chat() {
                             />
                         </div>
                     ) : isAudioPreview ? (
-                        <div style={{ width: '100%', maxWidth: 700, textAlign: 'center' }}>
-                            <div style={{ marginBottom: 14, fontSize: 18, fontWeight: 500, color: '#e9edef' }}>{file?.name}</div>
-                            <audio src={getFilePreviewUrl(file)} controls style={{ width: '100%' }} />
+                        <div style={{ width: 'min(420px, calc(100vw - 80px))', display: 'flex', justifyContent: 'center' }}>
+                            <audio
+                                src={getFilePreviewUrl(file)}
+                                controls
+                                preload="metadata"
+                                style={{
+                                    width: '100%',
+                                    height: 52,
+                                    borderRadius: 999,
+                                    colorScheme: 'dark',
+                                    background: 'rgba(226, 232, 240, 0.08)'
+                                }}
+                            />
                         </div>
                     ) : (
                         <div style={{
@@ -14548,15 +15116,15 @@ export default function Chat() {
 
                 {/* Footer / Caption Input Tray */}
                 <div style={{
-                    padding: '20px 24px 30px',
+                    padding: isAudioPreview ? '14px 24px 22px' : '20px 24px 30px',
                     background: isImagePreview ? 'transparent' : (isMediaThemePreview ? '#041b2d' : '#0b141a'),
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 20,
+                    gap: isAudioPreview ? 12 : 20,
                     position: 'relative',
                     borderTop: isImagePreview ? 'none' : (isMediaThemePreview ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(255, 255, 255, 0.1)'),
                     width: isMediaThemePreview ? imagePreviewCardWidth : '100%',
-                    margin: isMediaThemePreview ? '0 auto 26px' : '0',
+                    margin: isMediaThemePreview ? (isAudioPreview ? '0 auto 18px' : '0 auto 26px') : '0',
                     borderBottomLeftRadius: isMediaThemePreview ? 6 : 0,
                     borderBottomRightRadius: isMediaThemePreview ? 6 : 0
                 }}>
@@ -14623,7 +15191,7 @@ export default function Chat() {
                                 onMouseOut={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)'}
                                 onClick={() => document.getElementById('add-more-preview-files')?.click()}>
                                 <Plus size={24} />
-                                <input type="file" id="add-more-preview-files" multiple onChange={(e) => { handleFileSelect(e); }} style={{ display: 'none' }} />
+                                <input type="file" id="add-more-preview-files" multiple accept={ALL_ATTACHMENT_ACCEPT_ATTR} onChange={(e) => { handleFileSelect(e); }} style={{ display: 'none' }} />
                             </div>
                         </div>
                     </div>
@@ -14641,7 +15209,7 @@ export default function Chat() {
                             gap: 12,
                             position: 'relative'
                         }}>
-                            {(showGrammarBar && (grammarSuggestions || isGrammarLoading) && !isGarbageMessage) && (
+                            {showGrammarBar && (grammarSuggestions || isGrammarLoading || isGarbageMessage) && (
                                 <div
                                     style={{
                                         position: 'absolute',
@@ -14944,7 +15512,7 @@ export default function Chat() {
                                         <span>Take photo</span>
                                     </div>
                                     <div className="wa-group-icon-menu-item" onClick={() => { setIsCommunityIconMenuOpen(false); if (fileInputRef.current) fileInputRef.current.click(); }}>
-                                        <Image size={20} color="#54656f" />
+                                        <ImageIcon size={20} color="#54656f" />
                                         <span>Upload photo</span>
                                     </div>
                                     <div className="wa-group-icon-menu-item" onClick={() => setIsCommunityIconMenuOpen(false)}>
@@ -15358,7 +15926,7 @@ export default function Chat() {
                                             </div>
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12, color: subTextColor, fontSize: 14 }}>
-                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Image size={16} color="#38bdf8" /> {mediaMsgs.length} Media</span>
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><ImageIcon size={16} color="#38bdf8" /> {mediaMsgs.length} Media</span>
                                             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><LinkIcon size={16} color="#38bdf8" /> {links.length} Links</span>
                                             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><FileText size={16} color="#38bdf8" /> {docs.length} Docs</span>
                                         </div>
@@ -15652,7 +16220,7 @@ export default function Chat() {
                                     </div>
                                     <div style={{ display: 'flex', gap: 12, fontSize: 12, color: '#94a3b8' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                            <Image size={14} /> <span>{mediaMsgs.length} Media</span>
+                                            <ImageIcon size={14} /> <span>{mediaMsgs.length} Media</span>
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                             <LinkIcon size={14} /> <span>{linkMsgs.length} Links</span>
@@ -17361,11 +17929,6 @@ export default function Chat() {
                             </>
                         ) : (
                             <>
-                                {viewingImage.type === 'image' && (
-                                    <button className="wa-viewer-btn" onClick={startCrop} title="Crop">
-                                        <Crop size={20} />
-                                    </button>
-                                )}
                                 <button
                                     className="wa-viewer-btn"
                                     onClick={handleOpenWith}
@@ -19016,7 +19579,7 @@ export default function Chat() {
                                             </div>
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12, color: subTextColor, fontSize: 14 }}>
-                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Image size={16} color="#38bdf8" /> {cImages.length} Media</span>
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><ImageIcon size={16} color="#38bdf8" /> {cImages.length} Media</span>
                                             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><LinkIcon size={16} color="#38bdf8" /> {cLinks.length} Links</span>
                                             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><FileText size={16} color="#38bdf8" /> {cDocs.length} Docs</span>
                                         </div>
@@ -19412,6 +19975,26 @@ export default function Chat() {
                                 </div>
                             </div>
                         </div>
+                        {/* TEMP_MUTE_TEST_START: remove after 5-second mute test is confirmed. */}
+                        <button
+                            type="button"
+                            onClick={handleFiveSecondMuteTest}
+                            style={{
+                                marginTop: 14,
+                                width: '100%',
+                                border: '1px solid rgba(14, 165, 190, 0.55)',
+                                borderRadius: 8,
+                                background: 'rgba(14, 165, 190, 0.12)',
+                                color: '#7dd3fc',
+                                cursor: 'pointer',
+                                fontSize: 14,
+                                fontWeight: 600,
+                                padding: '11px 14px'
+                            }}
+                        >
+                            Sample test: mute for 5 seconds
+                        </button>
+                        {/* TEMP_MUTE_TEST_END */}
                     </div>
                 </div>
             </div>
@@ -21334,7 +21917,7 @@ export default function Chat() {
                     <input
                         type="color"
                         value={inlinePaintColor}
-                        onChange={(event) => setInlinePaintColor(event.target.value)}
+                        onChange={(event) => setInlinePaintColorWithMarker(event.target.value)}
                         style={{
                             position: 'absolute',
                             inset: 0,
@@ -22027,8 +22610,31 @@ export default function Chat() {
     const renderCameraModals = () => {
         if (cameraModal === 'none') return null;
 
+        const isChatCamera = cameraPurpose === 'chat';
+        const chatRect = typeof document !== 'undefined'
+            ? document.querySelector('.wa-main-chat')?.getBoundingClientRect()
+            : null;
+        const chatCameraBounds = isChatCamera && chatRect
+            ? {
+                left: chatRect.left,
+                top: chatRect.top + 60,
+                width: chatRect.width,
+                height: Math.max(0, chatRect.height - 60)
+            }
+            : null;
+
         return (
-            <div className="wa-camera-overlay">
+            <div
+                className={`wa-camera-overlay ${isChatCamera ? 'wa-camera-overlay-chat' : ''}`}
+                style={chatCameraBounds ? {
+                    left: chatCameraBounds.left,
+                    top: chatCameraBounds.top,
+                    width: chatCameraBounds.width,
+                    height: chatCameraBounds.height,
+                    right: 'auto',
+                    bottom: 'auto'
+                } : (isChatCamera ? { left: 0, top: 60, right: 0, bottom: 0 } : undefined)}
+            >
                 {cameraModal === 'permission' && (
                     <div className="wa-camera-modal">
                         <h2>Allow camera</h2>
@@ -22057,27 +22663,27 @@ export default function Chat() {
                 )}
 
                 {cameraModal === 'active' && (
-                    <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.4)', zIndex: 4000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <div style={{ width: '100%', maxWidth: 700, background: '#fff', borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', margin: '0 20px', boxShadow: '0 17px 50px 0 rgba(0,0,0,0.19), 0 12px 15px 0 rgba(0,0,0,0.24)' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', height: 60, padding: '0 20px', borderBottom: '1px solid #e9edef' }}>
-                                <button onClick={closeCamera} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', alignItems: 'center', width: 40, padding: 0 }}>
+                    <div className={isChatCamera ? 'wa-chat-camera-take-photo' : ''} style={isChatCamera ? undefined : { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.4)', zIndex: 4000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div style={isChatCamera ? undefined : { width: '100%', maxWidth: 700, background: '#fff', borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', margin: '0 20px', boxShadow: '0 17px 50px 0 rgba(0,0,0,0.19), 0 12px 15px 0 rgba(0,0,0,0.24)' }}>
+                            <div className={isChatCamera ? 'wa-chat-camera-titlebar' : ''} style={isChatCamera ? undefined : { display: 'flex', alignItems: 'center', height: 60, padding: '0 20px', borderBottom: '1px solid #e9edef' }}>
+                                <button onClick={closeCamera} className={isChatCamera ? 'wa-chat-camera-close' : ''} style={isChatCamera ? undefined : { background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', alignItems: 'center', width: 40, padding: 0 }}>
                                     <X size={24} />
                                 </button>
-                                <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
-                                    <span style={{ fontSize: 18, fontWeight: 500, color: '#111b21', whiteSpace: 'nowrap' }}>Capture photo</span>
+                                <div style={isChatCamera ? undefined : { flex: 1, display: 'flex', justifyContent: 'center' }}>
+                                    <span style={isChatCamera ? undefined : { fontSize: 18, fontWeight: 500, color: '#111b21', whiteSpace: 'nowrap' }}>{isChatCamera ? 'Take photo' : 'Capture photo'}</span>
                                 </div>
-                                <div style={{ width: 40 }}></div>
+                                {!isChatCamera && <div style={{ width: 40 }}></div>}
                             </div>
-                            <div style={{ width: '100%', background: '#f0f2f5', display: 'flex', justifyContent: 'center', position: 'relative' }}>
+                            <div className={isChatCamera ? 'wa-chat-camera-video-area' : ''} style={isChatCamera ? undefined : { width: '100%', background: '#f0f2f5', display: 'flex', justifyContent: 'center', position: 'relative' }}>
                                 <video
                                     ref={videoRef}
                                     autoPlay
                                     playsInline
-                                    style={{ width: '100%', maxHeight: '60vh', objectFit: 'cover' }}
+                                    style={isChatCamera ? undefined : { width: '100%', maxHeight: '60vh', objectFit: 'cover' }}
                                 />
                             </div>
-                            <div style={{ padding: '20px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff' }}>
-                                <button onClick={capturePhoto} style={{ width: 64, height: 64, borderRadius: '50%', background: '#0084ff', color: 'white', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', transition: 'transform 0.2s' }} onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.95)'} onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'} onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}>
+                            <div className={isChatCamera ? 'wa-chat-camera-footer' : ''} style={isChatCamera ? undefined : { padding: '20px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff' }}>
+                                <button onClick={capturePhoto} className={isChatCamera ? 'wa-chat-camera-capture' : ''} style={isChatCamera ? undefined : { width: 64, height: 64, borderRadius: '50%', background: '#0084ff', color: 'white', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', transition: 'transform 0.2s' }} onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.95)'} onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'} onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}>
                                     <Camera size={28} />
                                 </button>
                             </div>
@@ -22174,7 +22780,7 @@ export default function Chat() {
             }}
         >
             <div
-                className={`wa-main-chat ${(!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? 'wa-main-chat-with-panel' : ''} ${privacySettings.addWatermark ? 'media-watermark-active' : ''}`}
+                className={`wa-main-chat ${(!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? 'wa-main-chat-with-panel' : ''} ${privacySettings.addWatermark ? 'media-watermark-active' : ''} ${isViewOncePreviewOpen ? 'wa-view-once-chat-active' : ''}`}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 style={{
@@ -22557,9 +23163,6 @@ export default function Chat() {
                             // Footer Input Area
                             <div className="wa-footer-wrapper">
                                 <div style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '4px' }}>
-                                    {/* Typing Link Preview */}
-                                    {renderComposerLinkPreview()}
-
                                     {accountLocked ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
                                             Account Permanently Locked. Please contact the administrator.
@@ -22652,12 +23255,12 @@ export default function Chat() {
                                                     isMeMsg={isMeMsg}
                                                 />
                                             ) : (
-                                                <div className="wa-input-pill" style={{ background: 'rgba(8, 19, 39, 0.86)', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: (replyingTo || showGrammarBar) ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 16px 34px rgba(2, 6, 23, 0.28)', border: '1px solid rgba(148, 163, 184, 0.22)', backdropFilter: 'blur(14px) saturate(135%)' }}>
+                                                <div className="wa-input-pill" style={{ background: 'rgba(8, 19, 39, 0.86)', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: (replyingTo || showGrammarBar || typingLinkPreview) ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 16px 34px rgba(2, 6, 23, 0.28)', border: '1px solid rgba(148, 163, 184, 0.22)', backdropFilter: 'blur(14px) saturate(135%)' }}>
                                                     {renderGrammarBar()}
                                                     {replyingTo && (
                                                         <div className="wa-reply-preview-container">
                                                             <div style={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
-                                                                {selectedGroup && (
+                                                                {replyingTo && (
                                                                     <div className="wa-reply-preview-header">
                                                                         <span className="wa-reply-preview-name">
                                                                             {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || replyingTo.sender_name || replyingTo.senderName || 'Member')}
@@ -22668,6 +23271,7 @@ export default function Chat() {
                                                                     {renderReplyLinkPreview(replyingTo) || (() => {
                                                                         if (replyingTo.is_view_once) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ViewOnceBadge size={14} /> <span>View once</span></span>;
                                                                         if (replyingTo.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
+                                                                        if (replyingTo.type === 'video') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Play size={14} color="#027EB5" fill="#027EB5" /> <span>Video</span></span>;
                                                                         if (replyingTo.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>{replyingTo.file_name || replyingTo.content || 'File'}</span></span>;
                                                                         if (replyingTo.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><List size={14} color="#027EB5" /> <span>{replyingTo.poll?.question || 'Poll'}</span></span>;
                                                                         if (replyingTo.type === 'voice' || replyingTo.type === 'audio') {
@@ -22688,15 +23292,23 @@ export default function Chat() {
                                                                     })()}
                                                                 </div>
                                                             </div>
-                                                            {replyingTo.type === 'image' && replyingTo.file_path && !replyingTo.is_view_once && (
-                                                                <div className="wa-reply-preview-thumb">
-                                                                    <img src={getMessageMediaUrl(replyingTo)} alt="thumbnail" />
+                                                            {(replyingTo.type === 'image' || replyingTo.type === 'video') && replyingTo.file_path && !replyingTo.is_view_once && (
+                                                                <div className={`wa-reply-preview-thumb ${replyingTo.type === 'video' ? 'is-video' : ''}`}>
+                                                                    {replyingTo.type === 'video' ? (
+                                                                        <>
+                                                                            <video src={getMessageMediaUrl(replyingTo)} muted playsInline preload="metadata" />
+                                                                            <span className="wa-reply-video-play"><Play size={16} fill="currentColor" /></span>
+                                                                        </>
+                                                                    ) : (
+                                                                        <img src={getMessageMediaUrl(replyingTo)} alt="thumbnail" />
+                                                                    )}
                                                                 </div>
                                                             )}
-                                                            <X size={24} className="wa-reply-preview-close" onClick={() => setReplyingTo(null)} />
+                                                            <X size={24} className="wa-link-preview-close" onClick={() => setReplyingTo(null)} />
                                                         </div>
                                                     )}
-                                                    <div style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '0 4px 0 12px', minHeight: '54px' }}>
+                                                    {renderComposerLinkPreview()}
+                                                    <div style={{ display: 'flex', alignItems: isComposerMultiline ? 'flex-end' : 'center', width: '100%', padding: '0 4px 0 12px', minHeight: '54px' }}>
                                                         <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
                                                             {renderAttachmentMenu()}
                                                             <button
@@ -22720,7 +23332,7 @@ export default function Chat() {
                                                                     className="wa-attachment-floating-hint"
                                                                     style={{ left: `${attachmentHintPos.x}px`, top: `${attachmentHintPos.y}px` }}
                                                                 >
-                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)
+                                                                    {renderAllowedFilesHint()}
                                                                 </div>
                                                             )}
                                                             <input
@@ -22747,7 +23359,10 @@ export default function Chat() {
                                                             {file && (
                                                                 <div className="wa-file-preview-badge">
                                                                     {file.name.substring(0, 15)}...
-                                                                    <button onClick={() => { setFile(null); setSelectedFiles([]); setIsViewOnceMedia(false); }}>✕</button>
+                                                                    {isCameraCapturedFile && (
+                                                                        <button type="button" className="wa-file-preview-retake" onClick={handleRetakeCameraCapture}>Retake</button>
+                                                                    )}
+                                                                    <button onClick={() => { setFile(null); setSelectedFiles([]); setIsViewOnceMedia(false); setIsCameraCapturedFile(false); }}>�</button>
                                                                 </div>
                                                             )}
                                                             <textarea
@@ -22757,7 +23372,10 @@ export default function Chat() {
                                                                 className="wa-input-box"
                                                                 placeholder={t('chat_window.input_placeholder')}
                                                                 value={input}
-                                                                onChange={(e) => setInput(e.target.value)}
+                                                                onChange={(e) => {
+                                                                    setInput(e.target.value);
+                                                                    resizeMessageComposer(e.target);
+                                                                }}
                                                                 onPaste={handlePaste}
                                                                 onKeyDown={(e) => {
                                                                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -22766,7 +23384,7 @@ export default function Chat() {
                                                                     }
                                                                 }}
                                                                 rows={1}
-                                                                style={{ resize: 'none', overflowY: 'auto' }}
+                                                                style={{ resize: 'none', overflowY: 'hidden' }}
                                                             />
                                                         </div>
                                                         <div className="wa-footer-right-icons-inner">
@@ -23243,10 +23861,6 @@ export default function Chat() {
                             <div className="wa-footer-wrapper">
 
                                 <div style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '4px' }}>
-                                    {/* Typing Link Preview */}
-                                    {renderComposerLinkPreview()}
-
-
                                     {accountLocked ? (
                                         <div style={{ width: '100%', padding: '12px', background: '#fff5f6', borderRadius: '12px', textAlign: 'center', color: '#991b1b', fontSize: '0.9rem', border: '1px solid #fee2e2' }}>
                                             Account Permanently Locked. Please contact the administrator.
@@ -23369,12 +23983,12 @@ export default function Chat() {
                                                     isMeMsg={isMeMsg}
                                                 />
                                             ) : (
-                                                <div className="wa-input-pill" style={{ background: 'rgba(8, 19, 39, 0.86)', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: (replyingTo || showGrammarBar) ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 16px 34px rgba(2, 6, 23, 0.28)', border: '1px solid rgba(148, 163, 184, 0.22)', backdropFilter: 'blur(14px) saturate(135%)' }}>
+                                                <div className="wa-input-pill" style={{ background: 'rgba(8, 19, 39, 0.86)', flexDirection: 'column', alignItems: 'stretch', padding: 0, borderRadius: (replyingTo || showGrammarBar || typingLinkPreview) ? '16px' : '30px', transition: 'border-radius 0.2s', boxShadow: '0 16px 34px rgba(2, 6, 23, 0.28)', border: '1px solid rgba(148, 163, 184, 0.22)', backdropFilter: 'blur(14px) saturate(135%)' }}>
                                                     {renderGrammarBar()}
                                                     {replyingTo && (
                                                         <div className="wa-reply-preview-container">
                                                             <div style={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
-                                                                {selectedGroup && (
+                                                                {replyingTo && (
                                                                     <div className="wa-reply-preview-header">
                                                                         <span className="wa-reply-preview-name">
                                                                             {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || replyingTo.sender_name || replyingTo.senderName || 'Member')}
@@ -23385,6 +23999,7 @@ export default function Chat() {
                                                                     {renderReplyLinkPreview(replyingTo) || (() => {
                                                                         if (replyingTo.is_view_once) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ViewOnceBadge size={14} /> <span>View once</span></span>;
                                                                         if (replyingTo.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
+                                                                        if (replyingTo.type === 'video') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Play size={14} color="#027EB5" fill="#027EB5" /> <span>Video</span></span>;
                                                                         if (replyingTo.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>{replyingTo.file_name || replyingTo.content || 'File'}</span></span>;
                                                                         if (replyingTo.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><List size={14} color="#027EB5" /> <span>{replyingTo.poll?.question || 'Poll'}</span></span>;
                                                                         if (replyingTo.type === 'voice' || replyingTo.type === 'audio') {
@@ -23415,10 +24030,17 @@ export default function Chat() {
                                                                 </div>
                                                             </div>
                                                             {(() => {
-                                                                if (replyingTo.type === 'image' && replyingTo.file_path && !replyingTo.is_view_once) {
+                                                                if ((replyingTo.type === 'image' || replyingTo.type === 'video') && replyingTo.file_path && !replyingTo.is_view_once) {
                                                                     return (
-                                                                        <div className="wa-reply-preview-thumb">
-                                                                            <img src={getMessageMediaUrl(replyingTo)} alt="thumbnail" />
+                                                                        <div className={`wa-reply-preview-thumb ${replyingTo.type === 'video' ? 'is-video' : ''}`}>
+                                                                            {replyingTo.type === 'video' ? (
+                                                                                <>
+                                                                                    <video src={getMessageMediaUrl(replyingTo)} muted playsInline preload="metadata" />
+                                                                                    <span className="wa-reply-video-play"><Play size={16} fill="currentColor" /></span>
+                                                                                </>
+                                                                            ) : (
+                                                                                <img src={getMessageMediaUrl(replyingTo)} alt="thumbnail" />
+                                                                            )}
                                                                         </div>
                                                                     );
                                                                 }
@@ -23459,10 +24081,11 @@ export default function Chat() {
                                                                 }
                                                                 return null;
                                                             })()}
-                                                            <X size={24} className="wa-reply-preview-close" onClick={() => setReplyingTo(null)} />
+                                                            <X size={24} className="wa-link-preview-close" onClick={() => setReplyingTo(null)} />
                                                         </div>
                                                     )}
-                                                    <div style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '0 4px 0 12px', minHeight: '54px' }}>
+                                                    {renderComposerLinkPreview()}
+                                                    <div style={{ display: 'flex', alignItems: isComposerMultiline ? 'flex-end' : 'center', width: '100%', padding: '0 4px 0 12px', minHeight: '54px' }}>
                                                         <div className="wa-footer-left-icons" style={{ position: 'relative' }}>
                                                             {renderAttachmentMenu()}
                                                             <button
@@ -23486,7 +24109,7 @@ export default function Chat() {
                                                                     className="wa-attachment-floating-hint"
                                                                     style={{ left: `${attachmentHintPos.x}px`, top: `${attachmentHintPos.y}px` }}
                                                                 >
-                                                                    Allowed files: JPG, JPEG, PNG, DOC, DOCX, PPT, PDF, Excel, Video (up to 1GB)
+                                                                    {renderAllowedFilesHint()}
                                                                 </div>
                                                             )}
                                                             <input
@@ -23513,7 +24136,10 @@ export default function Chat() {
                                                             {file && (
                                                                 <div className="wa-file-preview-badge">
                                                                     {file.name.substring(0, 15)}...
-                                                                    <button onClick={() => { setFile(null); setSelectedFiles([]); setIsViewOnceMedia(false); }}>×</button>
+                                                                    {isCameraCapturedFile && (
+                                                                        <button type="button" className="wa-file-preview-retake" onClick={handleRetakeCameraCapture}>Retake</button>
+                                                                    )}
+                                                                    <button onClick={() => { setFile(null); setSelectedFiles([]); setIsViewOnceMedia(false); setIsCameraCapturedFile(false); }}>�</button>
                                                                 </div>
                                                             )}
                                                             <textarea
@@ -23523,7 +24149,10 @@ export default function Chat() {
                                                                 className="wa-input-box"
                                                                 placeholder={t('chat_window.input_placeholder')}
                                                                 value={input}
-                                                                onChange={(e) => setInput(e.target.value)}
+                                                                onChange={(e) => {
+                                                                    setInput(e.target.value);
+                                                                    resizeMessageComposer(e.target);
+                                                                }}
                                                                 onPaste={handlePaste}
                                                                 onKeyDown={(e) => {
                                                                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -23532,7 +24161,7 @@ export default function Chat() {
                                                                     }
                                                                 }}
                                                                 rows={1}
-                                                                style={{ resize: 'none', overflowY: 'auto' }}
+                                                                style={{ resize: 'none', overflowY: 'hidden' }}
                                                             />
                                                         </div>
                                                         <div className="wa-footer-right-icons-inner">
@@ -23572,7 +24201,7 @@ export default function Chat() {
                 )}
 
                 {/* Shared Scroll-to-bottom Button positioned in wa-main-chat parent */}
-                {showScrollBtn && (selectedUser || selectedGroup) && (window.innerWidth > 768 || !(isMessageSearchOpen || isContactInfoOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen)) && (
+                {showScrollBtn && !isViewOncePreviewOpen && cameraModal !== 'active' && (selectedUser || selectedGroup) && (window.innerWidth > 768 || !(isMessageSearchOpen || isContactInfoOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen)) && (
                     <button
                         className="wa-scroll-to-bottom-btn"
                         onClick={() => {
@@ -25649,8 +26278,9 @@ export default function Chat() {
                         bottom: 40,
                         left: '50%',
                         transform: 'translateX(-50%)',
-                        background: 'rgba(17, 27, 33, 0.85)',
-                        backdropFilter: 'blur(20px)',
+                        background: 'linear-gradient(180deg, rgba(7, 26, 44, 0.94), rgba(5, 18, 32, 0.94))',
+                        backdropFilter: 'blur(20px) saturate(135%)',
+                        WebkitBackdropFilter: 'blur(20px) saturate(135%)',
                         color: 'white',
                         padding: '16px 28px',
                         borderRadius: '24px',
@@ -25660,19 +26290,20 @@ export default function Chat() {
                         alignItems: 'center',
                         gap: '8px',
                         boxShadow: '0 12px 48px rgba(0,0,0,0.4)',
-                        border: '1px solid rgba(255,255,255,0.12)',
+                        border: '1px solid rgba(56, 189, 248, 0.22)',
+                        maxWidth: 'min(720px, calc(100vw - 48px))',
                         animation: 'wa-slide-up-fixed 0.4s cubic-bezier(0.19, 1, 0.22, 1)'
                     }}
                     className="wa-opening-file-status"
                 >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <Loader2 className="wa-spin" size={20} color="#0EA5BE" />
-                        <div style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.2px' }}>
+                        <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 0 }}>
                             Opening <span style={{ color: "#0EA5BE" }}>{openingFile}</span>
                         </div>
                     </div>
-                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', fontWeight: 400 }}>
-                        If browser asks for permission, please click <strong style={{ color: 'white' }}>Open</strong>.
+                    <div style={{ fontSize: 12, color: 'rgba(219,234,254,0.7)', fontWeight: 500 }}>
+                        Preparing the file and launching your system app.
                     </div>
                 </div>
             )}
@@ -27014,7 +27645,14 @@ export default function Chat() {
 
             {/* View Once Fullscreen Player Overlay */}
             {activeViewOnceMsg && (
-                <div className="wa-view-once-fullscreen">
+                <div
+                    className="wa-view-once-fullscreen"
+                    onDragStart={(e) => e.preventDefault()}
+                    onContextMenu={(e) => e.preventDefault()}
+                    onPointerMove={(e) => {
+                        if (e.buttons) e.preventDefault();
+                    }}
+                >
                     <div className="wa-view-once-content">
                         <div className="wa-view-once-header">
                             <h2 style={{ fontSize: '28px', color: '#0EA5BE', marginBottom: '8px' }}>{activeViewOnceMsg.sender_id?.name || selectedUser?.name || 'Voice Message'}</h2>
@@ -27343,6 +27981,12 @@ export default function Chat() {
         </>
     );
 }
+
+
+
+
+
+
 
 
 
