@@ -313,6 +313,110 @@ const respondNoMedia = (req, res) => {
     return res.end(svgBuffer);
 };
 
+const toObjectId = (value) => new mongoose.Types.ObjectId(String(value));
+
+const getUserGroupVisibilityWindows = async (userId) => {
+    const groups = await Group.find({
+        $or: [
+            { members: userId },
+            { removedMembers: userId },
+            { admin: userId },
+            { admins: userId }
+        ]
+    }).select('_id admin admins userHistory members removedMembers');
+
+    return groups.map((group) => {
+        const historyEntry = (group.userHistory || []).find((entry) => String(entry.user) === String(userId));
+        return {
+            groupId: group._id,
+            visibleFrom: historyEntry?.visibleFrom || new Date(0)
+        };
+    });
+};
+
+const buildDateRangeFromRequest = ({ mode, month, startDate, endDate }) => {
+    if (mode === 'month') {
+        const normalizedMonth = String(month || '').trim();
+        if (!/^\d{4}-\d{2}$/.test(normalizedMonth)) {
+            throw new Error('Invalid month value');
+        }
+
+        const [yearRaw, monthRaw] = normalizedMonth.split('-');
+        const year = Number(yearRaw);
+        const monthIndex = Number(monthRaw) - 1;
+        const start = new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0, 0));
+        const endExclusive = new Date(Date.UTC(year, monthIndex + 1, 1, 0, 0, 0, 0));
+        return { start, endExclusive, label: normalizedMonth };
+    }
+
+    const normalizedStart = String(startDate || '').trim();
+    const normalizedEnd = String(endDate || '').trim();
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedStart) || !/^\d{4}-\d{2}-\d{2}$/.test(normalizedEnd)) {
+        throw new Error('Invalid date range');
+    }
+
+    const start = new Date(`${normalizedStart}T00:00:00.000Z`);
+    const endExclusive = new Date(`${normalizedEnd}T00:00:00.000Z`);
+    endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(endExclusive.getTime())) {
+        throw new Error('Invalid date range');
+    }
+    if (start >= endExclusive) {
+        throw new Error('Start date must be before end date');
+    }
+
+    return { start, endExclusive, label: `${normalizedStart} to ${normalizedEnd}` };
+};
+
+const aggregateMonthlyBuckets = async (Model, match) => {
+    const rows = await Model.aggregate([
+        { $match: match },
+        {
+            $group: {
+                _id: {
+                    year: { $year: '$created_at' },
+                    month: { $month: '$created_at' }
+                },
+                count: { $sum: 1 }
+            }
+        }
+    ]);
+
+    return rows.map((row) => {
+        const year = row?._id?.year;
+        const month = row?._id?.month;
+        if (!year || !month) return null;
+        const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+        return {
+            monthKey,
+            count: Number(row.count || 0)
+        };
+    }).filter(Boolean);
+};
+
+const summarizeMonthlyBuckets = (rows) => {
+    const merged = new Map();
+    rows.forEach((row) => {
+        const existing = merged.get(row.monthKey) || { monthKey: row.monthKey, count: 0 };
+        existing.count += Number(row.count || 0);
+        merged.set(row.monthKey, existing);
+    });
+
+    return Array.from(merged.values())
+        .sort((a, b) => String(b.monthKey).localeCompare(String(a.monthKey)))
+        .map((row) => {
+            const [year, month] = row.monthKey.split('-').map(Number);
+            const date = new Date(Date.UTC(year, (month || 1) - 1, 1));
+            return {
+                key: row.monthKey,
+                label: date.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
+                count: row.count
+            };
+        });
+};
+
 // Authenticated media endpoint with path recovery for legacy files.
 router.get('/media', (req, res) => {
     const decoded = verifyTokenFromRequest(req);
@@ -684,6 +788,13 @@ router.get('/users', authenticateToken, async (req, res) => {
                     deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
                 }).sort({ created_at: -1 }).populate('user_id', 'name _id').then(r => r ? (typeof r.toObject === 'function' ? r.toObject() : r) : null);
 
+                const totalMessageCount = await Message.countDocuments({
+                    $or: [
+                        { user_id: new mongoose.Types.ObjectId(currentUserId), receiver_id: new mongoose.Types.ObjectId(u._id) },
+                        { user_id: new mongoose.Types.ObjectId(u._id), receiver_id: new mongoose.Types.ObjectId(currentUserId) }
+                    ]
+                });
+
                 // 2. Get Unread Count
                 const unreadCount = await Message.countDocuments({
                     user_id: new mongoose.Types.ObjectId(u._id),
@@ -734,6 +845,7 @@ router.get('/users', authenticateToken, async (req, res) => {
                 return {
                     ...userObj,
                     lastMessage: effectiveLastMsg,
+                    hasAnyHistory: totalMessageCount > 0 || !!isAccepted,
                     unreadCount: isAccepted ? unreadCount : (isPendingForMe ? 1 : 0),
                     mediaCount: isAccepted ? mediaCount : 0,
                     docCount: isAccepted ? docCount : 0,
@@ -757,6 +869,7 @@ router.get('/users', authenticateToken, async (req, res) => {
                 return {
                     ...userObj,
                     lastMessage: null,
+                    hasAnyHistory: false,
                     unreadCount: 0,
                     error: true
                 };
@@ -1404,18 +1517,37 @@ router.post('/messages/mark-unread', authenticateToken, async (req, res) => {
 router.get('/messages/starred/all', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
+        const userIdObj = toObjectId(userId);
 
         // Fetch starred P2P messages
-        const p2pStarred = await Message.find({ starred_by: userId })
+        const p2pStarred = await Message.find({
+            starred_by: userId,
+            deleted_for: { $ne: userIdObj }
+        })
             .populate('user_id', 'name image mobile __enc_name __enc_mobile')
             .populate('receiver_id', 'name image mobile __enc_name __enc_mobile')
             .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
 
+        const groupVisibilityWindows = await getUserGroupVisibilityWindows(userId);
+        const visibleGroupIds = groupVisibilityWindows.map((entry) => entry.groupId);
+
         // Fetch starred Group messages
-        const groupStarred = await GroupMessage.find({ starred_by: userId })
+        let groupStarred = [];
+        if (visibleGroupIds.length > 0) {
+            groupStarred = await GroupMessage.find({
+                starred_by: userId,
+                deleted_for: { $ne: userIdObj },
+                group_id: { $in: visibleGroupIds }
+            })
             .populate('sender_id', 'name image mobile __enc_name __enc_mobile')
             .populate('group_id', 'name icon')
             .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
+            const visibilityMap = new Map(groupVisibilityWindows.map((entry) => [String(entry.groupId), entry.visibleFrom]));
+            groupStarred = groupStarred.filter((msg) => {
+                const visibleFrom = visibilityMap.get(String(msg.group_id?._id || msg.group_id));
+                return !visibleFrom || new Date(msg.created_at) >= new Date(visibleFrom);
+            });
+        }
 
         // Standardize output
         const combined = [
@@ -1429,29 +1561,129 @@ router.get('/messages/starred/all', authenticateToken, async (req, res) => {
     }
 });
 
+router.get('/chat/delete-history/months', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const userIdObj = toObjectId(userId);
+
+        const p2pRows = await aggregateMonthlyBuckets(Message, {
+            $or: [
+                { user_id: userIdObj },
+                { receiver_id: userIdObj }
+            ],
+            deleted_for: { $ne: userIdObj }
+        });
+
+        const groupVisibilityWindows = await getUserGroupVisibilityWindows(userId);
+        const groupRowsNested = await Promise.all(groupVisibilityWindows.map(({ groupId, visibleFrom }) => (
+            aggregateMonthlyBuckets(GroupMessage, {
+                group_id: groupId,
+                deleted_for: { $ne: userIdObj },
+                created_at: { $gte: visibleFrom }
+            })
+        )));
+
+        const months = summarizeMonthlyBuckets([
+            ...p2pRows,
+            ...groupRowsNested.flat()
+        ]);
+
+        res.json({ months });
+    } catch (err) {
+        console.error('[DELETE HISTORY MONTHS ERROR]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.post('/chat/delete-history/range', authenticateToken, async (req, res) => {
+    const userId = req.user.id;
+    try {
+        const { mode = 'range', month, startDate, endDate } = req.body || {};
+        const { start, endExclusive, label } = buildDateRangeFromRequest({ mode, month, startDate, endDate });
+        const userDoc = await User.findById(userId).select('privacySettings');
+        if (!userDoc?.privacySettings?.clearChatDataEnabled) {
+            return res.status(403).json({ error: 'Clear chat data is disabled for this account.' });
+        }
+
+        const userIdObj = toObjectId(userId);
+        const p2pFilter = {
+            $or: [
+                { user_id: userIdObj },
+                { receiver_id: userIdObj }
+            ],
+            deleted_for: { $ne: userIdObj },
+            created_at: { $gte: start, $lt: endExclusive }
+        };
+
+        const p2pResult = await Message.updateMany(p2pFilter, {
+            $addToSet: { deleted_for: userIdObj },
+            $pull: { starred_by: userIdObj }
+        });
+
+        const groupVisibilityWindows = await getUserGroupVisibilityWindows(userId);
+        let groupModifiedCount = 0;
+
+        for (const { groupId, visibleFrom } of groupVisibilityWindows) {
+            const effectiveStart = start > visibleFrom ? start : visibleFrom;
+            if (effectiveStart >= endExclusive) continue;
+            const groupResult = await GroupMessage.updateMany({
+                group_id: groupId,
+                deleted_for: { $ne: userIdObj },
+                created_at: { $gte: effectiveStart, $lt: endExclusive }
+            }, {
+                $addToSet: { deleted_for: userIdObj },
+                $pull: { starred_by: userIdObj }
+            });
+            groupModifiedCount += Number(groupResult.modifiedCount || 0);
+        }
+
+        res.json({
+            status: 'success',
+            summary: {
+                label,
+                p2pDeleted: Number(p2pResult.modifiedCount || 0),
+                groupDeleted: groupModifiedCount,
+                totalDeleted: Number(p2pResult.modifiedCount || 0) + groupModifiedCount
+            }
+        });
+    } catch (err) {
+        console.error('[DELETE HISTORY RANGE ERROR]', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Fetch user event reminders
 router.get('/events/reminders', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
+        const userIdObj = toObjectId(userId);
 
         // All P2P events for the user
         const p2pEvents = await Message.find({
             type: 'event',
-            $or: [{ user_id: userId }, { receiver_id: userId }]
+            $or: [{ user_id: userIdObj }, { receiver_id: userIdObj }],
+            deleted_for: { $ne: userIdObj }
         })
             .populate('user_id', 'name image')
             .populate('receiver_id', 'name image');
 
-        // All Group events where user is a member
-        const userGroups = await Group.find({ members: userId }).select('_id');
-        const userGroupIds = userGroups.map(g => g._id);
+        const groupVisibilityWindows = await getUserGroupVisibilityWindows(userId);
+        let groupEvents = [];
 
-        const groupEvents = await GroupMessage.find({
-            type: 'event',
-            group_id: { $in: userGroupIds }
-        })
-            .populate('sender_id', 'name image')
-            .populate('group_id', 'name icon');
+        for (const { groupId, visibleFrom } of groupVisibilityWindows) {
+            const visibleGroupEvents = await GroupMessage.find({
+                type: 'event',
+                group_id: groupId,
+                deleted_for: { $ne: userIdObj },
+                created_at: { $gte: visibleFrom }
+            })
+                .populate('sender_id', 'name image')
+                .populate('group_id', 'name icon');
+
+            if (visibleGroupEvents.length > 0) {
+                groupEvents.push(...visibleGroupEvents);
+            }
+        }
 
         const toSortableTs = (msg) => {
             const start = msg?.event?.startDate;

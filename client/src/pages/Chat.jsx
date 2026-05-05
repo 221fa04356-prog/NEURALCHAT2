@@ -34,6 +34,7 @@ const SCREENSHOT_PROTECTION_CLASS = 'wa-screenshot-protection-active';
 const SCREENSHOT_INLINE_APPLIED_ATTR = 'data-wa-screenshot-inline-applied';
 const SCREENSHOT_OVERLAY_ID = 'wa-dom-screenshot-mask';
 const SCREENSHOT_APP_HIDDEN_ATTR = 'data-wa-screenshot-app-hidden';
+const getHiddenRemindersStorageKey = (userId) => `wa-hidden-reminders-${String(userId || 'anonymous')}`;
 
 const ensureScreenshotProtectionOverlay = () => {
     let overlay = document.getElementById(SCREENSHOT_OVERLAY_ID);
@@ -433,6 +434,7 @@ const createDefaultPrivacySettings = () => ({
     notifyOnScreenshot: true,
     blurOnScreenshot: false,
     addWatermark: false,
+    clearChatDataEnabled: false,
     restrictApprovedDevices: false,
     requireApprovalNewDevice: true,
     autoLockLocationChange: false,
@@ -487,6 +489,13 @@ const normalizePrivacySettings = (rawSettings) => {
     merged.forwardLimit = [1, 3, 5, 10].includes(Number(rawSettings?.forwardLimit))
         ? Number(rawSettings.forwardLimit)
         : defaults.forwardLimit;
+    merged.notifyOnForward = rawSettings?.notifyOnForward === true;
+    merged.screenshotDetection = rawSettings?.screenshotDetection !== false;
+    merged.notifyOnScreenshot = rawSettings?.notifyOnScreenshot !== false;
+    merged.blurOnScreenshot = rawSettings?.blurOnScreenshot === true;
+    merged.addWatermark = rawSettings?.addWatermark === true;
+    merged.clearChatDataEnabled = rawSettings?.clearChatDataEnabled === true;
+    merged.autoArchiveConversations = rawSettings?.autoArchiveConversations === true;
 
     return merged;
 };
@@ -1577,6 +1586,8 @@ export default function Chat() {
     const [searchQuery, setSearchQuery] = useState('');
     const [newChatSearchQuery, setNewChatSearchQuery] = useState('');
     const [groupSearchQuery, setGroupSearchQuery] = useState('');
+    const [groupInfoSearchQuery, setGroupInfoSearchQuery] = useState('');
+    const [isGroupInfoSearchOpen, setIsGroupInfoSearchOpen] = useState(false);
     const [selectedGroupMembers, setSelectedGroupMembers] = useState([]);
     const [isMessageSearchOpen, setIsMessageSearchOpen] = useState(false);
 
@@ -1920,12 +1931,39 @@ export default function Chat() {
     const [isRemindersModalOpen, setIsRemindersModalOpen] = useState(false);
     const [remindersList, setRemindersList] = useState([]);
     const remindersListRef = useRef([]);
+    const [hiddenReminderIds, setHiddenReminderIds] = useState([]);
     const [unreadRemindersCount, setUnreadRemindersCount] = useState(0);
     const [eventEditTarget, setEventEditTarget] = useState(null);
+    const [isClearRemindersConfirmOpen, setIsClearRemindersConfirmOpen] = useState(false);
+
+    const visibleReminders = useMemo(() => {
+        const hiddenSet = new Set((hiddenReminderIds || []).map(String));
+        return (remindersList || []).filter((m) => !hiddenSet.has(String(m?._id || m?.id || '')));
+    }, [remindersList, hiddenReminderIds]);
 
     useEffect(() => {
-        remindersListRef.current = remindersList;
-    }, [remindersList]);
+        remindersListRef.current = visibleReminders;
+    }, [visibleReminders]);
+
+    useEffect(() => {
+        const uid = user?.id || user?._id;
+        if (!uid) {
+            setHiddenReminderIds([]);
+            return;
+        }
+        try {
+            const stored = JSON.parse(localStorage.getItem(getHiddenRemindersStorageKey(uid)) || '[]');
+            setHiddenReminderIds(Array.isArray(stored) ? stored.map(String) : []);
+        } catch (_) {
+            setHiddenReminderIds([]);
+        }
+    }, [user?.id, user?._id]);
+
+    useEffect(() => {
+        const uid = user?.id || user?._id;
+        if (!uid) return;
+        localStorage.setItem(getHiddenRemindersStorageKey(uid), JSON.stringify((hiddenReminderIds || []).map(String)));
+    }, [hiddenReminderIds, user?.id, user?._id]);
 
     useEffect(() => {
         const checkUnread = () => {
@@ -1933,7 +1971,7 @@ export default function Chat() {
             if (!uid) return;
             const lastChecked = parseInt(localStorage.getItem(`lastRemindersChecked_${uid}`) || '0', 10);
             let count = 0;
-            remindersList.forEach(m => {
+            visibleReminders.forEach(m => {
                 const ev = m.event;
                 if (!ev || ev.cancelled) return;
 
@@ -1948,11 +1986,11 @@ export default function Chat() {
             setUnreadRemindersCount(count);
         };
         checkUnread();
-    }, [remindersList, user]);
+    }, [visibleReminders, user]);
 
     const scheduledEventsCount = useMemo(() => (
-        (remindersList || []).filter((m) => m?.event && !m.event.cancelled).length
-    ), [remindersList]);
+        (visibleReminders || []).filter((m) => m?.event && !m.event.cancelled).length
+    ), [visibleReminders]);
 
     const [isCancelEventConfirmOpen, setIsCancelEventConfirmOpen] = useState(false);
     const [eventTick, setEventTick] = useState(0); // For global re-render of expired states
@@ -2057,12 +2095,12 @@ export default function Chat() {
         };
     }, [viewingImage, isAppAsleep, file, selectedFiles]);
 
-    const fetchReminders = async () => {
+    const fetchReminders = async (force = false) => {
         try {
             const now = Date.now();
             if (now < (remindersErrorRef.current.pauseUntil || 0)) return;
-            if (remindersErrorRef.current.isFetching) return;
-            if (now - (remindersErrorRef.current.lastFetchAt || 0) < 30000) return;
+            if (remindersErrorRef.current.isFetching && !force) return;
+            if (!force && now - (remindersErrorRef.current.lastFetchAt || 0) < 30000) return;
             const token = localStorage.getItem('token');
             if (!token) return;
             remindersErrorRef.current.isFetching = true;
@@ -2088,6 +2126,36 @@ export default function Chat() {
         } finally {
             remindersErrorRef.current.isFetching = false;
         }
+    };
+
+    const handleClearAllReminders = () => {
+        if ((visibleReminders || []).length === 0) {
+            setSnackbar({ message: 'No reminders to clear.', type: 'info', variant: 'system' });
+            return;
+        }
+        setIsClearRemindersConfirmOpen(true);
+    };
+
+    const confirmClearAllReminders = () => {
+        const idsToHide = (visibleReminders || [])
+            .map((m) => String(m?._id || m?.id || ''))
+            .filter(Boolean);
+        if (idsToHide.length === 0) {
+            setIsClearRemindersConfirmOpen(false);
+            return;
+        }
+        setHiddenReminderIds((prev) => Array.from(new Set([...(prev || []).map(String), ...idsToHide])));
+        const uid = user?.id || user?._id;
+        if (uid) {
+            localStorage.setItem(`lastRemindersChecked_${uid}`, Date.now().toString());
+        }
+        setUnreadRemindersCount(0);
+        setIsClearRemindersConfirmOpen(false);
+        setSnackbar({
+            message: `${idsToHide.length} reminder${idsToHide.length === 1 ? '' : 's'} cleared from this panel.`,
+            type: 'success',
+            variant: 'system'
+        });
     };
 
     useEffect(() => {
@@ -2218,6 +2286,14 @@ export default function Chat() {
     const [isSavingPrivacy, setIsSavingPrivacy] = useState(false);
     const [isScreenshotPrivacyMaskActive, setIsScreenshotPrivacyMaskActive] = useState(false);
     const [screenshotPrivacySource, setScreenshotPrivacySource] = useState('');
+    const [isClearChatDataModalOpen, setIsClearChatDataModalOpen] = useState(false);
+    const [clearChatDataMode, setClearChatDataMode] = useState('month');
+    const [clearChatDataMonths, setClearChatDataMonths] = useState([]);
+    const [isClearChatDataLoading, setIsClearChatDataLoading] = useState(false);
+    const [selectedClearChatMonth, setSelectedClearChatMonth] = useState('');
+    const [clearChatDateRange, setClearChatDateRange] = useState({ startDate: '', endDate: '' });
+    const [pendingClearChatDelete, setPendingClearChatDelete] = useState(null);
+    const [isClearChatDataSubmitting, setIsClearChatDataSubmitting] = useState(false);
     const [isDeleteChatConfirmOpen, setIsDeleteChatConfirmOpen] = useState(false);
     const [isEncryptionInfoOpen, setIsEncryptionInfoOpen] = useState(false);
     const [encryptionVerifyData, setEncryptionVerifyData] = useState({
@@ -3580,9 +3656,139 @@ export default function Chat() {
             notifyOnScreenshot: 'Screenshot notifications',
             blurOnScreenshot: 'Screenshot blur protection',
             addWatermark: 'Media watermark',
+            clearChatDataEnabled: 'Clear chat data',
             autoArchiveConversations: 'Auto-archive',
         };
         await persistPrivacySettings(next, `${labels[key] || 'Privacy setting'} updated`);
+    };
+
+    const fetchClearChatDataMonths = async () => {
+        setIsClearChatDataLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.get('/api/chat/chat/delete-history/months', {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            const months = Array.isArray(res.data?.months) ? res.data.months : [];
+            setClearChatDataMonths(months);
+            if (!selectedClearChatMonth && months[0]?.key) {
+                setSelectedClearChatMonth(months[0].key);
+            }
+        } catch (err) {
+            console.error('Failed to load clear-chat month options', err);
+            setSnackbar({ message: err.response?.data?.error || 'Unable to load chat history months', type: 'error' });
+        } finally {
+            setIsClearChatDataLoading(false);
+        }
+    };
+
+    const openClearChatDataModal = () => {
+        if (!privacySettings.clearChatDataEnabled) {
+            setSnackbar({ message: 'Turn on Clear chat data first to use this action.', type: 'info', variant: 'system' });
+            return;
+        }
+        setPendingClearChatDelete(null);
+        setIsClearChatDataModalOpen(true);
+        fetchClearChatDataMonths();
+    };
+
+    const closeClearChatDataModal = () => {
+        if (isClearChatDataSubmitting) return;
+        setIsClearChatDataModalOpen(false);
+        setPendingClearChatDelete(null);
+    };
+
+    const describeClearChatSelection = (payload) => {
+        if (payload.mode === 'month') {
+            const matched = clearChatDataMonths.find((item) => item.key === payload.month);
+            return matched?.label || payload.month;
+        }
+        return `${payload.startDate} to ${payload.endDate}`;
+    };
+
+    const buildClearChatPayload = () => {
+        if (clearChatDataMode === 'month') {
+            if (!selectedClearChatMonth) {
+                throw new Error('Choose a month to clear.');
+            }
+            return { mode: 'month', month: selectedClearChatMonth };
+        }
+
+        const startDate = String(clearChatDateRange.startDate || '').trim();
+        const endDate = String(clearChatDateRange.endDate || '').trim();
+        if (!startDate || !endDate) {
+            throw new Error('Choose both a start date and an end date.');
+        }
+        if (new Date(`${startDate}T00:00:00`) > new Date(`${endDate}T00:00:00`)) {
+            throw new Error('The start date must be before the end date.');
+        }
+        return { mode: 'range', startDate, endDate };
+    };
+
+    const requestClearChatDataDelete = () => {
+        if (!privacySettings.clearChatDataEnabled) {
+            setSnackbar({ message: 'Turn on Clear chat data first to use this action.', type: 'info', variant: 'system' });
+            return;
+        }
+        try {
+            const payload = buildClearChatPayload();
+            setPendingClearChatDelete({
+                ...payload,
+                summary: describeClearChatSelection(payload)
+            });
+        } catch (err) {
+            setSnackbar({ message: err.message || 'Please complete your selection first.', type: 'error' });
+        }
+    };
+
+    const handleConfirmClearChatData = async () => {
+        if (!pendingClearChatDelete) return;
+        setIsClearChatDataSubmitting(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.post('/api/chat/chat/delete-history/range', pendingClearChatDelete, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            messageCacheByUserRef.current = {};
+            setMessages([]);
+            setGroupMessages([]);
+            setPendingClearChatDelete(null);
+            setIsClearChatDataModalOpen(false);
+
+            await Promise.all([
+                fetchUsers(),
+                fetchGroups(),
+                fetchCommunities(),
+                fetchMessageRequests(),
+                fetchGlobalStarredMessages(false),
+                fetchReminders(true)
+            ]);
+
+            const activeSelectedUserId = selectedUserRef.current?._id || selectedUserRef.current?.id;
+            const activeSelectedGroupId = selectedGroupRef.current?._id || selectedGroupRef.current?.id;
+
+            if (activeSelectedUserId) {
+                await fetchP2PRequest(activeSelectedUserId);
+            } else if (activeSelectedGroupId) {
+                await fetchGroupMessages(activeSelectedGroupId);
+            }
+
+            const deletedTotal = res.data?.summary?.totalDeleted ?? 0;
+            const deletedLabel = res.data?.summary?.label || pendingClearChatDelete.summary;
+            setSnackbar({
+                message: deletedTotal > 0
+                    ? `${deletedTotal} chat item${deletedTotal === 1 ? '' : 's'} hidden for your account from ${deletedLabel}.`
+                    : `No visible chat data was found for ${deletedLabel}.`,
+                type: 'success',
+                variant: 'system'
+            });
+        } catch (err) {
+            console.error('Clear chat data failed', err);
+            setSnackbar({ message: err.response?.data?.error || 'Failed to clear chat data', type: 'error' });
+        } finally {
+            setIsClearChatDataSubmitting(false);
+        }
     };
 
     const currentViewerId = String(user.id || user._id || userData?._id || userData?.id || '');
@@ -3869,6 +4075,13 @@ export default function Chat() {
     const [isCommunityHomeOpen, setIsCommunityHomeOpen] = useState(false);
     const [selectedCommunity, setSelectedCommunity] = useState(null);
     useEffect(() => { selectedCommunityRef.current = selectedCommunity; }, [selectedCommunity]);
+
+    useEffect(() => {
+        if (!isContactInfoOpen) {
+            setIsGroupInfoSearchOpen(false);
+            setGroupInfoSearchQuery('');
+        }
+    }, [isContactInfoOpen, selectedGroup?._id, selectedCommunity?._id]);
 
     const effectiveArchivedChatIds = useMemo(() => {
         const ids = new Set(archivedChatIds.map(id => String(id)));
@@ -11286,18 +11499,18 @@ export default function Chat() {
 
         return (
             <div className={`wa-profile-drawer wa-new-chat-drawer ${isNewChatOpen ? 'active' : ''}`}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef', boxSizing: 'border-box', width: '100%' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', boxSizing: 'border-box', width: '100%' }}>
                     <button
                         onClick={() => setIsNewChatOpen(false)}
-                        style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 10, display: 'flex', alignItems: 'center', width: 32, padding: 0, flexShrink: 0 }}
+                        style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', marginRight: 10, display: 'flex', alignItems: 'center', width: 32, padding: 0, flexShrink: 0 }}
                     >
                         <X size={24} />
                     </button>
-                    <span style={{ fontSize: 19, fontWeight: 500, color: '#3b4a54', whiteSpace: 'nowrap', flexShrink: 0 }}>{t('new_chat.title')}</span>
+                    <span style={{ fontSize: 19, fontWeight: 600, color: '#f8fafc', whiteSpace: 'nowrap', flexShrink: 0, letterSpacing: '-0.01em' }}>{t('new_chat.title')}</span>
                     <div style={{ flex: 1 }}></div>
                     <button
                         onClick={() => setIsPhoneNumberPanelOpen(true)}
-                        style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', alignItems: 'center', width: 32, padding: 0, flexShrink: 0 }}
+                        style={{ background: 'none', border: 'none', color: '#e2e8f0', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, padding: 0, flexShrink: 0, opacity: 0.95 }}
                     >
                         <LayoutGrid size={22} />
                     </button>
@@ -16040,8 +16253,43 @@ export default function Chat() {
                         <div style={{ background: itemBgColor, padding: '14px 0' }}>
                             <div style={{ padding: '0 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                                 <span style={{ color: subTextColor, fontSize: 14, fontWeight: 500 }}>{membersCount} members</span>
-                                <Search size={20} color={subTextColor} style={{ cursor: 'pointer' }} />
+                                <Search
+                                    size={20}
+                                    color={subTextColor}
+                                    style={{ cursor: 'pointer' }}
+                                    onClick={() => {
+                                        setIsGroupInfoSearchOpen((prev) => {
+                                            const next = !prev;
+                                            if (!next) setGroupInfoSearchQuery('');
+                                            return next;
+                                        });
+                                    }}
+                                />
                             </div>
+                            {isGroupInfoSearchOpen && (
+                                <div style={{ padding: '0 30px 18px' }}>
+                                    <div className="wa-group-info-search-shell" style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: 12, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                                        <Search size={18} color={subTextColor} />
+                                        <input
+                                            className="wa-group-info-search-input"
+                                            type="text"
+                                            placeholder="Search members"
+                                            value={groupInfoSearchQuery}
+                                            onChange={(e) => setGroupInfoSearchQuery(e.target.value)}
+                                            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#f8fafc', WebkitTextFillColor: '#f8fafc', caretColor: '#f8fafc', fontSize: 14, padding: '4px 0', minWidth: 0 }}
+                                        />
+                                        {groupInfoSearchQuery && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setGroupInfoSearchQuery('')}
+                                                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: subTextColor, display: 'flex', alignItems: 'center' }}
+                                            >
+                                                <X size={16} />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
                             <div style={{ padding: '0 30px', display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, cursor: 'pointer' }} onClick={() => setIsGroupAddMemberOpen(true)}>
                                 <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#0EA5BE', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
                                     <UserPlus size={20} color="#ffffff" />
@@ -16051,7 +16299,15 @@ export default function Chat() {
 
 
                             <div className="wa-member-list">
-                                {activeTarget.members?.map(m => {
+                                {activeTarget.members?.filter((m) => {
+                                    const q = groupInfoSearchQuery.trim().toLowerCase();
+                                    if (!q) return true;
+                                    const name = String(m?.name || '').toLowerCase();
+                                    const about = String(m?.about || '').toLowerCase();
+                                    const mobile = String(m?.mobile || '').toLowerCase();
+                                    const phone = mobile ? `+${mobile}` : '';
+                                    return name.includes(q) || about.includes(q) || mobile.includes(q) || phone.includes(q);
+                                }).map(m => {
                                     const isMe = String(m._id) === String(user.id || user._id);
                                     let phoneValue = m.mobile ? `+${m.mobile}` : '';
                                     const currentUserId = String(user.id || user._id);
@@ -21012,14 +21268,50 @@ export default function Chat() {
             {isGlobalStarredOpen && renderGlobalStarredDrawer()}
             {isRemindersModalOpen && (
                 <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: '#111b32', zIndex: 500, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '14px 23px', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', background: '#111b32', position: 'relative', minHeight: '59px' }}>
-                        <button
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', position: 'absolute', left: 23, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center' }}
-                            onClick={() => setIsRemindersModalOpen(false)}
-                        >
-                            <ArrowLeft size={24} color="#38bdf8" />
-                        </button>
-                        <span style={{ fontSize: '18px', color: '#f8fafc', fontWeight: 600, whiteSpace: 'nowrap' }}>Event Reminders</span>
+                    <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)', background: '#111b32', padding: isMobile ? '12px 14px 10px' : '14px 18px 12px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '40px 1fr 40px', alignItems: 'center', minHeight: 36 }}>
+                            <button
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', padding: 0, width: 40, height: 36 }}
+                                onClick={() => setIsRemindersModalOpen(false)}
+                            >
+                                <ArrowLeft size={24} color="#38bdf8" />
+                            </button>
+                            <span style={{ fontSize: isMobile ? '17px' : '18px', color: '#f8fafc', fontWeight: 600, whiteSpace: 'nowrap', textAlign: 'center' }}>Event Reminders</span>
+                            <div />
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                            <button
+                                type="button"
+                                onClick={handleClearAllReminders}
+                                disabled={visibleReminders.length === 0}
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    justifyContent: 'center',
+                                    minWidth: isMobile ? 132 : 152,
+                                    border: visibleReminders.length === 0
+                                        ? '1px solid rgba(100, 116, 139, 0.18)'
+                                        : '1px solid rgba(251, 113, 133, 0.34)',
+                                    background: visibleReminders.length === 0
+                                        ? 'linear-gradient(135deg, rgba(51, 65, 85, 0.18), rgba(30, 41, 59, 0.16))'
+                                        : 'linear-gradient(135deg, rgba(127, 29, 29, 0.22) 0%, rgba(159, 18, 57, 0.2) 52%, rgba(190, 24, 93, 0.18) 100%)',
+                                    color: visibleReminders.length === 0 ? '#64748b' : '#fecdd3',
+                                    borderRadius: 14,
+                                    padding: isMobile ? '11px 16px' : '12px 18px',
+                                    fontSize: isMobile ? 15 : 15,
+                                    fontWeight: 700,
+                                    lineHeight: 1,
+                                    boxShadow: visibleReminders.length === 0
+                                        ? 'none'
+                                        : '0 10px 24px rgba(127, 29, 29, 0.18), inset 0 1px 0 rgba(255,255,255,0.06)',
+                                    cursor: visibleReminders.length === 0 ? 'not-allowed' : 'pointer'
+                                }}
+                            >
+                                <Trash2 size={isMobile ? 16 : 16} />
+                                <span>Clear all</span>
+                            </button>
+                        </div>
                     </div>
                     <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px', paddingBottom: isMobile ? '70px' : '10px' }}>
                         {(() => {
@@ -21027,7 +21319,7 @@ export default function Chat() {
                             const approachingEvents = [];
 
                             // Sort logic: Active first, then by createdAt desc
-                            const sortedEvents = [...remindersList].sort((a, b) => {
+                            const sortedEvents = [...visibleReminders].sort((a, b) => {
                                 const aEv = a.event;
                                 const bEv = b.event;
                                 if (!aEv || !bEv) return 0;
@@ -21209,6 +21501,28 @@ export default function Chat() {
 
                             return (
                                 <>
+                                    <div style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: isMobile ? 'flex-start' : 'center',
+                                        gap: 12,
+                                        flexWrap: 'wrap',
+                                        marginBottom: 14,
+                                        padding: isMobile ? '4px 2px 2px' : '4px 4px 2px'
+                                    }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                            <div style={{ fontSize: 14, fontWeight: 700, color: '#cbd5e1' }}>All Scheduled Events</div>
+                                            <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                                                {sortedEvents.length} reminder{sortedEvents.length === 1 ? '' : 's'} visible in this panel
+                                            </div>
+                                        </div>
+                                        {hiddenReminderIds.length > 0 && (
+                                            <div style={{ fontSize: 12, color: '#64748b' }}>
+                                                Cleared reminders stay hidden on this account.
+                                            </div>
+                                        )}
+                                    </div>
+
                                     {approachingEvents.length > 0 && (
                                         <div style={{ marginBottom: 20 }}>
                                             <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#0EA5BE', marginBottom: 10, paddingLeft: 4 }}>Upcoming Reminders</div>
@@ -21217,9 +21531,10 @@ export default function Chat() {
                                     )}
 
                                     <div>
-                                        <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#cbd5e1', marginBottom: 10, paddingLeft: 4 }}>All Scheduled Events</div>
                                         {sortedEvents.length === 0 ? (
-                                            <div style={{ textAlign: 'center', color: '#94a3b8', marginTop: 40 }}>No events scheduled.</div>
+                                            <div style={{ textAlign: 'center', color: '#94a3b8', marginTop: 40, padding: isMobile ? '0 12px' : 0 }}>
+                                                No reminders are visible here. New or restored reminders will appear automatically.
+                                            </div>
                                         ) : (
                                             sortedEvents.map((m, i) => renderEventCard(m, `all-${m._id || i}`, false))
                                         )}
@@ -21595,11 +21910,13 @@ export default function Chat() {
                                         // If not searching and on "All" tab, hide users with no history/no pinning/no active requests
                                         if (!searchQuery.trim() && filterType === 'all' && !item.is_group && !item.is_community) {
                                             const hasHistory = !!item.lastMessage;
+                                            const hadAnyHistory = !!item.hasAnyHistory;
+                                            const isAcceptedContact = item.requestStatus === 'accepted';
                                             const isPinned = !!item.isPinned;
                                             const isPending = item.requestStatus === 'pending';
                                             const isRestricted = item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000;
 
-                                            if (!hasHistory && !isPinned && !isPending && !isRestricted) return false;
+                                            if (!hasHistory && !hadAnyHistory && !isAcceptedContact && !isPinned && !isPending && !isRestricted) return false;
                                         }
 
                                         if (filterType === 'all') {
@@ -25788,9 +26105,25 @@ export default function Chat() {
                                             <span className="wa-settings-toggle-slider" />
                                         </label>
                                     </div>
-                                    <button className="wa-settings-list-action">
+                                    <div className="wa-settings-item">
                                         <div className="wa-settings-item-info">
                                             <p className="wa-settings-item-label">Clear All Chat Data</p>
+                                            <p className="wa-settings-item-desc">Enable date-based clearing for this account only.</p>
+                                        </div>
+                                        <label className="wa-settings-toggle">
+                                            <input type="checkbox" checked={privacySettings.clearChatDataEnabled || false} onChange={() => togglePrivacyBooleanSetting('clearChatDataEnabled')} />
+                                            <span className="wa-settings-toggle-slider" />
+                                        </label>
+                                    </div>
+                                    <button
+                                        className={`wa-settings-list-action ${!privacySettings.clearChatDataEnabled ? 'disabled' : ''}`}
+                                        type="button"
+                                        onClick={openClearChatDataModal}
+                                        disabled={!privacySettings.clearChatDataEnabled}
+                                    >
+                                        <div className="wa-settings-item-info">
+                                            <p className="wa-settings-item-label">Choose Data to Clear</p>
+                                            <p className="wa-settings-item-desc">Select a month or define a custom date range.</p>
                                         </div>
                                         <ChevronRight size={16} />
                                     </button>
@@ -26642,6 +26975,103 @@ export default function Chat() {
                 </div>
             )}
 
+            {isClearChatDataModalOpen && (
+                <div className="wa-clear-chat-modal-overlay" onClick={closeClearChatDataModal}>
+                    <div className="wa-clear-chat-modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="wa-clear-chat-modal-header">
+                            <div>
+                                <h3>Clear Chat Data</h3>
+                                <p>Only your account view will change. Admin records and database records remain untouched.</p>
+                            </div>
+                            <button type="button" className="wa-clear-chat-close" onClick={closeClearChatDataModal}>
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div className="wa-clear-chat-mode-switch">
+                            <button
+                                type="button"
+                                className={clearChatDataMode === 'month' ? 'active' : ''}
+                                onClick={() => setClearChatDataMode('month')}
+                            >
+                                Month to month
+                            </button>
+                            <button
+                                type="button"
+                                className={clearChatDataMode === 'range' ? 'active' : ''}
+                                onClick={() => setClearChatDataMode('range')}
+                            >
+                                Custom range
+                            </button>
+                        </div>
+
+                        {clearChatDataMode === 'month' ? (
+                            <div className="wa-clear-chat-section">
+                                <div className="wa-clear-chat-section-title">Available months</div>
+                                {isClearChatDataLoading ? (
+                                    <div className="wa-clear-chat-loading"><Loader2 className="wa-spin" size={18} /> Loading months...</div>
+                                ) : clearChatDataMonths.length > 0 ? (
+                                    <div className="wa-clear-chat-month-grid">
+                                        {clearChatDataMonths.map((monthItem) => (
+                                            <button
+                                                key={monthItem.key}
+                                                type="button"
+                                                className={`wa-clear-chat-month-card ${selectedClearChatMonth === monthItem.key ? 'active' : ''}`}
+                                                onClick={() => setSelectedClearChatMonth(monthItem.key)}
+                                            >
+                                                <span>{monthItem.label}</span>
+                                                <small>{monthItem.count} item{monthItem.count === 1 ? '' : 's'}</small>
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="wa-clear-chat-empty">No visible chat history is available to clear.</div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="wa-clear-chat-section">
+                                <div className="wa-clear-chat-section-title">Choose date range</div>
+                                <div className="wa-clear-chat-date-grid">
+                                    <label>
+                                        <span>From</span>
+                                        <input
+                                            type="date"
+                                            value={clearChatDateRange.startDate}
+                                            onChange={(e) => setClearChatDateRange((prev) => ({ ...prev, startDate: e.target.value }))}
+                                        />
+                                    </label>
+                                    <label>
+                                        <span>To</span>
+                                        <input
+                                            type="date"
+                                            value={clearChatDateRange.endDate}
+                                            onChange={(e) => setClearChatDateRange((prev) => ({ ...prev, endDate: e.target.value }))}
+                                        />
+                                    </label>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="wa-clear-chat-warning">
+                            <AlertCircle size={16} />
+                            <span>Deleted items will also disappear from media, links, docs, starred messages, and related user-visible panels.</span>
+                        </div>
+
+                        <div className="wa-clear-chat-actions">
+                            <button type="button" className="secondary" onClick={closeClearChatDataModal}>Cancel</button>
+                            <button
+                                type="button"
+                                className="danger"
+                                onClick={requestClearChatDataDelete}
+                                disabled={isClearChatDataSubmitting || (clearChatDataMode === 'month' && clearChatDataMonths.length === 0)}
+                            >
+                                Continue
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <ConfirmModal
                 isOpen={isDiscardPreviewConfirmOpen}
                 title="Discard media?"
@@ -26651,6 +27081,17 @@ export default function Chat() {
                 confirmVariant="danger"
                 onConfirm={discardFilePreview}
                 onCancel={() => setIsDiscardPreviewConfirmOpen(false)}
+            />
+
+            <ConfirmModal
+                isOpen={isClearRemindersConfirmOpen}
+                title="Clear all reminders?"
+                message="This will remove the current reminders from your Event Reminders panel on this account. Event messages in chats will stay untouched."
+                confirmText="Clear reminders"
+                cancelText="Keep reminders"
+                confirmVariant="danger"
+                onConfirm={confirmClearAllReminders}
+                onCancel={() => setIsClearRemindersConfirmOpen(false)}
             />
 
             <ConfirmModal
@@ -26723,6 +27164,17 @@ export default function Chat() {
                     setIsClearChatConfirmOpen(false);
                     setDeleteTarget(null);
                 }}
+            />
+
+            <ConfirmModal
+                isOpen={!!pendingClearChatDelete}
+                title="Confirm Chat Data Deletion"
+                message={`This will permanently erase your visible chat data for ${pendingClearChatDelete?.summary || 'the selected period'} from this account only. Continue?`}
+                confirmText={isClearChatDataSubmitting ? 'Deleting...' : 'OK'}
+                cancelText="Cancel"
+                confirmVariant="danger"
+                onConfirm={handleConfirmClearChatData}
+                onCancel={() => !isClearChatDataSubmitting && setPendingClearChatDelete(null)}
             />
 
             <ConfirmModal
