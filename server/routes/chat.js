@@ -371,18 +371,50 @@ const buildDateRangeFromRequest = ({ mode, month, startDate, endDate }) => {
 };
 
 const aggregateMonthlyBuckets = async (Model, match) => {
-    const rows = await Model.aggregate([
-        { $match: match },
+    const normalizedMatch = { ...(match || {}) };
+    const createdAtFilter = normalizedMatch.created_at;
+    delete normalizedMatch.created_at;
+
+    const normalizedCreatedAtMatch = {};
+    if (createdAtFilter && typeof createdAtFilter === 'object' && !Array.isArray(createdAtFilter)) {
+        if (createdAtFilter.$gte) normalizedCreatedAtMatch.$gte = createdAtFilter.$gte;
+        if (createdAtFilter.$gt) normalizedCreatedAtMatch.$gt = createdAtFilter.$gt;
+        if (createdAtFilter.$lte) normalizedCreatedAtMatch.$lte = createdAtFilter.$lte;
+        if (createdAtFilter.$lt) normalizedCreatedAtMatch.$lt = createdAtFilter.$lt;
+    }
+
+    const pipeline = [
+        { $match: normalizedMatch },
         {
-            $group: {
-                _id: {
-                    year: { $year: '$created_at' },
-                    month: { $month: '$created_at' }
-                },
-                count: { $sum: 1 }
+            $addFields: {
+                normalized_created_at: {
+                    $convert: {
+                        input: '$created_at',
+                        to: 'date',
+                        onError: null,
+                        onNull: null
+                    }
+                }
             }
+        },
+        { $match: { normalized_created_at: { $ne: null } } }
+    ];
+
+    if (Object.keys(normalizedCreatedAtMatch).length > 0) {
+        pipeline.push({ $match: { normalized_created_at: normalizedCreatedAtMatch } });
+    }
+
+    pipeline.push({
+        $group: {
+            _id: {
+                year: { $year: '$normalized_created_at' },
+                month: { $month: '$normalized_created_at' }
+            },
+            count: { $sum: 1 }
         }
-    ]);
+    });
+
+    const rows = await Model.aggregate(pipeline);
 
     return rows.map((row) => {
         const year = row?._id?.year;
