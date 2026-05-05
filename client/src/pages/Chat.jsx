@@ -4999,7 +4999,7 @@ export default function Chat() {
                         )}
                     </div>
 
-                    <div className="wa-grammar-options">
+                    <div className="wa-grammar-options" style={{ display: 'flex', flexWrap: 'nowrap', gap: '4px', justifyContent: 'flex-start' }}>
                         {isGarbageMessage ? (
                             renderLevelPills(true)
                         ) : grammarSuggestions ? (
@@ -5914,6 +5914,7 @@ export default function Chat() {
             const gId = groupId ? String(groupId) : null;
 
             if (!uId) return;
+            if (uId === String(currentUserId)) return;
 
             const chatId = String(gId || uId).toLowerCase();
             if (!chatId) return;
@@ -14258,8 +14259,8 @@ export default function Chat() {
                                                         bottom: 'calc(100% + 16px)',
                                                         transform: 'translateX(-50%)',
                                                         width: 'max-content',
-                                                        minWidth: 330,
-                                                        maxWidth: 'min(420px, calc(100vw - 56px))',
+                                                        minWidth: 280,
+                                                        maxWidth: 'min(420px, calc(100vw - 32px))',
                                                         padding: '12px 14px 10px',
                                                         borderRadius: 12,
                                                         borderLeft: '3px solid #0EA5BE',
@@ -14275,7 +14276,7 @@ export default function Chat() {
                                                             <span>{getInlineTextAiIssue()}</span>
                                                         </div>
                                                     ) : (
-                                                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'nowrap', justifyContent: 'center' }}>
                                                             {[
                                                                 { id: 'basic', label: 'BASIC', color: '#059669' },
                                                                 { id: 'fluent', label: 'FLUENT', color: '#1d72d2' },
