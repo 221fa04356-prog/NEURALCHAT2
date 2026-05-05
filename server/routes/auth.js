@@ -800,7 +800,8 @@ router.put('/update-profile', async (req, res) => {
                 notifyOnScreenshot: privacySettings?.notifyOnScreenshot !== false,
                 blurOnScreenshot: privacySettings?.blurOnScreenshot === true,
                 addWatermark: privacySettings?.addWatermark === true,
-                autoArchiveConversations: privacySettings?.autoArchiveConversations === true
+                autoArchiveConversations: privacySettings?.autoArchiveConversations === true,
+                clearChatDataEnabled: privacySettings?.clearChatDataEnabled === true
             };
         }
 

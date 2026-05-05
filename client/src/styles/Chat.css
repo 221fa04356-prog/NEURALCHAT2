@@ -6659,6 +6659,103 @@ html.wa-screenshot-protection-active .wa-app-container {
     box-shadow: none;
 }
 
+.wa-settings-item,
+.wa-settings-list-action {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 22px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    text-align: left;
+}
+
+.wa-settings-list > :last-child {
+    border-bottom: none;
+}
+
+.wa-settings-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.wa-settings-item-label {
+    margin: 0;
+    color: #f8fafc;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.wa-settings-item-desc {
+    margin: 6px 0 0;
+    color: #94a3b8;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.wa-settings-list-action {
+    cursor: pointer;
+    color: #f8fafc;
+    transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.wa-settings-list-action:hover:not(:disabled) {
+    background: rgba(56, 189, 248, 0.08);
+}
+
+.wa-settings-list-action.disabled,
+.wa-settings-list-action:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.wa-settings-toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    width: 46px;
+    height: 26px;
+    flex-shrink: 0;
+}
+
+.wa-settings-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.wa-settings-toggle-slider {
+    position: absolute;
+    inset: 0;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: background 0.2s ease;
+}
+
+.wa-settings-toggle-slider::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #e2e8f0;
+    transition: transform 0.2s ease;
+}
+
+.wa-settings-toggle input:checked + .wa-settings-toggle-slider {
+    background: rgba(14, 165, 190, 0.55);
+}
+
+.wa-settings-toggle input:checked + .wa-settings-toggle-slider::before {
+    transform: translateX(20px);
+}
+
 .wa-setting-row {
     display: flex;
     justify-content: space-between;
@@ -8308,6 +8405,35 @@ html.wa-screenshot-protection-active .wa-app-container {
     box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.08);
 }
 
+.wa-group-info-search-input {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    appearance: none;
+    -webkit-appearance: none;
+    color: #f8fafc !important;
+    -webkit-text-fill-color: #f8fafc !important;
+    caret-color: #f8fafc !important;
+    font-size: 14px !important;
+    font-weight: 500;
+    line-height: 1.35 !important;
+    text-shadow: 0 0 0 #f8fafc;
+    opacity: 1 !important;
+}
+
+.wa-group-info-search-input::placeholder {
+    color: #94a3b8 !important;
+    -webkit-text-fill-color: #94a3b8 !important;
+    opacity: 1 !important;
+}
+
+.wa-group-info-search-shell {
+    color: #f8fafc !important;
+}
+
 .wa-settings-nav {
     flex: 1;
     padding: 8px 18px 24px;
@@ -9402,6 +9528,213 @@ html.wa-screenshot-protection-active .wa-app-container {
     transform: translateY(-1px);
 }
 
+.wa-clear-chat-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10020;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(2, 6, 23, 0.78);
+    backdrop-filter: blur(10px);
+}
+
+.wa-clear-chat-modal {
+    width: min(720px, 100%);
+    max-height: min(88vh, 820px);
+    overflow-y: auto;
+    border-radius: 24px;
+    background: linear-gradient(180deg, rgba(6, 17, 31, 0.98) 0%, rgba(8, 26, 43, 0.98) 100%);
+    border: 1px solid rgba(56, 189, 248, 0.22);
+    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.42);
+    padding: 26px;
+    color: #f8fafc;
+}
+
+.wa-clear-chat-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 22px;
+}
+
+.wa-clear-chat-modal-header h3 {
+    margin: 0 0 8px;
+    font-size: 24px;
+    font-weight: 800;
+}
+
+.wa-clear-chat-modal-header p {
+    margin: 0;
+    color: #94a3b8;
+    line-height: 1.55;
+}
+
+.wa-clear-chat-close {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: #cbd5e1;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.wa-clear-chat-mode-switch {
+    display: inline-flex;
+    gap: 10px;
+    padding: 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 22px;
+}
+
+.wa-clear-chat-mode-switch button {
+    border: none;
+    background: transparent;
+    color: #cbd5e1;
+    padding: 10px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.wa-clear-chat-mode-switch button.active {
+    background: rgba(56, 189, 248, 0.16);
+    color: #38bdf8;
+}
+
+.wa-clear-chat-section {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 20px;
+}
+
+.wa-clear-chat-section-title {
+    margin-bottom: 14px;
+    color: #38bdf8;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.wa-clear-chat-loading,
+.wa-clear-chat-empty {
+    min-height: 100px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #94a3b8;
+    gap: 10px;
+    text-align: center;
+}
+
+.wa-clear-chat-month-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.wa-clear-chat-month-card {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(15, 23, 42, 0.75);
+    color: #e2e8f0;
+    border-radius: 18px;
+    padding: 16px;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.wa-clear-chat-month-card span {
+    font-weight: 700;
+}
+
+.wa-clear-chat-month-card small {
+    color: #94a3b8;
+}
+
+.wa-clear-chat-month-card.active {
+    border-color: rgba(56, 189, 248, 0.7);
+    background: rgba(14, 165, 190, 0.14);
+    box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.24);
+}
+
+.wa-clear-chat-date-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.wa-clear-chat-date-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: #cbd5e1;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.wa-clear-chat-date-grid input {
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(15, 23, 42, 0.8);
+    color: #f8fafc;
+    padding: 12px 14px;
+}
+
+.wa-clear-chat-warning {
+    margin-top: 18px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    background: rgba(248, 113, 113, 0.08);
+    border: 1px solid rgba(248, 113, 113, 0.18);
+    color: #fecaca;
+}
+
+.wa-clear-chat-actions {
+    margin-top: 22px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.wa-clear-chat-actions button {
+    border: none;
+    border-radius: 999px;
+    padding: 12px 20px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.wa-clear-chat-actions button.secondary {
+    background: rgba(255, 255, 255, 0.08);
+    color: #e2e8f0;
+}
+
+.wa-clear-chat-actions button.danger {
+    background: linear-gradient(135deg, #ef4444 0%, #f97316 100%);
+    color: #fff;
+}
+
+.wa-clear-chat-actions button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
 .wa-lang-confirm-cancel:active {
     transform: scale(0.97);
 }
@@ -9459,6 +9792,32 @@ html.wa-screenshot-protection-active .wa-app-container {
 
     .wa-lang-confirm-cancel {
         text-align: center;
+    }
+
+    .wa-clear-chat-modal {
+        padding: 22px 18px;
+    }
+
+    .wa-clear-chat-modal-header {
+        flex-direction: column;
+    }
+
+    .wa-clear-chat-close {
+        align-self: flex-end;
+    }
+
+    .wa-clear-chat-mode-switch {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .wa-clear-chat-date-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .wa-clear-chat-actions {
+        flex-direction: column-reverse;
     }
 }
 
