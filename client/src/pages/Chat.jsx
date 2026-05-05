@@ -2284,6 +2284,7 @@ export default function Chat() {
     const [privacyDialogDraft, setPrivacyDialogDraft] = useState(createDefaultVisibilityRule);
     const [privacyDialogSearch, setPrivacyDialogSearch] = useState('');
     const [isSavingPrivacy, setIsSavingPrivacy] = useState(false);
+    const lastPrivacySettingsMutationAtRef = useRef(0);
     const [isScreenshotPrivacyMaskActive, setIsScreenshotPrivacyMaskActive] = useState(false);
     const [screenshotPrivacySource, setScreenshotPrivacySource] = useState('');
     const [isClearChatDataModalOpen, setIsClearChatDataModalOpen] = useState(false);
@@ -3567,6 +3568,8 @@ export default function Chat() {
     const persistPrivacySettings = async (nextPrivacySettings, successMessage = 'Privacy settings updated') => {
         const normalized = normalizePrivacySettings(nextPrivacySettings);
         const previous = privacySettings;
+        const mutationStartedAt = Date.now();
+        lastPrivacySettingsMutationAtRef.current = mutationStartedAt;
         const payload = {
             userId: userData.id || userData._id || user.id || user._id,
             privacySettings: normalized
@@ -3578,9 +3581,11 @@ export default function Chat() {
         try {
             const res = await axios.put('/api/auth/update-profile', payload);
             if (res.data?.user) {
-                const updatedUser = { ...userData, ...res.data.user, privacySettings: normalized };
-                localStorage.setItem('user', JSON.stringify(updatedUser));
-                setUserData(updatedUser);
+                setUserData((prev) => {
+                    const updatedUser = { ...prev, ...res.data.user, privacySettings: normalized };
+                    localStorage.setItem('user', JSON.stringify(updatedUser));
+                    return updatedUser;
+                });
             }
             setSnackbar({ message: successMessage, type: 'success', variant: 'system' });
             return true;
@@ -7028,24 +7033,33 @@ export default function Chat() {
     // --- Fetch Current User Data (For Profile) ---
     useEffect(() => {
         const fetchMe = async () => {
+            const requestStartedAt = Date.now();
             try {
                 const token = localStorage.getItem('token');
                 if (!token) return;
                 const res = await axios.get('/api/chat/me', {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
-                const normalizedUser = {
-                    ...userData,
-                    ...res.data,
-                    id: res.data?.id || res.data?._id || userData?.id || userData?._id || user.id || user._id,
-                    _id: res.data?._id || res.data?.id || userData?._id || userData?.id || user._id || user.id,
-                    name: res.data?.name || userData?.name || '',
-                    displayName: res.data?.displayName || userData?.displayName || res.data?.name || userData?.name || '',
-                    loginId: res.data?.loginId || res.data?.login_id,
-                    login_id: res.data?.login_id || res.data?.loginId
-                };
-                setUserData(normalizedUser);
-                localStorage.setItem('user', JSON.stringify(normalizedUser));
+                setUserData((prev) => {
+                    const shouldPreserveLocalPrivacy =
+                        requestStartedAt < lastPrivacySettingsMutationAtRef.current;
+
+                    const normalizedUser = {
+                        ...prev,
+                        ...res.data,
+                        privacySettings: shouldPreserveLocalPrivacy
+                            ? (prev?.privacySettings || res.data?.privacySettings)
+                            : res.data?.privacySettings,
+                        id: res.data?.id || res.data?._id || prev?.id || prev?._id || user.id || user._id,
+                        _id: res.data?._id || res.data?.id || prev?._id || prev?.id || user._id || user.id,
+                        name: res.data?.name || prev?.name || '',
+                        displayName: res.data?.displayName || prev?.displayName || res.data?.name || prev?.name || '',
+                        loginId: res.data?.loginId || res.data?.login_id,
+                        login_id: res.data?.login_id || res.data?.loginId
+                    };
+                    localStorage.setItem('user', JSON.stringify(normalizedUser));
+                    return normalizedUser;
+                });
             } catch (err) {
                 console.error("Failed to fetch my profile", err);
             }
