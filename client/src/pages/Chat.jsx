@@ -3667,13 +3667,48 @@ export default function Chat() {
         await persistPrivacySettings(next, `${labels[key] || 'Privacy setting'} updated`);
     };
 
+    const requestClearChatHistoryApi = async ({ method = 'get', body = undefined, token }) => {
+        const config = {
+            method,
+            headers: { Authorization: `Bearer ${token}` }
+        };
+
+        if (body !== undefined) {
+            config.data = body;
+        }
+
+        const endpointCandidates = [
+            '/api/chat/chat/delete-history',
+            '/api/chat/delete-history'
+        ];
+
+        const suffix = method === 'get'
+            ? '/months'
+            : '/range';
+
+        let lastError = null;
+        for (const basePath of endpointCandidates) {
+            try {
+                return await axios({
+                    ...config,
+                    url: `${basePath}${suffix}`
+                });
+            } catch (err) {
+                lastError = err;
+                if (err?.response?.status !== 404) {
+                    throw err;
+                }
+            }
+        }
+
+        throw lastError || new Error('Delete history endpoint unavailable');
+    };
+
     const fetchClearChatDataMonths = async () => {
         setIsClearChatDataLoading(true);
         try {
             const token = localStorage.getItem('token');
-            const res = await axios.get('/api/chat/chat/delete-history/months', {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const res = await requestClearChatHistoryApi({ method: 'get', token });
             const months = Array.isArray(res.data?.months) ? res.data.months : [];
             setClearChatDataMonths(months);
             if (!selectedClearChatMonth && months[0]?.key) {
@@ -3751,8 +3786,10 @@ export default function Chat() {
         setIsClearChatDataSubmitting(true);
         try {
             const token = localStorage.getItem('token');
-            const res = await axios.post('/api/chat/chat/delete-history/range', pendingClearChatDelete, {
-                headers: { Authorization: `Bearer ${token}` }
+            const res = await requestClearChatHistoryApi({
+                method: 'post',
+                body: pendingClearChatDelete,
+                token
             });
 
             messageCacheByUserRef.current = {};
