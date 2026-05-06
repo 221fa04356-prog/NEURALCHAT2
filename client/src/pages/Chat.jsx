@@ -141,11 +141,16 @@ const appendMediaToken = (url) => {
     if (!url) return '';
     const token = localStorage.getItem('token') || '';
     if (!token) return url;
+    const apiBase = (axios.defaults.baseURL || '').replace(/\/$/, '');
+    const apiOrigin = apiBase.replace(/\/api$/i, '');
 
     try {
         const parsed = new URL(url, window.location.origin);
         if (!parsed.pathname.startsWith('/api/chat/media')) return url;
         parsed.searchParams.set('token', token);
+        if (apiOrigin) {
+            return `${apiOrigin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+        }
         if (/^https?:\/\//i.test(url)) return parsed.toString();
         return `${parsed.pathname}${parsed.search}${parsed.hash}`;
     } catch (_) {
@@ -153,10 +158,35 @@ const appendMediaToken = (url) => {
         const withoutToken = String(url)
             .replace(/([?&])token=[^&#]*&?/i, '$1')
             .replace(/[?&]$/g, '');
-        return withoutToken.includes('?')
+        const tokenized = withoutToken.includes('?')
             ? `${withoutToken}&token=${encodeURIComponent(token)}`
             : `${withoutToken}?token=${encodeURIComponent(token)}`;
+        if (apiOrigin && tokenized.startsWith('/api/chat/media')) {
+            return `${apiOrigin}${tokenized}`;
+        }
+        return tokenized;
     }
+};
+
+const resolveApiMediaUrl = (url) => {
+    if (!url) return '';
+    const apiBase = (axios.defaults.baseURL || '').replace(/\/$/, '');
+    const apiOrigin = apiBase.replace(/\/api$/i, '');
+    const tokenized = appendMediaToken(url);
+    if (!apiOrigin) return tokenized;
+
+    try {
+        const parsed = new URL(tokenized, window.location.origin);
+        if (parsed.pathname.startsWith('/api/chat/media')) {
+            return `${apiOrigin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+        }
+    } catch (_) {
+        if (String(tokenized).startsWith('/api/chat/media')) {
+            return `${apiOrigin}${tokenized}`;
+        }
+    }
+
+    return tokenized;
 };
 
 const buildMediaProxyUrl = (rawPath) => {
@@ -167,16 +197,16 @@ const buildMediaProxyUrl = (rawPath) => {
             const parsed = new URL(raw, window.location.origin);
             if (parsed.pathname.startsWith('/uploads/')) {
                 const mediaApiPath = `/api/chat/media?path=${encodeURIComponent(parsed.pathname)}`;
-                return appendMediaToken(mediaApiPath);
+                return resolveApiMediaUrl(mediaApiPath);
             }
-            return appendMediaToken(`${parsed.pathname || raw}${parsed.search || ''}`);
+            return resolveApiMediaUrl(`${parsed.pathname || raw}${parsed.search || ''}`);
         } catch (_) {
             const normalized = raw.startsWith('/') ? raw : `/${raw.replace(/^\/+/, '')}`;
             if (normalized.startsWith('/uploads/')) {
                 const mediaApiPath = `/api/chat/media?path=${encodeURIComponent(normalized)}`;
-                return appendMediaToken(mediaApiPath);
+                return resolveApiMediaUrl(mediaApiPath);
             }
-            return appendMediaToken(normalized);
+            return resolveApiMediaUrl(normalized);
         }
     })();
 };
@@ -191,7 +221,7 @@ const getMediaUrl = (path) => {
                 return buildMediaProxyUrl(`${parsed.pathname}${parsed.search || ''}`) || null;
             }
             if (parsed.pathname.startsWith('/api/chat/media')) {
-                return appendMediaToken(`${parsed.pathname}${parsed.search || ''}`);
+                return resolveApiMediaUrl(`${parsed.pathname}${parsed.search || ''}`);
             }
         } catch (_) { }
         return appendMediaToken(path);
@@ -200,7 +230,7 @@ const getMediaUrl = (path) => {
         return buildMediaProxyUrl(path) || null;
     }
     if (path.startsWith('/api/chat/media')) {
-        return appendMediaToken(path);
+        return resolveApiMediaUrl(path);
     }
     const base = axios.defaults.baseURL || '';
     const resolved = `${base.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
@@ -1298,7 +1328,8 @@ const getYouTubeEmbedUrl = (url) => {
         controls: '1',
         fs: '1',
         playsinline: '1',
-        rel: '1'
+        rel: '1',
+        start: '0'
     });
 
     if (typeof window !== 'undefined' && window.location?.origin) {
@@ -1306,6 +1337,14 @@ const getYouTubeEmbedUrl = (url) => {
     }
 
     return `https://www.youtube.com/embed/${videoId}?${params.toString()}`;
+};
+
+const buildApiUrl = (path) => {
+    if (!path) return '';
+    if (/^https?:\/\//i.test(path)) return path;
+    const base = (axios.defaults.baseURL || '').replace(/\/$/, '');
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    return base ? `${base}${normalizedPath}` : normalizedPath;
 };
 
 const SharedVideoThumbnail = memo(function SharedVideoThumbnail({ src, poster }) {
@@ -1989,7 +2028,7 @@ export default function Chat() {
     const [globalStarredMessages, setGlobalStarredMessages] = useState([]);
     const [globalStarredCount, setGlobalStarredCount] = useState(0);
     const [isGlobalStarredLoading, setIsGlobalStarredLoading] = useState(false);
-    const [sharedMediaTab, setSharedMediaTab] = useState('media'); // 'media', 'docs', 'links'
+    const [sharedMediaTab, setSharedMediaTab] = useState('media'); // 'media', 'links', 'docs'
     const [selectedMediaMsgs, setSelectedMediaMsgs] = useState([]);
     const [jumpToMessageTarget, setJumpToMessageTarget] = useState(null);
     const [viewingImage, setViewingImage] = useState(null); // Track image for full-screen view
@@ -1997,6 +2036,15 @@ export default function Chat() {
     const [linkActionTarget, setLinkActionTarget] = useState(null); // { url, youtubeId, title }
     const [genericLinkPreviewTarget, setGenericLinkPreviewTarget] = useState(null);
     const [floatingPreviewLayout, setFloatingPreviewLayout] = useState({ x: 96, y: 54, width: 420, height: 280 });
+    const getVideoPreviewLayout = () => {
+        const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 960;
+        const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 720;
+        const width = Math.min(Math.max(720, floatingPreviewLayout.width), Math.max(320, viewportWidth - 32));
+        const height = Math.min(Math.max(320, Math.round(width * 9 / 16) + 38), Math.max(260, viewportHeight - 32));
+        const left = Math.min(Math.max(16, floatingPreviewLayout.x), Math.max(16, viewportWidth - width - 16));
+        const top = Math.min(Math.max(16, floatingPreviewLayout.y), Math.max(16, viewportHeight - height - 16));
+        return { left, top, width, height };
+    };
     const [isStarredMenuOpen, setIsStarredMenuOpen] = useState(false); // Menu for Starred Panel
     const [isGlobalStarredMenuOpen, setIsGlobalStarredMenuOpen] = useState(false); // Menu for Global Starred drawer
     const [isUnstarConfirmOpen, setIsUnstarConfirmOpen] = useState(false); // Confirmation bar
@@ -4631,15 +4679,17 @@ export default function Chat() {
         if (!safeContent) return safeContent;
 
         const urlRegex = /(https?:\/\/[^\s]+)/g;
+        const isUrlPart = /^https?:\/\/[^\s]+$/;
         const parts = String(safeContent).split(urlRegex);
 
         return parts.map((part, i) => {
             // Check if part is a URL
-            if (urlRegex.test(part)) {
+            if (isUrlPart.test(part)) {
+                const href = part.replace(/[)\].,!?;:'"]+$/g, '');
                 return (
                     <a
                         key={i}
-                        href={part}
+                        href={href}
                         target="_blank"
                         rel="noopener noreferrer"
                         style={{
@@ -4647,7 +4697,11 @@ export default function Chat() {
                             textDecoration: 'underline',
                             cursor: 'pointer'
                         }}
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            window.open(href, '_blank', 'noopener,noreferrer');
+                        }}
                     >
                         {part}
                     </a>
@@ -20895,7 +20949,7 @@ export default function Chat() {
                 </div>
 
                 <div className="wa-media-tabs">
-                    {['media', 'docs', 'links'].map(tab => {
+                    {['media', 'links', 'docs'].map(tab => {
                         const count = tab === 'media' ? mediaMsgs.length :
                             tab === 'docs' ? docMsgs.length :
                                 linkMsgs.length;
@@ -27595,7 +27649,7 @@ export default function Chat() {
                         </div>
                         <iframe
                             className="wa-link-preview-page-frame"
-                            src={`/api/chat/page-preview?url=${encodeURIComponent(genericLinkPreviewTarget.url)}`}
+                            src={buildApiUrl(`/api/chat/page-preview?url=${encodeURIComponent(genericLinkPreviewTarget.url)}`)}
                             title={genericLinkPreviewTarget.title || 'Link preview'}
                             sandbox="allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
                         />
@@ -27617,12 +27671,7 @@ export default function Chat() {
                 <div className="wa-video-preview-overlay-fixed">
                     <div
                         className="wa-video-preview-container wa-floating-preview-window"
-                        style={{
-                            left: floatingPreviewLayout.x,
-                            top: floatingPreviewLayout.y,
-                            width: floatingPreviewLayout.width,
-                            height: Math.max(260, Math.round(floatingPreviewLayout.width * 9 / 16) + 38)
-                        }}
+                        style={getVideoPreviewLayout()}
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="wa-video-preview-header wa-floating-preview-drag-handle" onPointerDown={startFloatingPreviewDrag}>
