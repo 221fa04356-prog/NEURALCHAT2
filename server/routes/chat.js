@@ -1059,7 +1059,9 @@ router.get('/page-preview', async (req, res) => {
 }());
 </script>`;
         let html = bodyBuffer.toString('utf8')
-            .replace(/<meta[^>]+http-equiv=["']content-security-policy["'][^>]*>/ig, '');
+            .replace(/<meta[^>]+http-equiv=["']content-security-policy["'][^>]*>/ig, '')
+            .replace(/\s+integrity=(["']).*?\1/ig, '')
+            .replace(/\s+crossorigin=(["']).*?\1/ig, '');
         html = rewritePreviewNavigation(html);
         html = /<head([^>]*)>/i.test(html)
             ? html.replace(/<head([^>]*)>/i, `<head$1><base href="${finalUrl}">`)

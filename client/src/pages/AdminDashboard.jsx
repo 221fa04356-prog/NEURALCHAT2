@@ -63,6 +63,61 @@ const OFFICIAL_TEXT_MUTED = '#94a3b8';
 const ADMIN_ACTION_SURFACE = 'linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%)';
 const ADMIN_ACTION_BORDER = 'none';
 
+const appendMediaToken = (url) => {
+    if (!url) return '';
+    const apiBase = (axios.defaults.baseURL || '').replace(/\/$/, '');
+    const apiOrigin = apiBase.replace(/\/api$/i, '');
+    const token = localStorage.getItem('token') || '';
+
+    try {
+        const parsed = new URL(url, window.location.origin);
+        if (!parsed.pathname.startsWith('/api/chat/media')) return url;
+        if (token) parsed.searchParams.set('token', token);
+        if (apiOrigin) return `${apiOrigin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+        if (/^https?:\/\//i.test(url)) return parsed.toString();
+        return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    } catch (_) {
+        if (!String(url).includes('/api/chat/media')) return url;
+        if (!token) return apiOrigin && String(url).startsWith('/api/chat/media') ? `${apiOrigin}${url}` : url;
+        const withoutToken = String(url)
+            .replace(/([?&])token=[^&#]*&?/i, '$1')
+            .replace(/[?&]$/g, '');
+        const tokenized = withoutToken.includes('?')
+            ? `${withoutToken}&token=${encodeURIComponent(token)}`
+            : `${withoutToken}?token=${encodeURIComponent(token)}`;
+        return apiOrigin && tokenized.startsWith('/api/chat/media') ? `${apiOrigin}${tokenized}` : tokenized;
+    }
+};
+
+const getAdminMediaUrl = (rawPath) => {
+    if (!rawPath) return '';
+    const raw = String(rawPath);
+    if (raw.startsWith('blob:') || raw.startsWith('data:')) return raw;
+    if (/^https?:\/\//i.test(raw)) {
+        try {
+            const parsed = new URL(raw);
+            if (parsed.pathname.startsWith('/uploads/')) {
+                return appendMediaToken(`/api/chat/media?path=${encodeURIComponent(parsed.pathname)}`);
+            }
+            if (parsed.pathname.startsWith('/api/chat/media')) {
+                return appendMediaToken(`${parsed.pathname}${parsed.search || ''}`);
+            }
+        } catch (_) { }
+        return raw;
+    }
+
+    const normalized = raw.startsWith('/') ? raw : `/${raw.replace(/^\/+/, '')}`;
+    if (normalized.startsWith('/uploads/')) {
+        return appendMediaToken(`/api/chat/media?path=${encodeURIComponent(normalized)}`);
+    }
+    if (normalized.startsWith('/api/chat/media')) {
+        return appendMediaToken(normalized);
+    }
+
+    const base = (axios.defaults.baseURL || '').replace(/\/$/, '');
+    return base ? `${base}/${raw.replace(/^\//, '')}` : normalized;
+};
+
 const ACTION_BUTTON_META = {
     primary: {
         color: '#ffffff',
@@ -1951,7 +2006,7 @@ export default function AdminDashboard() {
                     {isImage ? (
                         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <img
-                                src={viewingMedia.file_path}
+                                src={getAdminMediaUrl(viewingMedia.file_path)}
                                 alt="Full View"
                                 className="lightbox-media-hover"
                                 draggable="false"
@@ -1968,7 +2023,7 @@ export default function AdminDashboard() {
                         </div>
                     ) : (
                         <video
-                            src={viewingMedia.file_path}
+                            src={getAdminMediaUrl(viewingMedia.file_path)}
                             controls
                             autoPlay
                             style={{
@@ -2013,7 +2068,7 @@ export default function AdminDashboard() {
                                         )}
                                     </div>
                                 ) : (
-                                    <img src={m.file_path} alt="thumb" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    <img src={getAdminMediaUrl(m.file_path)} alt="thumb" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                 )}
                             </div>
                         ))}
@@ -4230,20 +4285,20 @@ export default function AdminDashboard() {
 
                                                                         {msg.type === 'image' && msg.file_path && (
                                                                             <div style={{ marginTop: '8px', position: 'relative', cursor: 'zoom-in' }} onClick={(e) => { e.stopPropagation(); setViewingMedia(msg); }}>
-                                                                                <img src={msg.file_path} alt="media" style={{ maxWidth: '100%', borderRadius: '8px', maxHeight: '200px', objectFit: 'contain' }} />
+                                                                                <img src={getAdminMediaUrl(msg.file_path)} alt="media" style={{ maxWidth: '100%', borderRadius: '8px', maxHeight: '200px', objectFit: 'contain' }} />
                                                                                 {msg.is_view_once && <div style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>View Once {msg.is_opened ? '(Opened)' : ''}</div>}
                                                                             </div>
                                                                         )}
                                                                         {msg.type === 'video' && msg.file_path && (
                                                                             <div style={{ marginTop: '8px', position: 'relative', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setViewingMedia(msg); }}>
-                                                                                <video src={msg.file_path} controls style={{ maxWidth: '100%', borderRadius: '8px', maxHeight: '200px' }} />
+                                                                                <video src={getAdminMediaUrl(msg.file_path)} controls style={{ maxWidth: '100%', borderRadius: '8px', maxHeight: '200px' }} />
                                                                                 {msg.is_view_once && <div style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>View Once {msg.is_opened ? '(Opened)' : ''}</div>}
                                                                             </div>
                                                                         )}
 
                                                                         {msg.type === 'file' && msg.file_path && (
                                                                             <div style={{ marginTop: '8px', background: 'rgba(0,0,0,0.05)', padding: '8px 12px', borderRadius: '8px' }}>
-                                                                                <a href={msg.file_path} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#0A7C8F', textDecoration: 'none', fontWeight: 'bold' }}>📄 {msg.fileName || 'Download File'}</a>
+                                                                                <a href={getAdminMediaUrl(msg.file_path)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#0A7C8F', textDecoration: 'none', fontWeight: 'bold' }}>📄 {msg.fileName || 'Download File'}</a>
                                                                             </div>
                                                                         )}
 
@@ -4260,7 +4315,7 @@ export default function AdminDashboard() {
                                                                                     boxShadow: isMe ? 'none' : 'inset 0 1px 3px rgba(0,0,0,0.05)'
                                                                                 }}>
                                                                                     <div
-                                                                                        onClick={() => handlePlayAudio(msgId, msg.file_path)}
+                                                                                        onClick={() => handlePlayAudio(msgId, getAdminMediaUrl(msg.file_path))}
                                                                                         style={{
                                                                                             width: '40px',
                                                                                             height: '40px',
