@@ -2549,8 +2549,8 @@ html.wa-screenshot-protection-active .wa-app-container {
 }
 
 .wa-link-preview-card.youtube {
-    background: rgba(255, 65, 84, 0.03);
-    border: 1px solid rgba(255, 65, 84, 0.08);
+    background: rgba(56, 189, 248, 0.04);
+    border: 1px solid rgba(56, 189, 248, 0.12);
 }
 
 .wa-link-preview-card:hover {
@@ -2558,7 +2558,7 @@ html.wa-screenshot-protection-active .wa-app-container {
 }
 
 .wa-link-preview-card.youtube:hover {
-    background: rgba(255, 65, 84, 0.03);
+    background: rgba(56, 189, 248, 0.05);
 }
 
 .wa-link-preview-card.youtube {
@@ -2610,7 +2610,7 @@ html.wa-screenshot-protection-active .wa-app-container {
 
 .wa-yt-play-btn:hover {
     transform: scale(1.1);
-    background: #ff0000;
+    background: rgba(14, 165, 190, 0.95);
 }
 
 .wa-link-thumb-small-wrapper {
@@ -2626,7 +2626,7 @@ html.wa-screenshot-protection-active .wa-app-container {
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.3);
+    background: transparent;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -2634,68 +2634,94 @@ html.wa-screenshot-protection-active .wa-app-container {
     transition: opacity 0.2s;
     border-radius: 4px;
     cursor: pointer;
+    z-index: 2;
 }
 
 .wa-link-thumb-small-wrapper:hover .wa-yt-preview-overlay-small {
     opacity: 1;
 }
 
+.wa-yt-preview-overlay-small.always-visible {
+    opacity: 1 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none;
+    padding: 0;
+}
+
 /* Fixed Overlay for Video Preview */
 .wa-video-preview-overlay-fixed {
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.85);
+    inset: 0;
+    background: transparent;
     z-index: 10000;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: 20px;
+    display: block;
+    padding: 0;
+    pointer-events: none;
 }
 
 .wa-video-preview-container {
-    width: 100%;
-    max-width: 900px;
-    aspect-ratio: 16 / 9;
+    position: fixed;
+    min-width: 280px;
+    min-height: 220px;
+    max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
     background: black;
     border-radius: 12px;
     overflow: hidden;
     display: flex;
     flex-direction: column;
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    pointer-events: auto;
+    resize: both;
 }
 
 .wa-video-preview-header {
-    height: 50px;
+    height: 38px;
     background: #111;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0 20px;
+    padding: 0 12px;
     color: white;
     font-weight: 500;
+    font-size: 13px;
+    flex-shrink: 0;
+    cursor: move;
+    user-select: none;
 }
 
 .wa-video-preview-close {
-    background: none;
-    border: none;
-    color: #999;
+    width: auto;
+    min-width: 58px;
+    height: 32px;
+    background: rgba(8, 20, 36, 0.92);
+    border: 1px solid rgba(125, 211, 252, 0.62);
+    color: #ffffff;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: color 0.2s;
+    border-radius: 8px;
+    padding: 0 12px;
+    font-size: 13px;
+    font-weight: 700;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.34);
+    transition: background 0.2s, border-color 0.2s;
 }
 
 .wa-video-preview-close:hover {
+    background: rgba(14, 165, 190, 0.38);
+    border-color: rgba(186, 230, 253, 0.9);
     color: white;
 }
 
 .wa-video-preview-body {
     flex: 1;
+    min-height: 0;
     background: black;
+    position: relative;
+    overflow: hidden;
 }
 
 .wa-msg-meta {
@@ -2817,6 +2843,7 @@ html.wa-screenshot-protection-active .wa-app-container {
 
 .wa-input-area {
     flex: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
     padding: 0 4px;
@@ -2956,14 +2983,23 @@ html.wa-screenshot-protection-active .wa-app-container {
 
 .wa-input-box {
     flex: 1;
+    width: 100%;
+    min-width: 0;
     background-color: transparent;
     border: none;
     padding: 12px 8px;
     font-size: 15px;
+    line-height: 20px;
     outline: none;
     color: var(--wa-text-primary);
     max-height: 120px;
     resize: none;
+}
+
+.wa-footer-left-icons {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
 }
 
 .wa-footer-wrapper {
@@ -4193,9 +4229,59 @@ html.wa-screenshot-protection-active .wa-app-container {
         transition: margin-right 0.3s cubic-bezier(0.1, 0.7, 0.1, 1);
     }
 
+    .wa-main-chat-with-panel .wa-chat-header {
+        padding-left: 12px;
+        padding-right: 8px;
+        gap: 8px;
+    }
 
-    .wa-main-chat-with-panel .wa-header-call-icon {
-        display: none !important;
+    .wa-main-chat-with-panel .wa-header-icons {
+        gap: 2px;
+        flex: 0 0 auto;
+    }
+
+    .wa-main-chat-with-panel .wa-header-call-icon,
+    .wa-main-chat-with-panel .wa-nav-icon-btn {
+        flex: 0 0 auto;
+        width: 34px;
+        height: 34px;
+        min-width: 34px;
+    }
+
+    .wa-main-chat-with-panel .wa-chat-header > .wa-chat-header-user {
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+
+    .wa-main-chat-with-panel .wa-chat-header-user .wa-avatar {
+        width: 34px !important;
+        height: 34px !important;
+        margin-right: 6px !important;
+        flex: 0 0 auto;
+    }
+
+    .wa-main-chat-with-panel .wa-call-dropdown-btn {
+        margin-right: 4px;
+        padding: 6px 10px;
+    }
+
+    .wa-main-chat-with-panel .wa-call-dropdown-btn span,
+    .wa-main-chat-with-panel .wa-call-dropdown-btn svg:last-child {
+        display: none;
+    }
+
+    .wa-main-chat-with-panel .wa-call-dropdown-btn svg:first-child {
+        margin-right: 0 !important;
+    }
+
+    .wa-main-chat-with-panel .wa-footer-wrapper {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    .wa-main-chat-with-panel .wa-input-pill {
+        min-width: 0;
+        margin-right: 4px;
     }
 }
 
@@ -5095,6 +5181,35 @@ html.wa-screenshot-protection-active .wa-app-container {
     display: flex;
     background: transparent;
     border-bottom: 1px solid var(--wa-border);
+    flex-shrink: 0;
+}
+
+.wa-shared-selection-toolbar {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--wa-border);
+    color: var(--wa-text-primary);
+    flex-shrink: 0;
+}
+
+.wa-shared-selection-toolbar > span {
+    text-align: center;
+    font-size: 15px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.wa-shared-selection-cancel {
+    background: none;
+    border: none;
+    color: #38bdf8;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 0;
+    cursor: pointer;
 }
 
 .wa-media-tab {
@@ -5148,12 +5263,66 @@ html.wa-screenshot-protection-active .wa-app-container {
     aspect-ratio: 1;
     position: relative;
     cursor: pointer;
+    overflow: hidden;
+    background: linear-gradient(110deg, rgba(7, 25, 42, 0.72) 8%, rgba(18, 48, 75, 0.9) 18%, rgba(7, 25, 42, 0.72) 33%) !important;
+    background-size: 200% 100% !important;
+    animation: waSharedMediaLoading 1.2s ease-in-out infinite;
 }
 
-.wa-media-grid-item img {
+.wa-media-grid-item img,
+.wa-shared-media-video,
+.wa-shared-video-thumb,
+.wa-shared-video-thumb img,
+.wa-shared-video-thumb video,
+.wa-shared-media-loading {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    display: block;
+}
+
+.wa-media-grid-item img,
+.wa-shared-media-video,
+.wa-shared-video-thumb {
+    position: relative;
+    z-index: 1;
+    background: transparent;
+}
+
+.wa-shared-video-thumb {
+    overflow: hidden;
+}
+
+.wa-shared-video-thumb video {
+    pointer-events: none;
+}
+
+.wa-shared-video-play-mark {
+    position: absolute;
+    right: 7px;
+    bottom: 7px;
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(2, 8, 18, 0.62);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.32);
+    z-index: 2;
+}
+
+.wa-shared-media-loading {
+    background: transparent;
+}
+
+@keyframes waSharedMediaLoading {
+    0% {
+        background-position: 120% 0;
+    }
+    100% {
+        background-position: -120% 0;
+    }
 }
 
 .wa-media-overlay {
@@ -5175,6 +5344,7 @@ html.wa-screenshot-protection-active .wa-app-container {
     transition: opacity 0.2s;
     pointer-events: none;
     /* Let clicks pass through to image for navigation */
+    z-index: 2;
 }
 
 .wa-media-select-btn {
@@ -5197,7 +5367,7 @@ html.wa-screenshot-protection-active .wa-app-container {
 .wa-doc-list-item,
 .wa-link-list-item {
     display: flex;
-    align-items: flex-start;
+    align-items: stretch;
     /* Align contents to top */
     padding: 12px 10px;
     border-bottom: 1px solid var(--wa-border);
@@ -5207,7 +5377,18 @@ html.wa-screenshot-protection-active .wa-app-container {
 
 .wa-doc-list-item:hover,
 .wa-link-list-item:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: transparent;
+}
+
+.wa-doc-select-hitbox {
+    width: 34px;
+    align-self: stretch;
+    min-height: 52px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    flex-shrink: 0;
+    padding-top: 4px;
 }
 
 .wa-doc-select-box {
@@ -5222,7 +5403,7 @@ html.wa-screenshot-protection-active .wa-app-container {
     background: transparent;
     opacity: 0;
     transition: opacity 0.2s;
-    margin-top: 4px;
+    margin-top: 0;
     /* Push down slightly to align with top of icon/text */
 }
 
@@ -5269,9 +5450,9 @@ html.wa-screenshot-protection-active .wa-app-container {
 .wa-link-card-small {
     flex: 1;
     min-width: 0;
-    background: rgba(255, 255, 255, 0.03);
+    background: transparent;
     padding: 8px;
-    border-radius: 8px;
+    border-radius: 0;
     text-decoration: none;
     color: inherit;
 }
@@ -5300,6 +5481,15 @@ html.wa-screenshot-protection-active .wa-app-container {
     flex-shrink: 0;
 }
 
+.wa-link-thumb-small-wrapper {
+    position: relative;
+    width: 60px;
+    height: 60px;
+    flex-shrink: 0;
+    overflow: hidden;
+    border-radius: 4px;
+}
+
 .wa-link-details-small {
     flex: 1;
     min-width: 0;
@@ -5323,8 +5513,164 @@ html.wa-screenshot-protection-active .wa-app-container {
     margin-top: 2px;
 }
 
+.wa-link-url-action {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+}
+
 .wa-link-url-small:hover {
     text-decoration: underline;
+}
+
+.wa-link-action-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10020;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(2, 6, 23, 0.58);
+    padding: 18px;
+}
+
+.wa-link-action-modal {
+    width: min(420px, calc(100vw - 32px));
+    background: #111b32;
+    border: 1px solid rgba(56, 189, 248, 0.2);
+    border-radius: 12px;
+    box-shadow: 0 22px 60px rgba(0, 0, 0, 0.42);
+    color: #f8fafc;
+    overflow: hidden;
+}
+
+.wa-link-action-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.wa-link-action-title {
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.wa-link-action-url {
+    margin-top: 5px;
+    max-width: 330px;
+    font-size: 12px;
+    color: #9cc5dd;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wa-link-action-close {
+    width: auto;
+    min-width: 58px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    background: rgba(15, 23, 42, 0.46);
+    color: #e5f4ff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border-radius: 8px;
+    padding: 0 12px;
+    font-size: 13px;
+    font-weight: 700;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.24);
+}
+
+.wa-text-close-btn {
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.wa-link-action-buttons {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+}
+
+.wa-link-action-buttons button {
+    width: 100%;
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    background: rgba(56, 189, 248, 0.1);
+    color: #e5f4ff;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.wa-link-action-buttons button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.wa-link-preview-overlay-fixed {
+    position: fixed;
+    inset: 0;
+    z-index: 10020;
+    display: block;
+    background: transparent;
+    padding: 18px;
+    pointer-events: none;
+}
+
+.wa-link-preview-modal {
+    position: fixed;
+    min-width: 320px;
+    min-height: 260px;
+    max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 48px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: #111b32;
+    border: 1px solid rgba(56, 189, 248, 0.2);
+    border-radius: 12px;
+    box-shadow: 0 22px 60px rgba(0, 0, 0, 0.42);
+    color: #f8fafc;
+    pointer-events: auto;
+    resize: both;
+}
+
+.wa-link-preview-modal-header {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: move;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.wa-link-preview-page-frame {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    border: 0;
+    background: #fff;
 }
 
 /* --- Starred Messages Panel --- */
@@ -11735,12 +12081,16 @@ svg.wa-back-icon,
 .wa-link-preview-image,
 .wa-typing-preview-image-wrap,
 .wa-link-thumb-small-wrapper,
-.wa-media-thumb,
-.wa-media-grid-item,
-.wa-doc-list-item,
-.wa-link-list-item {
+.wa-media-thumb {
     background: rgba(7, 25, 42, 0.86) !important;
     border-color: rgba(56, 189, 248, 0.16) !important;
+}
+
+.wa-doc-list-item,
+.wa-link-list-item,
+.wa-link-card-small,
+.wa-link-url-action {
+    background: transparent !important;
 }
 
 .wa-typing-preview-image-wrap {
@@ -11759,11 +12109,16 @@ svg.wa-back-icon,
 }
 
 .wa-link-preview-play-btn,
-.wa-mini-youtube-play,
+.wa-mini-youtube-play {
+    opacity: 1 !important;
+    background: rgba(14, 165, 190, 0.92) !important;
+    box-shadow: 0 10px 22px rgba(2, 6, 23, 0.38), 0 0 0 1px rgba(255, 255, 255, 0.14) inset;
+}
+
 .wa-yt-preview-overlay-small {
     opacity: 1 !important;
-    background: rgba(239, 68, 68, 0.9) !important;
-    box-shadow: 0 10px 22px rgba(2, 6, 23, 0.38), 0 0 0 1px rgba(255, 255, 255, 0.14) inset;
+    background: transparent !important;
+    box-shadow: none !important;
 }
 
 .wa-mini-youtube-play {

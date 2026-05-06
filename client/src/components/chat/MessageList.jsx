@@ -431,7 +431,7 @@ const MessageList = memo(({
     const viewOnceStorageKey = `wa_view_once_consumed_${String(user?.id || user?._id || 'anon')}`;
     const [locallyConsumedViewOnceIds, setLocallyConsumedViewOnceIds] = useState(() => {
         try {
-            const raw = sessionStorage.getItem(viewOnceStorageKey);
+            const raw = localStorage.getItem(viewOnceStorageKey);
             const arr = raw ? JSON.parse(raw) : [];
             return new Set(Array.isArray(arr) ? arr.map((id) => String(id || '')) : []);
         } catch (_) {
@@ -545,7 +545,17 @@ const MessageList = memo(({
 
     useEffect(() => {
         try {
-            sessionStorage.setItem(viewOnceStorageKey, JSON.stringify(Array.from(locallyConsumedViewOnceIds)));
+            const raw = localStorage.getItem(viewOnceStorageKey);
+            const arr = raw ? JSON.parse(raw) : [];
+            setLocallyConsumedViewOnceIds(new Set(Array.isArray(arr) ? arr.map((id) => String(id || '')) : []));
+        } catch (_) {
+            setLocallyConsumedViewOnceIds(new Set());
+        }
+    }, [viewOnceStorageKey]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(viewOnceStorageKey, JSON.stringify(Array.from(locallyConsumedViewOnceIds)));
         } catch (_) { }
     }, [locallyConsumedViewOnceIds, viewOnceStorageKey]);
 
@@ -1819,6 +1829,7 @@ const MessageList = memo(({
                                                             setSnackbar({ message: 'Viewed once. Marked as seen.', type: 'info', variant: 'system' });
                                                         }
                                                         if (!isMe) {
+                                                            markViewOnceConsumedLocally(msg);
                                                             markMessageViewed(msg._id || msg.id);
                                                         }
                                                     }

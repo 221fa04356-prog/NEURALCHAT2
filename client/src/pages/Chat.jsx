@@ -1267,10 +1267,113 @@ const VoiceRecordingUI = memo(({ isMobile, onSend, onCancel, setSnackbar, t, use
 
 const getYouTubeVideoId = (url) => {
     if (!url) return null;
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-    const match = url.match(regExp);
+    const cleaned = String(url).trim().replace(/[)\].,!?;:'"]+$/g, '');
+    try {
+        const parsed = new URL(cleaned.startsWith('http') ? cleaned : `https://${cleaned}`);
+        const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
+        if (host === 'youtu.be') {
+            const id = parsed.pathname.split('/').filter(Boolean)[0];
+            return id && id.length === 11 ? id : null;
+        }
+        if (host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com')) {
+            const queryId = parsed.searchParams.get('v');
+            if (queryId && queryId.length === 11) return queryId;
+            const parts = parsed.pathname.split('/').filter(Boolean);
+            const markerIndex = parts.findIndex(part => ['embed', 'shorts', 'live', 'v'].includes(part));
+            const pathId = markerIndex >= 0 ? parts[markerIndex + 1] : null;
+            return pathId && pathId.length === 11 ? pathId : null;
+        }
+    } catch (_) { }
+    const regExp = /^.*(youtu\.be\/|shorts\/|live\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?/\s]*).*/i;
+    const match = cleaned.match(regExp);
     return (match && match[2].length === 11) ? match[2] : null;
 };
+
+const getYouTubeEmbedUrl = (url) => {
+    const videoId = getYouTubeVideoId(url);
+    if (!videoId) return '';
+
+    const params = new URLSearchParams({
+        autoplay: '1',
+        controls: '1',
+        fs: '1',
+        playsinline: '1',
+        rel: '1'
+    });
+
+    if (typeof window !== 'undefined' && window.location?.origin) {
+        params.set('origin', window.location.origin);
+    }
+
+    return `https://www.youtube.com/embed/${videoId}?${params.toString()}`;
+};
+
+const SharedVideoThumbnail = memo(function SharedVideoThumbnail({ src, poster }) {
+    const videoRef = useRef(null);
+    const canvasRef = useRef(null);
+    const [thumbUrl, setThumbUrl] = useState('');
+    const [failed, setFailed] = useState(false);
+
+    useEffect(() => {
+        setThumbUrl('');
+        setFailed(false);
+    }, [src, poster]);
+
+    const captureFrame = () => {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        if (!video || !canvas || thumbUrl) return;
+
+        try {
+            const width = video.videoWidth || 320;
+            const height = video.videoHeight || 180;
+            if (!width || !height) return;
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, width, height);
+            setThumbUrl(canvas.toDataURL('image/jpeg', 0.82));
+        } catch (_) {
+            setFailed(true);
+        }
+    };
+
+    return (
+        <div className="wa-shared-video-thumb">
+            {thumbUrl ? (
+                <img src={thumbUrl} alt="video preview" />
+            ) : poster ? (
+                <img src={poster} alt="video preview" />
+            ) : (
+                <video
+                    ref={videoRef}
+                    src={src}
+                    muted
+                    playsInline
+                    preload="auto"
+                    controls={false}
+                    onLoadedMetadata={(e) => {
+                        try {
+                            const video = e.currentTarget;
+                            const seekTo = video.duration > 2 ? Math.min(1, video.duration / 3) : 0.1;
+                            video.currentTime = seekTo;
+                        } catch (_) {
+                            captureFrame();
+                        }
+                    }}
+                    onSeeked={captureFrame}
+                    onLoadedData={captureFrame}
+                    onError={() => setFailed(true)}
+                />
+            )}
+            <canvas ref={canvasRef} style={{ display: 'none' }} />
+            {!thumbUrl && !poster && failed && <div className="wa-shared-media-loading" />}
+            <div className="wa-shared-video-play-mark">
+                <Play size={18} fill="white" color="white" />
+            </div>
+        </div>
+    );
+});
 
 export default function Chat() {
     const WINDOWS_OPEN_HELPER_ORIGIN = 'http://127.0.0.1:48723';
@@ -1891,6 +1994,9 @@ export default function Chat() {
     const [jumpToMessageTarget, setJumpToMessageTarget] = useState(null);
     const [viewingImage, setViewingImage] = useState(null); // Track image for full-screen view
     const [previewVideoUrl, setPreviewVideoUrl] = useState(null); // URL for YouTube preview
+    const [linkActionTarget, setLinkActionTarget] = useState(null); // { url, youtubeId, title }
+    const [genericLinkPreviewTarget, setGenericLinkPreviewTarget] = useState(null);
+    const [floatingPreviewLayout, setFloatingPreviewLayout] = useState({ x: 96, y: 54, width: 420, height: 280 });
     const [isStarredMenuOpen, setIsStarredMenuOpen] = useState(false); // Menu for Starred Panel
     const [isGlobalStarredMenuOpen, setIsGlobalStarredMenuOpen] = useState(false); // Menu for Global Starred drawer
     const [isUnstarConfirmOpen, setIsUnstarConfirmOpen] = useState(false); // Confirmation bar
@@ -1898,6 +2004,38 @@ export default function Chat() {
     const [isNotificationSettingsOpen, setIsNotificationSettingsOpen] = useState(false);
     const [showUnreadBanner, setShowUnreadBanner] = useState(true);
     const [showGroupMenu, setShowGroupMenu] = useState(false);
+
+    const startFloatingPreviewDrag = (event) => {
+        if (event.button !== undefined && event.button !== 0) return;
+        event.preventDefault();
+        event.currentTarget?.setPointerCapture?.(event.pointerId);
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const startLayout = floatingPreviewLayout;
+        const handleMove = (moveEvent) => {
+            if (moveEvent.buttons !== 1 && moveEvent.pointerType !== 'touch') {
+                handleUp();
+                return;
+            }
+            const maxX = Math.max(8, window.innerWidth - 220);
+            const maxY = Math.max(8, window.innerHeight - 80);
+            setFloatingPreviewLayout(prev => ({
+                ...prev,
+                x: Math.max(8, Math.min(maxX, startLayout.x + moveEvent.clientX - startX)),
+                y: Math.max(8, Math.min(maxY, startLayout.y + moveEvent.clientY - startY))
+            }));
+        };
+        const handleUp = () => {
+            window.removeEventListener('pointermove', handleMove);
+            window.removeEventListener('pointerup', handleUp);
+            window.removeEventListener('pointercancel', handleUp);
+            window.removeEventListener('blur', handleUp);
+        };
+        window.addEventListener('pointermove', handleMove);
+        window.addEventListener('pointerup', handleUp, { once: true });
+        window.addEventListener('pointercancel', handleUp, { once: true });
+        window.addEventListener('blur', handleUp, { once: true });
+    };
 
     // --- Poll States ---
     const [isPollModalOpen, setIsPollModalOpen] = useState(false);
@@ -2992,6 +3130,7 @@ export default function Chat() {
     const getChatHoverPreview = (item, isGroupLike = false) => {
         const msg = item?.lastMessage || item?.announcements?.lastMessage;
         if (!msg) return '';
+        if (isDeletedForCurrentUser(msg)) return '';
 
         const fileName = msg.fileName || msg.file_name || msg.originalName || msg.name || '';
         const msgType = String(msg.type || '').toLowerCase();
@@ -3307,7 +3446,7 @@ export default function Chat() {
             );
         }
 
-        if (msg.deleted_for && msg.deleted_for.includes(user.id || user._id)) {
+        if (msg.deleted_for && msg.deleted_for.some(id => String(id?._id || id) === String(user.id || user._id))) {
             return (
                 <span style={{ fontStyle: 'italic', opacity: 0.7, display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <XCircle size={12} /> {t('chat_window.deleted_user_me')}
@@ -4432,6 +4571,24 @@ export default function Chat() {
         const myId = user.id || user._id;
         const sId = (msg.sender_id?._id || msg.sender_id) || (msg.user_id?._id || msg.user_id);
         return String(sId) === String(myId);
+    };
+
+    const isDeletedForCurrentUser = (msg) => {
+        if (!msg) return false;
+        const myId = String(user.id || user._id || '');
+        const deletedFor = Array.isArray(msg.deleted_for) ? msg.deleted_for : [];
+        return !!(
+            msg.is_deleted_by_admin ||
+            msg.is_deleted_by_user ||
+            (myId && deletedFor.some(id => String(id?._id || id) === myId))
+        );
+    };
+
+    const isSharedPanelVisibleMessage = (msg) => {
+        if (!msg) return false;
+        if (isDeletedForCurrentUser(msg)) return false;
+        if (msg.is_view_once) return false;
+        return true;
     };
 
     const canEditMessage = (msg) => {
@@ -6867,6 +7024,13 @@ export default function Chat() {
                     return;
                 }
 
+                if (genericLinkPreviewTarget) {
+                    setGenericLinkPreviewTarget(null);
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                    return;
+                }
+
                 if (viewingImage) {
                     setViewingImage(null);
                     e.stopImmediatePropagation();
@@ -6969,7 +7133,7 @@ export default function Chat() {
             window.removeEventListener('click', handleClickOutside);
             window.removeEventListener('keydown', handleGlobalKeyDown);
         };
-    }, [openDropdown, chatContextMenu, showMenu, isCountryDropdownOpen, selectedUser, selectedGroup, selectedCommunity, isNewChatOpen, isNewGroupOpen, showInputEmojiPicker, showUnblockModal, selectedFontSize, previewVideoUrl, viewingImage, file, selectedFiles]);
+    }, [openDropdown, chatContextMenu, showMenu, isCountryDropdownOpen, selectedUser, selectedGroup, selectedCommunity, isNewChatOpen, isNewGroupOpen, showInputEmojiPicker, showUnblockModal, selectedFontSize, previewVideoUrl, genericLinkPreviewTarget, viewingImage, file, selectedFiles]);
 
     useEffect(() => {
         const handleClickOutside = (e) => {
@@ -9106,10 +9270,8 @@ export default function Chat() {
 
         if (rawPath.startsWith('blob:') || rawPath.startsWith('data:')) return rawPath;
         if (!rawPath) return fallbackUrl || directUrl || null;
-        if (isPersistentMessageObjectId(msg._id || msg.id) && isManagedAppMediaPath(rawPath) && fallbackUrl) {
-            return fallbackUrl;
-        }
-        if (/(^|\/)uploads\//i.test(rawPath)) return fallbackUrl || directUrl || null;
+        if (isManagedAppMediaPath(rawPath)) return directUrl || fallbackUrl || null;
+        if (/(^|\/)uploads\//i.test(rawPath)) return directUrl || fallbackUrl || null;
         return directUrl || fallbackUrl || null;
     };
 
@@ -16173,7 +16335,7 @@ export default function Chat() {
 
                         {(() => {
                             const chatMsgs = groupMessages || [];
-                            const activeMsgs = chatMsgs.filter(m => !m.is_deleted_by_user && !m.is_deleted_by_admin);
+                            const activeMsgs = chatMsgs.filter(isSharedPanelVisibleMessage);
                             const mediaMsgs = activeMsgs.filter(m => m.type === 'image' || m.type === 'video' || m.type === 'audio').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                             const links = activeMsgs.filter(m => (m.link_preview?.url || /(https?:\/\/[^\s]+)/.test(m.content || '')) && m.type !== 'image' && m.type !== 'video' && m.type !== 'audio' && m.type !== 'file').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                             const docs = activeMsgs.filter(m => m.type === 'file').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -16508,7 +16670,7 @@ export default function Chat() {
                     {/* Media, Links, Docs */}
                     {(() => {
                         const chatMsgs = isGroup ? groupMessages : messages;
-                        const activeMsgs = (chatMsgs || []).filter(m => !m.is_deleted_by_user && !m.is_deleted_by_admin);
+                        const activeMsgs = (chatMsgs || []).filter(isSharedPanelVisibleMessage);
                         const mediaMsgs = activeMsgs.filter(m => m.type === 'image' || m.type === 'video' || m.type === 'audio');
                         const linkMsgs = activeMsgs.filter(m => (m.link_preview?.url || /(https?:\/\/[^\s]+)/.test(m.content || '')) && m.type !== 'image' && m.type !== 'video' && m.type !== 'audio' && m.type !== 'file');
                         const docMsgs = activeMsgs.filter(m => m.type === 'file');
@@ -19870,7 +20032,7 @@ export default function Chat() {
                         {(() => {
                             const isAnnouncementsActive = selectedGroup && (selectedGroup.isCommunityAnnouncements || String(selectedGroup._id) === String(community.announcements?._id || community.announcements));
                             const cChatMsgs = isAnnouncementsActive ? (groupMessages || []) : (community.announcements?.messages || groupMessages || []);
-                            const cActiveMsgs = cChatMsgs.filter(m => !m.is_deleted_by_user && !m.is_deleted_by_admin);
+                            const cActiveMsgs = cChatMsgs.filter(isSharedPanelVisibleMessage);
                             const cImages = cActiveMsgs.filter(m => m.type === 'image' || m.type === 'video').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                             const cLinks = cActiveMsgs.filter(m => (m.link_preview?.url || /(https?:\/\/[^\s]+)/.test(m.content)) && m.type !== 'image' && m.type !== 'video').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                             const cDocs = cActiveMsgs.filter(m => m.type === 'file').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -20587,6 +20749,8 @@ export default function Chat() {
             );
         }
 
+        chatMsgs = chatMsgs.filter(isSharedPanelVisibleMessage);
+
         const mediaMsgs = chatMsgs.filter(m => m.type === 'image' || m.type === 'video' || m.type === 'audio').sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
         const docMsgs = chatMsgs.filter(m => m.type === 'file').sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
         const linkMsgs = chatMsgs.filter(m => (m.link_preview?.url || /(https?:\/\/[^\s]+)/.test(m.content)) && m.type !== 'image' && m.type !== 'video' && m.type !== 'audio' && m.type !== 'file').sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
@@ -20623,6 +20787,11 @@ export default function Chat() {
             );
         };
 
+        const jumpToSharedMessage = (msgId) => {
+            setSelectedMediaMsgs([]);
+            handleSearchClick(msgId);
+        };
+
         const formatSharedMediaTimestamp = (dateStr) => {
             if (!dateStr) return '';
             const date = new Date(dateStr);
@@ -20651,7 +20820,10 @@ export default function Chat() {
             if (ext === 'csv') return 'CSV';
             if (['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods'].includes(ext)) return 'XLS';
             if (['ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'].includes(ext)) return 'PPT';
-            if (['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt', 'txt'].includes(ext)) return 'DOC';
+            if (ext === 'txt') return 'TXT';
+            if (ext === 'rtf') return 'RTF';
+            if (['md', 'markdown'].includes(ext)) return 'MD';
+            if (['doc', 'docx', 'docm', 'dot', 'dotx', 'odt'].includes(ext)) return 'DOC';
             if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'ZIP';
             return (ext || 'FILE').slice(0, 4).toUpperCase();
         };
@@ -20697,27 +20869,15 @@ export default function Chat() {
             return palette[hash % palette.length];
         };
 
+        const getSharedLinkUrl = (msg) => {
+            const rawUrl = msg?.link_preview?.url || String(msg?.content || '').match(/https?:\/\/[^\s<>"']+/)?.[0] || '';
+            return String(rawUrl).trim().replace(/[)\].,!?;:'"]+$/g, '');
+        };
+
         return (
             <div className={`wa-contact-info-panel shared-media-panel ${isSharedMediaOpen ? 'active' : ''}`}>
                 <div className="wa-contact-info-header" style={{ background: 'transparent', borderBottom: 'none', height: 60, display: 'flex', alignItems: 'center', padding: '0 15px' }}>
-                    {isSelectionMode ? (
-                        <div className="wa-selection-header-grid">
-                            <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                                <button onClick={() => setSelectedMediaMsgs([])} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#38bdf8', fontSize: '16px', fontWeight: 500, padding: 0, width: 'auto' }}>
-                                    {t('lang_confirm.cancel')}
-                                </button>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'center' }}>
-                                <span style={{ fontSize: 18, fontWeight: 500, whiteSpace: 'nowrap' }}>{t('chat_window.selected_count', { count: selectedMediaMsgs.length })}</span>
-                            </div>
-                            <div className="wa-selection-header-actions">
-                                <Copy size={22} color="#38bdf8" className="wa-copy-icon-mobile" style={{ cursor: 'pointer' }} onClick={handleBulkCopy} />
-                                <Star size={22} color="#38bdf8" style={{ cursor: 'pointer' }} onClick={handleBulkStar} />
-                                <Trash2 size={22} color="#f87171" style={{ cursor: 'pointer' }} onClick={handleBulkDelete} />
-                                <Forward size={22} color="#38bdf8" style={{ cursor: 'pointer' }} onClick={handleBulkForward} />
-                            </div>
-                        </div>
-                    ) : <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', width: '100%', height: '100%' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', width: '100%', height: '100%' }}>
                         <div style={{ display: 'flex', justifyContent: 'flex-start', paddingLeft: '8px' }}>
                             <button onClick={() => {
                                 setIsSharedMediaOpen(false);
@@ -20732,26 +20892,38 @@ export default function Chat() {
                         </div>
                         <div /> {/* Spacer */}
                     </div>
-                    }
                 </div>
 
-                {!isSelectionMode && (
-                    <div className="wa-media-tabs">
-                        {['media', 'docs', 'links'].map(tab => {
-                            const count = tab === 'media' ? mediaMsgs.length :
-                                tab === 'docs' ? docMsgs.length :
-                                    linkMsgs.length;
-                            return (
-                                <div
-                                    key={tab}
-                                    className={`wa-media-tab ${sharedMediaTab === tab ? 'active' : ''}`}
-                                    onClick={() => setSharedMediaTab(tab)}
-                                >
-                                    <div>{t(`shared_media.tabs.${tab}`)}</div>
-                                    <div className="wa-tab-count">{count}</div>
-                                </div>
-                            );
-                        })}
+                <div className="wa-media-tabs">
+                    {['media', 'docs', 'links'].map(tab => {
+                        const count = tab === 'media' ? mediaMsgs.length :
+                            tab === 'docs' ? docMsgs.length :
+                                linkMsgs.length;
+                        return (
+                            <div
+                                key={tab}
+                                className={`wa-media-tab ${sharedMediaTab === tab ? 'active' : ''}`}
+                                onClick={() => setSharedMediaTab(tab)}
+                            >
+                                <div>{t(`shared_media.tabs.${tab}`)}</div>
+                                <div className="wa-tab-count">{count}</div>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {isSelectionMode && (
+                    <div className="wa-shared-selection-toolbar">
+                        <button onClick={() => setSelectedMediaMsgs([])} className="wa-shared-selection-cancel">
+                            {t('lang_confirm.cancel')}
+                        </button>
+                        <span>{t('chat_window.selected_count', { count: selectedMediaMsgs.length })}</span>
+                        <div className="wa-selection-header-actions">
+                            <Copy size={22} color="#38bdf8" className="wa-copy-icon-mobile" style={{ cursor: 'pointer' }} onClick={handleBulkCopy} />
+                            <Star size={22} color="#38bdf8" style={{ cursor: 'pointer' }} onClick={handleBulkStar} />
+                            <Trash2 size={22} color="#f87171" style={{ cursor: 'pointer' }} onClick={handleBulkDelete} />
+                            <Forward size={22} color="#38bdf8" style={{ cursor: 'pointer' }} onClick={handleBulkForward} />
+                        </div>
                     </div>
                 )}
 
@@ -20775,6 +20947,10 @@ export default function Chat() {
                                                     const isSelected = !!selectedMediaMsgs.find(m => String(m._id || m.id) === String(msgKey));
                                                     const isAnySelected = selectedMediaMsgs.length > 0;
                                                     const mediaUrl = getMessageMediaUrl(msg);
+                                                    const videoPreviewUrl = mediaUrl && msg.type === 'video'
+                                                        ? `${mediaUrl}${String(mediaUrl).includes('#') ? '' : '#t=0.1'}`
+                                                        : mediaUrl;
+                                                    const videoPosterUrl = msg.thumbnail_path ? getMediaUrl(msg.thumbnail_path) : '';
 
                                                     return (
                                                         <div key={msgKey} className="wa-media-grid-item" onClick={(e) => {
@@ -20782,7 +20958,7 @@ export default function Chat() {
                                                             if (isAnySelected) {
                                                                 toggleSelection(msg);
                                                             } else {
-                                                                handleSearchClick(msgKey);
+                                                                jumpToSharedMessage(msgKey);
                                                             }
                                                         }}>
                                                             {msg.type === 'audio' ? (
@@ -20794,20 +20970,14 @@ export default function Chat() {
                                                                 </div>
                                                             ) : msg.type === 'video' ? (
                                                                 mediaUrl ? (
-                                                                    <video
-                                                                        src={mediaUrl}
-                                                                        muted
-                                                                        playsInline
-                                                                        preload="metadata"
-                                                                        style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#0f1f33' }}
-                                                                    />
+                                                                    <SharedVideoThumbnail src={videoPreviewUrl} poster={videoPosterUrl} />
                                                                 ) : (
-                                                                    <div style={{ width: '100%', height: '100%', background: '#0f1f33' }} />
+                                                                    <div className="wa-shared-media-loading" />
                                                                 )
                                                             ) : (
                                                                 mediaUrl
-                                                                    ? <img src={mediaUrl} alt="media" />
-                                                                    : <div style={{ width: '100%', height: '100%', background: '#0f1f33' }} />
+                                                                    ? <img src={mediaUrl} alt="media" loading="eager" decoding="async" />
+                                                                    : <div className="wa-shared-media-loading" />
                                                             )}
                                                             <div
                                                                 className={`wa-media-overlay ${isSelected ? 'selected' : ''}`}
@@ -20815,6 +20985,7 @@ export default function Chat() {
                                                             >
                                                                 <div
                                                                     className="wa-media-select-btn"
+                                                                    onMouseDown={(e) => e.stopPropagation()}
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
                                                                         toggleSelection(msg);
@@ -20845,22 +21016,39 @@ export default function Chat() {
                                             </div>
                                             <div className="wa-docs-list">
                                                 {msgs.map(msg => (
-                                                    <div key={msg._id || msg.id} className="wa-doc-list-item">
+                                                    <div
+                                                        key={msg._id || msg.id}
+                                                        className="wa-doc-list-item"
+                                                        onClick={() => {
+                                                            if (isSelectionMode) toggleSelection(msg);
+                                                            else jumpToSharedMessage(msg._id || msg.id);
+                                                        }}
+                                                    >
                                                         <div
-                                                            className={`wa-doc-select-box ${selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? 'active' : ''}`}
-                                                            onClick={(e) => { e.stopPropagation(); toggleSelection(msg); }}
+                                                            className="wa-doc-select-hitbox"
+                                                            onMouseDown={(e) => e.stopPropagation()}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                toggleSelection(msg);
+                                                            }}
                                                             style={{ cursor: 'pointer' }}
                                                         >
-                                                            {selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? (
-                                                                <CheckCheck size={14} color="#fff" />
-                                                            ) : (
-                                                                <div className="wa-doc-checkbox-placeholder" />
-                                                            )}
+                                                            <div className={`wa-doc-select-box ${selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? 'active' : ''}`}>
+                                                                {selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? (
+                                                                    <CheckCheck size={14} color="#fff" />
+                                                                ) : (
+                                                                    <div className="wa-doc-checkbox-placeholder" />
+                                                                )}
+                                                            </div>
                                                         </div>
                                                         <div
                                                             className="wa-doc-content-wrapper"
                                                             style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, cursor: 'pointer', minHeight: 52 }}
-                                                            onClick={() => handleSearchClick(msg._id || msg.id)}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                if (isSelectionMode) toggleSelection(msg);
+                                                                else jumpToSharedMessage(msg._id || msg.id);
+                                                            }}
                                                         >
                                                             <div className="wa-doc-icon-small" style={{ width: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                                                 {(() => {
@@ -20899,28 +21087,58 @@ export default function Chat() {
                                             </div>
                                             <div className="wa-links-list">
                                                 {msgs.map(msg => {
-                                                    const actualUrl = msg.link_preview?.url || msg.content?.match(/(https?:\/\/[^\s]+)/)?.[0];
+                                                    const actualUrl = getSharedLinkUrl(msg);
+                                                    const youtubeId = getYouTubeVideoId(actualUrl);
+                                                    const isYoutubeLink = !!youtubeId || /(^|\/\/)(www\.)?(youtube\.com|youtu\.be)\//i.test(actualUrl);
+                                                    const previewImage = msg.link_preview?.image || (youtubeId ? `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg` : '');
+                                                    const openLinkAction = () => {
+                                                        if (!actualUrl) return;
+                                                        setLinkActionTarget({
+                                                            url: actualUrl,
+                                                            youtubeId,
+                                                            title: msg.link_preview?.title || actualUrl,
+                                                            description: msg.link_preview?.description || '',
+                                                            image: previewImage,
+                                                            domain: msg.link_preview?.domain || (() => {
+                                                                try { return new URL(actualUrl).hostname; } catch (_) { return ''; }
+                                                            })()
+                                                        });
+                                                    };
                                                     return (
-                                                        <div key={msg._id || msg.id} className="wa-link-list-item">
+                                                        <div
+                                                            key={msg._id || msg.id}
+                                                            className="wa-link-list-item"
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                if (isSelectionMode) toggleSelection(msg);
+                                                                else openLinkAction();
+                                                            }}
+                                                        >
                                                             <div
-                                                                className={`wa-doc-select-box ${selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? 'active' : ''}`}
-                                                                onClick={(e) => { e.stopPropagation(); toggleSelection(msg); }}
+                                                                className="wa-doc-select-hitbox"
+                                                                onMouseDown={(e) => e.stopPropagation()}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    toggleSelection(msg);
+                                                                }}
                                                                 style={{ cursor: 'pointer' }}
                                                             >
-                                                                {selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? (
-                                                                    <CheckCheck size={18} color="#fff" />
-                                                                ) : (
-                                                                    <div className="wa-doc-checkbox-placeholder" />
-                                                                )}
+                                                                <div className={`wa-doc-select-box ${selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? 'active' : ''}`}>
+                                                                    {selectedMediaMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ? (
+                                                                        <CheckCheck size={18} color="#fff" />
+                                                                    ) : (
+                                                                        <div className="wa-doc-checkbox-placeholder" />
+                                                                    )}
+                                                                </div>
                                                             </div>
-                                                            <a
-                                                                className={`wa-link-card-small ${getYouTubeVideoId(actualUrl) ? 'youtube' : ''}`}
-                                                                href={actualUrl}
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
+                                                            <div
+                                                                className={`wa-link-card-small ${isYoutubeLink ? 'youtube' : ''}`}
                                                                 onClick={(e) => {
                                                                     e.preventDefault();
-                                                                    handleSearchClick(msg._id || msg.id);
+                                                                    e.stopPropagation();
+                                                                    if (isSelectionMode) toggleSelection(msg);
+                                                                    else openLinkAction();
                                                                 }}
                                                                 style={{ cursor: 'pointer', textDecoration: 'none', display: 'block' }}
                                                             >
@@ -20929,29 +21147,49 @@ export default function Chat() {
                                                                     <span className="wa-link-time-small">{formatSharedMediaTimestamp(msg.created_at)}</span>
                                                                 </div>
                                                                 <div style={{ display: 'flex', gap: 10 }}>
-                                                                    {msg.link_preview?.image && (
+                                                                    {previewImage && (
                                                                         <div className="wa-link-thumb-small-wrapper">
-                                                                            <img src={msg.link_preview.image} alt="preview" className="wa-link-thumb-small" />
-                                                                            {getYouTubeVideoId(actualUrl) && (
-                                                                                <div
-                                                                                    className="wa-yt-preview-overlay-small"
+                                                                            <img src={previewImage} alt="preview" className="wa-link-thumb-small" />
+                                                                            {isYoutubeLink && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    className="wa-yt-preview-overlay-small always-visible"
                                                                                     onClick={(e) => {
                                                                                         e.stopPropagation();
                                                                                         e.preventDefault();
-                                                                                        setPreviewVideoUrl(actualUrl);
+                                                                                        if (isSelectionMode) {
+                                                                                            toggleSelection(msg);
+                                                                                            return;
+                                                                                        }
+                                                                                        if (youtubeId) setPreviewVideoUrl(actualUrl);
                                                                                     }}
+                                                                                    aria-label="Play YouTube video in app"
                                                                                 >
                                                                                     <Play size={16} color="white" fill="white" />
-                                                                                </div>
+                                                                                </button>
                                                                             )}
                                                                         </div>
                                                                     )}
                                                                     <div className="wa-link-details-small">
                                                                         {msg.link_preview?.title && <div className="wa-link-title-small">{msg.link_preview.title}</div>}
-                                                                        <div className="wa-link-url-small" style={{ wordBreak: 'break-all' }}>{actualUrl}</div>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="wa-link-url-small wa-link-url-action"
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                e.preventDefault();
+                                                                                if (isSelectionMode) {
+                                                                                    toggleSelection(msg);
+                                                                                    return;
+                                                                                }
+                                                                                openLinkAction();
+                                                                            }}
+                                                                        >
+                                                                            {actualUrl}
+                                                                        </button>
                                                                     </div>
                                                                 </div>
-                                                            </a>
+                                                            </div>
                                                         </div>
                                                     );
                                                 })}
@@ -27298,20 +27536,107 @@ export default function Chat() {
             />
 
             {viewingImage && renderImageViewer()}
+            {linkActionTarget && (
+                <div className="wa-link-action-overlay" onClick={() => setLinkActionTarget(null)}>
+                    <div className="wa-link-action-modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="wa-link-action-header">
+                            <div>
+                                <div className="wa-link-action-title">Open link</div>
+                                <div className="wa-link-action-url">{linkActionTarget.url}</div>
+                            </div>
+                            <button className="wa-link-action-close wa-text-close-btn" onClick={() => setLinkActionTarget(null)} aria-label="Close">
+                                Close
+                            </button>
+                        </div>
+                        <div className="wa-link-action-buttons">
+                            <button
+                                onClick={() => {
+                                    if (linkActionTarget.youtubeId) {
+                                        setPreviewVideoUrl(linkActionTarget.url);
+                                    } else {
+                                        setGenericLinkPreviewTarget(linkActionTarget);
+                                    }
+                                    setLinkActionTarget(null);
+                                }}
+                            >
+                                <Play size={16} />
+                                <span>Preview in app</span>
+                            </button>
+                            <button
+                                onClick={() => {
+                                    window.open(linkActionTarget.url, '_blank', 'noopener,noreferrer');
+                                    setLinkActionTarget(null);
+                                }}
+                            >
+                                <ExternalLink size={16} />
+                                <span>Open in new tab</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {genericLinkPreviewTarget && (
+                <div className="wa-link-preview-overlay-fixed">
+                    <div
+                        className="wa-link-preview-modal wa-floating-preview-window"
+                        style={{
+                            left: floatingPreviewLayout.x,
+                            top: floatingPreviewLayout.y,
+                            width: floatingPreviewLayout.width,
+                            height: floatingPreviewLayout.height
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="wa-link-preview-modal-header wa-floating-preview-drag-handle" onPointerDown={startFloatingPreviewDrag}>
+                            <span>{genericLinkPreviewTarget.domain || 'Page Preview'}</span>
+                            <button className="wa-link-action-close wa-text-close-btn" onPointerDown={(e) => e.stopPropagation()} onClick={() => setGenericLinkPreviewTarget(null)} aria-label="Close">
+                                Close
+                            </button>
+                        </div>
+                        <iframe
+                            className="wa-link-preview-page-frame"
+                            src={`/api/chat/page-preview?url=${encodeURIComponent(genericLinkPreviewTarget.url)}`}
+                            title={genericLinkPreviewTarget.title || 'Link preview'}
+                            sandbox="allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
+                        />
+                        <div className="wa-link-action-buttons">
+                            <button
+                                onClick={() => {
+                                    window.open(genericLinkPreviewTarget.url, '_blank', 'noopener,noreferrer');
+                                    setGenericLinkPreviewTarget(null);
+                                }}
+                            >
+                                <ExternalLink size={16} />
+                                <span>Open page</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             {previewVideoUrl && (
-                <div className="wa-video-preview-overlay-fixed" onClick={() => setPreviewVideoUrl(null)}>
-                    <div className="wa-video-preview-container" onClick={(e) => e.stopPropagation()}>
-                        <div className="wa-video-preview-header">
+                <div className="wa-video-preview-overlay-fixed">
+                    <div
+                        className="wa-video-preview-container wa-floating-preview-window"
+                        style={{
+                            left: floatingPreviewLayout.x,
+                            top: floatingPreviewLayout.y,
+                            width: floatingPreviewLayout.width,
+                            height: Math.max(260, Math.round(floatingPreviewLayout.width * 9 / 16) + 38)
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="wa-video-preview-header wa-floating-preview-drag-handle" onPointerDown={startFloatingPreviewDrag}>
                             <span>Video Preview</span>
-                            <button className="wa-video-preview-close" onClick={() => setPreviewVideoUrl(null)}>
-                                <X size={20} />
+                            <button className="wa-video-preview-close wa-text-close-btn" onPointerDown={(e) => e.stopPropagation()} onClick={() => setPreviewVideoUrl(null)}>
+                                Close
                             </button>
                         </div>
                         <div className="wa-video-preview-body">
                             <iframe
+                                key={previewVideoUrl}
                                 width="100%"
                                 height="100%"
-                                src={`https://www.youtube.com/embed/${getYouTubeVideoId(previewVideoUrl)}?autoplay=1`}
+                                src={getYouTubeEmbedUrl(previewVideoUrl)}
                                 title="YouTube video player"
                                 frameBorder="0"
                                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"

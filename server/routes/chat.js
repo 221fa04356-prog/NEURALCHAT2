@@ -841,7 +841,10 @@ router.get('/users', authenticateToken, async (req, res) => {
                         { user_id: new mongoose.Types.ObjectId(currentUserId), receiver_id: new mongoose.Types.ObjectId(u._id) },
                         { user_id: new mongoose.Types.ObjectId(u._id), receiver_id: new mongoose.Types.ObjectId(currentUserId) }
                     ],
-                    deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) }
+                    deleted_for: { $ne: new mongoose.Types.ObjectId(currentUserId) },
+                    is_deleted_by_admin: { $ne: true },
+                    is_deleted_by_user: { $ne: true },
+                    is_view_once: { $ne: true }
                 };
 
                 const [mediaCount, docCount, linkCount] = await Promise.all([
@@ -930,6 +933,149 @@ router.get('/link-preview', authenticateToken, async (req, res) => {
     if (!url) return res.status(400).json({ error: 'URL required' });
     const preview = await fetchLinkPreview(url);
     res.json(preview || {});
+});
+
+router.get('/page-preview', async (req, res) => {
+    try {
+        const rawUrl = String(req.query.url || '').trim();
+        if (!rawUrl) return res.status(400).send('URL required');
+
+        const target = new URL(rawUrl);
+        if (!['http:', 'https:'].includes(target.protocol)) {
+            return res.status(400).send('Unsupported URL');
+        }
+        if (isPrivateOrLocalHost(target.hostname)) {
+            return res.status(400).send('Unsupported preview target');
+        }
+
+        const upstream = await axios.get(target.toString(), {
+            responseType: 'arraybuffer',
+            timeout: 9000,
+            maxRedirects: 4,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            },
+            validateStatus: (status) => status >= 200 && status < 400
+        });
+
+        const contentType = String(upstream.headers['content-type'] || 'text/html');
+        const finalUrl = upstream.request?.res?.responseUrl || target.toString();
+        const bodyBuffer = Buffer.from(upstream.data || '');
+        const toPreviewUrl = (value) => {
+            const href = String(value || '').trim();
+            if (href.startsWith('/api/chat/page-preview?url=')) return href;
+            if (!href || href.startsWith('#') || /^(javascript|mailto|tel|data|blob):/i.test(href)) return href;
+            try {
+                const resolved = new URL(href, finalUrl).toString();
+                const resolvedUrl = new URL(resolved);
+                if (!['http:', 'https:'].includes(resolvedUrl.protocol) || isPrivateOrLocalHost(resolvedUrl.hostname)) return href;
+                return `/api/chat/page-preview?url=${encodeURIComponent(resolved)}`;
+            } catch (_) {
+                return href;
+            }
+        };
+        const rewriteCssUrls = (cssText) => String(cssText || '')
+            .replace(/url\(\s*(["']?)(?!data:|blob:|#)([^"')]+)\1\s*\)/gi, (match, quote, href) => {
+                return `url("${toPreviewUrl(href)}")`;
+            })
+            .replace(/@import\s+(["'])(?!data:|blob:|#)(.*?)\1/gi, (match, quote, href) => {
+                return `@import "${toPreviewUrl(href)}"`;
+            });
+
+        if (contentType.includes('text/css')) {
+            res.setHeader('Content-Type', contentType);
+            res.setHeader('Cache-Control', 'public, max-age=300');
+            return res.send(rewriteCssUrls(bodyBuffer.toString('utf8')));
+        }
+
+        if (!contentType.includes('text/html') && !contentType.includes('application/xhtml+xml')) {
+            res.setHeader('Content-Type', contentType || 'application/octet-stream');
+            res.setHeader('Cache-Control', 'public, max-age=300');
+            res.removeHeader('X-Frame-Options');
+            res.removeHeader('Content-Security-Policy');
+            return res.send(bodyBuffer);
+        }
+
+        const rewritePreviewNavigation = (markup) => String(markup || '')
+            .replace(/<meta[^>]+http-equiv=["']refresh["'][^>]*>/ig, '')
+            .replace(/(<(?:a|link)\b[^>]*?\shref\s*=\s*)(["'])(.*?)\2/gi, (match, prefix, quote, href) => {
+                return `${prefix}${quote}${toPreviewUrl(href)}${quote}`;
+            })
+            .replace(/(<(?:script|img|source|video|audio|track|input|form|use|iframe|embed)\b[^>]*?\s(?:src|poster|action|href)\s*=\s*)(["'])(.*?)\2/gi, (match, prefix, quote, href) => {
+                return `${prefix}${quote}${toPreviewUrl(href)}${quote}`;
+            })
+            .replace(/(<[^>]*?\ssrcset\s*=\s*)(["'])(.*?)\2/gi, (match, prefix, quote, srcset) => {
+                const rewritten = String(srcset || '').split(',').map(part => {
+                    const pieces = part.trim().split(/\s+/);
+                    if (!pieces[0]) return part;
+                    pieces[0] = toPreviewUrl(pieces[0]);
+                    return pieces.join(' ');
+                }).join(', ');
+                return `${prefix}${quote}${rewritten}${quote}`;
+            })
+            .replace(/(<[^>]*?\sstyle\s*=\s*)(["'])(.*?)\2/gi, (match, prefix, quote, styleText) => {
+                return `${prefix}${quote}${rewriteCssUrls(styleText)}${quote}`;
+            })
+            .replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (match, open, cssText, close) => {
+                return `${open}${rewriteCssUrls(cssText)}${close}`;
+            })
+            .replace(/(<a\b[^>]*?\starget\s*=\s*)(["'])(.*?)\2/gi, '$1$2_self$2')
+            .replace(/(<form\b[^>]*?\saction\s*=\s*)(["'])(.*?)\2/gi, (match, prefix, quote, action) => {
+                return `${prefix}${quote}${toPreviewUrl(action || finalUrl)}${quote}`;
+            })
+            .replace(/(<form\b(?![^>]*?\saction\s*=)[^>]*?)>/gi, (match, prefix) => {
+                return `${prefix} action="${toPreviewUrl(finalUrl)}">`;
+            })
+            .replace(/(<form\b[^>]*?\smethod\s*=\s*)(["'])post\2/gi, '$1$2get$2');
+        const previewNavigationScript = `
+<script>
+(function () {
+    var proxyPrefix = '/api/chat/page-preview?url=';
+    function canProxy(href) {
+        return href && !href.startsWith('#') && !/^(javascript|mailto|tel):/i.test(href);
+    }
+    function toProxyUrl(href) {
+        return proxyPrefix + encodeURIComponent(new URL(href, document.baseURI).toString());
+    }
+    document.addEventListener('click', function (event) {
+        var anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+        if (!anchor || anchor.hasAttribute('download')) return;
+        var href = anchor.getAttribute('href');
+        if (!canProxy(href)) return;
+        event.preventDefault();
+        window.location.href = toProxyUrl(href);
+    }, true);
+    document.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (!form || !form.action || String(form.method || 'get').toLowerCase() !== 'get') return;
+        event.preventDefault();
+        var target = new URL(form.getAttribute('action') || document.baseURI, document.baseURI);
+        new FormData(form).forEach(function (value, key) {
+            target.searchParams.set(key, value);
+        });
+        window.location.href = toProxyUrl(target.toString());
+    }, true);
+}());
+</script>`;
+        let html = bodyBuffer.toString('utf8')
+            .replace(/<meta[^>]+http-equiv=["']content-security-policy["'][^>]*>/ig, '');
+        html = rewritePreviewNavigation(html);
+        html = /<head([^>]*)>/i.test(html)
+            ? html.replace(/<head([^>]*)>/i, `<head$1><base href="${finalUrl}">`)
+            : `<base href="${finalUrl}">${html}`;
+        html = /<\/body>/i.test(html)
+            ? html.replace(/<\/body>/i, `${previewNavigationScript}</body>`)
+            : `${html}${previewNavigationScript}`;
+
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('X-Frame-Options', 'ALLOWALL');
+        res.removeHeader('Content-Security-Policy');
+        res.send(html);
+    } catch (err) {
+        console.error('Page preview error:', err.message);
+        res.status(502).send(`<html><body style="font-family:Arial;padding:24px;color:#334155"><h2>Preview unavailable</h2><p>${String(err.message || 'This page could not be loaded in preview.')}</p></body></html>`);
+    }
 });
 
 // POST Grammar Check
