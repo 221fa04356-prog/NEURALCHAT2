@@ -2216,6 +2216,8 @@ export default function Chat() {
     const [contactSearchQuery, setContactSearchQuery] = useState('');
     const [selectedContacts, setSelectedContacts] = useState([]);
     const [isConfirmContactSendOpen, setIsConfirmContactSendOpen] = useState(false);
+    const [isScheduleSendOpen, setIsScheduleSendOpen] = useState(false);
+    const [scheduledSendAt, setScheduledSendAt] = useState('');
 
     // Sleep Mode Effect
     useEffect(() => {
@@ -6118,7 +6120,7 @@ export default function Chat() {
 
             const markMsg = (m) => {
                 const msgSenderId = String(m.sender_id?._id || m.sender_id || m.user_id?._id || m.user_id || '');
-                if (msgSenderId === myId && !m.is_read) {
+                if (msgSenderId === myId && !m.is_read && !m.is_scheduled) {
                     return { ...m, is_read: true, read_at: data.read_at || new Date() };
                 }
                 return m;
@@ -6436,6 +6438,27 @@ export default function Chat() {
             setSnackbar({ message: 'Connection failed. Please refresh.', type: 'error' });
         };
 
+        const onScheduledMessageSent = (data) => {
+            const scheduledId = String(data?.scheduledId || '');
+            const delivered = data?.message;
+            if (!scheduledId || !delivered) return;
+            const replaceScheduled = prev => prev.map(m => String(m._id || m.id) === scheduledId
+                ? {
+                    ...delivered,
+                    created_at: m.created_at || delivered.created_at,
+                    scheduled_created_at: m.created_at || delivered.scheduled_created_at || delivered.created_at,
+                    is_scheduled: false,
+                    is_read: false,
+                    read_at: null
+                }
+                : m);
+            if (data.isGroup) {
+                setGroupMessages(replaceScheduled);
+            } else {
+                setMessages(replaceScheduled);
+            }
+        };
+
         // Attach Listeners
         socket.on('connect', onConnect);
         socket.on('disconnect', onDisconnect);
@@ -6443,6 +6466,7 @@ export default function Chat() {
         socket.io.on("reconnect_attempt", onReconnectAttempt);
         socket.io.on("reconnect_failed", onReconnectFailed);
         socket.on('receive_message', onReceiveMessage);
+        socket.on('scheduled_message_sent', onScheduledMessageSent);
         socket.on('messages_read', onMessagesRead);
         socket.on('messages_read_broadcast', onMessagesRead);
         socket.on('messages_unread', onMessagesUnread);
@@ -7234,6 +7258,7 @@ export default function Chat() {
             socket.io.off("reconnect_attempt", onReconnectAttempt);
             socket.io.off("reconnect_failed", onReconnectFailed);
             socket.off('receive_message', onReceiveMessage);
+            socket.off('scheduled_message_sent', onScheduledMessageSent);
             socket.off('messages_read', onMessagesRead);
             socket.off('messages_read_broadcast', onMessagesRead);
             socket.off('messages_unread', onMessagesUnread);
@@ -7807,16 +7832,9 @@ export default function Chat() {
             const token = localStorage.getItem('token');
             const myId = String(user.id || user._id);
             const isOwner = String(activeGroup?.admin?._id || activeGroup?.admin || activeGroup?.creatorId || '') === myId;
-            const otherAdmins = (activeGroup?.admins || []).filter(admin => String(admin?._id || admin?.id || admin) !== myId);
-            const needsManualTransfer = isOwner && otherAdmins.length === 0;
             const newAdminId = newAdminOverride?._id || newAdminOverride?.id || exitGroupTransferTarget?._id || exitGroupTransferTarget?.id || null;
-            if (needsManualTransfer) {
-                await axios.post(`/api/groups/${groupId}/transfer-ownership`, { newAdminId }, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-            }
 
-            const res = await axios.post(`/api/groups/${groupId}/exit`, needsManualTransfer ? {} : (isOwner && newAdminId ? { newAdminId } : {}), {
+            const res = await axios.post(`/api/groups/${groupId}/exit`, isOwner && newAdminId ? { newAdminId } : {}, {
                 headers: { Authorization: `Bearer ${token}` }
             });
 
@@ -10239,6 +10257,9 @@ export default function Chat() {
                     _id: contact._id,
                     name: contact.name,
                     mobile: contact.mobile,
+                    countryCode: contact.countryCode,
+                    email: contact.email,
+                    designation: contact.designation,
                     image: contact.image,
                     about: contact.about
                 });
@@ -10247,6 +10268,9 @@ export default function Chat() {
                     _id: c._id,
                     name: c.name,
                     mobile: c.mobile,
+                    countryCode: c.countryCode,
+                    email: c.email,
+                    designation: c.designation,
                     image: c.image,
                     about: c.about
                 })));
@@ -10257,11 +10281,40 @@ export default function Chat() {
             formData.append('content', contentPayload);
             formData.append('type', 'contact');
             if (selectedUser) formData.append('toUserId', selectedUser._id);
+            if (scheduledSendAt) {
+                formData.append('scheduled_at', new Date(scheduledSendAt).toISOString());
+                formData.append('email_content', summarizeSharedContacts(contentPayload));
+            }
 
             const endpoint = selectedGroup ? `/api/groups/${selectedGroup._id}/send` : '/api/chat/send';
             const res = await axios.post(endpoint, formData, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+
+            if (res.data?.status === 'scheduled') {
+                const scheduledId = res.data.scheduled?._id || `scheduled-contact-${Date.now()}`;
+                const scheduledMsg = {
+                    _id: scheduledId,
+                    id: scheduledId,
+                    sender_id: user.id || user._id,
+                    receiver_id: selectedUser ? selectedUser._id : null,
+                    group_id: selectedGroup ? selectedGroup._id : null,
+                    role: 'user',
+                    content: contentPayload,
+                    type: 'contact',
+                    created_at: new Date(),
+                    is_scheduled: true,
+                    scheduled_at: res.data.scheduled?.scheduled_at || scheduledSendAt
+                };
+                if (selectedGroup) setGroupMessages(prev => [...prev, scheduledMsg]);
+                else setMessages(prev => [...prev, scheduledMsg]);
+                setIsContactSelectionOpen(false);
+                setIsConfirmContactSendOpen(false);
+                setSelectedContacts([]);
+                setScheduledSendAt('');
+                setSnackbar({ message: 'Contact card scheduled.', type: 'success', variant: 'system' });
+                return;
+            }
 
             const sentMsg = res.data.message;
 
@@ -10287,6 +10340,7 @@ export default function Chat() {
             setIsContactSelectionOpen(false);
             setIsConfirmContactSendOpen(false);
             setSelectedContacts([]);
+            setScheduledSendAt('');
             setSnackbar({ message: 'Contact(s) shared successfully', type: 'success', variant: 'system' });
 
             if (selectedGroup) fetchGroups(); else fetchUsers();
@@ -10337,10 +10391,45 @@ export default function Chat() {
                 endpoint = '/api/chat/poll/send';
                 payload = { toUserId: selectedUser._id, question: pollQuestion.trim(), options: validOptions, allowMultipleAnswers };
             }
+            if (scheduledSendAt) {
+                payload.scheduledAt = new Date(scheduledSendAt).toISOString();
+            }
 
             const res = await axios.post(endpoint, payload, {
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
             });
+
+            if (res.data?.status === 'scheduled') {
+                const scheduledId = res.data.scheduled?._id || `scheduled-poll-${Date.now()}`;
+                const scheduledMsg = {
+                    _id: scheduledId,
+                    id: scheduledId,
+                    sender_id: user.id || user._id,
+                    receiver_id: selectedUser ? selectedUser._id : null,
+                    group_id: selectedGroup ? selectedGroup._id : null,
+                    role: 'user',
+                    content: pollQuestion.trim(),
+                    type: 'poll',
+                    poll: {
+                        question: pollQuestion.trim(),
+                        options: validOptions.map(text => ({ text, voters: [] })),
+                        allowMultipleAnswers
+                    },
+                    created_at: new Date(),
+                    is_scheduled: true,
+                    scheduled_at: res.data.scheduled?.scheduled_at || scheduledSendAt
+                };
+                if (selectedGroup) setGroupMessages(prev => [...prev, scheduledMsg]);
+                else setMessages(prev => [...prev, scheduledMsg]);
+                setIsPollModalOpen(false);
+                setPollQuestion('');
+                setPollOptions(['', '']);
+                setAllowMultipleAnswers(true);
+                setPollErrors({});
+                setScheduledSendAt('');
+                setSnackbar({ message: 'Poll scheduled.', type: 'success', variant: 'system' });
+                return;
+            }
 
             const sentMsg = res.data.message;
 
@@ -10367,6 +10456,7 @@ export default function Chat() {
             setPollOptions(['', '']);
             setAllowMultipleAnswers(true);
             setPollErrors({});
+            setScheduledSendAt('');
             setSnackbar({ message: 'Poll created!', type: 'success', variant: 'system' });
         } catch (err) {
             console.error('Poll send failed:', err);
@@ -10437,9 +10527,41 @@ export default function Chat() {
                 payload = { toUserId: selectedUser._id, eventData };
             }
 
+            if (scheduledSendAt) {
+                payload.scheduledAt = new Date(scheduledSendAt).toISOString();
+            }
+
             const res = await axios.post(endpoint, payload, {
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
             });
+
+            if (res.data?.status === 'scheduled') {
+                const scheduledAtValue = res.data.scheduled?.scheduled_at || scheduledSendAt;
+                setIsEventModalOpen(false);
+                setIsScheduleSendOpen(false);
+                setScheduledSendAt('');
+                const scheduledMsg = {
+                    _id: res.data.scheduled?._id || `scheduled-${Date.now()}`,
+                    id: res.data.scheduled?._id || `scheduled-${Date.now()}`,
+                    sender_id: user.id || user._id,
+                    receiver_id: selectedUser ? selectedUser._id : null,
+                    group_id: selectedGroup ? selectedGroup._id : null,
+                    role: 'user',
+                    content: eventData.name,
+                    type: 'event',
+                    event: { ...eventData, participants: [user.id || user._id] },
+                    created_at: new Date(),
+                    is_scheduled: true,
+                    scheduled_at: scheduledAtValue
+                };
+                if (selectedGroup) {
+                    setGroupMessages(prev => [...prev, scheduledMsg]);
+                } else {
+                    setMessages(prev => [...prev, scheduledMsg]);
+                }
+                setSnackbar({ message: 'Event scheduled. Mail confirmation sent to you.', type: 'success', variant: 'system' });
+                return;
+            }
 
             const sentMsg = res.data.message;
 
@@ -10888,6 +11010,10 @@ export default function Chat() {
             if (resolvedMediaDuration) {
                 formData.append('duration', resolvedMediaDuration);
             }
+            if (scheduledSendAt) {
+                formData.append('scheduled_at', new Date(scheduledSendAt).toISOString());
+                formData.append('email_content', textToSend);
+            }
 
             // Ensure socket is connected before potential emit
             if (!socket.connected) {
@@ -10910,6 +11036,23 @@ export default function Chat() {
                 setSnackbar({ message: 'Message request sent. They must accept before you can continue.', type: 'info', variant: 'system' });
                 fetchUsers();
                 fetchMessageRequests();
+                return;
+            }
+
+            if (res.data.status === 'scheduled') {
+                const scheduledId = res.data.scheduled?._id || tempId;
+                if (selectedGroup) {
+                    setGroupMessages(prev => prev.map(m => (m.id === tempId || m._id === tempId)
+                        ? { ...m, _id: scheduledId, id: scheduledId, is_scheduled: true, scheduled_at: res.data.scheduled?.scheduled_at || scheduledSendAt }
+                        : m));
+                } else {
+                    setMessages(prev => prev.map(m => (m.id === tempId || m._id === tempId)
+                        ? { ...m, _id: scheduledId, id: scheduledId, is_scheduled: true, scheduled_at: res.data.scheduled?.scheduled_at || scheduledSendAt }
+                        : m));
+                }
+                setIsScheduleSendOpen(false);
+                setScheduledSendAt('');
+                setSnackbar({ message: 'Message scheduled. Mail confirmation sent to you.', type: 'success', variant: 'system' });
                 return;
             }
 
@@ -10972,6 +11115,8 @@ export default function Chat() {
 
                 fetchUsers(); // Force refresh contact list from server
             }
+            setScheduledSendAt('');
+            setIsScheduleSendOpen(false);
 
         } catch (err) {
             console.error("Failed to send msg", err);
@@ -11026,6 +11171,22 @@ export default function Chat() {
         } finally {
             setIsRecording(false);
         }
+    };
+
+    const openScheduleSend = () => {
+        const now = new Date(Date.now() + 5 * 60 * 1000);
+        const localDefault = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+        if (!scheduledSendAt) setScheduledSendAt(localDefault);
+        setIsScheduleSendOpen(true);
+    };
+
+    const confirmScheduledSend = (e) => {
+        if (!scheduledSendAt || new Date(scheduledSendAt) <= new Date()) {
+            setSnackbar({ message: 'Please select a future date and time.', type: 'error', variant: 'system' });
+            return;
+        }
+        setIsScheduleSendOpen(false);
+        setSnackbar({ message: 'Schedule time set. Press send to schedule it.', type: 'info', variant: 'system' });
     };
 
     const renderContactSelectionPanel = () => {
@@ -11196,7 +11357,15 @@ export default function Chat() {
                             ))}
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '10px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: '10px' }}>
+                            <button
+                                type="button"
+                                onClick={openScheduleSend}
+                                style={{ background: scheduledSendAt ? 'rgba(14, 165, 190, 0.28)' : 'rgba(255,255,255,0.08)', border: '1px solid rgba(56,189,248,0.32)', borderRadius: '50%', width: 60, height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+                                aria-label="Schedule contact card"
+                            >
+                                <Clock size={26} color={scheduledSendAt ? '#67e8f9' : '#cbd5e1'} />
+                            </button>
                             <button
                                 onClick={() => handleSendContact(selectedContacts)}
                                 style={{ background: '#027EB5', border: 'none', borderRadius: '50%', width: 60, height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 10px rgba(0,0,0,0.3)', flexShrink: 0 }}
@@ -16007,6 +16176,29 @@ export default function Chat() {
                             )}
                         </div>
 
+                        <button
+                            type="button"
+                            onClick={openScheduleSend}
+                            disabled={isPreviewSendBlockedByAI}
+                            title={isPreviewSendBlockedByAI ? 'Please apply AI grammar suggestion first' : 'Schedule send'}
+                            style={{
+                                width: 50,
+                                height: 50,
+                                borderRadius: '50%',
+                                background: scheduledSendAt ? 'rgba(14, 165, 190, 0.22)' : 'rgba(17, 43, 66, 0.92)',
+                                border: scheduledSendAt ? '1px solid rgba(14, 165, 190, 0.9)' : '1px solid rgba(56, 189, 248, 0.35)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: isPreviewSendBlockedByAI ? 'not-allowed' : 'pointer',
+                                opacity: isPreviewSendBlockedByAI ? 0.6 : 1,
+                                flexShrink: 0
+                            }}
+                            aria-label="Schedule send"
+                        >
+                            <Clock size={24} color={scheduledSendAt ? "#67e8f9" : "#9fd8ef"} />
+                        </button>
+
                         <div style={{ position: 'relative', width: 50, height: 50, flexShrink: 0 }}>
                             <button
                                 onClick={handleSend}
@@ -16836,12 +17028,15 @@ export default function Chat() {
                                     </div>
                                 </div>
                             )}
-                            <div style={{ padding: '0 30px', display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, cursor: 'pointer' }} onClick={() => setIsGroupAddMemberOpen(true)}>
-                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#0EA5BE', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
-                                    <UserPlus size={20} color="#ffffff" />
+                            {(String(activeTarget.admin?._id || activeTarget.admin || activeTarget.creatorId || '') === String(user.id || user._id)
+                                || (activeTarget.admins || []).some(a => String(a?._id || a) === String(user.id || user._id))) && (
+                                <div style={{ padding: '0 30px', display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, cursor: 'pointer' }} onClick={() => setIsGroupAddMemberOpen(true)}>
+                                    <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#0EA5BE', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
+                                        <UserPlus size={20} color="#ffffff" />
+                                    </div>
+                                    <span style={{ color: textColor, fontSize: 16, fontWeight: 400 }}>Add member</span>
                                 </div>
-                                <span style={{ color: textColor, fontSize: 16, fontWeight: 400 }}>Add member</span>
-                            </div>
+                            )}
 
 
                             <div className="wa-member-list">
@@ -16858,11 +17053,10 @@ export default function Chat() {
                                     let phoneValue = m.mobile ? `+${m.mobile}` : '';
                                     const currentUserId = String(user.id || user._id);
                                     const isCurrentUserOwner = String(activeTarget.admin?._id || activeTarget.admin || activeTarget.creatorId || '') === currentUserId;
-                                    const isCurrentUserAdmin = isCurrentUserOwner || (activeTarget.admins || []).some(a => String(a?._id || a) === currentUserId);
                                     const isTargetOwner = String(activeTarget.admin?._id || activeTarget.admin || activeTarget.creatorId || '') === String(m._id || m.id);
                                     const isGroupAdmin = String(activeTarget.admin?._id || activeTarget.admin || activeTarget.creatorId || '') === String(m._id) ||
                                         (activeTarget.admins || []).some(a => String(a?._id || a) === String(m._id));
-                                    const canManageThisMember = isCurrentUserAdmin && !isMe && !isTargetOwner;
+                                    const canManageThisMember = isCurrentUserOwner && !isMe && !isTargetOwner;
 
                                     return (
                                         <div
@@ -17846,6 +18040,25 @@ export default function Chat() {
                                         <Play size={32} color="white" fill="white" />
                                     </div>
                                     {infoMessage.content && <p style={{ padding: '8px', color: '#f8fafc', fontSize: '14px' }}>{infoMessage.content}</p>}
+                                </div>
+                            ) : infoMessage.type === 'audio' ? (
+                                <div style={{ background: '#ffffff', color: '#111827', borderRadius: 14, padding: '14px 16px', minWidth: 280, marginBottom: 8, border: '1px solid #e5e7eb' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                        <div style={{ width: 42, height: 42, borderRadius: '50%', background: '#0EA5BE', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff', flexShrink: 0 }}>
+                                            <Mic size={20} />
+                                        </div>
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 3 }}>Voice message</div>
+                                            <div style={{ color: '#64748b', fontSize: 13 }}>
+                                                {[
+                                                    infoMessage.fileName || 'Audio file',
+                                                    infoMessage.duration ? formatVoiceTime(infoMessage.duration) : '',
+                                                    infoMessage.fileSize ? formatFileSize(infoMessage.fileSize) : ''
+                                                ].filter(Boolean).join(' | ')}
+                                            </div>
+                                        </div>
+                                        <Play size={22} color="#0EA5BE" fill="#0EA5BE" />
+                                    </div>
                                 </div>
                             ) : infoMessage.type === 'file' ? (
                                 <div className="wa-msg-file">
@@ -18984,9 +19197,11 @@ export default function Chat() {
                         >
                             {!isDeleted && (
                                 <>
-                                    <div className="wa-dropdown-item" onClick={(e) => { e.stopPropagation(); setInfoMessage(data); setOpenDropdown(null); }}>
-                                        <Info size={16} style={{ marginRight: 10 }} /> Message info
-                                    </div>
+                                    {isMe && (
+                                        <div className="wa-dropdown-item" onClick={(e) => { e.stopPropagation(); setInfoMessage(data); setOpenDropdown(null); }}>
+                                            <Info size={16} style={{ marginRight: 10 }} /> Message info
+                                        </div>
+                                    )}
                                     <div className="wa-dropdown-item" onClick={() => { setReplyingTo(data); setOpenDropdown(null); }}>
                                         <Reply size={16} style={{ marginRight: 10 }} /> Reply
                                     </div>
@@ -19049,7 +19264,7 @@ export default function Chat() {
 
                         {!isDeleted && (
                             <>
-                                {(isMe || data.type === 'event') && (
+                                {isMe && (
                                     <div className="wa-dropdown-item" onClick={(e) => { e.stopPropagation(); setInfoMessage(data); setOpenDropdown(null); }}>
                                         <Info size={16} style={{ marginRight: 10 }} /> Message info
                                     </div>
@@ -24350,6 +24565,16 @@ export default function Chat() {
                                                         </div>
                                                         <div className="wa-footer-right-icons-inner">
                                                             {(input.trim() || file) ? (
+                                                                <>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={openScheduleSend}
+                                                                    className="wa-nav-icon-btn"
+                                                                    data-tooltip="Schedule send"
+                                                                    aria-label="Schedule send"
+                                                                >
+                                                                    <Clock size={22} color={scheduledSendAt ? "#0EA5BE" : "#54656f"} />
+                                                                </button>
                                                                 <button
                                                                     onClick={handleSend}
                                                                     className="wa-send-btn-inner"
@@ -24362,6 +24587,7 @@ export default function Chat() {
                                                                 >
                                                                     <Send size={30} color="white" strokeWidth={2.5} />
                                                                 </button>
+                                                                </>
                                                             ) : (
                                                                 <button className="wa-mic-btn-idle" data-tooltip="Voice message" onClick={startRecording}>
                                                                     <Mic size={26} color="currentColor" />
@@ -25126,6 +25352,16 @@ export default function Chat() {
                                                         </div>
                                                         <div className="wa-footer-right-icons-inner">
                                                             {(input.trim() || file) ? (
+                                                                <>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={openScheduleSend}
+                                                                    className="wa-nav-icon-btn"
+                                                                    data-tooltip="Schedule send"
+                                                                    aria-label="Schedule send"
+                                                                >
+                                                                    <Clock size={22} color={scheduledSendAt ? "#0EA5BE" : "#54656f"} />
+                                                                </button>
                                                                 <button
                                                                     onClick={handleSend}
                                                                     className="wa-send-btn-inner"
@@ -25138,6 +25374,7 @@ export default function Chat() {
                                                                 >
                                                                     <Send size={30} color="white" strokeWidth={2.5} />
                                                                 </button>
+                                                                </>
                                                             ) : (
                                                                 <button className="wa-mic-btn-idle" data-tooltip="Voice message" onClick={startRecording}>
                                                                     <Mic size={26} color="currentColor" />
@@ -25460,6 +25697,26 @@ export default function Chat() {
                         </div>
                     </div>
                     <div style={{ padding: '20px 24px', display: 'flex', justifyContent: 'flex-end', background: '#202c33', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                        <button
+                            type="button"
+                            onClick={openScheduleSend}
+                            style={{
+                                background: scheduledSendAt ? 'rgba(14, 165, 190, 0.28)' : 'rgba(255,255,255,0.08)',
+                                width: '56px',
+                                height: '56px',
+                                borderRadius: '50%',
+                                border: '1px solid rgba(56,189,248,0.32)',
+                                color: '#fff',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                marginRight: 10
+                            }}
+                            aria-label="Schedule poll"
+                        >
+                            <Clock size={25} color={scheduledSendAt ? '#67e8f9' : '#cbd5e1'} />
+                        </button>
                         <button
                             onClick={handleSendPoll}
                             style={{
@@ -25953,7 +26210,15 @@ export default function Chat() {
                         )}
                     </div>
 
-                    <div style={{ padding: '15px 20px', display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
+                    <div style={{ padding: '15px 20px', display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0 }}>
+                        <button
+                            type="button"
+                            onClick={openScheduleSend}
+                            style={{ background: scheduledSendAt ? '#d9f6fb' : '#e5edf1', width: '54px', height: '54px', borderRadius: '50%', border: 'none', color: scheduledSendAt ? '#0EA5BE' : '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                            aria-label="Schedule event"
+                        >
+                            <Clock size={24} />
+                        </button>
                         <button
                             onClick={handleSendEvent}
                             style={{ background: '#0EA5BE', width: '54px', height: '54px', borderRadius: '50%', border: 'none', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 8px rgba(14, 165, 190, 0.4)' }}
@@ -28184,8 +28449,7 @@ export default function Chat() {
                 const activeGroup = exitGroupTarget || selectedGroup;
                 const myId = String(user.id || user._id);
                 const isOwner = String(activeGroup?.admin?._id || activeGroup?.admin || activeGroup?.creatorId || '') === myId;
-                const otherAdmins = (activeGroup?.admins || []).filter(admin => String(admin?._id || admin?.id || admin) !== myId);
-                const needsManualTransfer = isOwner && otherAdmins.length === 0;
+                const needsManualTransfer = false;
                 const candidateMembers = (activeGroup?.members || []).filter(member => String(member._id || member.id || member) !== myId);
 
                 return (
@@ -29167,6 +29431,35 @@ export default function Chat() {
             {renderContactSelectionPanel()}
             {renderConfirmContactSendPanel()}
             {renderContactDetailPopup()}
+            {isScheduleSendOpen && (
+                <div
+                    className="wa-contact-detail-modal-overlay"
+                    onClick={() => setIsScheduleSendOpen(false)}
+                    style={{ position: 'fixed', inset: 0, zIndex: 30000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ width: '100%', maxWidth: 380, background: '#ffffff', borderRadius: 8, boxShadow: '0 18px 45px rgba(0,0,0,0.25)', overflow: 'hidden' }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', padding: '16px 18px', borderBottom: '1px solid #e5e7eb' }}>
+                            <div style={{ fontSize: 20, fontWeight: 600, color: '#111827', whiteSpace: 'nowrap' }}>Schedule send</div>
+                        </div>
+                        <div style={{ padding: 18 }}>
+                            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#4b5563', marginBottom: 8 }}>Date and time</label>
+                            <input
+                                type="datetime-local"
+                                value={scheduledSendAt}
+                                onChange={(e) => setScheduledSendAt(e.target.value)}
+                                style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', border: '1px solid #d1d5db', borderRadius: 6, color: '#111827', fontSize: 15 }}
+                            />
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
+                                <button type="button" onClick={() => { setIsScheduleSendOpen(false); setScheduledSendAt(''); }} style={{ border: '1px solid #d1d5db', background: '#fff', color: '#374151', borderRadius: 6, padding: '9px 14px' }}>Cancel</button>
+                                <button type="button" onClick={confirmScheduledSend} style={{ border: 'none', background: '#0EA5BE', color: '#fff', borderRadius: 6, padding: '9px 14px', fontWeight: 600 }}>Set time</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             {fullEmojiPicker && (
                 <EmojiPicker
                     position={fullEmojiPicker.pos}

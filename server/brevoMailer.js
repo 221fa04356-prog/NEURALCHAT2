@@ -6,7 +6,7 @@ apiKey.apiKey = process.env.BREVO_API_KEY;
 
 const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
 
-const sendBrevoMail = async (to, subject, content, isHtml = true, fromEmail = process.env.EMAIL_USER, fromName = process.env.EMAIL_FROM_NAME || "NeuralChat Admin") => {
+const sendBrevoMail = async (to, subject, content, isHtml = true, fromEmail = process.env.EMAIL_USER, fromName = process.env.EMAIL_FROM_NAME || "NeuralChat Admin", replyToEmail = null) => {
   try {
     let sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail();
 
@@ -23,6 +23,9 @@ const sendBrevoMail = async (to, subject, content, isHtml = true, fromEmail = pr
     };
 
     sendSmtpEmail.to = [{ email: to }];
+    if (replyToEmail) {
+      sendSmtpEmail.replyTo = { email: replyToEmail };
+    }
 
     console.log("[BREVO DEBUG] Attempting to send email to:", to);
     console.log("[BREVO DEBUG] Sender:", sendSmtpEmail.sender.email);

@@ -905,7 +905,8 @@ const MessageList = memo(({
         });
 
         filteredMessages.forEach((msg) => {
-            const dateLabel = formatDateForSeparator(msg.created_at, t, getLangCode(selectedLanguage));
+            const messageDisplayTime = isMeMsg(msg) && msg.scheduled_created_at ? msg.scheduled_created_at : msg.created_at;
+            const dateLabel = formatDateForSeparator(messageDisplayTime, t, getLangCode(selectedLanguage));
             if (currentGroupDate !== dateLabel) {
                 currentGroupDate = dateLabel;
                 items.push({ type: 'date', date: dateLabel });
@@ -2178,7 +2179,7 @@ const MessageList = memo(({
                             <div className="wa-msg-meta" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: 4, fontSize: 11, color: '#667781' }}>
                                 {msg.is_starred && <Star size={12} className="wa-star-icon" fill="currentColor" />}
                                 {msg.is_edited && <span>Edited</span>}
-                                <span>{formatTime(msg.created_at)}</span>
+                                <span>{formatTime(isMe && msg.scheduled_created_at ? msg.scheduled_created_at : msg.created_at)}</span>
                                 {isMe && (
                                     <span className="wa-msg-status">
                                         {msg.is_read ? (
@@ -2194,7 +2195,7 @@ const MessageList = memo(({
                         {msg.type === 'audio' && (
                             <div className="wa-voice-bubble-meta">
                                 {msg.is_starred && <Star size={12} className="wa-star-icon" fill="currentColor" style={{ marginRight: 4 }} />}
-                                <span className="wa-timestamp">{formatTime(msg.created_at)}</span>
+                                <span className="wa-timestamp">{formatTime(isMe && msg.scheduled_created_at ? msg.scheduled_created_at : msg.created_at)}</span>
                                 {isMe && (
                                     <span className="wa-msg-status" style={{ marginLeft: 4 }}>
                                         {msg.is_read ? (
