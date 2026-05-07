@@ -5,6 +5,7 @@ import ImageEditorModal from '../components/ImageEditorModal';
 import logo from '../assets/logo.png';
 import { useNavigate } from 'react-router-dom';
 import { SignalService } from '../utils/signalService';
+import { formatFileSize } from '../utils/fileSize';
 import ViewOnceBadge from '../components/chat/ViewOnceBadge';
 import {
     MessageSquare, CircleDashed, Users, MoreVertical, Plus, Megaphone,
@@ -1498,6 +1499,7 @@ export default function Chat() {
     // --- File Upload State ---
     const [file, setFile] = useState(null);
     const [selectedFiles, setSelectedFiles] = useState([]);
+    const [documentPreviewCounts, setDocumentPreviewCounts] = useState({});
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
     const composerDraftsRef = useRef({});
     const isRestoringComposerDraftRef = useRef(false);
@@ -1868,6 +1870,14 @@ export default function Chat() {
     const [showInputEmojiPicker, setShowInputEmojiPicker] = useState(false);
     const [inputEmojiPickerPos, setInputEmojiPickerPos] = useState({ x: 0, y: 0 });
     const [emojiInsertTarget, setEmojiInsertTarget] = useState('chat');
+    const openEmojiPickerForTarget = (event, target) => {
+        event?.stopPropagation?.();
+        const rect = event?.currentTarget?.getBoundingClientRect?.();
+        if (!rect) return;
+        setEmojiInsertTarget(target);
+        setInputEmojiPickerPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
+        setShowInputEmojiPicker((prev) => !prev || emojiInsertTarget !== target);
+    };
     const [chatContextMenu, setChatContextMenu] = useState(null); // { x: number, y: number }
     const [replyingTo, setReplyingTo] = useState(null); // { _id: string, content: string, senderName: string }
     const [infoMessage, setInfoMessage] = useState(null); // Message details view
@@ -3025,18 +3035,192 @@ export default function Chat() {
         return alias || contact.name || 'User';
     };
 
-    const formatFileSize = (bytes) => {
-        if (!bytes) return '0 B';
-        const k = 1024;
-        const sizes = ['B', 'kB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-    };
-
     const isDocument = (fileName) => {
         if (!fileName) return false;
         const ext = fileName.split('.').pop().toLowerCase();
         return ['pdf', 'doc', 'docx', 'docm', 'dotx', 'dot', 'rtf', 'odt', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xltx', 'xlt', 'ods', 'ppt', 'pptx', 'pptm', 'potx', 'pot', 'ppsx', 'pps', 'odp', 'txt', 'csv'].includes(ext);
+    };
+
+    const getDocumentPageCount = (msg) => {
+        const rawPages = msg?.pageCount ?? msg?.pages ?? msg?.page_count ?? msg?.metadata?.pageCount ?? msg?.metadata?.pages ?? msg?.metadata?.page_count;
+        const pages = Number(rawPages);
+        return Number.isFinite(pages) && pages > 0 ? Math.round(pages) : 0;
+    };
+
+    const getDocumentCountLabelForExt = (count, ext = '') => {
+        const value = Number(count);
+        if (!Number.isFinite(value) || value <= 0) return '';
+        const n = Math.round(value);
+        const normalizedExt = String(ext || '').toLowerCase();
+        if (['ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'].includes(normalizedExt)) {
+            return `${n} slide${n === 1 ? '' : 's'}`;
+        }
+        if (['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods'].includes(normalizedExt)) {
+            return `${n} sheet${n === 1 ? '' : 's'}`;
+        }
+        if (normalizedExt === 'csv') return `${n} row${n === 1 ? '' : 's'}`;
+        if (normalizedExt === 'txt') return `${n} line${n === 1 ? '' : 's'}`;
+        return `${n} page${n === 1 ? '' : 's'}`;
+    };
+
+    const getDocumentPageLabel = (msg, fallback = '') => {
+        const count = getDocumentPageCount(msg);
+        const displayName = getDisplayFileName(msg);
+        const dotIdx = displayName.lastIndexOf('.');
+        const ext = (dotIdx > 0 && dotIdx < displayName.length - 1) ? displayName.slice(dotIdx + 1).toLowerCase() : '';
+        if (count > 0) return getDocumentCountLabelForExt(count, ext);
+        if (fallback) return fallback;
+        if (['pdf', 'doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt'].includes(ext)) return '1 page';
+        return '';
+    };
+
+    const getDocumentMetaLabel = (msg, { includeType = true, includeSize = true, includeDate = '' } = {}) => {
+        const parts = [];
+        let pageLabel = getDocumentPageLabel(msg);
+        const displayName = getDisplayFileName(msg);
+        const dotIdx = displayName.lastIndexOf('.');
+        const ext = (dotIdx > 0 && dotIdx < displayName.length - 1) ? displayName.slice(dotIdx + 1).toUpperCase() : '';
+        if (!pageLabel && ext === 'PDF') pageLabel = '1 page';
+        if (pageLabel) parts.push(pageLabel);
+        if (includeType) {
+            if (ext) parts.push(ext);
+        }
+        if (includeSize) {
+            const sizeLabel = formatFileSize(msg?.fileSize || msg?.file_size || msg?.size || 0);
+            if (sizeLabel) parts.push(sizeLabel);
+        }
+        if (includeDate) parts.push(includeDate);
+        return parts.join(' - ');
+    };
+
+    const inflateRawBytes = async (bytes) => {
+        if (!window.DecompressionStream) return null;
+        try {
+            const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+            return new Uint8Array(await new Response(stream).arrayBuffer());
+        } catch (_) {
+            return null;
+        }
+    };
+
+    const readZipEntries = async (fileObj, wantedNames = null) => {
+        const buffer = await fileObj.arrayBuffer();
+        const view = new DataView(buffer);
+        const bytes = new Uint8Array(buffer);
+        const decoder = new TextDecoder('utf-8');
+        const minEocdOffset = Math.max(0, bytes.length - 0x10000 - 22);
+        let eocdOffset = -1;
+        for (let i = bytes.length - 22; i >= minEocdOffset; i -= 1) {
+            if (view.getUint32(i, true) === 0x06054b50) {
+                eocdOffset = i;
+                break;
+            }
+        }
+        if (eocdOffset < 0) return new Map();
+
+        const entryCount = view.getUint16(eocdOffset + 10, true);
+        let centralOffset = view.getUint32(eocdOffset + 16, true);
+        const wanted = wantedNames ? new Set(wantedNames) : null;
+        const entries = new Map();
+
+        for (let i = 0; i < entryCount && centralOffset < bytes.length; i += 1) {
+            if (view.getUint32(centralOffset, true) !== 0x02014b50) break;
+            const method = view.getUint16(centralOffset + 10, true);
+            const compressedSize = view.getUint32(centralOffset + 20, true);
+            const fileNameLength = view.getUint16(centralOffset + 28, true);
+            const extraLength = view.getUint16(centralOffset + 30, true);
+            const commentLength = view.getUint16(centralOffset + 32, true);
+            const localOffset = view.getUint32(centralOffset + 42, true);
+            const nameStart = centralOffset + 46;
+            const name = decoder.decode(bytes.slice(nameStart, nameStart + fileNameLength));
+
+            if (!wanted || wanted.has(name) || [...wanted].some(pattern => pattern instanceof RegExp && pattern.test(name))) {
+                const localNameLength = view.getUint16(localOffset + 26, true);
+                const localExtraLength = view.getUint16(localOffset + 28, true);
+                const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+                const compressed = bytes.slice(dataStart, dataStart + compressedSize);
+                let data = null;
+                if (method === 0) data = compressed;
+                if (method === 8) data = await inflateRawBytes(compressed);
+                if (data) entries.set(name, decoder.decode(data));
+            }
+
+            centralOffset += 46 + fileNameLength + extraLength + commentLength;
+        }
+
+        return entries;
+    };
+
+    const listZipEntryNames = async (fileObj) => {
+        const buffer = await fileObj.arrayBuffer();
+        const view = new DataView(buffer);
+        const bytes = new Uint8Array(buffer);
+        const decoder = new TextDecoder('utf-8');
+        const minEocdOffset = Math.max(0, bytes.length - 0x10000 - 22);
+        let eocdOffset = -1;
+        for (let i = bytes.length - 22; i >= minEocdOffset; i -= 1) {
+            if (view.getUint32(i, true) === 0x06054b50) {
+                eocdOffset = i;
+                break;
+            }
+        }
+        if (eocdOffset < 0) return [];
+
+        const entryCount = view.getUint16(eocdOffset + 10, true);
+        let centralOffset = view.getUint32(eocdOffset + 16, true);
+        const names = [];
+        for (let i = 0; i < entryCount && centralOffset < bytes.length; i += 1) {
+            if (view.getUint32(centralOffset, true) !== 0x02014b50) break;
+            const fileNameLength = view.getUint16(centralOffset + 28, true);
+            const extraLength = view.getUint16(centralOffset + 30, true);
+            const commentLength = view.getUint16(centralOffset + 32, true);
+            const nameStart = centralOffset + 46;
+            names.push(decoder.decode(bytes.slice(nameStart, nameStart + fileNameLength)));
+            centralOffset += 46 + fileNameLength + extraLength + commentLength;
+        }
+        return names;
+    };
+
+    const estimateDocumentCount = async (fileObj) => {
+        const fileName = String(fileObj?.name || '').toLowerCase();
+        const ext = fileName.split('.').pop() || '';
+        if (!fileObj) return 0;
+        try {
+            if (fileObj.type === 'application/pdf' || ext === 'pdf') {
+                const text = new TextDecoder('latin1').decode(await fileObj.arrayBuffer());
+                const matches = text.match(/\/Type\s*\/Page\b/g);
+                return matches?.length ? matches.length : 0;
+            }
+            if (['ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx'].includes(ext)) {
+                const names = await listZipEntryNames(fileObj);
+                return names.filter(name => /^ppt\/slides\/slide\d+\.xml$/i.test(name)).length;
+            }
+            if (['xls', 'xlsx', 'xlsm', 'xlt', 'xltx'].includes(ext)) {
+                const names = await listZipEntryNames(fileObj);
+                return names.filter(name => /^xl\/worksheets\/sheet\d+\.xml$/i.test(name)).length;
+            }
+            if (ext === 'csv') {
+                const text = await fileObj.text();
+                return text.split(/\r\n|\n|\r/).filter(line => line.trim()).length;
+            }
+            if (ext === 'txt') {
+                const text = await fileObj.text();
+                return text.split(/\r\n|\n|\r/).filter(line => line.trim()).length || 1;
+            }
+            if (['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt'].includes(ext)) {
+                const entries = await readZipEntries(fileObj, ['docProps/app.xml']);
+                const text = entries.get('docProps/app.xml') || '';
+                const pagesMatch = text.match(/<Pages>(\d+)<\/Pages>/i);
+                if (pagesMatch) return Number(pagesMatch[1]) || 0;
+                const wordsMatch = text.match(/<Words>(\d+)<\/Words>/i);
+                if (wordsMatch) return Math.max(1, Math.ceil((Number(wordsMatch[1]) || 0) / 500));
+                return 1;
+            }
+            return 0;
+        } catch (err) {
+            console.warn('Could not estimate document count:', err);
+            return 0;
+        }
     };
 
     const CLIPBOARD_FILE_PREFIX = '__NEURALCHAT_FILE__';
@@ -3156,6 +3340,14 @@ export default function Chat() {
         return decodeClipboardPayloadText(cleaned) ? '' : cleaned;
     };
 
+    const handleComposerInputChange = (event) => {
+        const nextValue = sanitizeClipboardPayloadText(event.target.value);
+        setInput(nextValue);
+        if (event.target?.tagName === 'TEXTAREA') {
+            resizeMessageComposer(event.target);
+        }
+    };
+
     const filePayloadToFile = async (payload) => {
         const fileName = payload?.fileName || payload?.name || 'document';
         const mimeType = payload?.mimeType || guessMimeTypeFromFileName(fileName);
@@ -3185,11 +3377,8 @@ export default function Chat() {
         const looksLikeDocument = msgType === 'document' || msgType === 'file' || isDocument(fileName);
 
         if (looksLikeDocument) {
-            const size = formatFileSize(msg.fileSize || msg.file_size || msg.size || 0);
-            const rawPages = msg.pageCount || msg.pages || msg.page_count || msg.metadata?.pageCount || msg.metadata?.pages || msg.metadata?.page_count;
-            const pages = Number(rawPages) > 0 ? Number(rawPages) : 1;
-            const pageText = pages ? `${pages} page${Number(pages) === 1 ? '' : 's'}` : 'pages unavailable';
-            return `${fileName || 'Document'} - ${size} - ${pageText}`;
+            const meta = getDocumentMetaLabel(msg, { includeType: false });
+            return [fileName || 'Document', meta].filter(Boolean).join(' - ');
         }
 
         const content = String(msg.content || msg.text || '').replace(/\s+/g, ' ').trim();
@@ -3533,16 +3722,12 @@ export default function Chat() {
                 const dotIdx = previewName.lastIndexOf('.');
                 const ext = (dotIdx > 0 && dotIdx < previewName.length - 1) ? previewName.slice(dotIdx + 1).toLowerCase() : '';
                 const getFriendlyFileLabel = () => {
-                    if (ext === 'pdf') return 'PDF';
-                    if (['csv'].includes(ext)) return 'CSV';
-                    if (['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods'].includes(ext)) return 'XLS';
-                    if (['ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'].includes(ext)) return 'PPT';
-                    if (['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt', 'txt'].includes(ext)) return 'DOC';
-                    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'ZIP';
+                    if (ext) return ext.slice(0, 5).toUpperCase();
                     return 'FILE';
                 };
                 const extLabel = getFriendlyFileLabel();
                 const fileLabel = previewName ? truncateFileName(previewName) : 'File';
+                const pageLabel = getDocumentPageLabel(msg, ext === 'pdf' ? '1 page' : '');
                 const getExtColor = () => {
                     if (['pdf'].includes(ext)) return '#E53935';
                     if (['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'csv', 'ods'].includes(ext)) return '#1F9D55';
@@ -3572,6 +3757,12 @@ export default function Chat() {
                         </span>
                         <span style={{ color: '#8696a0' }}>|</span>
                         <span>{fileLabel}</span>
+                        {pageLabel && (
+                            <>
+                                <span style={{ color: '#8696a0' }}>|</span>
+                                <span style={{ color: '#94a3b8' }}>{pageLabel}</span>
+                            </>
+                        )}
                     </span>
                 );
             }
@@ -4905,54 +5096,62 @@ export default function Chat() {
             }
         }
 
-        if (msg.type === 'file' && msg.file_path) {
-            try {
-                const fileName = getDisplayFileName(msg) || 'document';
-                const mimeType = guessMimeTypeFromFileName(fileName);
-                const payload = {
-                    kind: 'neuralchat-file',
-                    filePath: msg.file_path,
-                    fileName,
-                    mimeType,
-                    sourceType: msg.type
-                };
-                const payloadText = `${CLIPBOARD_FILE_PREFIX}${JSON.stringify(payload)}`;
-                const fileBlobResponse = await fetch(encodeURI(getMediaUrl(msg.file_path)));
-                if (!fileBlobResponse.ok) {
-                    throw new Error(`Failed to fetch file (${fileBlobResponse.status})`);
-                }
-                const fileBlob = await fileBlobResponse.blob();
+        const copyMessageAsFilePayload = async (messageToCopy, successLabel = 'File copied to clipboard!') => {
+            const fileName = getDisplayFileName(messageToCopy) || messageToCopy.fileName || messageToCopy.file_name || (
+                messageToCopy.type === 'video' ? 'video.mp4' :
+                    messageToCopy.type === 'audio' ? 'audio.mp3' :
+                        'document'
+            );
+            const mimeType = messageToCopy.mimeType || messageToCopy.mime_type || guessMimeTypeFromFileName(fileName);
+            const payload = {
+                kind: 'neuralchat-file',
+                filePath: messageToCopy.file_path,
+                fileName,
+                mimeType,
+                sourceType: messageToCopy.type
+            };
+            const payloadText = `${CLIPBOARD_FILE_PREFIX}${JSON.stringify(payload)}`;
+            const fileBlobResponse = await fetch(encodeURI(getMediaUrl(messageToCopy.file_path)));
+            if (!fileBlobResponse.ok) {
+                throw new Error(`Failed to fetch file (${fileBlobResponse.status})`);
+            }
+            const fileBlob = await fileBlobResponse.blob();
 
-                if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
-                    try {
-                        await navigator.clipboard.write([
-                            new ClipboardItem({
-                                'text/plain': new Blob([payloadText], { type: 'text/plain' }),
-                                [fileBlob.type || mimeType || 'application/octet-stream']: fileBlob
-                            })
-                        ]);
-                    } catch (clipboardWriteErr) {
-                        await navigator.clipboard.writeText(payloadText);
-                    }
-                } else if (navigator.clipboard && navigator.clipboard.writeText) {
+            if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
+                try {
+                    await navigator.clipboard.write([
+                        new ClipboardItem({
+                            'text/plain': new Blob([payloadText], { type: 'text/plain' }),
+                            [fileBlob.type || mimeType || 'application/octet-stream']: fileBlob
+                        })
+                    ]);
+                } catch (clipboardWriteErr) {
                     await navigator.clipboard.writeText(payloadText);
-                } else {
-                    const textArea = document.createElement("textarea");
-                    textArea.value = payloadText;
-                    textArea.style.position = 'fixed';
-                    textArea.style.left = '-9999px';
-                    document.body.appendChild(textArea);
-                    textArea.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(textArea);
                 }
+            } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(payloadText);
+            } else {
+                const textArea = document.createElement("textarea");
+                textArea.value = payloadText;
+                textArea.style.position = 'fixed';
+                textArea.style.left = '-9999px';
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+            }
 
-                setSnackbar({ message: 'Document copied to clipboard!', type: 'success', variant: 'system' });
-                setOpenDropdown(null);
+            setSnackbar({ message: successLabel, type: 'success', variant: 'system' });
+            setOpenDropdown(null);
+        };
+
+        if ((msg.type === 'file' || msg.type === 'video' || msg.type === 'audio') && msg.file_path) {
+            try {
+                await copyMessageAsFilePayload(msg, msg.type === 'file' ? 'Document copied to clipboard!' : 'Media copied to clipboard!');
                 return;
             } catch (err) {
-                console.error('Failed to copy document:', err);
-                setSnackbar({ message: 'Failed to copy document', type: 'error', variant: 'system' });
+                console.error('Failed to copy file payload:', err);
+                setSnackbar({ message: msg.type === 'file' ? 'Failed to copy document' : 'Failed to copy media', type: 'error', variant: 'system' });
                 setOpenDropdown(null);
                 return;
             }
@@ -5039,14 +5238,15 @@ export default function Chat() {
     };
 
     const handleBulkStar = async () => {
-        if (selectedMediaMsgs.length === 0) {
+        const actionableMsgs = selectedMediaMsgs.filter(isSharedPanelVisibleMessage);
+        if (actionableMsgs.length === 0) {
             setSnackbar({ message: 'Please select at least one message', type: 'info', variant: 'system' });
             return;
         }
-        const ids = selectedMediaMsgs.map(m => m._id || m.id);
+        const ids = actionableMsgs.map(m => m._id || m.id);
         const token = localStorage.getItem('token');
         try {
-            const allStarred = selectedMediaMsgs.every(m => m.is_starred);
+            const allStarred = actionableMsgs.every(m => m.is_starred);
             await Promise.all(ids.map(id => axios.post(`/api/chat/message/${id}/toggle`, { action: 'star', value: !allStarred }, {
                 headers: { 'Authorization': `Bearer ${token}` }
             })));
@@ -5054,7 +5254,7 @@ export default function Chat() {
             const updateStarred = (prev) => prev.map(m => (ids.includes(m._id) || ids.includes(m.id)) ? { ...m, is_starred: !allStarred } : m);
             setMessages(updateStarred);
             setGroupMessages(updateStarred);
-            const delta = allStarred ? -selectedMediaMsgs.length : selectedMediaMsgs.filter(m => !m.is_starred).length;
+            const delta = allStarred ? -actionableMsgs.length : actionableMsgs.filter(m => !m.is_starred).length;
             setGlobalStarredCount(prev => Math.max(0, prev + delta));
             if (allStarred) {
                 setGlobalStarredMessages(prev => prev.filter(m => !ids.some(id => String(id) === String(m._id || m.id))));
@@ -5071,21 +5271,29 @@ export default function Chat() {
     };
 
     const handleBulkDelete = () => {
-        if (selectedMediaMsgs.length === 0) {
+        const actionableMsgs = selectedMediaMsgs.filter(isSharedPanelVisibleMessage);
+        if (actionableMsgs.length === 0) {
             setSnackbar({ message: 'Please select at least one message', type: 'info', variant: 'system' });
             return;
         }
-        setMsgToDelete(selectedMediaMsgs.map(m => m._id));
+        setMsgToDelete(actionableMsgs.map(m => m._id));
         setIsDeleteModalOpen(true);
     };
 
     const handleBulkCopy = async () => {
-        if (selectedMediaMsgs.length === 0) {
+        const actionableMsgs = selectedMediaMsgs.filter(isSharedPanelVisibleMessage);
+        if (actionableMsgs.length === 0) {
             setSnackbar({ message: 'Please select at least one message', type: 'info', variant: 'system' });
             return;
         }
 
-        const texts = selectedMediaMsgs.map(m => {
+        if (actionableMsgs.length === 1 && ['image', 'video', 'audio', 'file'].includes(actionableMsgs[0].type)) {
+            await handleCopyMessage(actionableMsgs[0]);
+            setSelectedMediaMsgs([]);
+            return;
+        }
+
+        const texts = actionableMsgs.map(m => {
             if (m.type === 'text') return m.content;
             const url = getMessageMediaUrl(m);
             if (url) return `${m.content || ''}\n${url}`.trim();
@@ -5118,12 +5326,13 @@ export default function Chat() {
     };
 
     const handleBulkForward = () => {
-        if (selectedMediaMsgs.length === 0) {
+        const actionableMsgs = selectedMediaMsgs.filter(isSharedPanelVisibleMessage);
+        if (actionableMsgs.length === 0) {
             setSnackbar({ message: 'Please select at least one message', type: 'info', variant: 'system' });
             return;
         }
         // Don't set isForwardingMode(true) to avoid global checkboxes in main chat
-        setForwardSelectedMsgs(selectedMediaMsgs);
+        setForwardSelectedMsgs(actionableMsgs);
         setIsForwardModalOpen(true);
         // Don't close Shared Media Panel - user wants it to stay open
         // setIsSharedMediaOpen(false); 
@@ -5133,21 +5342,22 @@ export default function Chat() {
 
     // --- Bulk Actions for Main Chat Section ---
     const handleChatSelectionBulkStar = async () => {
-        if (forwardSelectedMsgs.length === 0) {
+        const actionableMsgs = forwardSelectedMsgs.filter(msg => !isDeletedForCurrentUser(msg));
+        if (actionableMsgs.length === 0) {
             setSnackbar({ message: 'Please select at least one message', type: 'info', variant: 'system' });
             return;
         }
-        const ids = forwardSelectedMsgs.map(m => m._id);
+        const ids = actionableMsgs.map(m => m._id);
         const token = localStorage.getItem('token');
         try {
-            const allStarred = forwardSelectedMsgs.every(m => m.is_starred);
+            const allStarred = actionableMsgs.every(m => m.is_starred);
             await Promise.all(ids.map(id => axios.post(`/api/chat/message/${id}/toggle`,
                 { action: 'star', value: !allStarred },
                 { headers: { 'Authorization': `Bearer ${token}` } }
             )));
             setMessages(prev => prev.map(m => ids.some(id => String(id) === String(m._id) || String(id) === String(m.id)) ? { ...m, is_starred: !allStarred } : m));
             setGroupMessages(prev => prev.map(m => ids.some(id => String(id) === String(m._id) || String(id) === String(m.id)) ? { ...m, is_starred: !allStarred } : m));
-            const delta = allStarred ? -forwardSelectedMsgs.length : forwardSelectedMsgs.filter(m => !m.is_starred).length;
+            const delta = allStarred ? -actionableMsgs.length : actionableMsgs.filter(m => !m.is_starred).length;
             setGlobalStarredCount(prev => Math.max(0, prev + delta));
             if (allStarred) {
                 setGlobalStarredMessages(prev => prev.filter(m => !ids.some(id => String(id) === String(m._id || m.id))));
@@ -5165,30 +5375,32 @@ export default function Chat() {
     };
 
     const handleChatSelectionBulkDelete = () => {
-        if (forwardSelectedMsgs.length === 0) {
+        const actionableMsgs = forwardSelectedMsgs.filter(msg => !isDeletedForCurrentUser(msg));
+        if (actionableMsgs.length === 0) {
             setSnackbar({ message: 'Please select at least one message', type: 'info', variant: 'system' });
             return;
         }
-        setMsgToDelete(forwardSelectedMsgs.map(m => m._id));
+        setMsgToDelete(actionableMsgs.map(m => m._id));
         setIsDeleteModalOpen(true);
     };
 
     const handleChatSelectionBulkCopy = async () => {
-        if (forwardSelectedMsgs.length === 0) {
+        const actionableMsgs = forwardSelectedMsgs.filter(msg => !isDeletedForCurrentUser(msg));
+        if (actionableMsgs.length === 0) {
             setSnackbar({ message: 'Please select at least one message', type: 'info', variant: 'system' });
             return;
         }
 
         // If only one image is selected, use the high-quality image copy logic
-        if (forwardSelectedMsgs.length === 1 && forwardSelectedMsgs[0].type === 'image') {
-            await handleCopyMessage(forwardSelectedMsgs[0]);
+        if (actionableMsgs.length === 1 && ['image', 'video', 'audio', 'file'].includes(actionableMsgs[0].type)) {
+            await handleCopyMessage(actionableMsgs[0]);
             setIsForwardingMode(false);
             setIsChatSelectionMode(false);
             setForwardSelectedMsgs([]);
             return;
         }
 
-        const texts = forwardSelectedMsgs.map(m => {
+        const texts = actionableMsgs.map(m => {
             if (m.type === 'text') return m.content;
             const rawUrl = getMessageMediaUrl(m);
             const url = encodeURI(rawUrl);
@@ -5231,7 +5443,7 @@ export default function Chat() {
     };
 
     const handleChatSelectionBulkDownload = async () => {
-        const mediaMsgs = forwardSelectedMsgs.filter(m => m.type === 'image' || m.type === 'video' || m.type === 'file');
+        const mediaMsgs = forwardSelectedMsgs.filter(m => !isDeletedForCurrentUser(m) && (m.type === 'image' || m.type === 'video' || m.type === 'file'));
         if (mediaMsgs.length === 0) {
             setSnackbar({ message: 'No media messages selected', type: 'info' });
             return;
@@ -10554,6 +10766,7 @@ export default function Chat() {
         const isMediaTargetByMime = !!(targetFile && (targetFile.type?.startsWith('image/') || targetFile.type?.startsWith('video/') || targetFile.type?.startsWith('audio/')));
         const supportsViewOnceForTarget = isCloudAudioMessage || isMediaTargetByMime || (isVoiceMessage && !isDocTargetByExt);
         const resolvedMediaDuration = voiceDuration || await getUploadMediaDuration(targetFile);
+        const resolvedPageCount = targetFile ? await estimateDocumentCount(targetFile) : 0;
 
         // 1. Basic empty check
         if ((!textToSend.trim() && !targetFile && !isCloudAudioMessage) || (!selectedUser && !selectedGroup)) return;
@@ -10589,7 +10802,7 @@ export default function Chat() {
             fileName: targetFile ? targetFile.name : null,
             fileSize: targetFile ? targetFile.size : null,
             duration: resolvedMediaDuration || null,
-            pageCount: 1, // Default for optimistic UI
+            pageCount: resolvedPageCount || (isDocument(targetFile?.name || '') ? 1 : 0),
             created_at: new Date(),
             is_read: false,
             is_view_once: (targetFile || voiceFile || cloudAudio) ? (currentViewOnce && supportsViewOnceForTarget) : false,
@@ -10659,6 +10872,7 @@ export default function Chat() {
 
             formData.append('content', textToSubmit);
             if (targetFile) formData.append('file', targetFile);
+            if (resolvedPageCount) formData.append('pageCount', resolvedPageCount);
             if (cloudAudio?.audioUrl) {
                 formData.append('file_path', cloudAudio.audioUrl);
                 formData.append('type', 'audio');
@@ -10750,6 +10964,8 @@ export default function Chat() {
                     type: sentMsg.type,
                     file_path: sentMsg.file_path,
                     fileName: sentMsg.fileName,
+                    fileSize: sentMsg.fileSize,
+                    pageCount: sentMsg.pageCount,
                     is_view_once: sentMsg.is_view_once,
                     reply_to: tempMsg.reply_to // Pass full reply object if needed by client, or just ID
                 });
@@ -11643,8 +11859,9 @@ export default function Chat() {
 
                 <span style={{
                     position: 'absolute',
-                    left: 16,
-                    textAlign: 'left',
+                    left: 0,
+                    right: 0,
+                    textAlign: 'center',
                     fontSize: 22,
                     fontWeight: 500,
                     color: '#f8fafc',
@@ -11662,8 +11879,8 @@ export default function Chat() {
                         {userData.image ? (
                             <img src={userData.image} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', border: '4px solid rgba(56, 189, 248, 0.3)' }} />
                         ) : (
-                            <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', display: 'flex', justifyContent: 'center', alignItems: 'center', border: '4px solid rgba(56, 189, 248, 0.3)' }}>
-                                <UserIcon size={80} color="#38bdf8" />
+                            <div className="wa-theme-initial-avatar wa-theme-initial-avatar-large">
+                                <span>{(userData.displayName || userData.name || user?.name || 'U').trim().charAt(0).toUpperCase()}</span>
                             </div>
                         )}
 
@@ -12526,7 +12743,14 @@ export default function Chat() {
                                         onChange={(e) => setGroupSubject(e.target.value)}
                                         autoFocus
                                     />
-                                    <Smile size={24} color="#54656f" style={{ cursor: 'pointer' }} />
+                                    <button
+                                        type="button"
+                                        className="wa-inline-emoji-trigger"
+                                        aria-label="Add emoji to group subject"
+                                        onClick={(event) => openEmojiPickerForTarget(event, 'groupSubject')}
+                                    >
+                                        <Smile size={24} color="#54656f" />
+                                    </button>
                                 </div>
                             </div>
 
@@ -13238,6 +13462,32 @@ export default function Chat() {
         if (!candidate) return '';
         return `${candidate.name}|${candidate.size}|${candidate.lastModified}|${candidate.type}`;
     };
+
+    useEffect(() => {
+        const filesToInspect = [...(selectedFiles || []), ...(file ? [file] : [])]
+            .filter((candidate, index, arr) => (
+                candidate &&
+                isDocument(candidate.name || '') &&
+                arr.findIndex(item => getFileSignature(item) === getFileSignature(candidate)) === index
+            ));
+        if (!filesToInspect.length) return undefined;
+
+        let cancelled = false;
+        filesToInspect.forEach(async (candidate) => {
+            const signature = getFileSignature(candidate);
+            if (!signature || documentPreviewCounts[signature] !== undefined) return;
+            const count = await estimateDocumentCount(candidate);
+            if (cancelled) return;
+            setDocumentPreviewCounts(prev => ({
+                ...prev,
+                [signature]: count || (isDocument(candidate.name || '') ? 1 : 0)
+            }));
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [file, selectedFiles, documentPreviewCounts]);
 
     const getInlineImageEditSession = (candidate = file) => {
         const signature = getFileSignature(candidate);
@@ -14253,6 +14503,15 @@ export default function Chat() {
         const hasCaptionText = !!(input || '').trim();
         const isPreviewSendBlockedByAI = hasCaptionText && (!suggestionApplied || isGrammarLoading || isGarbageMessage);
         const inlinePreviewFile = inlineImageEditMode && inlineEditSourceFile ? inlineEditSourceFile : file;
+        const previewFileExt = String(file?.name || '').split('.').pop()?.toLowerCase() || '';
+        const previewFileSignature = getFileSignature(file);
+        const previewDocumentCount = previewFileSignature ? documentPreviewCounts[previewFileSignature] : 0;
+        const previewDocumentCountLabel = getDocumentCountLabelForExt(previewDocumentCount, previewFileExt);
+        const previewDocumentMeta = [
+            previewDocumentCountLabel,
+            previewFileExt ? previewFileExt.toUpperCase() : '',
+            formatFileSize(file?.size || 0)
+        ].filter(Boolean).join(' - ');
         return (
             <div className="wa-file-preview-overlay" style={{
                 height: '100%',
@@ -14462,19 +14721,22 @@ export default function Chat() {
                     borderTopRightRadius: isImagePreview ? 0 : (isMediaThemePreview ? 6 : 0)
                 }}>
                     {isDocumentPreview && (
-                        <div style={{
-                            width: '100%',
-                            maxWidth: 640,
-                            marginBottom: 16,
-                            fontSize: 16,
-                            fontWeight: 600,
-                            color: '#dbeafe',
-                            textAlign: 'center',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
-                        }}>
-                            {file?.name || 'Document'}
+                        <div style={{ width: '100%', maxWidth: 640, marginBottom: 16, textAlign: 'center', overflow: 'hidden' }}>
+                            <div style={{
+                                fontSize: 16,
+                                fontWeight: 600,
+                                color: '#dbeafe',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis'
+                            }}>
+                                {file?.name || 'Document'}
+                            </div>
+                            {previewDocumentMeta && (
+                                <div style={{ marginTop: 6, fontSize: 13, color: '#8fb6ce', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {previewDocumentMeta}
+                                </div>
+                            )}
                         </div>
                     )}
                     {file && file.type?.startsWith('image/') ? (
@@ -15589,7 +15851,7 @@ export default function Chat() {
                             <div style={{ fontSize: 14, color: '#8db2c9', marginBottom: 8 }}>No preview available</div>
                             <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8, color: '#e9edef', wordBreak: 'break-word' }}>{file?.name || 'File'}</div>
                             <div style={{ fontSize: 14, color: '#8db2c9' }}>
-                                {file?.size ? (file.size / (1024 * 1024)).toFixed(2) + ' MB' : ''} - {getDisplayFileType(file)}
+                                {[formatFileSize(file?.size), getDisplayFileType(file)].filter(Boolean).join(' - ')}
                             </div>
                         </div>
                     )}
@@ -15732,7 +15994,7 @@ export default function Chat() {
                                 }}
                                 placeholder="Add a caption..."
                                 value={input}
-                                onChange={e => setInput(e.target.value)}
+                                onChange={handleComposerInputChange}
                                 onKeyDown={e => {
                                     if (e.key === 'Enter') handleSend(e);
                                 }}
@@ -16014,7 +16276,14 @@ export default function Chat() {
                                     onChange={(e) => setCommunityName(e.target.value)}
                                     style={{ border: 'none', outline: 'none', background: 'transparent', flex: 1, fontSize: 17, color: '#f8fafc', padding: '4px 0' }}
                                 />
-                                <Smile size={24} color="#94a3b8" style={{ cursor: 'pointer' }} />
+                                <button
+                                    type="button"
+                                    className="wa-inline-emoji-trigger"
+                                    aria-label="Add emoji to community name"
+                                    onClick={(event) => openEmojiPickerForTarget(event, 'communityName')}
+                                >
+                                    <Smile size={24} color="#94a3b8" />
+                                </button>
                             </div>
                         </div>
 
@@ -16037,7 +16306,14 @@ export default function Chat() {
                                 }}
                             />
                             <div style={{ position: 'absolute', right: 15, bottom: 15 }}>
-                                <Smile size={24} color="#94a3b8" style={{ cursor: 'pointer' }} />
+                                <button
+                                    type="button"
+                                    className="wa-inline-emoji-trigger"
+                                    aria-label="Add emoji to community description"
+                                    onClick={(event) => openEmojiPickerForTarget(event, 'communityDescription')}
+                                >
+                                    <Smile size={24} color="#94a3b8" />
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -16438,6 +16714,11 @@ export default function Chat() {
                                                         <div style={{ fontSize: 9, color: '#667781', textAlign: 'center', marginTop: 4, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                             {m.fileName || 'Document'}
                                                         </div>
+                                                        {getDocumentPageLabel(m, String(m.fileName || '').toLowerCase().endsWith('.pdf') ? '1 page' : '') && (
+                                                            <div style={{ fontSize: 9, color: '#0EA5BE', fontWeight: 700, marginTop: 2, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                                                                {getDocumentPageLabel(m, String(m.fileName || '').toLowerCase().endsWith('.pdf') ? '1 page' : '')}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 );
                                             }
@@ -16459,9 +16740,7 @@ export default function Chat() {
                             );
                         })()}
 
-                        <div style={{ width: '100%', borderBottom: thickDivider }}></div>
-
-                        <div style={{ background: itemBgColor }}>
+                        <div className="wa-info-danger-actions" style={{ background: itemBgColor }}>
                             {(() => {
                                 const starredCount = groupMessages.filter(m => m.is_starred).length;
                                 return (
@@ -16492,26 +16771,26 @@ export default function Chat() {
                                 <List size={24} color="#38bdf8" />
                                 <span style={{ color: textColor, fontSize: 16 }}>Add to list</span>
                             </div>
-                            <div className="clickable" onClick={() => {
+                            <div className="clickable wa-info-danger-action" onClick={() => {
                                 setDeleteTarget({ _id: activeTargetId, id: activeTargetId, name: displayName, isGroup: true });
                                 setIsClearChatConfirmOpen(true);
                             }} style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
-                                <Trash2 size={24} color="#38bdf8" />
-                                <span style={{ color: textColor, fontSize: 16 }}>Clear group</span>
+                                <Trash2 size={24} color="#ff5b6e" />
+                                <span style={{ color: '#ff5b6e', fontSize: 16 }}>Clear group</span>
                             </div>
                             {!activeTarget.isCommunityAnnouncements && (
                                 <div
-                                    className="clickable"
+                                    className="clickable wa-info-danger-action"
                                     onClick={() => handleModerationAction('report', activeTarget._id || activeTarget.id, activeTarget)}
                                     style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}
                                 >
-                                    <ThumbsDown size={24} color="#f87171" />
-                                    <span style={{ color: '#f87171', fontSize: 16 }}>Report group</span>
+                                    <ThumbsDown size={24} color="#ff5b6e" />
+                                    <span style={{ color: '#ff5b6e', fontSize: 16 }}>Report group</span>
                                 </div>
                             )}
-                            <div className="clickable" onClick={() => requestExitGroup(activeTarget)} style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
-                                <LogOut size={24} color="#f87171" />
-                                <span style={{ color: '#f87171', fontSize: 16 }}>Exit group</span>
+                            <div className="clickable wa-info-danger-action" onClick={() => requestExitGroup(activeTarget)} style={{ padding: '14px 30px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
+                                <LogOut size={24} color="#ff5b6e" />
+                                <span style={{ color: '#ff5b6e', fontSize: 16 }}>Exit group</span>
                             </div>
                         </div>
 
@@ -16677,11 +16956,11 @@ export default function Chat() {
                     <div className="wa-contact-info-bg" style={{ opacity: 0.1 }}></div>
 
                     <div className="wa-contact-profile-section">
-                        <div className="wa-contact-avatar-large" style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                        <div className="wa-contact-avatar-large" style={{ width: 160, height: 160, background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
                             {displayPhoto ? (
                                 <img src={displayPhoto} alt={displayName} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
                             ) : (
-                                <span style={{ fontSize: 40, color: '#54656f' }}>
+                                <span className="wa-theme-initial-avatar-letter">
                                     {displayName.charAt(0).toUpperCase()}
                                 </span>
                             )}
@@ -16710,8 +16989,6 @@ export default function Chat() {
                             </div>
                         </div>
                     </div>
-
-                    <div className="wa-contact-section-divider" style={{ background: 'rgba(255, 255, 255, 0.08)' }}></div>
 
                     {/* About Section */}
                     <div className="wa-contact-info-item">
@@ -16794,6 +17071,11 @@ export default function Chat() {
                                                         <div style={{ fontSize: 10, color: '#667781', textAlign: 'center', marginTop: 4, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                             {m.fileName || 'Doc'}
                                                         </div>
+                                                        {getDocumentPageLabel(m, String(m.fileName || '').toLowerCase().endsWith('.pdf') ? '1 page' : '') && (
+                                                            <div style={{ fontSize: 9, color: '#0EA5BE', fontWeight: 700, marginTop: 2, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                                                                {getDocumentPageLabel(m, String(m.fileName || '').toLowerCase().endsWith('.pdf') ? '1 page' : '')}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 );
                                             }
@@ -16848,7 +17130,7 @@ export default function Chat() {
                             <ChevronRight size={20} color="#38bdf8" style={{ transform: 'none' }} />
                         </div>
                         <div className="wa-setting-item clickable" onClick={() => setIsEncryptionInfoOpen(true)}>
-                            <div className="wa-setting-icon"><Lock size={20} color="#54656f" /></div>
+                            <div className="wa-setting-icon"><Lock size={20} color="#38bdf8" /></div>
                             <div className="wa-setting-text">
                                 <div>{t('contact_info.encryption')}</div>
                                 <div className="wa-setting-subtext">Messages are end-to-end encrypted. Click to learn more.</div>
@@ -16940,12 +17222,12 @@ export default function Chat() {
                             <>
                                 <div className="wa-setting-item clickable" onClick={() => handleToggleFavorite(activeTargetId, isFavoriteContact)}>
                                     <div className="wa-setting-icon">
-                                        {isFavoriteContact ? <HeartOff size={20} color="#6b7280" /> : <Heart size={20} color="#6b7280" />}
+                                        {isFavoriteContact ? <HeartOff size={20} color="#38bdf8" /> : <Heart size={20} color="#38bdf8" />}
                                     </div>
                                     <div className="wa-setting-text">{isFavoriteContact ? 'Remove favourite' : 'Add to favourites'}</div>
                                 </div>
                                 <div className="wa-setting-item clickable" onClick={() => handleAddChatToList(activeTargetId, displayName)}>
-                                    <div className="wa-setting-icon"><List size={20} color="#6b7280" /></div>
+                                    <div className="wa-setting-icon"><List size={20} color="#38bdf8" /></div>
                                     <div className="wa-setting-text">Add to list</div>
                                 </div>
                                 <div className="wa-setting-item danger" onClick={() => {
@@ -17570,7 +17852,7 @@ export default function Chat() {
                                     <FileText size={32} color="#38bdf8" />
                                     <div className="wa-file-info">
                                         <p>{infoMessage.fileName}</p>
-                                        <span>{formatFileSize(infoMessage.fileSize)} - PDF</span>
+                                        <span>{getDocumentMetaLabel(infoMessage, { includeType: true, includeSize: true })}</span>
                                     </div>
                                 </div>
                             ) : infoMessage.type === 'contact' ? renderContactMessageCard(infoMessage.content, { tone: 'light', marginBottom: '8px' }) : infoMessage.type === 'poll' && infoMessage.poll ? (
@@ -18410,7 +18692,7 @@ export default function Chat() {
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#54656f' }}>
                         <FileText size={120} strokeWidth={1} />
                         <span style={{ marginTop: 20, fontSize: 24, fontWeight: 500 }}>{viewingImage.fileName}</span>
-                        <span style={{ marginTop: 8, fontSize: 16, opacity: 0.7 }}>{viewingImage.fileSize ? `${Math.ceil(viewingImage.fileSize / 1024)} kB` : 'Document'}</span>
+                        <span style={{ marginTop: 8, fontSize: 16, opacity: 0.7 }}>{formatFileSize(viewingImage.fileSize) || 'Document'}</span>
                     </div>
                 );
             }
@@ -18818,16 +19100,20 @@ export default function Chat() {
                             </>
                         )}
 
-                        <div className="wa-dropdown-item" onClick={() => {
-                            setIsForwardingMode(true);
-                            setIsChatSelectionMode(true);
-                            setForwardSelectedMsgs([data]);
-                            setOpenDropdown(null);
-                        }}>
-                            <CheckSquare size={16} style={{ marginRight: 10 }} /> Select
-                        </div>
+                        {!isDeleted && (
+                            <>
+                                <div className="wa-dropdown-item" onClick={() => {
+                                    setIsForwardingMode(true);
+                                    setIsChatSelectionMode(true);
+                                    setForwardSelectedMsgs([data]);
+                                    setOpenDropdown(null);
+                                }}>
+                                    <CheckSquare size={16} style={{ marginRight: 10 }} /> Select
+                                </div>
 
-                        <div className="wa-dropdown-divider"></div>
+                                <div className="wa-dropdown-divider"></div>
+                            </>
+                        )}
                         {!isMe && !isDeleted && data.type !== 'event' && <div className="wa-dropdown-item"><ThumbsDown size={16} style={{ marginRight: 10 }} /> Report</div>}
                         {!isDeleted && (data.type === 'image' || data.type === 'file' || data.type === 'video' || data.type === 'audio') && (
                             <div className="wa-dropdown-item" onClick={(e) => {
@@ -20125,6 +20411,11 @@ export default function Chat() {
                                                         <div style={{ fontSize: 10, color: '#667781', textAlign: 'center', marginTop: 4, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                             {m.fileName || 'Doc'}
                                                         </div>
+                                                        {getDocumentPageLabel(m, String(m.fileName || '').toLowerCase().endsWith('.pdf') ? '1 page' : '') && (
+                                                            <div style={{ fontSize: 9, color: '#0EA5BE', fontWeight: 700, marginTop: 2, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                                                                {getDocumentPageLabel(m, String(m.fileName || '').toLowerCase().endsWith('.pdf') ? '1 page' : '')}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 );
                                             }
@@ -20425,13 +20716,15 @@ export default function Chat() {
                             })}
                     </div>
 
-                    <div style={{ background: bgColor, padding: '10px 0 40px 0', borderTop: thickDivider }}>
+                    <div className="wa-info-danger-actions" style={{ background: bgColor, padding: '10px 0 40px 0', borderTop: 'none' }}>
                         {[
-                            { icon: <LogOut size={20} />, label: 'Exit community', color: '#ea0038', action: onExitClick },
-                            ...(canIManage ? [{ icon: <XCircle size={20} />, label: 'Deactivate community', color: '#ea0038', action: () => { setDeactivateCommunityTarget(community); setIsDeactivateCommunityConfirmOpen(true); } }] : [])
+                            { icon: <ThumbsDown size={20} />, label: 'Report community', color: '#ff5b6e', action: () => handleModerationAction('report', community.id || community._id, { ...community, is_community: true }) },
+                            { icon: <LogOut size={20} />, label: 'Exit community', color: '#ff5b6e', action: onExitClick },
+                            ...(canIManage ? [{ icon: <XCircle size={20} />, label: 'Deactivate community', color: '#ff5b6e', action: () => { setDeactivateCommunityTarget(community); setIsDeactivateCommunityConfirmOpen(true); } }] : [])
                         ].map((item, idx) => (
                             <div
                                 key={idx}
+                                className="wa-info-danger-action"
                                 onClick={item.action}
                                 style={{
                                     padding: '16px 20px',
@@ -20870,16 +21163,7 @@ export default function Chat() {
             return safeName.slice(dot + 1).toLowerCase();
         };
         const getSharedFileBadge = (ext = '') => {
-            if (ext === 'pdf') return 'PDF';
-            if (ext === 'csv') return 'CSV';
-            if (['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods'].includes(ext)) return 'XLS';
-            if (['ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'].includes(ext)) return 'PPT';
-            if (ext === 'txt') return 'TXT';
-            if (ext === 'rtf') return 'RTF';
-            if (['md', 'markdown'].includes(ext)) return 'MD';
-            if (['doc', 'docx', 'docm', 'dot', 'dotx', 'odt'].includes(ext)) return 'DOC';
-            if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'ZIP';
-            return (ext || 'FILE').slice(0, 4).toUpperCase();
+            return (ext || 'FILE').slice(0, 5).toUpperCase();
         };
         const getSharedFileAccent = (ext = '') => {
             const fixedExtColors = {
@@ -21095,9 +21379,14 @@ export default function Chat() {
                                                                 )}
                                                             </div>
                                                         </div>
-                                                        <div
-                                                            className="wa-doc-content-wrapper"
-                                                            style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, cursor: 'pointer', minHeight: 52 }}
+                                                            <div
+                                                                className="wa-doc-content-wrapper"
+                                                                style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, cursor: 'pointer', minHeight: 52 }}
+                                                            title={(() => {
+                                                                const displayName = getDisplayFileName(msg) || 'Document';
+                                                                const meta = getDocumentMetaLabel(msg, { includeType: true, includeSize: true });
+                                                                return [displayName, meta].filter(Boolean).join('\n');
+                                                            })()}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 if (isSelectionMode) toggleSelection(msg);
@@ -21118,9 +21407,18 @@ export default function Chat() {
                                                                 })()}
                                                             </div>
                                                             <div className="wa-doc-info" style={{ minWidth: 0 }}>
-                                                                <div className="wa-doc-name-small">{getDisplayFileName(msg) || 'Document'}</div>
+                                                                <div
+                                                                    className="wa-doc-name-small"
+                                                                    title={(() => {
+                                                                        const displayName = getDisplayFileName(msg) || 'Document';
+                                                                        const meta = getDocumentMetaLabel(msg, { includeType: true, includeSize: true });
+                                                                        return [displayName, meta].filter(Boolean).join('\n');
+                                                                    })()}
+                                                                >
+                                                                    {truncateFileName(getDisplayFileName(msg) || 'Document', 42)}
+                                                                </div>
                                                                 <div className="wa-doc-meta-small">
-                                                                    {(() => { const displayName = getDisplayFileName(msg); const ext = getSharedFileExt(displayName); const badge = getSharedFileBadge(ext); const sizeLabel = formatFileSize(msg.fileSize || msg.file_size || 0) || 'File'; return sizeLabel + ' - ' + badge + ' - ' + formatSharedMediaTimestamp(msg.created_at); })()}
+                                                                    {(() => { const displayName = getDisplayFileName(msg); const ext = getSharedFileExt(displayName); const badge = getSharedFileBadge(ext); const dateLabel = formatSharedMediaTimestamp(msg.created_at); return getDocumentMetaLabel(msg, { includeType: false, includeSize: true, includeDate: `${badge} - ${dateLabel}` }) || `${badge} - ${dateLabel}`; })()}
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -21368,6 +21666,8 @@ export default function Chat() {
 
     const handleMouseDownResize = (e) => {
         e.preventDefault();
+        setInlinePaintPaletteOpen(false);
+        setInlineTextPaletteOpen(false);
         const startX = e.clientX;
         const startWidth = leftPanelWidth;
 
@@ -21511,7 +21811,15 @@ export default function Chat() {
                             padding: '10px 40px 10px 0', outline: 'none'
                         }}
                     />
-                    <Smile size={20} color="#38bdf8" style={{ position: 'absolute', right: 5, top: 12, cursor: 'pointer' }} />
+                    <button
+                        type="button"
+                        className="wa-inline-emoji-trigger"
+                        aria-label="Add emoji to list name"
+                        onClick={(event) => openEmojiPickerForTarget(event, 'newListName')}
+                        style={{ position: 'absolute', right: 5, top: 8 }}
+                    >
+                        <Smile size={20} color="#38bdf8" />
+                    </button>
                 </div>
 
                 <div style={{ fontSize: '14px', color: '#0EA5BE', marginBottom: 15, fontWeight: 600 }}>Included</div>
@@ -22575,19 +22883,6 @@ export default function Chat() {
                     }}
                 >
                     <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
-                    <input
-                        type="color"
-                        value={inlinePaintColor}
-                        onChange={(event) => setInlinePaintColorWithMarker(event.target.value)}
-                        style={{
-                            position: 'absolute',
-                            inset: 0,
-                            opacity: 0,
-                            width: '100%',
-                            height: '100%',
-                            cursor: 'crosshair'
-                        }}
-                    />
                 </div>
             )}
         </div >
@@ -22957,7 +23252,8 @@ export default function Chat() {
     };
 
     const handleForwardSend = async () => {
-        if (selectedForwardContacts.length === 0 || forwardSelectedMsgs.length === 0) return;
+        const actionableForwardMsgs = forwardSelectedMsgs.filter(msg => !isDeletedForCurrentUser(msg));
+        if (selectedForwardContacts.length === 0 || actionableForwardMsgs.length === 0) return;
 
         // Optimistically close modal
         setIsForwardModalOpen(false);
@@ -22970,7 +23266,7 @@ export default function Chat() {
 
         // Send logic
         for (const contact of selectedForwardContacts) {
-            for (const msg of forwardSelectedMsgs) {
+            for (const msg of actionableForwardMsgs) {
                 try {
                     const isGroup = contact.isForwardGroup;
                     const endpoint = isGroup ? `/api/groups/${contact._id}/send` : '/api/chat/send';
@@ -22981,6 +23277,7 @@ export default function Chat() {
                         file_path: msg.file_path,
                         fileName: msg.fileName,
                         fileSize: msg.fileSize,
+                        pageCount: msg.pageCount || msg.page_count || 0,
                         isForwarded: true,
                         duration: msg.duration || 0,
                         event: msg.event,
@@ -22996,6 +23293,7 @@ export default function Chat() {
                             formData.append('type', msg.type);
                             formData.append('fileName', msg.fileName || '');
                             formData.append('fileSize', msg.fileSize || 0);
+                            formData.append('pageCount', msg.pageCount || msg.page_count || 0);
                             formData.append('duration', msg.duration || 0);
                         } else {
                             formData.append('type', msg.type || 'text');
@@ -23036,6 +23334,9 @@ export default function Chat() {
                             content: sentMsg.content,
                             type: sentMsg.type,
                             file_path: sentMsg.file_path,
+                            fileName: sentMsg.fileName,
+                            fileSize: sentMsg.fileSize,
+                            pageCount: sentMsg.pageCount,
                             duration: sentMsg.duration,
                             isForwarded: true,
                             created_at: sentMsg.created_at,
@@ -24034,8 +24335,7 @@ export default function Chat() {
                                                                 placeholder={t('chat_window.input_placeholder')}
                                                                 value={input}
                                                                 onChange={(e) => {
-                                                                    setInput(e.target.value);
-                                                                    resizeMessageComposer(e.target);
+                                                                    handleComposerInputChange(e);
                                                                 }}
                                                                 onPaste={handlePaste}
                                                                 onKeyDown={(e) => {
@@ -24811,8 +25111,7 @@ export default function Chat() {
                                                                 placeholder={t('chat_window.input_placeholder')}
                                                                 value={input}
                                                                 onChange={(e) => {
-                                                                    setInput(e.target.value);
-                                                                    resizeMessageComposer(e.target);
+                                                                    handleComposerInputChange(e);
                                                                 }}
                                                                 onPaste={handlePaste}
                                                                 onKeyDown={(e) => {
@@ -25479,7 +25778,15 @@ export default function Chat() {
                                 placeholder="Event name"
                                 style={{ width: '100%', border: 'none', borderBottom: '2px solid #0EA5BE', padding: '8px 40px 8px 0', fontSize: '16px', outline: 'none', background: 'transparent', color: '#f8fafc' }}
                             />
-                            <Smile size={24} color="#8696a0" style={{ position: 'absolute', right: 0, top: '8px', cursor: 'pointer' }} />
+                            <button
+                                type="button"
+                                className="wa-inline-emoji-trigger"
+                                aria-label="Add emoji to event name"
+                                onClick={(event) => openEmojiPickerForTarget(event, 'eventName')}
+                                style={{ position: 'absolute', right: 0, top: '4px' }}
+                            >
+                                <Smile size={24} color="#8696a0" />
+                            </button>
                         </div>
 
                         {/* Description */}
@@ -25491,7 +25798,15 @@ export default function Chat() {
                                 rows={3}
                                 style={{ width: '100%', border: 'none', fontSize: '15px', outline: 'none', background: 'transparent', color: '#111b21', resize: 'none' }}
                             />
-                            <Smile size={24} color="#8696a0" style={{ position: 'absolute', right: '12px', top: '12px', cursor: 'pointer' }} />
+                            <button
+                                type="button"
+                                className="wa-inline-emoji-trigger"
+                                aria-label="Add emoji to event description"
+                                onClick={(event) => openEmojiPickerForTarget(event, 'eventDescription')}
+                                style={{ position: 'absolute', right: '12px', top: '8px' }}
+                            >
+                                <Smile size={24} color="#8696a0" />
+                            </button>
                         </div>
 
                         {/* Start Date & Time */}
@@ -25960,7 +26275,14 @@ export default function Chat() {
                         boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
                         border: '1px solid #e2e8f0'
                     }}>
-                        <Smile size={24} color="#54656f" style={{ cursor: 'pointer', flexShrink: 0 }} />
+                        <button
+                            type="button"
+                            className="wa-inline-emoji-trigger"
+                            aria-label="Add emoji to edited message"
+                            onClick={(event) => openEmojiPickerForTarget(event, 'editInput')}
+                        >
+                            <Smile size={24} color="#54656f" />
+                        </button>
                         <textarea
                             autoFocus
                             className="wa-edit-box"
@@ -28712,13 +29034,13 @@ export default function Chat() {
 
             {/* Reaction Details Modal */}
             {reactionDetails && (() => {
-                const rWidth = 220;
+                const rWidth = 260;
                 const activeTab = reactionDetails.activeTab || 'all';
-                const allReactions = reactionDetails.msg.reactions;
+                const allReactions = reactionDetails.msg.reactions || [];
                 const reactions = activeTab === 'all' ? allReactions : allReactions.filter(r => r.emoji === activeTab);
 
                 const displayCount = Math.min(4, Math.max(activeTab === 'all' ? allReactions.length : reactions.length, 1));
-                const rHeight = 36 + displayCount * 50;
+                const rHeight = 40 + displayCount * 62;
 
                 const rect = reactionDetails.rect;
 
@@ -28738,6 +29060,17 @@ export default function Chat() {
                     acc[r.emoji]++;
                     return acc;
                 }, {});
+                const formatReactionTimestamp = (value) => {
+                    if (!value) return '';
+                    const date = new Date(value);
+                    if (Number.isNaN(date.getTime())) return '';
+                    return date.toLocaleString([], {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                };
 
                 return (
                     <div
@@ -28796,9 +29129,11 @@ export default function Chat() {
                             {/* Filtered Reaction list */}
                             <div style={{ flex: 1, overflowY: reactions.length > 4 ? 'auto' : 'hidden' }}>
                                 {reactions.map((r, i) => {
-                                    const isMe = String(r.user_id) === String(user.id || user._id);
-                                    const u = isMe ? user : users.find(usr => String(usr._id || usr.id) === String(r.user_id));
+                                    const reactionUserId = String(r.user_id?._id || r.user_id || '');
+                                    const isMe = reactionUserId === String(user.id || user._id);
+                                    const u = isMe ? user : users.find(usr => String(usr._id || usr.id) === reactionUserId);
                                     const displayName = isMe ? 'You' : (u ? u.name : 'Unknown');
+                                    const reactionTime = formatReactionTimestamp(r.created_at || r.timestamp);
                                     const displayAvatar = u?.avatar
                                         ? (u.avatar.startsWith('http') ? u.avatar : `http://localhost:5000${u.avatar}`)
                                         : 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png';
@@ -28815,7 +29150,9 @@ export default function Chat() {
                                             </div>
                                             <div style={{ flex: 1, minWidth: 0 }}>
                                                 <div style={{ color: '#111b21', fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</div>
-                                                {isMe && <div style={{ color: '#8696a0', fontSize: 10, marginTop: 0.5 }}>Click to remove</div>}
+                                                <div style={{ color: '#8696a0', fontSize: 10, marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                    {[reactionTime, isMe ? 'Click to remove' : 'Reacted'].filter(Boolean).join(' - ')}
+                                                </div>
                                             </div>
                                             <div style={{ fontSize: 20, paddingLeft: 6 }}>{r.emoji}</div>
                                         </div>
@@ -28847,10 +29184,33 @@ export default function Chat() {
                     zoom={typeof getAppZoom === 'function' ? getAppZoom() : 1}
                     className="input-mode"
                     onSelect={(emoji) => {
-                        if (emojiInsertTarget === 'inlineText') {
-                            setInlineTextDraft(prev => prev + emoji);
-                        } else {
-                            setInput(prev => prev + emoji);
+                        switch (emojiInsertTarget) {
+                            case 'inlineText':
+                                setInlineTextDraft(prev => prev + emoji);
+                                break;
+                            case 'groupSubject':
+                                setGroupSubject(prev => prev + emoji);
+                                break;
+                            case 'communityName':
+                                setCommunityName(prev => prev + emoji);
+                                break;
+                            case 'communityDescription':
+                                setCommunityDescription(prev => prev + emoji);
+                                break;
+                            case 'newListName':
+                                setNewListName(prev => prev + emoji);
+                                break;
+                            case 'eventName':
+                                setEventName(prev => prev + emoji);
+                                break;
+                            case 'eventDescription':
+                                setEventDescription(prev => prev + emoji);
+                                break;
+                            case 'editInput':
+                                setEditInput(prev => prev + emoji);
+                                break;
+                            default:
+                                setInput(prev => prev + emoji);
                         }
                     }}
                     onClose={() => setShowInputEmojiPicker(false)}

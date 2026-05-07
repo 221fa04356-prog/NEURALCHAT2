@@ -24,6 +24,7 @@ const cloudinaryUpload = require('../middleware/multer');
 const { isCloudinaryConfigured } = require('../config/cloudinary');
 const { detectUnsafeText } = require('../utils/moderation');
 const { calculateMessageHash } = require('../utils/messageHash');
+const { countOfficeDocumentItems } = require('../utils/documentCount');
 
 const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole']; // Legacy fallback only
 
@@ -2256,6 +2257,8 @@ router.post('/send', authenticateToken, (req, res, next) => {
         filePath = '/uploads/' + file.filename;
         fileName = file.originalname;
         fileSize = file.size;
+        pageCount = Number(req.body.pageCount || 0);
+        const uploadedFilePath = path.join(__dirname, '../uploads', file.filename);
 
         // Guardrail: tiny audio blobs are suspicious, but do not block sending.
         if (type === 'audio' && fileSize < MIN_VALID_AUDIO_BYTES) {
@@ -2265,7 +2268,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
         // Permanent durability: persist every uploaded attachment in Mongo GridFS.
         if (['audio', 'video', 'image', 'file'].includes(type)) {
             try {
-                const absPath = path.join(__dirname, '../uploads', file.filename);
+                const absPath = uploadedFilePath;
                 const { fileId } = await uploadLocalFileToGridFS(absPath, file.originalname || file.filename, {
                     senderId: userId,
                     receiverId: toUserId || null,
@@ -2283,7 +2286,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
         // Try to get page count for PDFs (wrapped in try-catch to prevent crashing)
         if (file.mimetype === 'application/pdf') {
             try {
-                const dataBuffer = fs.readFileSync(path.join(__dirname, '../uploads', file.filename));
+                const dataBuffer = fs.readFileSync(uploadedFilePath);
                 // Only attempt if pdfParse is a function
                 if (typeof pdfParse === 'function') {
                     const data = await pdfParse(dataBuffer);
@@ -2294,6 +2297,9 @@ router.post('/send', authenticateToken, (req, res, next) => {
             } catch (e) {
                 console.error("PDF Page Count Failed", e);
             }
+        } else if (type === 'file') {
+            const officeCount = countOfficeDocumentItems(uploadedFilePath, fileName);
+            if (officeCount > 0) pageCount = officeCount;
         }
     } else if (req.body.file_path) {
         // Handle Forwarding (Existing File)
@@ -2506,7 +2512,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
                 file_path: filePath,
                 fileName,
                 fileSize: fileSize || 0,
-                pageCount: req.body.pageCount || 0,
+                pageCount: pageCount || 0,
                 thumbnail_path: req.body.thumbnail_path || null,
                 link_preview: linkPreview,
                 duration: Number(req.body.duration || 0), is_view_once, // Metadata

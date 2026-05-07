@@ -7,6 +7,7 @@ import {
 import axios from 'axios';
 import { Virtuoso } from 'react-virtuoso';
 import ViewOnceBadge from './ViewOnceBadge';
+import { formatFileSize } from '../../utils/fileSize';
 
 const DEFAULT_VOICE_WAVEFORM = [8, 10, 9, 12, 11, 8, 13, 15, 12, 9, 11, 14, 10, 13, 8, 10, 15, 11, 13, 10, 14, 12, 9, 8, 10, 13, 11, 12, 9, 11];
 const VOICE_WAVEFORM_BARS = 30;
@@ -418,6 +419,17 @@ const MessageList = memo(({
     isMobile,
     onViewOncePreviewOpenChange
 }) => {
+    const isDeletedForCurrentUser = useCallback((msg) => {
+        if (!msg) return false;
+        const myId = String(user?.id || user?._id || '');
+        const deletedFor = Array.isArray(msg.deleted_for) ? msg.deleted_for : [];
+        return !!(
+            msg.is_deleted_by_admin ||
+            msg.is_deleted_by_user ||
+            (myId && deletedFor.some(id => String(id?._id || id) === myId))
+        );
+    }, [user?.id, user?._id]);
+
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [failedMediaKeys, setFailedMediaKeys] = useState(() => new Set());
     const [failedMediaUrls, setFailedMediaUrls] = useState(() => new Set());
@@ -1078,16 +1090,21 @@ const MessageList = memo(({
         const filePathGuess = decodeURIComponent(String(msg.file_path || msg.filePath || '').split('?')[0].split('/').pop() || '').trim();
         const rawFileName = fileNameDirect || (/\.[a-z0-9]{2,8}$/i.test(contentGuess) ? contentGuess : '') || filePathGuess || 'Document';
         const displayFileName = rawFileName.replace(/^\d{10,}-/, '');
+        const compactFileName = (name, max = 38) => {
+            const safeName = String(name || '').trim();
+            if (safeName.length <= max) return safeName;
+            const dotIdx = safeName.lastIndexOf('.');
+            const ext = dotIdx > 0 ? safeName.slice(dotIdx) : '';
+            const base = dotIdx > 0 ? safeName.slice(0, dotIdx) : safeName;
+            const available = Math.max(8, max - ext.length - 3);
+            const head = Math.ceil(available * 0.62);
+            const tail = Math.max(3, available - head);
+            return `${base.slice(0, head)}...${base.slice(-tail)}${ext}`;
+        };
         const fileDotIdx = displayFileName.lastIndexOf('.');
         const fileExt = (fileDotIdx > 0 && fileDotIdx < displayFileName.length - 1) ? displayFileName.slice(fileDotIdx + 1).toLowerCase() : '';
         const getFriendlyFileLabel = () => {
-            if (fileExt === 'pdf') return 'PDF';
-            if (['csv'].includes(fileExt)) return 'CSV';
-            if (['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods'].includes(fileExt)) return 'XLS';
-            if (['ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'].includes(fileExt)) return 'PPT';
-            if (['txt'].includes(fileExt)) return 'TXT';
-            if (['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt'].includes(fileExt)) return 'DOC';
-            if (['zip', 'rar', '7z', 'tar', 'gz'].includes(fileExt)) return 'ZIP';
+            if (fileExt) return fileExt.slice(0, 5).toUpperCase();
             return 'FILE';
         };
         const fileBadgeLabel = getFriendlyFileLabel();
@@ -1125,13 +1142,27 @@ const MessageList = memo(({
         const officePreviewUrl = canRemoteOfficePreview
             ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(absoluteFileUrl)}`
             : '';
-        const formatFileSize = (bytes) => {
-            const n = Number(bytes || 0);
-            if (!Number.isFinite(n) || n <= 0) return '';
-            if (n >= 1024 * 1024) return `${Math.round((n / (1024 * 1024)) * 10) / 10} MB`;
-            return `${Math.max(1, Math.round(n / 1024))} kB`;
-        };
         const fileSizeLabel = formatFileSize(msg.fileSize || msg.file_size);
+        const pageCount = Number(msg.pageCount ?? msg.pages ?? msg.page_count ?? msg.metadata?.pageCount ?? msg.metadata?.pages ?? msg.metadata?.page_count ?? 0);
+        const formatDocumentCountLabel = (count, ext = '') => {
+            const value = Number(count);
+            if (!Number.isFinite(value) || value <= 0) return '';
+            const n = Math.round(value);
+            if (['ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'].includes(ext)) {
+                return `${n} slide${n === 1 ? '' : 's'}`;
+            }
+            if (['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods'].includes(ext)) {
+                return `${n} sheet${n === 1 ? '' : 's'}`;
+            }
+            if (ext === 'csv') return `${n} row${n === 1 ? '' : 's'}`;
+            if (ext === 'txt') return `${n} line${n === 1 ? '' : 's'}`;
+            return `${n} page${n === 1 ? '' : 's'}`;
+        };
+        const pageCountLabel = formatDocumentCountLabel(pageCount, fileExt)
+            || (['pdf', 'doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt'].includes(fileExt) ? '1 page' : '')
+            || '';
+        const docMetaLabel = [fileBadgeLabel, pageCountLabel, fileSizeLabel].filter(Boolean).join(' | ');
+        const docHoverTitle = [displayFileName, pageCountLabel, fileSizeLabel].filter(Boolean).join('\n');
         const getDocAccent = () => {
             if (['pdf'].includes(fileExt)) return '#E53935';
             if (['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'csv', 'ods'].includes(fileExt)) return '#1F9D55';
@@ -1317,6 +1348,10 @@ const MessageList = memo(({
                     onDoubleClick={() => { if (!isForwardingMode) setReplyingTo(msg); }}
                     onClick={() => {
                         if (isForwardingMode) {
+                            if (isDeletedForCurrentUser(msg)) {
+                                setSnackbar({ message: 'Deleted messages cannot be selected', type: 'info', variant: 'system' });
+                                return;
+                            }
                             const isSelected = forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id));
                             if (isSelected) {
                                 setForwardSelectedMsgs(prev => prev.filter(m => String(m._id || m.id) !== String(msg._id || msg.id)));
@@ -1330,7 +1365,7 @@ const MessageList = memo(({
                         }
                     }}
                 >
-                    {isForwardingMode && (
+                    {isForwardingMode && !isDeletedForCurrentUser(msg) && (
                         <div className="wa-msg-checkbox">
                             {forwardSelectedMsgs.find(m => String(m._id || m.id) === String(msg._id || msg.id)) ?
                                 <CheckSquare size={24} color="white" fill="#0EA5BE" /> :
@@ -1730,11 +1765,11 @@ const MessageList = memo(({
                                                     </div>
                                                     <div className="wa-doc-copy">
                                                         <div className="wa-doc-title">{docTypeName}</div>
-                                                        <div className="wa-doc-filename" title={displayFileName}>
-                                                            {displayFileName}
+                                                        <div className="wa-doc-filename" title={docHoverTitle}>
+                                                            {compactFileName(displayFileName)}
                                                         </div>
                                                         <div className="wa-doc-meta">
-                                                            {fileBadgeLabel}{fileSizeLabel ? ` | ${fileSizeLabel}` : ''}
+                                                            {docMetaLabel}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -1743,6 +1778,7 @@ const MessageList = memo(({
                                                     <button
                                                         type="button"
                                                         className="wa-doc-btn wa-doc-btn-open"
+                                                        title="Open"
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             if (msg.is_view_once && !isMe) {
@@ -1760,6 +1796,7 @@ const MessageList = memo(({
                                                     <button
                                                         type="button"
                                                         className="wa-doc-btn"
+                                                        title="Save as"
                                                         onClick={(e) => { 
                                                             e.stopPropagation(); 
                                                             if (msg.is_view_once && !isMe) {
