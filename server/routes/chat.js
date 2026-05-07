@@ -2112,7 +2112,7 @@ router.post('/poll/:messageId/vote', authenticateToken, async (req, res) => {
         const userId = req.user.id;
         const userObjId = new mongoose.Types.ObjectId(userId);
 
-        const msg = await Message.findById(messageId);
+        const msg = await Message.findById(messageId) || await Message.findOne({ scheduled_message_id: messageId });
         if (!msg || msg.type !== 'poll') return res.status(404).json({ error: 'Poll not found' });
 
         const allowMultiple = msg.poll.allowMultipleAnswers;
@@ -2137,13 +2137,18 @@ router.post('/poll/:messageId/vote', authenticateToken, async (req, res) => {
         msg.markModified('poll');
         await msg.save();
 
-        const updated = await Message.findById(messageId);
+        const updated = await Message.findById(msg._id);
         const msgObj = updated.toObject();
 
         // Emit to both parties
         if (req.io) {
             [String(msg.user_id), String(msg.receiver_id)].filter(Boolean).forEach(uid => {
-                req.io.to(uid).emit('poll_voted', { messageId, poll: msgObj.poll, isGroup: false });
+                req.io.to(uid).emit('poll_voted', {
+                    messageId: String(msg._id),
+                    scheduledMessageId: String(msg.scheduled_message_id || ''),
+                    poll: msgObj.poll,
+                    isGroup: false
+                });
             });
         }
 

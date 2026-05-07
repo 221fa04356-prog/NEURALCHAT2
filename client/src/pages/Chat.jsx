@@ -6325,10 +6325,12 @@ export default function Chat() {
 
         const onPollVoted = (data) => {
             debugLog('Socket: poll_voted', data);
-            const { messageId, poll, isGroup } = data;
+            const { messageId, scheduledMessageId, poll, isGroup } = data;
 
             const updateMsgs = prev => prev.map(m =>
-                (String(m._id || m.id) === String(messageId)) ? { ...m, poll } : m
+                (String(m._id || m.id) === String(messageId) || (scheduledMessageId && String(m._id || m.id) === String(scheduledMessageId)))
+                    ? { ...m, _id: messageId || m._id, id: messageId || m.id, poll, is_scheduled: false }
+                    : m
             );
 
             if (isGroup) {
@@ -10837,7 +10839,8 @@ export default function Chat() {
         }
 
         const token = localStorage.getItem('token');
-        const endpoint = isGroup ? `/api/groups/poll/${msg._id}/vote` : `/api/chat/poll/${msg._id}/vote`;
+        const messageId = msg._id || msg.id;
+        const endpoint = isGroup ? `/api/groups/poll/${messageId}/vote` : `/api/chat/poll/${messageId}/vote`;
 
         try {
             const res = await axios.post(endpoint, { optionIndexes: newIndexes }, {
@@ -10846,7 +10849,7 @@ export default function Chat() {
 
             const updatedPoll = res.data.poll;
             const updateFn = prev => prev.map(m =>
-                (String(m._id) === String(msg._id) || String(m.id) === String(msg._id))
+                (String(m._id || m.id) === String(messageId))
                     ? { ...m, poll: updatedPoll }
                     : m
             );

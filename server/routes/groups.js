@@ -563,7 +563,7 @@ router.post('/poll/:messageId/vote', authenticateToken, async (req, res) => {
         msg.markModified('poll');
         await msg.save();
 
-        const updated = await GroupMessage.findById(messageId);
+        const updated = await GroupMessage.findById(msg._id);
         const msgObj = updated.toObject();
 
         if (req.io) {
@@ -572,7 +572,8 @@ router.post('/poll/:messageId/vote', authenticateToken, async (req, res) => {
             
             notifyIds.forEach(memberId => {
                 req.io.to(memberId).emit('poll_voted', {
-                    messageId,
+                    messageId: String(msg._id),
+                    scheduledMessageId: String(msg.scheduled_message_id || ''),
                     poll: msgObj.poll,
                     isGroup: true,
                     groupId: String(msg.group_id)
