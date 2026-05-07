@@ -576,12 +576,24 @@ const formatEventTimeString = (startDate, startTime, endDate, endTime) => {
 };
 
 const parseEventDateTime = (dateValue, timeValue, fallbackDate = '') => {
-    const normalizedDate = String(dateValue || fallbackDate || '').split('T')[0];
+    const normalizedDate = normalizeEventDateInput(dateValue || fallbackDate);
     if (!normalizedDate) return null;
 
     const normalizedTime = String(timeValue || '00:00').slice(0, 5);
     const parsed = new Date(`${normalizedDate}T${normalizedTime}:00`);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const normalizeEventDateInput = (value) => {
+    if (!value) return '';
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+    const raw = String(value);
+    const yyyyMmDd = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (yyyyMmDd) return yyyyMmDd[0];
+    const ddMmYyyy = raw.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+    if (ddMmYyyy) return `${ddMmYyyy[3]}-${ddMmYyyy[2]}-${ddMmYyyy[1]}`;
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
 };
 
 const getEventLifecycleState = (event) => {
@@ -6875,7 +6887,13 @@ export default function Chat() {
                 }
 
                 setGroupMessages(prev => {
-                    if (prev.find(m => m._id === data.message?._id)) return prev;
+                    const scheduledMessageId = data.message?.scheduled_message_id;
+                    if (scheduledMessageId && prev.some(m => String(m._id || m.id) === String(scheduledMessageId))) {
+                        return prev.map(m => String(m._id || m.id) === String(scheduledMessageId)
+                            ? { ...data.message, is_scheduled: false }
+                            : m);
+                    }
+                    if (prev.find(m => String(m._id || m.id) === String(data.message?._id || data.message?.id))) return prev;
                     if (isMyOwnMessage && !data.message?.is_system && data.message?.type !== 'system') return prev; // Avoid duplicating optimistic message, but allow system logs
                     return [...prev, data.message];
                 });
@@ -10507,7 +10525,7 @@ export default function Chat() {
             return;
         }
 
-        if (startObj < new Date()) {
+        if (startObj.getTime() < Date.now() - 60 * 1000) {
             setSnackbar({
                 message: 'Event start time cannot be in the past.',
                 type: 'error',
@@ -10678,9 +10696,9 @@ export default function Chat() {
         setEventDescription(ev.description || '');
         setEventLocation(ev.location || '');
         setEventReminderTiming(ev.reminderTiming || 'default');
-        setEventStartDate(ev.startDate || new Date().toISOString().split('T')[0]);
+        setEventStartDate(normalizeEventDateInput(ev.startDate) || new Date().toISOString().split('T')[0]);
         setEventStartTime(ev.startTime || '11:00');
-        setEventEndDate(ev.endDate || '');
+        setEventEndDate(normalizeEventDateInput(ev.endDate) || '');
         setEventEndTime(ev.endTime || '');
         setIsEventEditOpen(true);
     };
@@ -10730,7 +10748,7 @@ export default function Chat() {
                 return;
             }
 
-            if (startObj < new Date()) {
+            if (startObj.getTime() < Date.now() - 60 * 1000) {
                 setSnackbar({
                     message: 'Event start time cannot be in the past.',
                     type: 'error',

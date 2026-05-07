@@ -40,7 +40,13 @@ const formatEventDateTime = (dateValue, timeValue) => {
     const datePart = toDatePart(dateValue);
     if (!datePart) return '';
     const timePart = String(timeValue || '00:00').slice(0, 5);
-    return formatDateTime(`${datePart}T${timePart}:00`);
+    const [year, month, day] = datePart.split('-').map(Number);
+    const [hour, minute] = timePart.split(':').map(Number);
+    if (!year || !month || !day || Number.isNaN(hour) || Number.isNaN(minute)) return '';
+    const monthName = new Date(Date.UTC(year, month - 1, day)).toLocaleString('en-IN', { month: 'short' });
+    const hour12 = hour % 12 || 12;
+    const ampm = hour >= 12 ? 'pm' : 'am';
+    return `${day} ${monthName} ${year}, ${hour12}:${String(minute).padStart(2, '0')} ${ampm}`;
 };
 
 const getUserName = (user) => user?.displayName || user?.name || user?.email || 'User';

@@ -3905,7 +3905,7 @@ router.post('/event/send', authenticateToken, async (req, res) => {
 router.post('/event/:messageId/join', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     try {
-        const msg = await Message.findById(req.params.messageId);
+        const msg = await Message.findById(req.params.messageId) || await Message.findOne({ scheduled_message_id: req.params.messageId });
         if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
 
         if (!msg.event.participants) msg.event.participants = [];
@@ -3940,7 +3940,7 @@ router.post('/event/:messageId/join', authenticateToken, async (req, res) => {
 router.post('/event/:messageId/edit', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     try {
-        const msg = await Message.findById(req.params.messageId);
+        const msg = await Message.findById(req.params.messageId) || await Message.findOne({ scheduled_message_id: req.params.messageId });
         if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
 
         // Only creator can edit for now
