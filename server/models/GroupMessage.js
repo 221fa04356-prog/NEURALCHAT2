@@ -84,6 +84,8 @@ const groupMessageSchema = new mongoose.Schema({
     }],
     message_hash: { type: String, unique: true, sparse: true },
     previous_message_hash: { type: String, sparse: true },
+    scheduled_message_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ScheduledMessage', default: null },
+    scheduled_created_at: { type: Date, default: null },
     created_at: { type: Date, default: Date.now }
 }, {
     toJSON: { virtuals: true },

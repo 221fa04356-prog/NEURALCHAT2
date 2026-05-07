@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const sendBrevoMail = require('../brevoMailer');
 
 const transporter = nodemailer.createTransport({
     host: process.env.EMAIL_HOST,
@@ -19,10 +20,18 @@ const transporter = nodemailer.createTransport({
  * @param {string} subject - Email subject
  * @param {string} html - Email body (HTML)
  */
-const sendEmail = async (to, subject, html) => {
+const sendEmail = async (to, subject, html, options = {}) => {
     try {
+        if (process.env.BREVO_API_KEY) {
+            const fromMatch = String(options.from || '').match(/"?(.*?)"?\s*<([^>]+)>/);
+            const fromName = fromMatch?.[1] || process.env.EMAIL_FROM_NAME || 'Admin';
+            const fromEmail = fromMatch?.[2] || process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
+            return await sendBrevoMail(to, subject, html, true, fromEmail, fromName, options.replyTo);
+        }
+
         const info = await transporter.sendMail({
-            from: `"${process.env.EMAIL_FROM_NAME || 'Admin'}" <${process.env.EMAIL_USER}>`,
+            from: options.from || `"${process.env.EMAIL_FROM_NAME || 'Admin'}" <${process.env.EMAIL_USER}>`,
+            replyTo: options.replyTo,
             to,
             subject,
             html,

@@ -25,6 +25,7 @@ const { isCloudinaryConfigured } = require('../config/cloudinary');
 const { detectUnsafeText } = require('../utils/moderation');
 const { calculateMessageHash } = require('../utils/messageHash');
 const { countOfficeDocumentItems } = require('../utils/documentCount');
+const { scheduleMessage, notifyEventCreated, notifyEventChanged } = require('../utils/scheduledMessaging');
 
 const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole']; // Legacy fallback only
 
@@ -786,7 +787,7 @@ router.get('/users', authenticateToken, async (req, res) => {
             query.role = { $ne: 'admin' };
         }
 
-        const users = await User.find(query).select('name email mobile _id role about isOnline lastSeen messagingBlocked blockedUsers privacySettings __enc_name __enc_email __enc_mobile __enc_about __enc_designation');
+        const users = await User.find(query).select('name email mobile countryCode designation _id role about isOnline lastSeen messagingBlocked blockedUsers privacySettings __enc_name __enc_email __enc_mobile __enc_about __enc_designation');
         console.log(`[DEBUG] /users: Found ${users.length} raw users for requester ${currentUserId} (Role: ${currentUserRole})`);
 
         if (!currentUserId) {
@@ -1580,7 +1581,7 @@ router.post('/messages/mark-read', authenticateToken, async (req, res) => {
         console.log(`[DEBUG] mark-read: Reader ${userId} (Object: ${readerObjId}) processed messages from ${senderId}. Updated: ${updateResult.modifiedCount}`);
 
         // Notify the sender that their messages were read only if allowed by the reader's privacy settings.
-        if (req.io) {
+        if (req.io && updateResult.modifiedCount > 0) {
             if (canShareReadReceipt) {
                 console.log(`[DEBUG] mark-read: BROADCASTING messages_read for reader ${userId} to sender ${senderId}`);
                 req.io.to(senderId).emit('messages_read', {
@@ -2045,7 +2046,7 @@ router.get('/p2p/:userId/:otherUserId', authenticateToken, async (req, res) => {
 // POST /api/chat/poll/send - Send a P2P poll message
 router.post('/poll/send', authenticateToken, async (req, res) => {
     try {
-        const { toUserId, question, options, allowMultipleAnswers } = req.body;
+        const { toUserId, question, options, allowMultipleAnswers, scheduledAt, scheduled_at } = req.body;
         const senderId = req.user.id;
 
         if (!toUserId) return res.status(400).json({ error: 'Recipient required' });
@@ -2053,6 +2054,25 @@ router.post('/poll/send', authenticateToken, async (req, res) => {
         if (!options || options.length < 2) return res.status(400).json({ error: 'At least 2 options required' });
 
         const pollOptions = options.map(opt => ({ text: opt, voters: [] }));
+
+        const scheduled = await scheduleMessage({
+            senderId,
+            targetType: 'user',
+            targetId: toUserId,
+            scheduledAt: scheduledAt || scheduled_at,
+            payload: {
+                content: question,
+                type: 'poll',
+                poll: {
+                    question,
+                    options: pollOptions,
+                    allowMultipleAnswers: allowMultipleAnswers !== false
+                }
+            }
+        });
+        if (scheduled) {
+            return res.json({ status: 'scheduled', scheduled });
+        }
 
         const msg = await Message.create({
             user_id: senderId,
@@ -2468,6 +2488,34 @@ router.post('/send', authenticateToken, (req, res, next) => {
             }
             // --- END REQUEST CHECK ---
 
+            const scheduledAt = req.body.scheduled_at || req.body.scheduledAt;
+            const scheduled = await scheduleMessage({
+                senderId: userId,
+                targetType: 'user',
+                targetId: toUserId,
+                scheduledAt,
+                payload: {
+                    content: content || '',
+                    email_content: req.body.email_content || content || '',
+                    type,
+                    file_path: filePath,
+                    fileName,
+                    fileSize: fileSize || 0,
+                    pageCount: pageCount || 0,
+                    thumbnail_path: req.body.thumbnail_path || null,
+                    duration: Number(req.body.duration || 0),
+                    is_view_once,
+                    reply_to: reply_to || null,
+                    poll: poll || undefined,
+                    event: event || undefined,
+                    ciphertext: req.body.ciphertext,
+                    session_header: req.body.session_header ? JSON.parse(req.body.session_header) : undefined
+                }
+            });
+            if (scheduled) {
+                return res.json({ status: 'scheduled', scheduled });
+            }
+
             // Detect URL for preview
             const urlRegex = /(https?:\/\/[^\s]+)/g;
             const urlMatch = content ? content.match(urlRegex) : null;
@@ -2564,6 +2612,14 @@ router.post('/send', authenticateToken, (req, res, next) => {
             // Notify Receiver (P2P)
             if (toUserId && req.io) {
                 req.io.to(String(toUserId)).emit('receive_message', msgObj);
+            }
+            if (type === 'event' && event) {
+                notifyEventCreated({
+                    senderId: userId,
+                    targetType: 'user',
+                    targetId: toUserId,
+                    payload: { content: event.name || content || '', type: 'event', event }
+                }).catch((emailErr) => console.error('[EVENT EMAIL P2P]', emailErr.message || emailErr));
             }
 
             return res.json({ status: 'sent', message: msgObj });
@@ -3792,13 +3848,28 @@ router.post('/messages/:messageId/react', authenticateToken, async (req, res) =>
 // Send Event (P2P)
 router.post('/event/send', authenticateToken, async (req, res) => {
     const userId = req.user.id;
-    const { toUserId, eventData } = req.body;
+    const { toUserId, eventData, scheduledAt, scheduled_at } = req.body;
 
     if (!toUserId || !eventData || !eventData.name) {
         return res.status(400).json({ error: 'Missing toUserId or eventData' });
     }
 
     try {
+        const scheduled = await scheduleMessage({
+            senderId: userId,
+            targetType: 'user',
+            targetId: toUserId,
+            scheduledAt: scheduledAt || scheduled_at,
+            payload: {
+                content: eventData.name,
+                type: 'event',
+                event: eventData
+            }
+        });
+        if (scheduled) {
+            return res.json({ status: 'scheduled', scheduled });
+        }
+
         const msg = await Message.create({
             user_id: userId,
             receiver_id: toUserId,
@@ -3817,6 +3888,12 @@ router.post('/event/send', authenticateToken, async (req, res) => {
         if (req.io) {
             req.io.to(String(toUserId)).emit('receive_message', msgObj);
         }
+        notifyEventCreated({
+            senderId: userId,
+            targetType: 'user',
+            targetId: toUserId,
+            payload: { content: eventData.name, type: 'event', event: eventData }
+        }).catch((emailErr) => console.error('[EVENT EMAIL P2P]', emailErr.message || emailErr));
 
         res.json({ status: 'sent', message: msgObj });
     } catch (err) {
@@ -3905,6 +3982,14 @@ router.post('/event/:messageId/edit', authenticateToken, async (req, res) => {
             });
         }
 
+        notifyEventChanged({
+            senderId: userId,
+            targetType: 'user',
+            targetId: msg.receiver_id,
+            event: msgObj.event,
+            action: 'rescheduled'
+        }).catch((emailErr) => console.error('[EVENT EMAIL EDIT P2P]', emailErr.message || emailErr));
+
         res.json({ status: 'success', event: msgObj.event });
     } catch (err) {
         console.error('[EVENT EDIT P2P] Error:', err);
@@ -3956,6 +4041,14 @@ router.post('/event/:messageId/cancel', authenticateToken, async (req, res) => {
                 if (pId && pId !== 'null') req.io.to(pId).emit('receive_message', sysObj);
             });
         }
+
+        notifyEventChanged({
+            senderId: userId,
+            targetType: 'user',
+            targetId: otherId,
+            event: msgObj.event,
+            action: 'cancelled'
+        }).catch((emailErr) => console.error('[EVENT EMAIL CANCEL P2P]', emailErr.message || emailErr));
 
         res.json({ status: 'success', event: msgObj.event, system: sysObj });
     } catch (err) {

@@ -21,6 +21,7 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const { detectUnsafeText } = require('../utils/moderation');
 const { calculateMessageHash } = require('../utils/messageHash');
 const { countOfficeDocumentItems } = require('../utils/documentCount');
+const { scheduleMessage, notifyEventCreated, notifyEventChanged } = require('../utils/scheduledMessaging');
 
 const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole']; // Precise bad words
 
@@ -450,7 +451,7 @@ router.get('/:groupId/messages', authenticateToken, async (req, res) => {
 // POST /api/groups/poll/send - Send a group poll message
 router.post('/poll/send', authenticateToken, async (req, res) => {
     try {
-        const { groupId, question, options, allowMultipleAnswers } = req.body;
+        const { groupId, question, options, allowMultipleAnswers, scheduledAt, scheduled_at } = req.body;
         const senderId = req.user.id;
 
         if (!groupId) return res.status(400).json({ error: 'Group ID required' });
@@ -474,6 +475,25 @@ router.post('/poll/send', authenticateToken, async (req, res) => {
         }
 
         const pollOptions = options.map(opt => ({ text: opt, voters: [] }));
+
+        const scheduled = await scheduleMessage({
+            senderId,
+            targetType: 'group',
+            targetId: groupId,
+            scheduledAt: scheduledAt || scheduled_at,
+            payload: {
+                content: question,
+                type: 'poll',
+                poll: {
+                    question,
+                    options: pollOptions,
+                    allowMultipleAnswers: allowMultipleAnswers !== false
+                }
+            }
+        });
+        if (scheduled) {
+            return res.json({ status: 'scheduled', scheduled });
+        }
 
         const msg = await GroupMessage.create({
             group_id: groupId,
@@ -569,7 +589,7 @@ router.post('/poll/:messageId/vote', authenticateToken, async (req, res) => {
 // POST /api/groups/event/send - Send a group event message
 router.post('/event/send', authenticateToken, async (req, res) => {
     try {
-        const { groupId, eventData } = req.body;
+        const { groupId, eventData, scheduledAt, scheduled_at } = req.body;
         const senderId = req.user.id;
 
         if (!groupId) return res.status(400).json({ error: 'Group ID required' });
@@ -584,6 +604,21 @@ router.post('/event/send', authenticateToken, async (req, res) => {
 
         if (!isMem && !isOwner && !isAdmin) {
             return res.status(403).json({ error: 'Not a group member' });
+        }
+
+        const scheduled = await scheduleMessage({
+            senderId,
+            targetType: 'group',
+            targetId: groupId,
+            scheduledAt: scheduledAt || scheduled_at,
+            payload: {
+                content: eventData.name,
+                type: 'event',
+                event: eventData
+            }
+        });
+        if (scheduled) {
+            return res.json({ status: 'scheduled', scheduled });
         }
 
         const msg = await GroupMessage.create({
@@ -609,6 +644,12 @@ router.post('/event/send', authenticateToken, async (req, res) => {
                 });
             });
         }
+        notifyEventCreated({
+            senderId,
+            targetType: 'group',
+            targetId: groupId,
+            payload: { content: eventData.name, type: 'event', event: eventData }
+        }).catch((emailErr) => console.error('[EVENT EMAIL GROUP]', emailErr.message || emailErr));
 
         res.json({ status: 'sent', message: msgObj });
     } catch (err) {
@@ -757,6 +798,14 @@ router.post('/event/:messageId/edit', authenticateToken, async (req, res) => {
             req.io.to('admins').emit('event_updated', { messageId: msg._id, event: msgObj.event, isGroup: true, groupId: String(msg.group_id) });
         }
 
+        notifyEventChanged({
+            senderId: userId,
+            targetType: 'group',
+            targetId: msg.group_id,
+            event: msgObj.event,
+            action: 'rescheduled'
+        }).catch((emailErr) => console.error('[EVENT EMAIL EDIT GROUP]', emailErr.message || emailErr));
+
         res.json({ status: 'success', event: msgObj.event });
     } catch (err) {
         console.error('[EVENT EDIT GROUP] Error:', err);
@@ -816,6 +865,14 @@ router.post('/event/:messageId/cancel', authenticateToken, async (req, res) => {
                 });
             }
         }
+
+        notifyEventChanged({
+            senderId: userId,
+            targetType: 'group',
+            targetId: msg.group_id,
+            event: msgObj.event,
+            action: 'cancelled'
+        }).catch((emailErr) => console.error('[EVENT EMAIL CANCEL GROUP]', emailErr.message || emailErr));
 
         res.json({ status: 'success', event: msgObj.event, system: sysObj });
     } catch (err) {
@@ -1007,6 +1064,32 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             try { pollData = JSON.parse(pollData); } catch (e) { pollData = null; }
         }
 
+        const scheduled = await scheduleMessage({
+            senderId,
+            targetType: 'group',
+            targetId: groupId,
+            scheduledAt: req.body.scheduled_at || req.body.scheduledAt,
+            payload: {
+                content: content || '',
+                email_content: req.body.email_content || content || '',
+                type: type || 'text',
+                file_path: file_path || null,
+                fileName: fileName || null,
+                fileSize: fileSize || 0,
+                pageCount: req.body.pageCount || 0,
+                thumbnail_path: req.body.thumbnail_path || null,
+                duration: Number(req.body.duration || 0),
+                is_view_once: is_view_once === 'true' || is_view_once === true,
+                poll: pollData || undefined,
+                event: eventData || undefined,
+                ciphertext: req.body.ciphertext,
+                sender_key_id: req.body.sender_key_id
+            }
+        });
+        if (scheduled) {
+            return res.json({ status: 'scheduled', scheduled });
+        }
+
         // --- IMMUTABILITY HASH CHAINING ---
         const lastMsgInGroup = await GroupMessage.findOne({ group_id: groupId }).sort({ created_at: -1 });
         const previousHash = lastMsgInGroup ? lastMsgInGroup.message_hash : 'GENESIS_BLOCK';
@@ -1064,6 +1147,14 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
                     message: decryptedPopulated.toObject()
                 });
             });
+        }
+        if ((type || 'text') === 'event' && eventData) {
+            notifyEventCreated({
+                senderId,
+                targetType: 'group',
+                targetId: groupId,
+                payload: { content: eventData.name || content || '', type: 'event', event: eventData }
+            }).catch((emailErr) => console.error('[EVENT EMAIL GROUP]', emailErr.message || emailErr));
         }
 
         res.json({ status: 'sent', message: decryptedPopulated.toObject() });
@@ -1390,10 +1481,9 @@ router.patch('/:groupId/admin', authenticateToken, async (req, res) => {
         const group = await Group.findById(groupId);
         if (!group) return res.status(404).json({ error: 'Group not found' });
         
-        // Verify current user is a group admin
-        const isAdmin = String(userId) === String(group.admin) || (group.admins || []).some(admin => String(admin) === String(userId));
-        if (!isAdmin) {
-            return res.status(403).json({ error: 'Only admins can modify group admins' });
+        const isMainAdmin = String(userId) === String(group.admin);
+        if (!isMainAdmin) {
+            return res.status(403).json({ error: 'Only the current main group admin can modify group admins' });
         }
 
         // Verify TARGET is a member
@@ -1444,10 +1534,10 @@ router.patch('/:groupId/members', authenticateToken, async (req, res) => {
         const group = await Group.findById(groupId);
         if (!group) return res.status(404).json({ error: 'Group not found' });
         
-        // Check if current user is an admin
-        const isAdmin = String(userId) === String(group.admin) || (group.admins || []).some(admin => String(admin) === String(userId));
-        if (!isAdmin) {
-            return res.status(403).json({ error: 'Only admins can add members' });
+        const canAddMembers = String(userId) === String(group.admin)
+            || (group.admins || []).some(admin => String(admin) === String(userId));
+        if (!canAddMembers) {
+            return res.status(403).json({ error: 'Only group admins can add members' });
         }
 
         const newMemberIds = (memberIds || []).filter(id => !group.members.some(m => String(m) === String(id)));
@@ -1568,10 +1658,9 @@ const removeGroupMember = async (req, res) => {
         const group = await Group.findById(groupId);
         if (!group) return res.status(404).json({ error: 'Group not found' });
 
-        const isRequesterAdmin = String(group.admin) === String(requesterId)
-            || (group.admins || []).some(admin => String(admin) === String(requesterId));
-        if (!isRequesterAdmin) {
-            return res.status(403).json({ error: 'Only group admins can remove members' });
+        const isRequesterMainAdmin = String(group.admin) === String(requesterId);
+        if (!isRequesterMainAdmin) {
+            return res.status(403).json({ error: 'Only the current main group admin can remove members' });
         }
 
         if (String(memberId) === String(requesterId)) {
@@ -1829,6 +1918,16 @@ router.post('/:groupId/exit', authenticateToken, async (req, res) => {
             .map(member => String(member))
             .filter(memberId => memberId !== String(userId));
 
+        if (remainingMemberIds.length === 0) {
+            const Community = require('../models/Community');
+
+            await GroupMessage.deleteMany({ group_id: group._id });
+            await Group.deleteOne({ _id: group._id });
+            await Community.updateMany({ groups: group._id }, { $pull: { groups: group._id } });
+
+            return res.json({ status: 'success', removed: true, groupId: String(group._id) });
+        }
+
         if (String(group.admin) === String(userId)) {
             const survivingAdmins = (group.admins || [])
                 .map(admin => String(admin))
@@ -1847,18 +1946,9 @@ router.post('/:groupId/exit', authenticateToken, async (req, res) => {
                 group.admin = survivingAdmins[0];
                 group.admins = survivingAdmins.slice(1);
             } else {
-                return res.status(400).json({ error: 'Group admin must assign a new admin before exiting' });
+                group.admin = remainingMemberIds[Math.floor(Math.random() * remainingMemberIds.length)];
+                group.admins = [];
             }
-        }
-
-        if (remainingMemberIds.length === 0) {
-            const Community = require('../models/Community');
-
-            await GroupMessage.deleteMany({ group_id: group._id });
-            await Group.deleteOne({ _id: group._id });
-            await Community.updateMany({ groups: group._id }, { $pull: { groups: group._id } });
-
-            return res.json({ status: 'success', removed: true, groupId: String(group._id) });
         }
 
         handleMembershipExit(group, userId);

@@ -378,6 +378,8 @@ const getLocalIp = require('./utils/getLocalIp');
 const PORT = process.env.PORT || 3000;
 const bootstrap = async () => {
     await connectDB();
+    const { startScheduledMessaging } = require('./utils/scheduledMessaging');
+    startScheduledMessaging(io);
 
     try {
         // Reset anyone who was stuck "Online" due to a server crash/restart
