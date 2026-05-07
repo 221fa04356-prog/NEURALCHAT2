@@ -535,7 +535,7 @@ router.post('/poll/:messageId/vote', authenticateToken, async (req, res) => {
         const userId = req.user.id;
         const userObjId = new mongoose.Types.ObjectId(userId);
 
-        const msg = await GroupMessage.findById(messageId);
+        const msg = await GroupMessage.findById(messageId) || await GroupMessage.findOne({ scheduled_message_id: messageId });
         if (!msg || msg.type !== 'poll') return res.status(404).json({ error: 'Poll not found' });
 
         const group = await Group.findById(msg.group_id);
@@ -670,7 +670,7 @@ router.post('/event/:messageId/respond', authenticateToken, async (req, res) => 
             return res.status(400).json({ error: 'Invalid status' });
         }
 
-        const msg = await GroupMessage.findById(messageId);
+        const msg = await GroupMessage.findById(messageId) || await GroupMessage.findOne({ scheduled_message_id: messageId });
         if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
         const event = msg.event || {};
         const startDateValue = event.startDate ? String(event.startDate).split('T')[0] : '';
