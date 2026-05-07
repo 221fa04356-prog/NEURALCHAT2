@@ -20,6 +20,7 @@ const Groq = require('groq-sdk');
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const { detectUnsafeText } = require('../utils/moderation');
 const { calculateMessageHash } = require('../utils/messageHash');
+const { countOfficeDocumentItems } = require('../utils/documentCount');
 
 const badWords = ['damn', 'idiot', 'stupid', 'hate', 'kill', 'abuse', 'fuck', 'shit', 'bastard', 'asshole']; // Precise bad words
 
@@ -874,6 +875,8 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             file_path = '/uploads/' + file.filename;
             fileName = file.originalname;
             fileSize = file.size;
+            req.body.pageCount = Number(req.body.pageCount || 0);
+            const uploadedFilePath = path.join(__dirname, '../uploads', file.filename);
 
             if (file.mimetype.startsWith('video/')) {
                 type = 'video';
@@ -893,7 +896,7 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             // Permanent durability: persist every uploaded attachment in Mongo GridFS.
             if (['audio', 'video', 'image', 'file'].includes(type)) {
                 try {
-                    const absPath = path.join(__dirname, '../uploads', file.filename);
+                    const absPath = uploadedFilePath;
                     const { fileId } = await uploadLocalFileToGridFS(absPath, file.originalname || file.filename, {
                         senderId,
                         groupId,
@@ -911,7 +914,7 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             // Extract page count for PDF
             if (file.mimetype === 'application/pdf') {
                 try {
-                    const dataBuffer = fs.readFileSync(path.join(__dirname, '../uploads', file.filename));
+                    const dataBuffer = fs.readFileSync(uploadedFilePath);
                     const pdfParse = require('pdf-parse');
                     if (typeof pdfParse === 'function') {
                         const data = await pdfParse(dataBuffer);
@@ -920,6 +923,9 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
                 } catch (e) {
                     console.error("Group PDF Page Count Failed", e);
                 }
+            } else if (type === 'file') {
+                const officeCount = countOfficeDocumentItems(uploadedFilePath, fileName);
+                if (officeCount > 0) req.body.pageCount = officeCount;
             }
         } else if (req.body.file_path) {
             // Forwarded file
