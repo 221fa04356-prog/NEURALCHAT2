@@ -414,6 +414,7 @@ router.get('/:groupId/messages', authenticateToken, async (req, res) => {
 
         const messagesDesc = await GroupMessage.find(baseQuery)
             .populate('sender_id', 'name _id __enc_name')
+            .populate('reply_to', 'content type file_path fileName fileSize pageCount duration sender_id user_id is_view_once poll event')
             .populate('read_by', 'name image _id privacySettings')
             .populate('read_details.user_id', 'name image _id privacySettings')
             .sort({ created_at: -1 })
@@ -1135,10 +1136,13 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
         });
 
         const populated = await GroupMessage.findById(msg._id)
-            .populate('sender_id', 'name _id __enc_name');
+            .populate('sender_id', 'name _id __enc_name')
+            .populate('reply_to', 'content type file_path fileName fileSize pageCount duration sender_id user_id is_view_once poll event');
 
         // Re-fetch to guarantee decryption before sending to socket/response
-        const decryptedPopulated = await GroupMessage.findById(msg._id).populate('sender_id', 'name _id __enc_name');
+        const decryptedPopulated = await GroupMessage.findById(msg._id)
+            .populate('sender_id', 'name _id __enc_name')
+            .populate('reply_to', 'content type file_path fileName fileSize pageCount duration sender_id user_id is_view_once poll event');
 
         // Emit to all group members
         if (req.io) {
@@ -1183,7 +1187,39 @@ router.patch('/:groupId/name', authenticateToken, async (req, res) => {
         // Emit update to all members
         if (req.io) {
             group.members.forEach(memberId => {
-                req.io.to(memberId.toString()).emit('group_updated', { groupId, name: group.name });
+                req.io.to(memberId.toString()).emit('group_updated', { groupId, name: group.name, description: group.description });
+            });
+        }
+
+        res.json({ status: 'updated', group });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PATCH /api/groups/:groupId/description - Update group description
+router.patch('/:groupId/description', authenticateToken, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const { description } = req.body;
+        const userId = req.user.id;
+
+        const group = await Group.findById(groupId);
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+        if (!(group.members || []).some(m => String(m) === String(userId))) {
+            return res.status(403).json({ error: 'Not a group member' });
+        }
+
+        group.description = description || '';
+        await group.save();
+
+        if (req.io) {
+            group.members.forEach(memberId => {
+                req.io.to(memberId.toString()).emit('group_updated', {
+                    groupId,
+                    name: group.name,
+                    description: group.description
+                });
             });
         }
 

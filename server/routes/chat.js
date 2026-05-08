@@ -747,7 +747,7 @@ router.get('/history/:userId', async (req, res) => {
             receiver_id: null // Only AI messages
         })
             .sort({ created_at: 1 })
-            .populate('reply_to', 'content type file_path user_id sender_id');
+            .populate('reply_to', 'content type file_path fileName fileSize pageCount duration user_id sender_id is_view_once poll event');
         res.json(messages);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -965,17 +965,28 @@ router.get('/page-preview', async (req, res) => {
         const finalUrl = upstream.request?.res?.responseUrl || target.toString();
         const bodyBuffer = Buffer.from(upstream.data || '');
         const proxyOrigin = `${req.protocol}://${req.get('host')}`;
-        const proxyPrefix = `${proxyOrigin}/api/chat/page-preview?url=`;
+        const requestedOrigin = (() => {
+            try {
+                const origin = String(req.query.origin || '').trim();
+                if (!origin) return '';
+                const parsed = new URL(origin);
+                return ['http:', 'https:'].includes(parsed.protocol) ? parsed.origin : '';
+            } catch (_) {
+                return '';
+            }
+        })();
+        const browserProxyOrigin = requestedOrigin || proxyOrigin;
+        const proxyPrefix = `${browserProxyOrigin}/api/chat/page-preview?url=`;
         const toPreviewUrl = (value) => {
             const href = String(value || '').trim();
-            if (href.startsWith('/api/chat/page-preview?url=')) return `${proxyOrigin}${href}`;
+            if (href.startsWith('/api/chat/page-preview?url=')) return `${browserProxyOrigin}${href}`;
             if (href.startsWith(proxyPrefix)) return href;
             if (!href || href.startsWith('#') || /^(javascript|mailto|tel|data|blob):/i.test(href)) return href;
             try {
                 const resolved = new URL(href, finalUrl).toString();
                 const resolvedUrl = new URL(resolved);
                 if (!['http:', 'https:'].includes(resolvedUrl.protocol) || isPrivateOrLocalHost(resolvedUrl.hostname)) return href;
-                return `${proxyPrefix}${encodeURIComponent(resolved)}`;
+                return `${proxyPrefix}${encodeURIComponent(resolved)}${requestedOrigin ? `&origin=${encodeURIComponent(requestedOrigin)}` : ''}`;
             } catch (_) {
                 return href;
             }
@@ -996,6 +1007,12 @@ router.get('/page-preview', async (req, res) => {
 
         if (!contentType.includes('text/html') && !contentType.includes('application/xhtml+xml')) {
             res.setHeader('Content-Type', contentType || 'application/octet-stream');
+            if (upstream.headers['content-disposition']) {
+                res.setHeader('Content-Disposition', upstream.headers['content-disposition']);
+            }
+            if (upstream.headers['content-length']) {
+                res.setHeader('Content-Length', upstream.headers['content-length']);
+            }
             res.setHeader('Cache-Control', 'public, max-age=300');
             res.removeHeader('X-Frame-Options');
             res.removeHeader('Content-Security-Policy');
@@ -1038,6 +1055,8 @@ router.get('/page-preview', async (req, res) => {
 (function () {
     var proxyPrefix = ${JSON.stringify(proxyPrefix)};
     var relativeProxyPrefix = '/api/chat/page-preview?url=';
+    var browserProxyOrigin = ${JSON.stringify(browserProxyOrigin)};
+    var originParam = ${JSON.stringify(requestedOrigin ? `&origin=${encodeURIComponent(requestedOrigin)}` : '')};
     var currentTargetUrl = ${JSON.stringify(finalUrl)};
     function notifyParent(url) {
         try {
@@ -1059,8 +1078,8 @@ router.get('/page-preview', async (req, res) => {
     }
     function toProxyUrl(href) {
         if (href.startsWith(proxyPrefix)) return href;
-        if (href.startsWith(relativeProxyPrefix)) return window.location.origin + href;
-        return proxyPrefix + encodeURIComponent(new URL(href, document.baseURI).toString());
+        if (href.startsWith(relativeProxyPrefix)) return browserProxyOrigin + href + (href.indexOf('&origin=') === -1 ? originParam : '');
+        return proxyPrefix + encodeURIComponent(new URL(href, document.baseURI).toString()) + originParam;
     }
     document.addEventListener('click', function (event) {
         var anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null;
@@ -1088,6 +1107,8 @@ router.get('/page-preview', async (req, res) => {
 </script>`;
         let html = bodyBuffer.toString('utf8')
             .replace(/<meta[^>]+http-equiv=["']content-security-policy["'][^>]*>/ig, '')
+            .replace(/<script\b(?![^>]*\btype=(["'])application\/ld\+json\1)[^>]*>[\s\S]*?<\/script>/ig, '')
+            .replace(/<script\b(?![^>]*\btype=(["'])application\/ld\+json\1)[^>]*\/>/ig, '')
             .replace(/\s+integrity=(["']).*?\1/ig, '')
             .replace(/\s+crossorigin=(["']).*?\1/ig, '');
         html = rewritePreviewNavigation(html);
@@ -2040,7 +2061,7 @@ router.get('/p2p/:userId/:otherUserId', authenticateToken, async (req, res) => {
         const messagesDesc = await Message.find(baseQuery)
             .sort({ created_at: -1 })
             .limit(pageLimit + 1)
-            .populate('reply_to', 'content type file_path user_id sender_id ciphertext session_header');
+            .populate('reply_to', 'content type file_path fileName fileSize pageCount duration user_id sender_id ciphertext session_header is_view_once poll event');
 
         const hasMore = messagesDesc.length > pageLimit;
         const pageMessages = hasMore ? messagesDesc.slice(0, pageLimit) : messagesDesc;
@@ -2632,7 +2653,8 @@ router.post('/send', authenticateToken, (req, res, next) => {
                 });
             }
 
-            const decryptedMsg = await Message.findById(msg._id);
+            const decryptedMsg = await Message.findById(msg._id)
+                .populate('reply_to', 'content type file_path fileName fileSize pageCount duration user_id sender_id ciphertext session_header is_view_once poll event');
             const msgObj = decryptedMsg.toObject();
 
             // Notify Admins
