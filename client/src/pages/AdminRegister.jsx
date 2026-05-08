@@ -93,8 +93,8 @@ export default function AdminRegister() {
         }
 
         try {
-            await axios.post('/api/auth/admin/register', formData);
-            setSnackbar({ open: true, message: 'Admin Account Created! Redirecting...', type: 'success' });
+            const res = await axios.post('/api/auth/admin/register', formData);
+            setSnackbar({ open: true, message: res.data?.message || 'Your Request has been sent to the Main Admin for approval', type: 'success' });
             setTimeout(() => navigate('/'), 2000);
         } catch (err) {
             setSnackbar({

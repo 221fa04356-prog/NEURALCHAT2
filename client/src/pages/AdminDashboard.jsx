@@ -9,7 +9,7 @@ import {
     Eye, EyeOff, Menu, AlertTriangle, ArrowLeft, Smile,
     User as UserIcon, Search, Bell, Settings, LayoutDashboard,
     TrendingUp, Calendar, ChevronRight, X, Layers, Check, RefreshCw, Forward, ChevronDown, XCircle,
-    Mic, Pause, Play, List, History, ShieldCheck, MapPin, Video, Phone, Ban, Clock
+    Mic, Pause, Play, List, History, ShieldCheck, MapPin, Video, Phone, Ban, Clock, UserPlus
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import {
@@ -155,6 +155,15 @@ const METRIC_META = {
         color: '#2e7bff',
         gradient: ADMIN_PILL_GRADIENT,
         onClickTab: 'pending'
+    },
+    adminRequests: {
+        label: 'New Admin Requests',
+        shortLabel: 'Admin Requests',
+        subtext: 'Admin transfer requests',
+        icon: UserPlus,
+        color: '#38bdf8',
+        gradient: ADMIN_PILL_GRADIENT,
+        onClickTab: 'admin-requests'
     },
     activeResets: {
         label: 'Reset Requests',
@@ -314,6 +323,7 @@ const getActionButtonStyle = (variant = 'primary') => {
         padding: '7px 11px',
         width: '104px',
         minWidth: '104px',
+        maxWidth: '100%',
         borderRadius: '0.8rem',
         cursor: 'pointer',
         fontSize: '0.9rem',
@@ -326,6 +336,7 @@ const getActionButtonStyle = (variant = 'primary') => {
         justifyContent: 'center',
         gap: '6px',
         whiteSpace: 'nowrap',
+        lineHeight: 1.15,
         outline: 'none',
         appearance: 'none'
     };
@@ -367,6 +378,7 @@ export default function AdminDashboard() {
     const [selectedReactionMsg, setSelectedReactionMsg] = useState(null); // For message-specific audit card
     const [selectedEventMsg, setSelectedEventMsg] = useState(null); // For event-specific audit log
     const [loading, setLoading] = useState(true);
+    const [accessDenied, setAccessDenied] = useState('');
 
     const fetchReactionLogs = async () => {
         try {
@@ -587,6 +599,10 @@ export default function AdminDashboard() {
         [...adminNotifications].sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
     ), [adminNotifications]);
 
+    const adminRequests = useMemo(() => (
+        users.filter(user => user.role === 'admin' && String(user.status || '').toLowerCase() === 'pending')
+    ), [users]);
+
     const handleFloatingScroll = () => {
         if (isDraggingScrollControl) return;
         const root = mainScrollRef.current;
@@ -782,6 +798,20 @@ export default function AdminDashboard() {
         }
     });
 
+    useEffect(() => {
+        if (!localStorage.getItem('token') || adminUser?.role !== 'admin') {
+            setAccessDenied('You are not an admin. You do not have permission to access');
+            setLoading(false);
+            return;
+        }
+
+        axios.get('/api/admin/me').catch((err) => {
+            const message = err.response?.data?.error || 'You are not an admin. You do not have permission to access';
+            setAccessDenied(message);
+            setLoading(false);
+        });
+    }, [adminUser?.role, adminUser?.id, adminUser?._id]);
+
     // Snackbar & Confirmation
     const [snackbar, setSnackbar] = useState(null);
     const showSnackbar = (message, type = 'info') => {
@@ -799,7 +829,7 @@ export default function AdminDashboard() {
     const closeSnackbar = () => setSnackbar(null);
 
     const [confirmConfig, setConfirmConfig] = useState(null);
-    const triggerConfirm = (title, message, onConfirm) => setConfirmConfig({ title, message, onConfirm });
+    const triggerConfirm = (title, message, onConfirm, options = {}) => setConfirmConfig({ title, message, onConfirm, ...options });
     const closeConfirm = () => setConfirmConfig(null);
 
     const [unethicalModalUser, setUnethicalModalUser] = useState(null);
@@ -867,6 +897,12 @@ export default function AdminDashboard() {
         if (alert.type === 'registration') {
             setActiveTab('pending');
             setHighlightedRedirectRow({ kind: 'pending', id: String(alert.userId || '') });
+            setShowNotifications(false);
+            return;
+        }
+        if (alert.type === 'admin_request') {
+            setActiveTab('admin-requests');
+            setHighlightedRedirectRow({ kind: 'admin-requests', id: String(alert.userId || '') });
             setShowNotifications(false);
             return;
         }
@@ -984,11 +1020,16 @@ export default function AdminDashboard() {
     }, [highlightedRedirectRow, activeTab, users, resets, resolvedActionDetails]);
 
     useEffect(() => {
+        if (!localStorage.getItem('token') || adminUser?.role !== 'admin') {
+            setAccessDenied('You are not an admin. You do not have permission to access');
+            setLoading(false);
+            return;
+        }
         fetchData();
         fetchStats();
         fetchUnethicalAlerts();
         fetchReactionLogs();
-    }, []);
+    }, [adminUser?.role, adminUser?.id, adminUser?._id]);
 
     const fetchUnethicalAlerts = async () => {
         try {
@@ -1007,7 +1048,7 @@ export default function AdminDashboard() {
     // Socket Setup
     useEffect(() => {
         const token = localStorage.getItem('token');
-        if (!token) return;
+        if (!token || adminUser?.role !== 'admin') return;
 
         const SOCKET_URL = isLanOrLocal ? window.location.origin : (import.meta.env.VITE_API_URL || window.location.origin);
         const socket = io(SOCKET_URL, {
@@ -1020,6 +1061,12 @@ export default function AdminDashboard() {
 
         socket.on('connect', () => {
             console.log('Client: Socket Connected!', socket.id);
+        });
+
+        socket.on('force_logout', () => {
+            localStorage.clear();
+            sessionStorage.clear();
+            setAccessDenied('You are not an admin. You do not have permission to access');
         });
 
         socket.on('connect_error', (err) => {
@@ -1090,6 +1137,36 @@ export default function AdminDashboard() {
             setAdminNotifications(prev => [newNotif, ...prev]);
             fetchData();
             fetchStats();
+        });
+
+        socket.on('new_admin_request', (newAdmin) => {
+            setUsers(prev => {
+                if (prev.find(u => String(u.id || u._id) === String(newAdmin.id))) return prev;
+                return [...prev, newAdmin];
+            });
+            showSnackbar(`New Admin Registration Received: ${newAdmin.name}`, 'info');
+            setAdminNotifications(prev => [{
+                id: `admin-request-${newAdmin.id}-${Date.now()}`,
+                type: 'admin_request',
+                userId: newAdmin.id,
+                name: newAdmin.name,
+                email: newAdmin.email,
+                timestamp: new Date()
+            }, ...prev]);
+            fetchData();
+            fetchStats();
+        });
+
+        socket.on('admin_transfer_approved', ({ newAdminId }) => {
+            const currentId = String(adminUser?.id || adminUser?._id || '');
+            if (currentId && String(newAdminId) !== currentId) {
+                localStorage.clear();
+                sessionStorage.clear();
+                setAccessDenied('You are not an admin. You do not have permission to access');
+            } else {
+                fetchData();
+                fetchStats();
+            }
         });
 
         socket.on('new_reset', (newReset) => {
@@ -1389,7 +1466,7 @@ export default function AdminDashboard() {
         });
 
         return () => socket.disconnect();
-    }, []);
+    }, [adminUser?.role, adminUser?.id, adminUser?._id]);
 
     const fetchData = async () => {
         try {
@@ -1410,6 +1487,9 @@ export default function AdminDashboard() {
             }
         } catch (err) {
             console.error(err);
+            if ([401, 403].includes(err.response?.status)) {
+                setAccessDenied(err.response?.data?.error || 'You are not an admin. You do not have permission to access');
+            }
         } finally {
             setLoading(false);
         }
@@ -1452,6 +1532,41 @@ export default function AdminDashboard() {
             setLoginIds({ ...loginIds, [userId]: '' });
         } catch (err) {
             showSnackbar(err.response?.data?.error || 'Approval failed', 'error');
+        }
+    };
+
+    const handleApproveAdminTransfer = async (requestId) => {
+        try {
+            const res = await axios.post('/api/admin/admin-transfer/approve', { requestId });
+            const requested = users.find(u => String(u.id || u._id) === String(requestId));
+            showSnackbar(
+                res.data?.mailSent === false
+                    ? `Admin transferred to ${requested?.name || 'new admin'}, but one or more emails failed. Check server logs.`
+                    : `Admin accountship transferred to: ${requested?.name || 'new admin'}`,
+                res.data?.mailSent === false ? 'warning' : 'success'
+            );
+            setAdminNotifications(prev => prev.filter(n => !(n.type === 'admin_request' && String(n.userId) === String(requestId))));
+            fetchData();
+            fetchStats();
+        } catch (err) {
+            showSnackbar(err.response?.data?.error || 'Admin transfer failed', 'error');
+        } finally {
+            closeConfirm();
+        }
+    };
+
+    const handleRejectAdminTransfer = async (requestId) => {
+        const requested = users.find(u => String(u.id || u._id) === String(requestId));
+        try {
+            await axios.delete(`/api/admin/user/${requestId}`);
+            showSnackbar(`Admin request rejected for: ${requested?.name || 'new admin'}`, 'info');
+            setAdminNotifications(prev => prev.filter(n => !(n.type === 'admin_request' && String(n.userId) === String(requestId))));
+            fetchData();
+            fetchStats();
+        } catch (err) {
+            showSnackbar(err.response?.data?.error || 'Admin request rejection failed', 'error');
+        } finally {
+            closeConfirm();
         }
     };
 
@@ -2286,6 +2401,8 @@ export default function AdminDashboard() {
                                         )
                                     ) : alert.type === 'registration' ? (
                                         <UserCheck size={18} color="#2e7bff" />
+                                    ) : alert.type === 'admin_request' ? (
+                                        <UserPlus size={18} color="#38bdf8" />
                                     ) : alert.type === 'reset' ? (
                                         <Key size={18} color="#4e59ff" />
                                     ) : (
@@ -2299,6 +2416,7 @@ export default function AdminDashboard() {
                                              alert.type === 'unblock_request' ? 'Unblock Request' : 
                                              alert.type === 'moderation_action' ? `${alert.action === 'unblock' ? 'Unblock' : alert.action === 'block' ? 'Block' : 'Report'} Action` :
                                              alert.type === 'registration' ? 'New Registration' : 
+                                             alert.type === 'admin_request' ? 'New Admin Request' :
                                              alert.type === 'reset' ? 'Password Reset' : 'Message Deleted'}
                                         </span>
                                         <span style={{ fontSize: '0.65rem', color: OFFICIAL_TEXT_MUTED }}>
@@ -2307,6 +2425,7 @@ export default function AdminDashboard() {
                                     </div>
                                     <div style={{ fontSize: '0.75rem', color: OFFICIAL_TEXT_SECONDARY, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
                                         {alert.type === 'registration' ? <UserIcon size={12} /> : 
+                                         alert.type === 'admin_request' ? <UserPlus size={12} /> :
                                          alert.type === 'reset' ? <Key size={12} /> : 
                                          alert.type === 'unblock_request' ? <ShieldCheck size={12} /> : 
                                          alert.type === 'moderation_action' ? (alert.action === 'unblock' ? <ShieldCheck size={12} /> : alert.action === 'block' ? <XCircle size={12} /> : <AlertTriangle size={12} />) :
@@ -2338,6 +2457,8 @@ export default function AdminDashboard() {
                                             alert.message || `${alert.userName || 'Someone'} ${alert.action === 'block' ? 'blocked' : alert.action === 'unblock' ? 'unblocked' : 'reported'} ${alert.targetName || 'someone'}`
                                         ) : alert.type === 'registration' ? (
                                             `New user: ${alert.email || alert.login_id || alert.userId}`
+                                        ) : alert.type === 'admin_request' ? (
+                                            `Admin transfer request: ${alert.email || alert.userId}`
                                         ) : alert.type === 'reset' ? (
                                             `Id: ${alert.login_id || alert.email || alert.name}`
                                         ) : null}
@@ -2984,6 +3105,112 @@ export default function AdminDashboard() {
                                     </div>
                                 </td>
                             </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+        );
+    };
+
+    const renderAdminRequests = () => {
+        const query = (searchQuery || '').toLowerCase().trim();
+        const filtered = adminRequests.filter(request => (
+            !query ||
+            String(request.name || '').toLowerCase().includes(query) ||
+            String(request.email || '').toLowerCase().includes(query) ||
+            String(request.mobile || '').toLowerCase().includes(query)
+        ));
+
+        if (filtered.length === 0) {
+            return (
+                <div data-scroll-section="admin-requests" className="admin-empty-panel" style={{ borderRadius: '1.25rem', padding: '3rem', textAlign: 'center', scrollMarginTop: '110px' }}>
+                    <h3 style={{ margin: 0, color: OFFICIAL_TEXT_PRIMARY }}>No new admin requests</h3>
+                    <p style={{ margin: '0.75rem 0 0', color: OFFICIAL_TEXT_MUTED }}>New admin registration transfer requests will appear here.</p>
+                </div>
+            );
+        }
+
+        return (
+            <div
+                data-scroll-section="admin-requests"
+                className="admin-data-panel table-responsive"
+                    style={{ borderRadius: '1.25rem', overflowX: 'auto', scrollMarginTop: '110px' }}
+            >
+                <table style={{ minWidth: '1180px', width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                        <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(148, 163, 184, 0.12)' }}>
+                            <th style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>Sl.No</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>USER</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>ROLE</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>EMAIL</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>MOBILE</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600', whiteSpace: 'nowrap' }}>DATE & TIME</th>
+                            <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600', minWidth: '250px' }}>MANAGE</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {filtered.map((request, index) => {
+                            const rowId = String(request.id || request._id || '');
+                            const isHighlighted = Boolean(highlightedRedirectRow?.kind === 'admin-requests' && highlightedRedirectRow?.id === rowId);
+                            return (
+                                <tr
+                                    key={rowId}
+                                    data-redirect-row={`admin-requests:${rowId}`}
+                                    className="hover-row"
+                                    style={{
+                                        background: isHighlighted ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
+                                        boxShadow: isHighlighted ? 'inset 0 0 0 1px rgba(56, 189, 248, 0.45), 0 16px 36px rgba(2, 6, 23, 0.18)' : 'none'
+                                    }}
+                                >
+                                    <td style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', color: OFFICIAL_TEXT_MUTED }}>{index + 1}</td>
+                                    <td style={{ padding: '1rem', textAlign: 'center', color: OFFICIAL_TEXT_PRIMARY, fontWeight: 700 }}>{request.name}</td>
+                                    <td style={{ padding: '1rem', textAlign: 'center' }}>
+                                        <span style={{ display: 'inline-flex', padding: '4px 12px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', color: '#73a8ff', fontWeight: 800 }}>
+                                            Admin
+                                        </span>
+                                    </td>
+                                    <td style={{ padding: '1rem', textAlign: 'center', color: OFFICIAL_TEXT_SECONDARY, whiteSpace: 'nowrap' }}>{request.email}</td>
+                                    <td style={{ padding: '1rem', textAlign: 'center', color: OFFICIAL_TEXT_SECONDARY, whiteSpace: 'nowrap' }}>{request.countryCode || '+91'} {request.mobile}</td>
+                                    <td style={{ padding: '1rem', textAlign: 'center', color: OFFICIAL_TEXT_MUTED }}>
+                                        {request.created_at ? (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                <strong style={{ color: OFFICIAL_TEXT_SECONDARY }}>{new Date(request.created_at).toLocaleDateString('en-IN')}</strong>
+                                                <span>{new Date(request.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+                                            </div>
+                                        ) : 'N/A'}
+                                    </td>
+                                    <td style={{ padding: '1rem', textAlign: 'center' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.75rem', minWidth: '230px' }}>
+                                            <button
+                                                onClick={() => triggerConfirm(
+                                                    'Transfer Main Admin?',
+                                                    `Approve ${request.name} as the new Main Admin? Your current admin access will be removed after this transfer.`,
+                                                    () => handleApproveAdminTransfer(rowId),
+                                                    { confirmVariant: 'primary', confirmText: 'Approve' }
+                                                )}
+                                                style={getActionButtonStyle('primary')}
+                                                onMouseOver={(e) => applyActionButtonHover(e.currentTarget, 'primary', true)}
+                                                onMouseOut={(e) => applyActionButtonHover(e.currentTarget, 'primary', false)}
+                                            >
+                                                <Check size={16} /> Approve
+                                            </button>
+                                            <button
+                                                onClick={() => triggerConfirm(
+                                                    'Reject Registration?',
+                                                    `Reject and delete ${request.name}?`,
+                                                    () => handleRejectAdminTransfer(rowId),
+                                                    { confirmVariant: 'danger', confirmText: 'Confirm' }
+                                                )}
+                                                style={getActionButtonStyle('danger')}
+                                                onMouseOver={(e) => applyActionButtonHover(e.currentTarget, 'danger', true)}
+                                                onMouseOut={(e) => applyActionButtonHover(e.currentTarget, 'danger', false)}
+                                            >
+                                                <X size={16} /> Reject
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
                             );
                         })}
                     </tbody>
@@ -3766,6 +3993,24 @@ export default function AdminDashboard() {
     // MAIN LAYOUT
     // --------------------------------------------------------------------------------
 
+    if (accessDenied) {
+        return (
+            <div className="dashboard-layout" style={{ minHeight: '100vh', width: '100vw', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: 'transparent' }}>
+                <div className="admin-empty-panel" style={{ width: '100%', maxWidth: '520px', borderRadius: '1.25rem', padding: '2rem', textAlign: 'center' }}>
+                    <ShieldCheck size={36} color="#73a8ff" style={{ marginBottom: '1rem' }} />
+                    <h2 style={{ margin: '0 0 0.75rem', color: OFFICIAL_TEXT_PRIMARY }}>Access Denied</h2>
+                    <p style={{ margin: 0, color: OFFICIAL_TEXT_SECONDARY, lineHeight: 1.6 }}>{accessDenied}</p>
+                    <button
+                        onClick={() => { localStorage.clear(); sessionStorage.clear(); navigate('/?showLogin=true&role=admin'); }}
+                        style={{ ...getActionButtonStyle('primary'), width: 'auto', minWidth: '168px', padding: '10px 16px', margin: '1.5rem auto 0' }}
+                    >
+                        <ArrowLeft size={16} /> Back to Admin Login
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="dashboard-layout" style={{ display: 'flex', height: '100vh', width: '100vw', background: 'transparent', fontFamily: "'Open Sans', sans-serif", position: 'relative', overflow: 'hidden' }}>
             {/* Mobile Sidebar Overlay */}
@@ -3817,6 +4062,7 @@ export default function AdminDashboard() {
                         { id: 'overview', name: 'Dashboard', icon: LayoutDashboard, color: '#73a8ff' },
                         { id: 'management', name: 'Total Users', icon: Users, count: normalizedStats?.totalUsers, color: '#1a9cff' },
                         { id: 'pending', name: 'Pending Approvals', icon: UserCheck, count: normalizedStats?.pendingApprovals, color: '#2e7bff' },
+                        { id: 'admin-requests', name: 'New Admin Requests', icon: UserPlus, count: normalizedStats?.adminRequests ?? adminRequests.length, color: '#38bdf8' },
                         { id: 'resets', name: 'Reset Requests', icon: Key, count: normalizedStats?.activeResets, color: '#4e59ff' },
                         { id: 'unblock', name: 'Unblock Requests', icon: ShieldCheck, count: normalizedStats?.unblockRequests, color: '#6e72ff' },
                         { id: 'block-actions', name: 'Block Actions', icon: XCircle, count: normalizedStats?.totalBlocks, color: '#73a8ff' },
@@ -4021,7 +4267,7 @@ export default function AdminDashboard() {
                 >
                     <div className="admin-scroll-shell" style={{ maxWidth: '1200px', margin: '0 auto', minWidth: 0, position: 'relative' }}>
 
-                        {(activeTab === 'overview' || activeTab === 'management' || activeTab === 'pending' || activeTab === 'resets' || activeTab === 'unblock' || activeTab === 'block-actions' || activeTab === 'report-actions') && (
+                        {(activeTab === 'overview' || activeTab === 'management' || activeTab === 'pending' || activeTab === 'admin-requests' || activeTab === 'resets' || activeTab === 'unblock' || activeTab === 'block-actions' || activeTab === 'report-actions') && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '2rem' }}>
                                 <div style={{
                                     width: '36px', height: '36px',
@@ -4033,6 +4279,7 @@ export default function AdminDashboard() {
                                     {activeTab === 'overview' && <LayoutDashboard size={20} color="white" />}
                                     {activeTab === 'management' && <Users size={20} color="white" />}
                                     {activeTab === 'pending' && <UserCheck size={20} color="white" />}
+                                    {activeTab === 'admin-requests' && <UserPlus size={20} color="white" />}
                                     {activeTab === 'resets' && <Key size={20} color="white" />}
                                     {activeTab === 'unblock' && <ShieldCheck size={20} color="white" />}
                                     {activeTab === 'block-actions' && <XCircle size={20} color="white" />}
@@ -4042,6 +4289,7 @@ export default function AdminDashboard() {
                                     {activeTab === 'overview' && 'Dashboard'}
                                     {activeTab === 'management' && 'Total Users'}
                                     {activeTab === 'pending' && 'Pending Approvals'}
+                                    {activeTab === 'admin-requests' && 'New Admin Requests'}
                                     {activeTab === 'resets' && 'Reset Requests'}
                                     {activeTab === 'unblock' && 'Unblock Requests'}
                                     {activeTab === 'block-actions' && 'Block Actions'}
@@ -4058,6 +4306,7 @@ export default function AdminDashboard() {
                                 {activeTab === 'overview' && renderOverview()}
                                 {activeTab === 'management' && renderUsersList('management')}
                                 {activeTab === 'pending' && renderUsersList('pending')}
+                                {activeTab === 'admin-requests' && renderAdminRequests()}
                                 {activeTab === 'resets' && renderResets()}
                                 {activeTab === 'unblock' && renderUnblockRequests()}
                                 {activeTab === 'block-actions' && renderActionTable('block')}

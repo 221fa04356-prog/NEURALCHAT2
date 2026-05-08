@@ -15,6 +15,14 @@ const isLanOrLocal =
 // For local/LAN development, use Vite proxy so requests hit local backend.
 // For deployed environments, respect VITE_API_URL.
 axios.defaults.baseURL = isLanOrLocal ? '' : (import.meta.env.VITE_API_URL || '');
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token && !config.headers?.Authorization && !config.headers?.authorization) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 
 const app = <App />;
 
