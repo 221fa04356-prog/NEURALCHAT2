@@ -6,6 +6,7 @@ const User = require('../models/User');
 const Message = require('../models/Message');
 const Group = require('../models/Group');
 const GroupMessage = require('../models/GroupMessage');
+const ScheduledMessage = require('../models/ScheduledMessage');
 const ChatDeletion = require('../models/ChatDeletion');
 const PasswordReset = require('../models/PasswordReset');
 const Community = require('../models/Community');
@@ -844,14 +845,33 @@ router.get('/chat/history-filtered', async (req, res) => {
             }
         }
 
-        // --- Enrich messages with reaction history (Audit Trail) ---
+        // --- Enrich messages with scheduled delivery details and reaction history (Audit Trail) ---
         const messageIds = messages.map(m => m._id);
+        const scheduledIds = messages
+            .map(m => m.scheduled_message_id)
+            .filter(Boolean);
+        const scheduledRows = scheduledIds.length > 0
+            ? await ScheduledMessage.find({ _id: { $in: scheduledIds } })
+                .select('scheduled_at created_at sent_at status target_type sender_id target_id')
+            : [];
+        const scheduledById = new Map(scheduledRows.map(row => [String(row._id), row.toObject()]));
+
         const reactionLogs = await ReactionLog.find({ message_id: { $in: messageIds } })
             .populate('user_id', 'name __enc_name')
             .sort({ timestamp: 1 });
 
         const historyWithAudit = messages.map(m => {
             const mObj = m.toObject ? m.toObject() : m;
+            const scheduledInfo = mObj.scheduled_message_id
+                ? scheduledById.get(String(mObj.scheduled_message_id))
+                : null;
+            if (scheduledInfo) {
+                mObj.scheduled = scheduledInfo;
+                mObj.scheduled_at = scheduledInfo.scheduled_at;
+                mObj.scheduled_requested_at = scheduledInfo.created_at;
+                mObj.scheduled_sent_at = scheduledInfo.sent_at;
+                mObj.is_scheduled_delivery = true;
+            }
             mObj.reaction_history = reactionLogs.filter(log => String(log.message_id) === String(mObj._id));
             return mObj;
         });

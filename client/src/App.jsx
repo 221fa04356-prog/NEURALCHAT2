@@ -89,6 +89,7 @@ function AppContent() {
   const showNeural = ['/chat', '/reset', '/admin-reset', '/admin'].some(path => 
     location.pathname === path || location.pathname.startsWith(path + '/')
   );
+  const enableScreenshotPrivacy = location.pathname === '/chat' || location.pathname.startsWith('/chat/');
 
   return (
     <>
@@ -105,7 +106,7 @@ function AppContent() {
       )}
       
       {showNeural && <NeuralBackground />}
-      <ScreenshotPrivacy />
+      {enableScreenshotPrivacy && <ScreenshotPrivacy />}
       
       <div className="app-main-wrapper">
         <Routes>

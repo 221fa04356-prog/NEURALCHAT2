@@ -9,7 +9,7 @@ import {
     Eye, EyeOff, Menu, AlertTriangle, ArrowLeft, Smile,
     User as UserIcon, Search, Bell, Settings, LayoutDashboard,
     TrendingUp, Calendar, ChevronRight, X, Layers, Check, RefreshCw, Forward, ChevronDown, XCircle,
-    Mic, Pause, Play, List, History, ShieldCheck, MapPin, Video, Phone, Ban
+    Mic, Pause, Play, List, History, ShieldCheck, MapPin, Video, Phone, Ban, Clock
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import {
@@ -422,6 +422,7 @@ export default function AdminDashboard() {
     const [selectedDate, setSelectedDate] = useState(null);
     const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, messageId: null });
     const [viewingContact, setViewingContact] = useState(null);
+    const [openScheduledInfoId, setOpenScheduledInfoId] = useState(null);
 
     // Multi-Select State
     const [selectionMode, setSelectionMode] = useState(false);
@@ -1521,11 +1522,12 @@ export default function AdminDashboard() {
         const handleClick = () => {
             if (contextMenu.visible) setContextMenu({ ...contextMenu, visible: false });
             if (msgDropdown) setMsgDropdown(null);
+            if (openScheduledInfoId) setOpenScheduledInfoId(null);
             if (showNotifications) setShowNotifications(false);
         };
         window.addEventListener('click', handleClick);
         return () => window.removeEventListener('click', handleClick);
-    }, [contextMenu, msgDropdown, showNotifications]);
+    }, [contextMenu, msgDropdown, openScheduledInfoId, showNotifications]);
 
     const handleSelectDate = async (date) => {
         setSelectedDate(date);
@@ -1603,6 +1605,37 @@ export default function AdminDashboard() {
         const mins = Math.floor(seconds / 60);
         const secs = Math.floor(seconds % 60);
         return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    const formatAdminScheduleTime = (value) => {
+        if (!value) return 'not available';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return 'not available';
+        return date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+    };
+
+    const getScheduledActivityLines = (msg, isSentByReviewedUser) => {
+        const reviewedUserName = viewChat?.user?.name || 'User';
+        const contactName = selectedContact?.name || msg.sender_name || 'User';
+        const senderName = isSentByReviewedUser ? reviewedUserName : (msg.sender_name || contactName);
+        const receiverName = isSentByReviewedUser ? contactName : reviewedUserName;
+        const senderScheduledRequestAt = msg.scheduled_requested_at || msg.scheduled_created_at || msg.scheduled?.created_at;
+        const deliveredAt = msg.created_at || msg.scheduled_sent_at || msg.scheduled?.sent_at;
+        const scheduledAt = msg.scheduled_at || msg.scheduled?.scheduled_at;
+
+        if (isSentByReviewedUser) {
+            return [
+                `${senderName} has sent this message at ${formatAdminScheduleTime(senderScheduledRequestAt)}.`,
+                `${senderName} has scheduled to send this message at ${formatAdminScheduleTime(scheduledAt)}.`
+            ];
+        }
+
+        return [
+            `${senderName} has sent a scheduled message to ${receiverName} at ${formatAdminScheduleTime(deliveredAt)}.`,
+            msg.read_at
+                ? `${receiverName} has viewed this message at ${formatAdminScheduleTime(msg.read_at)}.`
+                : `${receiverName} has not viewed this message yet.`
+        ];
     };
 
     const renderContent = (content) => {
@@ -4142,6 +4175,9 @@ export default function AdminDashboard() {
                                                 const isDeleted = msg.is_deleted_by_admin || msg.is_deleted_by_user;
                                                 const msgId = msg._id || msg.id;
                                                 const isSelected = selectedMsgs.includes(msgId);
+                                                const hasScheduledActivity = Boolean(msg.scheduled_message_id || msg.scheduled_at || msg.scheduled?.scheduled_at || msg.is_scheduled_delivery);
+                                                const isScheduledInfoOpen = openScheduledInfoId === msgId;
+                                                const scheduledActivityLines = hasScheduledActivity ? getScheduledActivityLines(msg, isMe) : [];
 
                                                 return (
                                                     <div
@@ -4589,6 +4625,38 @@ export default function AdminDashboard() {
                                                                             </div>
                                                                         )}
                                                                     </div>
+                                                                    {hasScheduledActivity && (
+                                                                        <div
+                                                                            className={`admin-scheduled-activity ${isMe ? 'sent' : 'received'}`}
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                        >
+                                                                            <button
+                                                                                type="button"
+                                                                                className="admin-scheduled-clock"
+                                                                                aria-label="Scheduled message"
+                                                                                data-tooltip="Scheduled message"
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    setOpenScheduledInfoId(isScheduledInfoOpen ? null : msgId);
+                                                                                }}
+                                                                            >
+                                                                                <Clock size={13} />
+                                                                            </button>
+                                                                            {isScheduledInfoOpen && (
+                                                                                <div className={`admin-scheduled-popover ${isMe ? 'align-right' : 'align-left'}`}>
+                                                                                    <div className="admin-scheduled-popover-title">
+                                                                                        <Clock size={14} />
+                                                                                        Scheduled message
+                                                                                    </div>
+                                                                                    <ol className="admin-scheduled-popover-list">
+                                                                                        {scheduledActivityLines.map((line, idx) => (
+                                                                                            <li key={idx}>{line}</li>
+                                                                                        ))}
+                                                                                    </ol>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
                                                                     <div style={{ fontSize: '0.7rem', color: '#8898aa', marginTop: '4px', textAlign: isMe ? 'right' : 'left' }}>
                                                                         {isMe ? 'You' : (selectedContact.name)} • {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                                                     </div>
