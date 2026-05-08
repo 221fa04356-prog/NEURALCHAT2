@@ -425,6 +425,7 @@ const MessageList = memo(({
     isMobile,
     openYouTubeChoice,
     openGenericLinkPreview,
+    openLinkChoice,
     onViewOncePreviewOpenChange
 }) => {
     const isDeletedForCurrentUser = useCallback((msg) => {
@@ -1176,7 +1177,8 @@ const MessageList = memo(({
             if (['pdf'].includes(fileExt)) return '#E53935';
             if (['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'csv', 'ods'].includes(fileExt)) return '#1F9D55';
             if (['ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'].includes(fileExt)) return '#D36A2E';
-            if (['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt', 'txt'].includes(fileExt)) return '#2D6AC8';
+            if (['txt'].includes(fileExt)) return '#64748b';
+            if (['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt'].includes(fileExt)) return '#2D6AC8';
             return '#54656f';
         };
         const docAccent = getDocAccent();
@@ -1394,6 +1396,11 @@ const MessageList = memo(({
                             if (!isForwardingMode) {
                                 e.persist();
                                 if (longPressTimer.current) clearTimeout(longPressTimer.current);
+                                const startTouch = e.touches?.[0];
+                                if (startTouch) {
+                                    e.currentTarget.dataset.longPressX = String(startTouch.clientX);
+                                    e.currentTarget.dataset.longPressY = String(startTouch.clientY);
+                                }
                                 longPressTimer.current = setTimeout(() => {
                                     const touchPoint = e.touches?.[0] || e.changedTouches?.[0];
                                     handleMsgDropdownOpen(
@@ -1409,7 +1416,14 @@ const MessageList = memo(({
                             }
                         }}
                         onTouchEnd={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current) }}
-                        onTouchMove={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current) }}
+                        onTouchMove={(e) => {
+                            const touch = e.touches?.[0];
+                            const startX = Number(e.currentTarget.dataset.longPressX || 0);
+                            const startY = Number(e.currentTarget.dataset.longPressY || 0);
+                            if (!touch || !startX || !startY) return;
+                            const moved = Math.hypot(touch.clientX - startX, touch.clientY - startY);
+                            if (moved > 14 && longPressTimer.current) clearTimeout(longPressTimer.current);
+                        }}
                     >
                         {isGroup && !isMe && (
                             <div className="wa-sender-name" style={{
@@ -1453,7 +1467,13 @@ const MessageList = memo(({
                                     {(() => {
                                         if (msg.reply_to.is_view_once) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ViewOnceBadge size={14} /> <span>View once</span></span>;
                                         if (msg.reply_to.type === 'image') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={14} color="#027EB5" /> <span>Photo</span></span>;
-                                        if (msg.reply_to.type === 'file') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>File</span></span>;
+                                        if (msg.reply_to.type === 'file') {
+                                            const replyFileName = msg.reply_to.fileName || msg.reply_to.file_name || msg.reply_to.name || '';
+                                            const replyContent = sanitizeClipboardPayloadText(msg.reply_to.content || '').trim();
+                                            const replyPathName = decodeURIComponent(String(msg.reply_to.file_path || msg.reply_to.filePath || '').split('?')[0].split('/').pop() || '').trim();
+                                            const replyDisplayName = (replyFileName || (/\.[a-z0-9]{2,8}$/i.test(replyContent) ? replyContent : '') || replyPathName || 'File').replace(/^\d{10,}-/, '');
+                                            return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={14} color="#027EB5" /> <span>{compactFileName(replyDisplayName, 42)}</span></span>;
+                                        }
                                         if (msg.reply_to.type === 'poll') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><List size={14} color="#027EB5" /> <span>{msg.reply_to.poll?.question || 'Poll'}</span></span>;
                                         if (msg.reply_to.type === 'voice' || msg.reply_to.type === 'audio') return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mic size={14} color="#027EB5" /> <span>Voice message</span></span>;
                                         if (msg.reply_to.type === 'contact') {
@@ -1668,11 +1688,8 @@ const MessageList = memo(({
                                                             }}
                                                             onLoadedMetadata={() => captureVideoPoster(msg)}
                                                             onEnded={(event) => {
-                                                                const video = event.currentTarget;
-                                                                video.pause();
-                                                                video.currentTime = 0;
                                                                 setVideoPlayingState(msg, false);
-                                                                setVideoOverlayVisible(msg, false, false);
+                                                                setVideoOverlayVisible(msg, true, false);
                                                             }}
                                                             onClick={(event) => event.stopPropagation()}
                                                             style={{ 
@@ -1936,6 +1953,10 @@ const MessageList = memo(({
                                     const youtubeId = getMessageListYouTubeId(previewUrl);
                                     const isYoutube = !!youtubeId || /(^|\/\/)(www\.)?(youtube\.com|youtu\.be)\//i.test(previewUrl);
                                     const openPreview = () => {
+                                        if (typeof openLinkChoice === 'function') {
+                                            openLinkChoice(previewUrl || lp.url, lp);
+                                            return;
+                                        }
                                         if (isYoutube && typeof openYouTubeChoice === 'function') {
                                             openYouTubeChoice(previewUrl, lp);
                                             return;
