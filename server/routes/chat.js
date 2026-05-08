@@ -963,15 +963,18 @@ router.get('/page-preview', async (req, res) => {
         const contentType = String(upstream.headers['content-type'] || 'text/html');
         const finalUrl = upstream.request?.res?.responseUrl || target.toString();
         const bodyBuffer = Buffer.from(upstream.data || '');
+        const proxyOrigin = `${req.protocol}://${req.get('host')}`;
+        const proxyPrefix = `${proxyOrigin}/api/chat/page-preview?url=`;
         const toPreviewUrl = (value) => {
             const href = String(value || '').trim();
-            if (href.startsWith('/api/chat/page-preview?url=')) return href;
+            if (href.startsWith('/api/chat/page-preview?url=')) return `${proxyOrigin}${href}`;
+            if (href.startsWith(proxyPrefix)) return href;
             if (!href || href.startsWith('#') || /^(javascript|mailto|tel|data|blob):/i.test(href)) return href;
             try {
                 const resolved = new URL(href, finalUrl).toString();
                 const resolvedUrl = new URL(resolved);
                 if (!['http:', 'https:'].includes(resolvedUrl.protocol) || isPrivateOrLocalHost(resolvedUrl.hostname)) return href;
-                return `/api/chat/page-preview?url=${encodeURIComponent(resolved)}`;
+                return `${proxyPrefix}${encodeURIComponent(resolved)}`;
             } catch (_) {
                 return href;
             }
@@ -1032,11 +1035,30 @@ router.get('/page-preview', async (req, res) => {
         const previewNavigationScript = `
 <script>
 (function () {
-    var proxyPrefix = '/api/chat/page-preview?url=';
+    var proxyPrefix = ${JSON.stringify(proxyPrefix)};
+    var relativeProxyPrefix = '/api/chat/page-preview?url=';
+    var currentTargetUrl = ${JSON.stringify(finalUrl)};
+    function notifyParent(url) {
+        try {
+            window.parent && window.parent.postMessage({ type: 'neuchat-page-preview-navigate', url: url || currentTargetUrl }, '*');
+        } catch (error) {}
+    }
     function canProxy(href) {
         return href && !href.startsWith('#') && !/^(javascript|mailto|tel):/i.test(href);
     }
+    function getTargetUrl(href) {
+        if (href.startsWith(proxyPrefix) || href.startsWith(relativeProxyPrefix)) {
+            try {
+                return new URL(href, window.location.origin).searchParams.get('url') || currentTargetUrl;
+            } catch (error) {
+                return currentTargetUrl;
+            }
+        }
+        return new URL(href, document.baseURI).toString();
+    }
     function toProxyUrl(href) {
+        if (href.startsWith(proxyPrefix)) return href;
+        if (href.startsWith(relativeProxyPrefix)) return window.location.origin + href;
         return proxyPrefix + encodeURIComponent(new URL(href, document.baseURI).toString());
     }
     document.addEventListener('click', function (event) {
@@ -1045,6 +1067,8 @@ router.get('/page-preview', async (req, res) => {
         var href = anchor.getAttribute('href');
         if (!canProxy(href)) return;
         event.preventDefault();
+        var nextUrl = getTargetUrl(href);
+        notifyParent(nextUrl);
         window.location.href = toProxyUrl(href);
     }, true);
     document.addEventListener('submit', function (event) {
@@ -1055,8 +1079,10 @@ router.get('/page-preview', async (req, res) => {
         new FormData(form).forEach(function (value, key) {
             target.searchParams.set(key, value);
         });
+        notifyParent(target.toString());
         window.location.href = toProxyUrl(target.toString());
     }, true);
+    notifyParent(currentTargetUrl);
 }());
 </script>`;
         let html = bodyBuffer.toString('utf8')

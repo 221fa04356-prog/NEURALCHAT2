@@ -8208,7 +8208,7 @@ export default function Chat() {
 
     const renderSearchSidebar = () => (
         <div className={`wa-search-sidebar ${isMessageSearchOpen ? 'active' : ''}`}>
-            <div className="wa-header" style={{ height: 60, padding: '5px 10px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', background: '#f0f2f5', borderBottom: '1px solid #d1d7db' }}>
+            <div className="wa-header" style={{ height: 60, padding: '5px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f0f2f5', borderBottom: '1px solid #d1d7db', flexShrink: 0 }}>
                 <button
                     onClick={() => {
                         setIsMessageSearchOpen(false);
@@ -8217,12 +8217,12 @@ export default function Chat() {
                             setIsContactInfoOpen(true);
                         }
                     }}
-                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#0EA5BE', justifySelf: 'start' }}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#0EA5BE', flexShrink: 0 }}
                 >
                     <span style={{ fontSize: 16, fontWeight: 500 }}>{t('lang_confirm.cancel')}</span>
                 </button>
-                <span style={{ fontSize: 16, fontWeight: 500, color: '#111b21', whiteSpace: 'nowrap', justifySelf: 'center' }}>{t('chat_list.search_messages')}</span>
-                <div style={{ justifySelf: 'end' }} />
+                <span style={{ fontSize: 16, fontWeight: 500, color: '#111b21', whiteSpace: 'nowrap', flexShrink: 0, margin: '0 16px' }}>{t('chat_list.search_messages')}</span>
+                <div style={{ width: 50, flexShrink: 0 }} />
             </div>
 
             <div style={{ padding: '20px 15px', background: 'transparent', flex: 1, overflowY: 'auto' }}>
