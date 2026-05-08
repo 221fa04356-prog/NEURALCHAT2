@@ -6570,7 +6570,8 @@ export default function Chat() {
                 return;
             }
 
-            const isActiveChat = currentSelected && String(senderId) === String(currentSelected._id);
+            const currentSelectedId = currentSelected?._id || currentSelected?.id;
+            const isActiveChat = !!(currentSelectedId && String(senderId) === String(currentSelectedId));
 
             // Clear manual unarchive status on new message
             setManualUnarchiveList(prev => prev.filter(id => String(id) !== String(senderId)));
@@ -6652,7 +6653,7 @@ export default function Chat() {
                 processedMessageIdsRef.current.add(String(data._id));
 
                 setUsers(prev => prev.map(u => {
-                    if (String(u._id) === String(senderId)) {
+                    if (String(u._id || u.id) === String(senderId)) {
                         // If chat is active, don't increment unread (it's read immediately)
                         // If chat is NOT active, increment unread
                         const newUnread = isActiveChat ? 0 : (u.unreadCount || 0) + 1;
@@ -6718,7 +6719,7 @@ export default function Chat() {
 
             const markMsg = (m) => {
                 const msgSenderId = String(m.sender_id?._id || m.sender_id || m.user_id?._id || m.user_id || '');
-                if (msgSenderId === myId && !m.is_read && !m.is_scheduled) {
+                if (msgSenderId === myId && !m.is_read) {
                     return { ...m, is_read: true, read_at: data.read_at || new Date() };
                 }
                 return m;

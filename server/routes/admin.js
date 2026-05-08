@@ -17,6 +17,48 @@ const sendBrevoMail = require('../brevoMailer');
 const crypto = require('crypto');
 const getClientBaseUrl = require('../utils/getClientBaseUrl');
 
+const SCHEDULED_PENDING_STATUSES = ['scheduled', 'sending'];
+
+const buildScheduledPreviewMessage = (scheduled, senderName = '') => {
+    const row = scheduled.toObject ? scheduled.toObject() : scheduled;
+    const payload = row.payload || {};
+    const isGroup = row.target_type === 'group';
+    return {
+        _id: `scheduled-${row._id}`,
+        id: `scheduled-${row._id}`,
+        role: 'user',
+        user_id: row.sender_id,
+        sender_id: row.sender_id,
+        receiver_id: isGroup ? null : row.target_id,
+        group_id: isGroup ? row.target_id : null,
+        sender_name: senderName || 'User',
+        content: payload.content || payload.email_content || '',
+        type: payload.type || 'text',
+        file_path: payload.file_path || null,
+        fileName: payload.fileName || null,
+        fileSize: payload.fileSize || 0,
+        pageCount: payload.pageCount || 0,
+        thumbnail_path: payload.thumbnail_path || null,
+        duration: payload.duration || 0,
+        is_view_once: !!payload.is_view_once,
+        reply_to: payload.reply_to || null,
+        poll: payload.poll || undefined,
+        event: payload.event || undefined,
+        ciphertext: payload.ciphertext,
+        session_header: payload.session_header,
+        sender_key_id: payload.sender_key_id,
+        created_at: row.created_at,
+        scheduled_message_id: row._id,
+        scheduled: row,
+        scheduled_at: row.scheduled_at,
+        scheduled_requested_at: row.created_at,
+        scheduled_sent_at: row.sent_at,
+        is_scheduled: true,
+        is_scheduled_preview: true,
+        is_scheduled_delivery: false
+    };
+};
+
 const generateSignature = (password) => {
     // HMAC SHA256 with Global Secret (Pepper)
     return crypto.createHmac('sha256', process.env.JWT_SECRET)
@@ -365,9 +407,18 @@ router.get('/chat/contacts/:userId', async (req, res) => {
         // Find all unique people this user has messaged or received messages from
         const sentTo = await Message.distinct('receiver_id', { user_id: userId, receiver_id: { $ne: null } });
         const receivedFrom = await Message.distinct('user_id', { receiver_id: userId });
+        const scheduledTargets = await ScheduledMessage.distinct('target_id', {
+            sender_id: userId,
+            target_type: 'user',
+            status: { $in: SCHEDULED_PENDING_STATUSES }
+        });
 
         // Merge and unique IDs
-        const contactIds = [...new Set([...sentTo.map(id => id.toString()), ...receivedFrom.map(id => id.toString())])];
+        const contactIds = [...new Set([
+            ...sentTo.map(id => id.toString()),
+            ...receivedFrom.map(id => id.toString()),
+            ...scheduledTargets.map(id => id.toString())
+        ])];
 
         // Fetch user details for these contacts
         const contactsRaw = await User.find({ _id: { $in: contactIds } }).select('name email __enc_name __enc_email');
@@ -445,7 +496,16 @@ router.get('/chat/dates/:userId/:otherUserId', async (req, res) => {
             const isGroup = await Group.exists({ _id: otherUserId });
             if (isGroup) {
                 const groupMessages = await GroupMessage.find({ group_id: otherUserId }).select('created_at').sort({ created_at: -1 });
-                const dates = [...new Set(groupMessages.map(m => m.created_at.toISOString().split('T')[0]))];
+                const scheduledRows = await ScheduledMessage.find({
+                    sender_id: userId,
+                    target_type: 'group',
+                    target_id: otherUserId,
+                    status: { $in: SCHEDULED_PENDING_STATUSES }
+                }).select('created_at');
+                const dates = [...new Set([
+                    ...groupMessages.map(m => m.created_at.toISOString().split('T')[0]),
+                    ...scheduledRows.map(m => m.created_at.toISOString().split('T')[0])
+                ])];
                 return res.json(dates);
             } else {
                 query = {
@@ -455,7 +515,16 @@ router.get('/chat/dates/:userId/:otherUserId', async (req, res) => {
                     ]
                 };
                 const messages = await Message.find(query).select('created_at').sort({ created_at: -1 });
-                const dates = [...new Set(messages.map(m => m.created_at.toISOString().split('T')[0]))];
+                const scheduledRows = await ScheduledMessage.find({
+                    sender_id: userId,
+                    target_type: 'user',
+                    target_id: otherUserId,
+                    status: { $in: SCHEDULED_PENDING_STATUSES }
+                }).select('created_at');
+                const dates = [...new Set([
+                    ...messages.map(m => m.created_at.toISOString().split('T')[0]),
+                    ...scheduledRows.map(m => m.created_at.toISOString().split('T')[0])
+                ])];
                 return res.json(dates);
             }
         }
@@ -876,13 +945,39 @@ router.get('/chat/history-filtered', async (req, res) => {
             return mObj;
         });
 
+        const pendingScheduledQuery = {
+            sender_id: userId,
+            status: { $in: SCHEDULED_PENDING_STATUSES },
+            created_at: { $gte: start, $lte: end }
+        };
+        if (otherUserId !== 'ai') {
+            const isGroup = await Group.exists({ _id: otherUserId });
+            if (isGroup) {
+                pendingScheduledQuery.target_type = 'group';
+                pendingScheduledQuery.target_id = otherUserId;
+            } else {
+                pendingScheduledQuery.target_type = 'user';
+                pendingScheduledQuery.target_id = otherUserId;
+            }
+        }
+
+        const pendingScheduledRows = otherUserId === 'ai'
+            ? []
+            : await ScheduledMessage.find(pendingScheduledQuery)
+                .select('sender_id target_type target_id payload scheduled_at status sent_message_id sent_at error created_at')
+                .sort({ created_at: 1 });
+        const reviewedSender = pendingScheduledRows.length > 0
+            ? await User.findById(userId).select('name __enc_name')
+            : null;
+        const pendingScheduledPreviews = pendingScheduledRows.map(row => buildScheduledPreviewMessage(row, reviewedSender?.name));
+
         // Check if user has deleted this contact
         const deletions = await ChatDeletion.find({
             userId: userId,
             contactId: otherUserId
         }).populate('userId', 'name __enc_name').sort({ deletedAt: 1 });
 
-        const enrichedMessages = [...historyWithAudit];
+        const enrichedMessages = [...historyWithAudit, ...pendingScheduledPreviews];
 
         if (deletions.length > 0) {
             deletions.forEach(del => {
@@ -896,9 +991,8 @@ router.get('/chat/history-filtered', async (req, res) => {
                     is_system_notice: true
                 });
             });
-            // Re-sort by created_at since we added messages
-            enrichedMessages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
         }
+        enrichedMessages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
         res.json(enrichedMessages);
     } catch (err) {

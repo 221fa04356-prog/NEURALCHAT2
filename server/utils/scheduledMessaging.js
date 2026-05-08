@@ -262,7 +262,7 @@ const getGroupRecipients = async (group, senderId) => {
     return User.find({ _id: { $in: memberIds } }).select('name displayName email __enc_name __enc_displayName __enc_email');
 };
 
-const scheduleMessage = async ({ senderId, targetType, targetId, payload, scheduledAt }) => {
+const scheduleMessage = async ({ senderId, targetType, targetId, payload, scheduledAt, io }) => {
     if (!scheduledAt) return null;
     const date = new Date(scheduledAt);
     if (Number.isNaN(date.getTime())) {
@@ -292,6 +292,44 @@ const scheduleMessage = async ({ senderId, targetType, targetId, payload, schedu
         recipients = await getGroupRecipients(group, senderId);
     }
     await notifySenderScheduled({ sender, recipients, payload, scheduledAt: date, targetName });
+    if (io) {
+        io.to('admins').emit('scheduled_message_created', {
+            scheduled: scheduled.toObject ? scheduled.toObject() : scheduled,
+            preview: {
+                _id: `scheduled-${scheduled._id}`,
+                id: `scheduled-${scheduled._id}`,
+                role: 'user',
+                user_id: senderId,
+                sender_id: senderId,
+                receiver_id: targetType === 'user' ? targetId : null,
+                group_id: targetType === 'group' ? targetId : null,
+                sender_name: sender?.name || sender?.displayName || 'User',
+                content: payload.content || payload.email_content || '',
+                type: payload.type || 'text',
+                file_path: payload.file_path || null,
+                fileName: payload.fileName || null,
+                fileSize: payload.fileSize || 0,
+                pageCount: payload.pageCount || 0,
+                thumbnail_path: payload.thumbnail_path || null,
+                duration: payload.duration || 0,
+                is_view_once: !!payload.is_view_once,
+                reply_to: payload.reply_to || null,
+                poll: payload.poll || undefined,
+                event: payload.event || undefined,
+                ciphertext: payload.ciphertext,
+                session_header: payload.session_header,
+                sender_key_id: payload.sender_key_id,
+                created_at: scheduled.created_at,
+                scheduled_message_id: scheduled._id,
+                scheduled_at: scheduled.scheduled_at,
+                scheduled_requested_at: scheduled.created_at,
+                scheduled_sent_at: scheduled.sent_at,
+                is_scheduled: true,
+                is_scheduled_preview: true,
+                is_scheduled_delivery: false
+            }
+        });
+    }
     return scheduled;
 };
 
@@ -329,6 +367,12 @@ const sendP2PNow = async ({ scheduled, io }) => {
         created_at: timestamp
     });
     const msgObj = (await Message.findById(msg._id)).toObject();
+    msgObj.sender_id = senderId;
+    msgObj.scheduled_at = scheduled.scheduled_at;
+    msgObj.scheduled_requested_at = scheduled.created_at;
+    msgObj.scheduled_sent_at = timestamp;
+    msgObj.is_scheduled_delivery = true;
+    msgObj.user_id = senderId;
     if (io) {
         io.to(receiverId).emit('receive_message', msgObj);
         io.to(senderId).emit('scheduled_message_sent', { scheduledId: String(scheduled._id), message: msgObj, isGroup: false });
@@ -376,9 +420,15 @@ const sendGroupNow = async ({ scheduled, io }) => {
         created_at: timestamp
     });
     const msgObj = (await GroupMessage.findById(msg._id).populate('sender_id', 'name _id __enc_name')).toObject();
+    msgObj.scheduled_at = scheduled.scheduled_at;
+    msgObj.scheduled_requested_at = scheduled.created_at;
+    msgObj.scheduled_sent_at = timestamp;
+    msgObj.is_scheduled_delivery = true;
+    msgObj.user_id = senderId;
     if (io) {
         group.members.forEach((memberId) => io.to(String(memberId)).emit('group_message', { groupId, message: msgObj }));
         io.to(senderId).emit('scheduled_message_sent', { scheduledId: String(scheduled._id), message: msgObj, isGroup: true, groupId });
+        io.to('admins').emit('receive_message', msgObj);
     }
     const sender = await User.findById(senderId).select('name displayName email __enc_name __enc_displayName __enc_email');
     const recipients = await getGroupRecipients(group, senderId);
