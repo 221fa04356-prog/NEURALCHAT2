@@ -26,6 +26,7 @@ const userSchema = new mongoose.Schema({
     login_id: { type: String, unique: true, sparse: true }, // sparse allows null/undefined to not clash
     password: { type: String },
     password_signature: { type: String, select: false }, // For uniqueness check (SHA256 + Pepper)
+    pending_admin_password: { type: String, select: false },
     role: { type: String, enum: ['user', 'admin'], default: 'user' },
     status: { type: String, enum: ['pending', 'approved'], default: 'pending' },
     token_version: { type: Number, default: 0 },

@@ -15,9 +15,12 @@ const ChatActionLog = require('../models/ChatActionLog');
 const { sendEmail } = require('../utils/emailService');
 const sendBrevoMail = require('../brevoMailer');
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const getClientBaseUrl = require('../utils/getClientBaseUrl');
+const { renderEmailShell } = require('../utils/emailTemplates');
 
 const SCHEDULED_PENDING_STATUSES = ['scheduled', 'sending'];
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const buildScheduledPreviewMessage = (scheduled, senderName = '') => {
     const row = scheduled.toObject ? scheduled.toObject() : scheduled;
@@ -66,6 +69,82 @@ const generateSignature = (password) => {
         .digest('hex');
 };
 
+const getAdminCredentialKey = () => crypto
+    .createHash('sha256')
+    .update(process.env.JWT_SECRET || process.env.DEFAULT_ENCRYPTION_SECRET || 'neuralchat-admin-pending')
+    .digest();
+
+const decryptPendingAdminPassword = (payload = '') => {
+    const [ivHex, tagHex, encryptedHex] = String(payload).split(':');
+    if (!ivHex || !tagHex || !encryptedHex) return '';
+    const decipher = crypto.createDecipheriv('aes-256-gcm', getAdminCredentialKey(), Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    return Buffer.concat([
+        decipher.update(Buffer.from(encryptedHex, 'hex')),
+        decipher.final()
+    ]).toString('utf8');
+};
+
+const isValidEmailAddress = (email = '') => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim());
+
+const sendTransferMail = async (to, subject, html, label) => {
+    const recipient = String(to || '').trim();
+    if (!recipient) {
+        console.warn(`[ADMIN TRANSFER MAIL] Skipped ${label}: missing recipient email`);
+        return { label, to, ok: false, skipped: true, error: 'Missing recipient email' };
+    }
+    if (!isValidEmailAddress(recipient)) {
+        console.warn(`[ADMIN TRANSFER MAIL] Skipped ${label}: invalid recipient email`);
+        return { label, to: recipient, ok: false, skipped: true, error: 'Invalid recipient email' };
+    }
+
+    try {
+        await sendBrevoMail(recipient, subject, html, true);
+        console.log(`[ADMIN TRANSFER MAIL] Sent ${label} to ${recipient}`);
+        return { label, to: recipient, ok: true };
+    } catch (err) {
+        const error = err?.response?.body?.message || err?.message || 'Email delivery failed';
+        console.error(`[ADMIN TRANSFER MAIL] Failed ${label} to ${recipient}:`, error);
+        return { label, to: recipient, ok: false, error };
+    }
+};
+
+const authenticateAdmin = async (req, res, next) => {
+    const header = req.headers.authorization || '';
+    const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+    if (!token) return res.status(401).json({ error: 'Admin authentication required' });
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const user = await User.findById(decoded.id).select('name email role status token_version __enc_name __enc_email');
+        if (!user) return res.status(401).json({ error: 'Admin authentication required' });
+        if (typeof user.decryptFieldsSync === 'function') {
+            user.decryptFieldsSync();
+        }
+        if (user.role !== 'admin' || user.status !== 'approved') {
+            return res.status(403).json({ error: 'You are not an admin. You do not have permission to access' });
+        }
+        if (decoded.token_version !== undefined && user.token_version !== decoded.token_version) {
+            return res.status(401).json({ error: 'Session expired. Please login again.' });
+        }
+        req.adminUser = user;
+        next();
+    } catch (err) {
+        return res.status(401).json({ error: 'Admin authentication required' });
+    }
+};
+
+router.use(authenticateAdmin);
+
+router.get('/me', async (req, res) => {
+    res.json({
+        id: req.adminUser._id,
+        name: req.adminUser.name,
+        email: req.adminUser.email,
+        role: req.adminUser.role
+    });
+});
+
 const USER_PUBLIC_SELECT = [
     'name',
     'displayName',
@@ -106,6 +185,15 @@ const toDecryptedUserObject = (user) => {
         user.decryptFieldsSync();
     }
     return user.toObject ? user.toObject() : user;
+};
+
+const getDecryptedUserSnapshot = (user) => {
+    const obj = toDecryptedUserObject(user);
+    if (!obj) return null;
+    return {
+        ...obj,
+        id: obj._id?.toString?.() || obj.id
+    };
 };
 
 // Get all users
@@ -173,14 +261,19 @@ router.post('/approve', async (req, res) => {
         if (user && user.email) {
             const subject = 'Account Approved - Login Details';
             const baseUrl = getClientBaseUrl();
-            const html = `
-                <h3>Welcome to NeuralChat</h3>
-                <p>Your account has been approved.</p>
-                <p><strong>Login ID:</strong> ${loginId}</p>
-                <p><strong>Password:</strong> ${password}</p>
-                <p>Reset your password using below link</p>
-                <p><a href="${baseUrl}/reset">Reset Here</a></p>
-            `;
+            const html = renderEmailShell({
+                eyebrow: 'Account Approved',
+                title: 'Welcome to NeuralChat',
+                greeting: `Hi ${user.name || 'User'},`,
+                intro: 'Your account has been approved. Use the login details below to access NeuralChat.',
+                details: [
+                    { label: 'Login ID', value: loginId },
+                    { label: 'Temporary Password', value: password }
+                ],
+                actionUrl: `${baseUrl}/reset`,
+                actionLabel: 'Reset Password',
+                note: 'Please reset your temporary password before using your account regularly.'
+            });
             console.log(`Attempting to send approval email to: ${user.email}`);
             await sendBrevoMail(user.email, subject, html, true).catch(err => {
                 console.error('Failed to send user approval email:', err);
@@ -188,6 +281,100 @@ router.post('/approve', async (req, res) => {
         }
     } catch (e) {
         res.status(500).json({ error: e.message });
+    }
+});
+
+router.post('/admin-transfer/approve', async (req, res) => {
+    const { requestId } = req.body;
+    if (!requestId) return res.status(400).json({ error: 'Missing admin request id' });
+
+    try {
+        const requestedAdmin = await User.findOne({ _id: requestId, role: 'admin', status: 'pending' })
+            .select('name displayName email role status token_version created_at __enc_name __enc_displayName __enc_email +pending_admin_password +password_signature');
+        if (!requestedAdmin) return res.status(404).json({ error: 'Admin request not found' });
+
+        const plainPassword = decryptPendingAdminPassword(requestedAdmin.pending_admin_password || '');
+        const requestedAdminSnapshot = getDecryptedUserSnapshot(requestedAdmin);
+        const requestedAdminName = requestedAdminSnapshot?.displayName || requestedAdminSnapshot?.name || 'new admin';
+        const requestedAdminEmail = String(requestedAdminSnapshot?.email || '').trim();
+
+        const previousAdmins = await User.find({ role: 'admin', status: 'approved', _id: { $ne: requestedAdmin._id } }).select('name displayName email __enc_name __enc_displayName __enc_email');
+        if (
+            req.adminUser?.email &&
+            !previousAdmins.some(admin => String(admin._id) === String(req.adminUser._id))
+        ) {
+            previousAdmins.push(req.adminUser);
+        }
+        const previousAdminSnapshots = previousAdmins
+            .map(getDecryptedUserSnapshot)
+            .filter(admin => admin?._id || admin?.id);
+        const previousAdminIds = previousAdmins.map(admin => admin._id);
+
+        await User.updateMany(
+            { _id: { $in: previousAdminIds } },
+            { $set: { role: 'user' }, $inc: { token_version: 1 } }
+        );
+
+        requestedAdmin.status = 'approved';
+        requestedAdmin.pending_admin_password = undefined;
+        requestedAdmin.token_version = (requestedAdmin.token_version || 0) + 1;
+        requestedAdmin.created_at = new Date();
+        await requestedAdmin.save();
+
+        if (req.io) {
+            req.io.to('admins').emit('admin_transfer_approved', {
+                newAdminId: requestedAdmin._id.toString(),
+                previousAdminIds: previousAdminIds.map(String)
+            });
+            previousAdminIds.forEach(id => req.io.to(String(id)).emit('force_logout'));
+        }
+
+        const subject = 'You have been approved and allotted as the new Admin';
+        const baseUrl = getClientBaseUrl();
+        const html = renderEmailShell({
+            eyebrow: 'Admin Approved',
+            title: 'You Are the New Admin',
+            greeting: `Hi ${requestedAdminName},`,
+            intro: 'Your admin request has been approved. You can now sign in to the admin dashboard with the credentials you provided while registering.',
+            details: [
+                { label: 'Email', value: requestedAdminEmail },
+                ...(plainPassword ? [{ label: 'Password', value: plainPassword }] : []),
+                { label: 'Role', value: 'Admin' }
+            ],
+            actionUrl: `${baseUrl}/?showLogin=true&role=admin`,
+            actionLabel: 'Login to Admin Dashboard',
+            note: 'You now have administrative privileges for this NeuralChat workspace.'
+        });
+        const transferSubject = `Your Admin ownership has been transferred to ${requestedAdminName}`;
+        const transferHtml = (oldAdminName = 'Admin') => renderEmailShell({
+            eyebrow: 'Ownership Transfer',
+            title: 'Admin Ownership Transferred',
+            greeting: `Hi ${oldAdminName},`,
+            intro: [
+                `Your admin ownership has been transferred to ${requestedAdminName}.`,
+                'You can no longer access the admin dashboard or use administrative privileges for this NeuralChat workspace.'
+            ],
+            details: [
+                { label: 'New Admin', value: requestedAdminName },
+                { label: 'Previous Admin', value: oldAdminName },
+                { label: 'Status', value: 'Admin access removed' }
+            ],
+            note: 'If you believe this transfer was not expected, please contact the new admin directly.'
+        });
+        const mailResults = await Promise.all([
+            sendTransferMail(requestedAdminEmail, subject, html, 'new admin approval'),
+            ...previousAdminSnapshots
+                .filter(admin => admin.email)
+                .map(admin => sendTransferMail(admin.email, transferSubject, transferHtml(admin.displayName || admin.name), 'previous admin transfer'))
+        ]);
+
+        res.json({
+            message: 'Admin accountship transferred successfully',
+            mailSent: mailResults.every(result => result.ok),
+            mailResults
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -273,13 +460,18 @@ router.post('/reset-password', async (req, res) => {
             // Use configured CLIENT_URL or auto-detect local IP
             const baseUrl = getClientBaseUrl();
 
-            const html = `
-                <h3>Temporary Password</h3>
-                <p>You have been allocated with Temporary Password by the admin.</p>
-                <p><strong>Temporary Password:</strong> ${newPassword}</p>
-                <p>Reset your password using below link</p>
-                <p><a href="${baseUrl}/reset?token=${signature}&id=${user._id}">Reset Here</a></p>
-            `;
+            const html = renderEmailShell({
+                eyebrow: 'Password Reset',
+                title: 'Temporary Password Allocated',
+                greeting: `Hi ${user.name || 'User'},`,
+                intro: 'The admin has allocated a temporary password for your account.',
+                details: [
+                    { label: 'Temporary Password', value: newPassword }
+                ],
+                actionUrl: `${baseUrl}/reset?token=${signature}&id=${user._id}`,
+                actionLabel: 'Reset Password',
+                note: 'Use this temporary password only to reset your account password.'
+            });
             console.log(`Attempting to send temporary password email to: ${user.email}`);
             await sendBrevoMail(user.email, subject, html, true).catch(err => {
                 console.error('Failed to send user reset email:', err);
@@ -552,6 +744,7 @@ router.get('/stats', async (req, res) => {
                 login_id: { $exists: true, $ne: null }
             }),
             pendingApprovals: await User.countDocuments({ status: 'pending', role: 'user' }),
+            adminRequests: await User.countDocuments({ status: 'pending', role: 'admin' }),
             activeResets: await PasswordReset.countDocuments({ status: 'pending' }),
             unblockRequests: await User.countDocuments({ unblockRequested: true }),
             totalBlocks: blockCount,

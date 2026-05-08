@@ -84,7 +84,7 @@ export default function Home() {
 
         try {
             const payload = isAdmin
-                ? { email: adminEmail, password: adminPassword, force: forceParams }
+                ? { email: adminEmail, password: adminPassword, force: forceParams, adminLogin: true }
                 : { loginId: userLoginId, password: userPassword, force: forceParams };
 
             const res = await axios.post('/api/auth/login', payload);

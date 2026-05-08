@@ -8,12 +8,26 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const getClientBaseUrl = require('../utils/getClientBaseUrl');
 const sendBrevoMail = require('../brevoMailer');
+const { renderEmailShell } = require('../utils/emailTemplates');
 
 
 const generateSignature = (password) => {
     return crypto.createHmac('sha256', process.env.JWT_SECRET)
         .update(password)
         .digest('hex');
+};
+
+const getAdminCredentialKey = () => crypto
+    .createHash('sha256')
+    .update(process.env.JWT_SECRET || process.env.DEFAULT_ENCRYPTION_SECRET || 'neuralchat-admin-pending')
+    .digest();
+
+const encryptPendingAdminPassword = (password) => {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', getAdminCredentialKey(), iv);
+    const encrypted = Buffer.concat([cipher.update(String(password), 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
 };
 
 const normalizeMobile = (mobile = '') => String(mobile).replace(/\D/g, '').slice(-10);
@@ -211,27 +225,41 @@ router.post('/register', async (req, res) => {
         const adminEmail = process.env.ADMIN_EMAIL;
         if (adminEmail) {
             const subject = 'New User Registration Request';
-            const html = `
-                <h3>New User Registration</h3>
-                <p><strong>Name:</strong> ${name}</p>
-                <p><strong>Job Position:</strong> ${designation || 'N/A'}</p>
-                <p><strong>Email:</strong> ${email}</p>
-                <p><strong>Mobile:</strong> ${countryCode} ${mobile}</p>
-                <p>Please login to the admin dashboard to approve this user.</p>
-            `;
+            const html = renderEmailShell({
+                eyebrow: 'User Approval',
+                title: 'New User Registration',
+                intro: 'A new user is waiting for approval in your NeuralChat admin dashboard.',
+                details: [
+                    { label: 'Name', value: name },
+                    { label: 'Job Position', value: designation || 'N/A' },
+                    { label: 'Email', value: email },
+                    { label: 'Mobile', value: `${countryCode} ${cleanMobile}` }
+                ],
+                actionUrl: `${getClientBaseUrl()}/?showLogin=true&role=admin`,
+                actionLabel: 'Open Admin Dashboard',
+                note: 'Review the details before approving this account.'
+            });
             sendBrevoMail(adminEmail, subject, html, true).catch(err => console.error('Failed to send admin email:', err));
         }
 
         // Email User
         if (email) {
             const userSubject = 'Registration Request Received';
-            const userHtml = `
-                <h3>Registration Successful</h3>
-                <p>Hi ${name},</p>
-                <p>Your registration request has been submitted successfully to the admin team.</p>
-                <p>We will notify you once your account has been approved and your login details are generated.</p>
-                <p>Thank you for choosing NeuralChat.</p>
-            `;
+            const userHtml = renderEmailShell({
+                eyebrow: 'Registration',
+                title: 'Registration Request Received',
+                greeting: `Hi ${name},`,
+                intro: [
+                    'Your registration request has been submitted successfully to the admin team.',
+                    'We will notify you once your account has been approved and your login details are generated.'
+                ],
+                details: [
+                    { label: 'Name', value: name },
+                    { label: 'Email', value: email },
+                    { label: 'Status', value: 'Pending admin approval' }
+                ],
+                note: 'No action is needed from your side right now.'
+            });
             sendBrevoMail(email, userSubject, userHtml, true).catch(err => console.error('Failed to send user registration email:', err));
         }
 
@@ -244,7 +272,7 @@ router.post('/register', async (req, res) => {
 
 // Login
 router.post('/login', async (req, res) => {
-    const { email, loginId, password, force } = req.body;
+    const { email, loginId, password, force, adminLogin } = req.body;
 
     if (!email && !loginId) return res.status(400).json({ error: 'Missing Login ID or Email' });
 
@@ -253,6 +281,10 @@ router.post('/login', async (req, res) => {
             ? await findUserByEmail(email)
             : await User.findOne({ login_id: loginId });
         if (!user) return res.status(400).json({ error: 'User not found' });
+
+        if (adminLogin && user.role !== 'admin') {
+            return res.status(403).json({ error: 'You are not an admin. You do not have permission to access' });
+        }
 
         if (user.status !== 'approved') {
             return res.status(403).json({ error: 'Account not approved yet' });
@@ -340,13 +372,19 @@ router.post('/forgot-password', async (req, res) => {
 
         if (adminEmail) {
             const subject = 'Password Reset Request';
-            const html = `
-                <h3>Password Reset Requested</h3>
-                <p><strong>User:</strong> ${user.name}</p>
-                <p><strong>Email:</strong> ${user.email}</p>
-                <p><strong>Login ID:</strong> ${user.login_id}</p>
-                <p>Please login to the admin dashboard to resolve this request.</p>
-            `;
+            const html = renderEmailShell({
+                eyebrow: 'Password Reset',
+                title: 'Password Reset Requested',
+                intro: 'A user has requested help resetting their password.',
+                details: [
+                    { label: 'User', value: user.name },
+                    { label: 'Email', value: user.email },
+                    { label: 'Login ID', value: user.login_id || 'N/A' }
+                ],
+                actionUrl: `${getClientBaseUrl()}/?showLogin=true&role=admin`,
+                actionLabel: 'Resolve Request',
+                note: 'Allocate a temporary password only after verifying the request.'
+            });
             jobs.push(
                 sendBrevoMail(adminEmail, subject, html, true).then(() => ({ type: 'admin', ok: true })).catch((err) => ({ type: 'admin', ok: false, error: err?.message || 'Failed to send admin email' }))
             );
@@ -354,13 +392,19 @@ router.post('/forgot-password', async (req, res) => {
 
         if (user.email) {
             const userSubject = 'Password Reset Request Received';
-            const userHtml = `
-                <h3>We received your password reset request</h3>
-                <p>Hi ${user.name},</p>
-                <p>Your request has been submitted to the admin team for approval.</p>
-                <p><strong>Login ID:</strong> ${user.login_id}</p>
-                <p>You will receive updated login details once your request is processed.</p>
-            `;
+            const userHtml = renderEmailShell({
+                eyebrow: 'Password Reset',
+                title: 'We Received Your Request',
+                greeting: `Hi ${user.name},`,
+                intro: [
+                    'Your password reset request has been submitted to the admin team for approval.',
+                    'You will receive updated login details once your request is processed.'
+                ],
+                details: [
+                    { label: 'Login ID', value: user.login_id || 'N/A' },
+                    { label: 'Status', value: 'Pending admin review' }
+                ]
+            });
             
             jobs.push(
                 sendBrevoMail(user.email, userSubject, userHtml, true).then(() => ({ type: 'user', ok: true })).catch((err) => ({ type: 'user', ok: false, error: err?.message || 'Failed to send user email' }))
@@ -418,8 +462,8 @@ router.post('/admin/register', async (req, res) => {
         }
 
         const hash = await bcrypt.hash(password, 10);
-
-        await User.create({
+        const approvedAdminExists = await User.exists({ role: 'admin', status: 'approved' });
+        const newAdmin = await User.create({
             name,
             displayName: name,
             email,
@@ -427,11 +471,69 @@ router.post('/admin/register', async (req, res) => {
             password: hash,
             password_signature: signature,
             role: 'admin',
-            status: 'approved',
+            status: approvedAdminExists ? 'pending' : 'approved',
+            pending_admin_password: approvedAdminExists ? encryptPendingAdminPassword(password) : undefined,
             mobile: cleanMobile,
             mobile_signature: generateMobileSignature(cleanMobile),
             countryCode
         });
+
+        if (approvedAdminExists) {
+            const adminUsers = await User.find({ role: 'admin', status: 'approved' }).select('name email __enc_name __enc_email');
+            const recipients = adminUsers.map(admin => admin.email).filter(Boolean);
+            if (process.env.ADMIN_EMAIL && !recipients.includes(process.env.ADMIN_EMAIL)) recipients.push(process.env.ADMIN_EMAIL);
+
+            const subject = 'New Admin Registration Received';
+            const html = renderEmailShell({
+                eyebrow: 'Admin Approval',
+                title: 'New Admin Registration Received',
+                intro: 'A new admin registration is waiting for your approval.',
+                details: [
+                    { label: 'Name', value: name },
+                    { label: 'Email', value: email },
+                    { label: 'Mobile', value: `${countryCode} ${cleanMobile}` },
+                    { label: 'Requested Role', value: 'Admin' }
+                ],
+                actionUrl: `${getClientBaseUrl()}/?showLogin=true&role=admin`,
+                actionLabel: 'Review Admin Request',
+                note: 'Approving this request transfers admin ownership to the new admin.'
+            });
+            recipients.forEach(recipient => {
+                sendBrevoMail(recipient, subject, html, true).catch(err => console.error('Failed to send admin transfer request email:', err));
+            });
+
+            const requesterSubject = 'Admin request submitted';
+            const requesterHtml = renderEmailShell({
+                eyebrow: 'Admin Request',
+                title: 'Admin Request Submitted',
+                greeting: `Hi ${name},`,
+                intro: [
+                    'Your new admin registration request has been submitted to the current admin for review.',
+                    'We will notify you by email once the admin approves or rejects your request.'
+                ],
+                details: [
+                    { label: 'Email', value: email },
+                    { label: 'Mobile', value: `${countryCode} ${cleanMobile}` },
+                    { label: 'Status', value: 'Pending approval' }
+                ]
+            });
+            sendBrevoMail(email, requesterSubject, requesterHtml, true).catch(err => console.error('Failed to send admin request confirmation email:', err));
+
+            if (req.io) {
+                req.io.to('admins').emit('new_admin_request', {
+                    id: newAdmin._id.toString(),
+                    name,
+                    email,
+                    mobile: cleanMobile,
+                    countryCode,
+                    role: 'admin',
+                    status: 'pending',
+                    created_at: newAdmin.created_at
+                });
+            }
+
+            return res.json({ message: 'Your Request has been sent to the Main Admin for approval' });
+        }
 
         res.json({ message: 'Admin account created successfully' });
     } catch (err) {
@@ -565,17 +667,19 @@ router.post('/reset-password-temp', async (req, res) => {
         // Send email to user with new credentials
         const subject = 'Password Reset Successful';
         const baseUrl = getClientBaseUrl();
-        const html = `
-            <h3>Password Reset Successful</h3>
-            <p>Dear ${user.name},</p>
-            <p>Your password has been successfully reset.</p>
-            <p><strong>Login ID:</strong> ${user.login_id}</p>
-            <p><strong>New Password:</strong> ${newPassword}</p>
-            <p>Please keep this information secure and login to your account.</p>
-            <br>
-            <p>You can login here: <a href="${baseUrl}/?showLogin=true&token=${signature}&id=${user._id}">Login Here</a></p>
-            <br>
-        `;
+        const html = renderEmailShell({
+            eyebrow: 'Password Updated',
+            title: 'Password Reset Successful',
+            greeting: `Hi ${user.name},`,
+            intro: 'Your password has been successfully reset. Please keep these details secure.',
+            details: [
+                { label: 'Login ID', value: user.login_id || 'N/A' },
+                { label: 'New Password', value: newPassword }
+            ],
+            actionUrl: `${baseUrl}/?showLogin=true&token=${signature}&id=${user._id}`,
+            actionLabel: 'Login to NeuralChat',
+            note: 'For your account security, change this password after signing in if it was shared with you.'
+        });
 
         console.log(`Attempting to send reset confirmation email to: ${user.email}`);
         // Non-blocking call to show popup immediately
