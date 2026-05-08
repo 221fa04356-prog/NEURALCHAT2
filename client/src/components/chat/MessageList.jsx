@@ -12,6 +12,12 @@ import { formatFileSize } from '../../utils/fileSize';
 const DEFAULT_VOICE_WAVEFORM = [8, 10, 9, 12, 11, 8, 13, 15, 12, 9, 11, 14, 10, 13, 8, 10, 15, 11, 13, 10, 14, 12, 9, 8, 10, 13, 11, 12, 9, 11];
 const VOICE_WAVEFORM_BARS = 30;
 const voiceWaveformCache = new Map();
+const getMessageListYouTubeId = (url) => {
+    if (!url) return null;
+    const text = String(url);
+    const match = text.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|shorts\/|embed\/|live\/))([^#&?/\s]{11})/i);
+    return match?.[1] || null;
+};
 const buildVoiceWaveform = async (src, signal) => {
     if (!src || typeof window === 'undefined') return DEFAULT_VOICE_WAVEFORM;
 
@@ -417,6 +423,8 @@ const MessageList = memo(({
     headerContent,
     onScroll,
     isMobile,
+    openYouTubeChoice,
+    openGenericLinkPreview,
     onViewOncePreviewOpenChange
 }) => {
     const isDeletedForCurrentUser = useCallback((msg) => {
@@ -1924,8 +1932,22 @@ const MessageList = memo(({
                                 {(() => {
                                     let lp = msg.link_preview;
                                     if (!lp || !lp.title) return null;
+                                    const previewUrl = lp.url || (typeof msg.content === 'string' ? msg.content : '');
+                                    const youtubeId = getMessageListYouTubeId(previewUrl);
+                                    const isYoutube = !!youtubeId || /(^|\/\/)(www\.)?(youtube\.com|youtu\.be)\//i.test(previewUrl);
+                                    const openPreview = () => {
+                                        if (isYoutube && typeof openYouTubeChoice === 'function') {
+                                            openYouTubeChoice(previewUrl, lp);
+                                            return;
+                                        }
+                                        if (typeof openGenericLinkPreview === 'function') {
+                                            openGenericLinkPreview(previewUrl || lp.url, lp);
+                                            return;
+                                        }
+                                        window.open(previewUrl || lp.url, '_blank', 'noopener,noreferrer');
+                                    };
                                     return (
-                                        <div className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''}`} onClick={(e) => { e.stopPropagation(); window.open(lp.url, '_blank'); }} style={{ cursor: 'pointer', marginTop: 8 }}>
+                                        <div className={`wa-link-preview-card ${!lp.image ? 'no-image' : ''} ${isYoutube ? 'youtube' : ''}`} onClick={(e) => { e.stopPropagation(); openPreview(); }} style={{ cursor: 'pointer', marginTop: 8 }}>
                                             {lp.image && (
                                                 <div className="wa-link-preview-image">
                                                     <img
@@ -1936,6 +1958,21 @@ const MessageList = memo(({
                                                             event.currentTarget.closest('.wa-link-preview-card')?.classList.add('no-image');
                                                         }}
                                                     />
+                                                    {isYoutube && (
+                                                        <button
+                                                            type="button"
+                                                            className="wa-link-preview-play-btn"
+                                                            aria-label="Choose how to open YouTube video"
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                openPreview();
+                                                            }}
+                                                        >
+                                                            <span className="wa-play-icon">
+                                                                <Play size={28} color="white" fill="white" />
+                                                            </span>
+                                                        </button>
+                                                    )}
                                                 </div>
                                             )}
                                             <div className="wa-link-preview-content">

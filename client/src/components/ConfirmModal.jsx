@@ -54,7 +54,16 @@ const ConfirmModal = ({
                     <p>{message}</p>
                 </div>
                 <div className="confirm-modal-footer">
-                    <button className="btn-secondary" onClick={onCancel}>{cancelText || 'Cancel'}</button>
+                    <button
+                        className="btn-secondary"
+                        onPointerDown={(event) => {
+                            event.stopPropagation();
+                            onCancel?.();
+                        }}
+                        onClick={onCancel}
+                    >
+                        {cancelText || 'Cancel'}
+                    </button>
 
                     {onSecondary && (
                         <button className={secondaryBtnClass} onClick={onSecondary}>

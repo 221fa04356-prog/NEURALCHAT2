@@ -1338,10 +1338,14 @@ const getYouTubeEmbedUrl = (url) => {
 
     const params = new URLSearchParams({
         autoplay: '1',
-        controls: '1',
+        controls: '0',
+        disablekb: '0',
+        enablejsapi: '1',
         fs: '1',
+        iv_load_policy: '3',
+        modestbranding: '1',
         playsinline: '1',
-        rel: '1',
+        rel: '0',
         start: '0'
     });
 
@@ -1779,6 +1783,11 @@ export default function Chat() {
 
     const [isContactInfoOpen, setIsContactInfoOpen] = useState(false); // Controls "Contact Info" panel
     const [messageSearchQuery, setMessageSearchQuery] = useState('');
+    const [messageSearchDate, setMessageSearchDate] = useState('');
+    const [isMessageDatePickerOpen, setIsMessageDatePickerOpen] = useState(false);
+    const [messageDatePickerMonth, setMessageDatePickerMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+    const [messageDatePickerView, setMessageDatePickerView] = useState('day'); // day | year | month
+    const messageDatePickerPickedRef = useRef(false);
     const [filterType, setFilterType] = useState('all'); // 'all' | 'unread' | 'favorites'
     const [openDropdown, setOpenDropdown] = useState(null); // { type: 'msg'|'contact', id: string, data: any }
     const getCustomListsStorageKey = (ownerId) => `wa-custom-lists-${String(ownerId || 'anonymous')}`;
@@ -1797,6 +1806,18 @@ export default function Chat() {
     const [newListMembers, setNewListMembers] = useState([]);
     const [searchListQuery, setSearchListQuery] = useState('');
     const [showCustomListsDropdown, setShowCustomListsDropdown] = useState(false);
+    const [customListContextMenu, setCustomListContextMenu] = useState(null);
+    const customListLongPressRef = useRef(null);
+    const customListContextOpenedRef = useRef(false);
+    const [editingCustomList, setEditingCustomList] = useState(null);
+    const [editListName, setEditListName] = useState('');
+    const [editListMembers, setEditListMembers] = useState([]);
+    const [editListSearchQuery, setEditListSearchQuery] = useState('');
+    const [isEditListPickerOpen, setIsEditListPickerOpen] = useState(false);
+    const [isListMuteModalOpen, setIsListMuteModalOpen] = useState(false);
+    const [listMuteTarget, setListMuteTarget] = useState(null);
+    const [listMuteOption, setListMuteOption] = useState('8');
+    const [isReorderListsOpen, setIsReorderListsOpen] = useState(false);
     const [typingUsers, setTypingUsers] = useState({}); // { [chatId]: Set<userId> }
     const typingTimeoutRef = useRef({}); // { [chatId]: timeoutId }
 
@@ -2014,7 +2035,8 @@ export default function Chat() {
     const hasRestoredActiveChatRef = useRef(false);
     const userRef = useRef(user);
     const groupsRef = useRef([]);
-    const searchSource = useRef('chat_header'); // 'chat_header' | 'contact_info'
+    const searchSource = useRef('chat_header'); // 'chat_header' | 'group_header' | 'contact_info' | 'group_info'
+    const [messageSearchSource, setMessageSearchSource] = useState('chat_header');
     const isInitialFetchDone = useRef(false);
     const usersRef = useRef([]);
     const recentlyMarkedRead = useRef({}); // { userId: timestamp }
@@ -2033,6 +2055,231 @@ export default function Chat() {
     // --- Search State ---
     const [isSearching, setIsSearching] = useState(false);
     const [searchResults, setSearchResults] = useState([]);
+    const openMessageSearchPanel = useCallback((source) => {
+        if (searchSource.current !== source) {
+            setMessageSearchQuery('');
+            setSearchResults([]);
+            setIsSearching(false);
+        }
+        searchSource.current = source;
+        setMessageSearchSource(source);
+        setIsMessageSearchOpen(true);
+    }, []);
+    const closeMessageSearchPanel = useCallback(() => {
+        const source = searchSource.current;
+        setIsMessageSearchOpen(false);
+        setMessageSearchQuery('');
+        setMessageSearchDate('');
+        setIsMessageDatePickerOpen(false);
+        setMessageDatePickerView('day');
+        const now = new Date();
+        setMessageDatePickerMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+        if (source === 'contact_info' || source === 'group_info') {
+            setIsContactInfoOpen(true);
+        }
+    }, []);
+    const closeMessageDatePicker = useCallback(() => {
+        setIsMessageDatePickerOpen(false);
+        setMessageDatePickerView('day');
+        if (!messageDatePickerPickedRef.current) {
+            const now = new Date();
+            setMessageDatePickerMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+        }
+        messageDatePickerPickedRef.current = false;
+    }, []);
+    const toggleMessageDatePicker = useCallback(() => {
+        setIsMessageDatePickerOpen(prev => {
+            if (prev) {
+                closeMessageDatePicker();
+                return false;
+            }
+            messageDatePickerPickedRef.current = false;
+            const openDate = messageSearchDate ? new Date(`${messageSearchDate}T00:00:00`) : new Date();
+            const safeOpenDate = Number.isNaN(openDate.getTime()) ? new Date() : openDate;
+            setMessageDatePickerMonth(new Date(safeOpenDate.getFullYear(), safeOpenDate.getMonth(), 1));
+            setMessageDatePickerView('day');
+            return true;
+        });
+    }, [closeMessageDatePicker, messageSearchDate]);
+
+    useEffect(() => {
+        if (!isMessageSearchOpen || !isMessageDatePickerOpen) return undefined;
+        const handlePointerDown = (event) => {
+            if (event.target.closest?.('.wa-search-sidebar')) return;
+            closeMessageDatePicker();
+        };
+        document.addEventListener('pointerdown', handlePointerDown, true);
+        return () => document.removeEventListener('pointerdown', handlePointerDown, true);
+    }, [closeMessageDatePicker, isMessageDatePickerOpen, isMessageSearchOpen]);
+
+    useEffect(() => {
+        if (!messageSearchDate) return;
+        const selectedDate = new Date(`${messageSearchDate}T00:00:00`);
+        if (!Number.isNaN(selectedDate.getTime())) {
+            setMessageDatePickerMonth(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
+        }
+    }, [messageSearchDate]);
+
+    const formatDateInputValue = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
+    const renderMessageDatePicker = () => {
+        if (!isMessageDatePickerOpen) return null;
+        const year = messageDatePickerMonth.getFullYear();
+        const month = messageDatePickerMonth.getMonth();
+        const firstDay = new Date(year, month, 1);
+        const gridStart = new Date(firstDay);
+        gridStart.setDate(firstDay.getDate() - firstDay.getDay());
+        const todayValue = formatDateInputValue(new Date());
+        const monthLabel = messageDatePickerMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+        const yearGridStart = year - (year % 12);
+        const years = Array.from({ length: 12 }, (_, index) => yearGridStart + index);
+        const monthNames = Array.from({ length: 12 }, (_, index) =>
+            new Date(year, index, 1).toLocaleDateString(undefined, { month: 'short' })
+        );
+        const days = Array.from({ length: 42 }, (_, index) => {
+            const date = new Date(gridStart);
+            date.setDate(gridStart.getDate() + index);
+            return date;
+        });
+
+        const goToPreviousPickerPage = () => {
+            if (messageDatePickerView === 'year') {
+                setMessageDatePickerMonth(prev => new Date(prev.getFullYear() - 12, prev.getMonth(), 1));
+                return;
+            }
+            if (messageDatePickerView === 'month') {
+                setMessageDatePickerMonth(prev => new Date(prev.getFullYear() - 1, prev.getMonth(), 1));
+                return;
+            }
+            setMessageDatePickerMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+        };
+
+        const goToNextPickerPage = () => {
+            if (messageDatePickerView === 'year') {
+                setMessageDatePickerMonth(prev => new Date(prev.getFullYear() + 12, prev.getMonth(), 1));
+                return;
+            }
+            if (messageDatePickerView === 'month') {
+                setMessageDatePickerMonth(prev => new Date(prev.getFullYear() + 1, prev.getMonth(), 1));
+                return;
+            }
+            setMessageDatePickerMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+        };
+
+        return (
+            <div className="wa-message-date-picker" onClick={(event) => event.stopPropagation()}>
+                <div className="wa-message-date-picker-header">
+                    <button
+                        type="button"
+                        onClick={goToPreviousPickerPage}
+                        aria-label="Previous"
+                    >
+                        <ChevronLeft size={18} />
+                    </button>
+                    <button
+                        type="button"
+                        className="wa-message-date-picker-title"
+                        onClick={() => setMessageDatePickerView(messageDatePickerView === 'day' ? 'year' : 'day')}
+                    >
+                        {messageDatePickerView === 'year'
+                            ? `${yearGridStart} - ${yearGridStart + 11}`
+                            : messageDatePickerView === 'month'
+                                ? year
+                                : monthLabel}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={goToNextPickerPage}
+                        aria-label="Next"
+                    >
+                        <ChevronRight size={18} />
+                    </button>
+                </div>
+                {messageDatePickerView === 'year' ? (
+                    <div className="wa-message-date-picker-year-grid">
+                        {years.map(optionYear => (
+                            <button
+                                type="button"
+                                key={optionYear}
+                                className={optionYear === year ? 'selected' : ''}
+                                onClick={() => {
+                                    setMessageDatePickerMonth(prev => new Date(optionYear, prev.getMonth(), 1));
+                                    setMessageDatePickerView('month');
+                                }}
+                            >
+                                {optionYear}
+                            </button>
+                        ))}
+                    </div>
+                ) : messageDatePickerView === 'month' ? (
+                    <div className="wa-message-date-picker-month-grid">
+                        {monthNames.map((monthName, index) => (
+                            <button
+                                type="button"
+                                key={monthName}
+                                className={index === month ? 'selected' : ''}
+                                onClick={() => {
+                                    setMessageDatePickerMonth(prev => new Date(prev.getFullYear(), index, 1));
+                                    setMessageDatePickerView('day');
+                                }}
+                            >
+                                {monthName}
+                            </button>
+                        ))}
+                    </div>
+                ) : (
+                    <>
+                        <div className="wa-message-date-picker-weekdays">
+                            {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(day => <span key={day}>{day}</span>)}
+                        </div>
+                        <div className="wa-message-date-picker-grid">
+                            {days.map(date => {
+                                const value = formatDateInputValue(date);
+                                const inMonth = date.getMonth() === month;
+                                const isSelected = value === messageSearchDate;
+                                const isToday = value === todayValue;
+                                return (
+                                    <button
+                                        type="button"
+                                        key={value}
+                                        className={`${!inMonth ? 'muted' : ''} ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''}`}
+                                        onClick={() => {
+                                            messageDatePickerPickedRef.current = true;
+                                            setMessageSearchDate(value);
+                                            closeMessageDatePicker();
+                                        }}
+                                    >
+                                        {date.getDate()}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </>
+                )}
+                <div className="wa-message-date-picker-footer">
+                    <button type="button" onClick={() => {
+                        messageDatePickerPickedRef.current = true;
+                        setMessageSearchDate('');
+                        const now = new Date();
+                        setMessageDatePickerMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+                        closeMessageDatePicker();
+                    }}>Clear</button>
+                    <button type="button" onClick={() => {
+                        messageDatePickerPickedRef.current = true;
+                        const now = new Date();
+                        setMessageDatePickerMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+                        setMessageSearchDate(todayValue);
+                        closeMessageDatePicker();
+                    }}>Today</button>
+                </div>
+            </div>
+        );
+    };
 
     // --- Edit Contact State ---
     const [isEditContactOpen, setIsEditContactOpen] = useState(false);
@@ -2055,8 +2302,22 @@ export default function Chat() {
     const [jumpToMessageTarget, setJumpToMessageTarget] = useState(null);
     const [viewingImage, setViewingImage] = useState(null); // Track image for full-screen view
     const [previewVideoUrl, setPreviewVideoUrl] = useState(null); // URL for YouTube preview
+    const youtubePreviewFrameRef = useRef(null);
+    const youtubePreviewPlayerRef = useRef(null);
+    const [youtubePreviewVolume, setYoutubePreviewVolume] = useState(72);
+    const [isYoutubePreviewMuted, setIsYoutubePreviewMuted] = useState(false);
+    const [isYoutubePreviewPlaying, setIsYoutubePreviewPlaying] = useState(true);
+    const [isYoutubePreviewSettingsOpen, setIsYoutubePreviewSettingsOpen] = useState(false);
+    const [youtubePreviewSpeed, setYoutubePreviewSpeed] = useState(1);
     const [linkActionTarget, setLinkActionTarget] = useState(null); // { url, youtubeId, title }
     const [genericLinkPreviewTarget, setGenericLinkPreviewTarget] = useState(null);
+    const linkPreviewFrameRef = useRef(null);
+    const [genericPreviewUrl, setGenericPreviewUrl] = useState('');
+    const [genericPreviewAddress, setGenericPreviewAddress] = useState('');
+    const [genericPreviewReloadKey, setGenericPreviewReloadKey] = useState(0);
+    const [isGenericPreviewLoading, setIsGenericPreviewLoading] = useState(false);
+    const [genericPreviewHistory, setGenericPreviewHistory] = useState([]);
+    const [genericPreviewHistoryIndex, setGenericPreviewHistoryIndex] = useState(-1);
     const [floatingPreviewLayout, setFloatingPreviewLayout] = useState({ x: 96, y: 54, width: 420, height: 280 });
     const getVideoPreviewLayout = () => {
         const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 960;
@@ -2105,6 +2366,125 @@ export default function Chat() {
         window.addEventListener('pointerup', handleUp, { once: true });
         window.addEventListener('pointercancel', handleUp, { once: true });
         window.addEventListener('blur', handleUp, { once: true });
+    };
+
+    useEffect(() => {
+        youtubePreviewPlayerRef.current?.destroy?.();
+        youtubePreviewPlayerRef.current = null;
+        setIsYoutubePreviewSettingsOpen(false);
+        setIsYoutubePreviewPlaying(true);
+
+        if (!previewVideoUrl || !getYouTubeVideoId(previewVideoUrl)) return undefined;
+
+        let disposed = false;
+        let nearEndTicks = 0;
+        let intervalId = null;
+        let syncIntervalId = null;
+
+        const createPlayer = () => {
+            if (disposed || !youtubePreviewFrameRef.current || !window.YT?.Player) return;
+            youtubePreviewPlayerRef.current?.destroy?.();
+            youtubePreviewPlayerRef.current = new window.YT.Player(youtubePreviewFrameRef.current, {
+                events: {
+                    onReady: (event) => {
+                        event.target.setVolume(youtubePreviewVolume);
+                        if (isYoutubePreviewMuted) event.target.mute();
+                        event.target.setPlaybackRate?.(youtubePreviewSpeed);
+                    },
+                    onStateChange: (event) => {
+                        setIsYoutubePreviewPlaying(event.data === window.YT.PlayerState.PLAYING);
+                    }
+                }
+            });
+
+            intervalId = window.setInterval(() => {
+                const player = youtubePreviewPlayerRef.current;
+                if (!player?.getDuration || !player?.getCurrentTime || !player?.getPlayerState) return;
+                const duration = Number(player.getDuration() || 0);
+                const current = Number(player.getCurrentTime() || 0);
+                const state = player.getPlayerState();
+                if (duration > 0 && duration - current <= 1.2 && state !== window.YT.PlayerState.ENDED) {
+                    nearEndTicks += 1;
+                    if (nearEndTicks >= 2) {
+                        player.seekTo(duration, true);
+                    }
+                } else {
+                    nearEndTicks = 0;
+                }
+            }, 700);
+
+            syncIntervalId = window.setInterval(() => {
+                const player = youtubePreviewPlayerRef.current;
+                if (!player?.getPlayerState) return;
+                setIsYoutubePreviewPlaying(player.getPlayerState() === window.YT.PlayerState.PLAYING);
+            }, 900);
+        };
+
+        if (window.YT?.Player) {
+            createPlayer();
+        } else {
+            const existingCallback = window.onYouTubeIframeAPIReady;
+            window.onYouTubeIframeAPIReady = () => {
+                existingCallback?.();
+                createPlayer();
+            };
+            if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+                const script = document.createElement('script');
+                script.src = 'https://www.youtube.com/iframe_api';
+                script.async = true;
+                document.body.appendChild(script);
+            }
+        }
+
+        return () => {
+            disposed = true;
+            if (intervalId) window.clearInterval(intervalId);
+            if (syncIntervalId) window.clearInterval(syncIntervalId);
+            youtubePreviewPlayerRef.current?.destroy?.();
+            youtubePreviewPlayerRef.current = null;
+        };
+    }, [previewVideoUrl]);
+
+    useEffect(() => {
+        const player = youtubePreviewPlayerRef.current;
+        if (!player?.setVolume) return;
+        player.setVolume(youtubePreviewVolume);
+        if (youtubePreviewVolume > 0 && isYoutubePreviewMuted) {
+            player.unMute?.();
+            setIsYoutubePreviewMuted(false);
+        }
+    }, [youtubePreviewVolume]);
+
+    useEffect(() => {
+        const player = youtubePreviewPlayerRef.current;
+        if (!player?.setPlaybackRate) return;
+        player.setPlaybackRate(youtubePreviewSpeed);
+    }, [youtubePreviewSpeed]);
+
+    const toggleYoutubePreviewPlayback = () => {
+        const player = youtubePreviewPlayerRef.current;
+        if (!player?.playVideo || !player?.pauseVideo) return;
+        if (isYoutubePreviewPlaying) {
+            player.pauseVideo();
+            setIsYoutubePreviewPlaying(false);
+        } else {
+            player.playVideo();
+            setIsYoutubePreviewPlaying(true);
+        }
+    };
+
+    const toggleYoutubePreviewMute = () => {
+        const player = youtubePreviewPlayerRef.current;
+        const nextMuted = !isYoutubePreviewMuted;
+        setIsYoutubePreviewMuted(nextMuted);
+        if (!player) return;
+        if (nextMuted) player.mute?.();
+        else player.unMute?.();
+    };
+
+    const selectYoutubePreviewSpeed = (speed) => {
+        setYoutubePreviewSpeed(speed);
+        youtubePreviewPlayerRef.current?.setPlaybackRate?.(speed);
     };
 
     // --- Poll States ---
@@ -2461,12 +2841,16 @@ export default function Chat() {
     const [activeSettingsTab, setActiveSettingsTab] = useState(null);
     const [settingsSearchQuery, setSettingsSearchQuery] = useState('');
     const [isSettingsEditing, setIsSettingsEditing] = useState(false);
+    const [isDiscardProfileEditConfirmOpen, setIsDiscardProfileEditConfirmOpen] = useState(false);
+    const [discardProfileEditAction, setDiscardProfileEditAction] = useState('edit-only');
+    const [profileEditSnapshot, setProfileEditSnapshot] = useState(null);
     const [pinReplaceModal, setPinReplaceModal] = useState(null); // { newId, isGroup, pinnedIds }
     const [pinMessageModal, setPinMessageModal] = useState(null);
     const [pinMessageDuration, setPinMessageDuration] = useState('30 days');
     const [currentPinnedIndex, setCurrentPinnedIndex] = useState(0);
 
     const openSettingsPanel = (initialTab = null) => {
+        if (isProfileOpen && !closeProfileDrawerSafely()) return;
         setIsProfileOpen(false);
         setIsSettingsEditing(false);
         setSettingsSearchQuery('');
@@ -2479,6 +2863,53 @@ export default function Chat() {
         setSettingsSearchQuery('');
         setActiveSettingsTab(null);
         setIsSettingsOpen(false);
+    };
+
+    const requestDiscardSettingsEdit = () => {
+        setDiscardProfileEditAction('settings');
+        setIsDiscardProfileEditConfirmOpen(true);
+    };
+
+    const confirmDiscardProfileEdit = () => {
+        if (profileEditSnapshot) {
+            setUserData(profileEditSnapshot);
+        }
+        setIsEditingProfileName(false);
+        setIsEditingProfileAbout(false);
+        setIsEditingProfilePhone(false);
+        setProfileEditValue('');
+        setIsSettingsEditing(false);
+        setIsDiscardProfileEditConfirmOpen(false);
+        setProfileEditSnapshot(null);
+        if (discardProfileEditAction === 'profile-close') {
+            setIsProfileOpen(false);
+        }
+        setDiscardProfileEditAction('edit-only');
+    };
+
+    const hasUnsavedProfileInlineEdit = () => {
+        if (!isEditingProfileName && !isEditingProfileAbout && !isEditingProfilePhone) return false;
+        if (isEditingProfileName) {
+            return profileEditValue !== (userData.displayName || userData.name || '');
+        }
+        if (isEditingProfileAbout) {
+            return profileEditValue !== (userData.about || '');
+        }
+        if (isEditingProfilePhone) {
+            return profileEditValue !== (userData.mobile || '');
+        }
+        return false;
+    };
+
+    const closeProfileDrawerSafely = () => {
+        if (hasUnsavedProfileInlineEdit()) {
+            setDiscardProfileEditAction('profile-close');
+            setIsDiscardProfileEditConfirmOpen(true);
+            return false;
+        }
+        confirmDiscardProfileEdit();
+        setIsProfileOpen(false);
+        return true;
     };
 
     // --- General Settings State ---
@@ -2507,6 +2938,8 @@ export default function Chat() {
     const [isClearChatDataSubmitting, setIsClearChatDataSubmitting] = useState(false);
     const [isDeleteChatConfirmOpen, setIsDeleteChatConfirmOpen] = useState(false);
     const [isEncryptionInfoOpen, setIsEncryptionInfoOpen] = useState(false);
+    const [isEncryptionStrategyOpen, setIsEncryptionStrategyOpen] = useState(false);
+    const [openEncryptionStrategyPoint, setOpenEncryptionStrategyPoint] = useState(null);
     const [encryptionVerifyData, setEncryptionVerifyData] = useState({
         loading: false,
         error: '',
@@ -2767,6 +3200,21 @@ export default function Chat() {
         window.addEventListener('resize', clampRightPanelWidth);
         clampRightPanelWidth();
         return () => window.removeEventListener('resize', clampRightPanelWidth);
+    }, []);
+
+    useEffect(() => {
+        const clampLeftPanelWidth = () => {
+            if (window.innerWidth <= 768) {
+                setLeftPanelWidth(window.innerWidth);
+                return;
+            }
+            const minWidth = 320;
+            const maxWidth = Math.max(minWidth, Math.min(Math.floor(window.innerWidth * 0.55), window.innerWidth - 360));
+            setLeftPanelWidth(prev => Math.max(minWidth, Math.min(maxWidth, prev || 450)));
+        };
+        window.addEventListener('resize', clampLeftPanelWidth);
+        clampLeftPanelWidth();
+        return () => window.removeEventListener('resize', clampLeftPanelWidth);
     }, []);
 
     const applyAppContainerScale = useCallback((fontSizeValue = selectedFontSize, scaleMode = fontScaleMode) => {
@@ -3731,7 +4179,8 @@ export default function Chat() {
                 return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Camera size={14} /> {isGroup ? 'Photo' : 'Image'}</span>;
             case 'video':
                 return <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Video size={14} /> Video</span>;
-            case 'file': {
+            case 'file':
+            case 'document': {
                 const previewName = getDisplayFileName(msg);
                 const dotIdx = previewName.lastIndexOf('.');
                 const ext = (dotIdx > 0 && dotIdx < previewName.length - 1) ? previewName.slice(dotIdx + 1).toLowerCase() : '';
@@ -3751,30 +4200,16 @@ export default function Chat() {
                 };
                 const extColor = getExtColor();
                 return (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            minWidth: 22,
-                            height: 16,
-                            padding: '0 4px',
-                            borderRadius: 4,
-                            background: extColor,
-                            color: '#fff',
-                            fontSize: 10,
-                            fontWeight: 700,
-                            lineHeight: 1,
-                            textTransform: 'uppercase'
-                        }}>
+                    <span className="wa-chat-doc-preview">
+                        <span className="wa-chat-doc-badge" style={{ background: extColor }}>
                             {extLabel}
                         </span>
-                        <span style={{ color: '#8696a0' }}>|</span>
-                        <span>{fileLabel}</span>
+                        <span className="wa-chat-doc-separator">|</span>
+                        <span className="wa-chat-doc-name">{fileLabel}</span>
                         {pageLabel && (
                             <>
-                                <span style={{ color: '#8696a0' }}>|</span>
-                                <span style={{ color: '#94a3b8' }}>{pageLabel}</span>
+                                <span className="wa-chat-doc-separator">|</span>
+                                <span className="wa-chat-doc-meta">{pageLabel}</span>
                             </>
                         )}
                     </span>
@@ -3945,6 +4380,7 @@ export default function Chat() {
                 setUserData(updatedUser);
                 setSnackbar({ message: 'Profile Updated successfully', type: 'success', variant: 'system' });
                 setIsSettingsEditing(false);
+                setProfileEditSnapshot(null);
             }
         } catch (err) {
             console.error('[CLIENT] Update failed details:', {
@@ -4913,18 +5349,6 @@ export default function Chat() {
                 );
             }
 
-            // Apply search highlighting if needed
-            if (messageSearchQuery) {
-                const searchParts = part.split(new RegExp(`(${messageSearchQuery})`, 'gi'));
-                return searchParts.map((searchPart, j) =>
-                    searchPart.toLowerCase() === messageSearchQuery.toLowerCase() ? (
-                        <span key={`${i}-${j}`} style={{ background: '#ffef96', color: 'black' }}>{searchPart}</span>
-                    ) : (
-                        searchPart
-                    )
-                );
-            }
-
             return part;
         });
     };
@@ -5724,11 +6148,11 @@ export default function Chat() {
         <button
             type="button"
             className="wa-youtube-pip-play"
-            aria-label="Play YouTube video in app"
+            aria-label="Choose how to open YouTube video"
             onClick={(event) => {
                 event.stopPropagation();
                 event.preventDefault();
-                setPreviewVideoUrl(url);
+                openYouTubeChoice(url);
             }}
             style={{ width: size, height: size }}
         >
@@ -5736,6 +6160,144 @@ export default function Chat() {
             <span>PiP</span>
         </button>
     );
+
+    const openYouTubeChoice = (url, preview = {}) => {
+        const youtubeId = getYouTubeVideoId(url);
+        if (!url || !youtubeId) return;
+        setLinkActionTarget({
+            url,
+            youtubeId,
+            title: preview.title || 'YouTube Video',
+            description: preview.description || '',
+            image: preview.image || '',
+            domain: preview.domain || 'youtube.com'
+        });
+    };
+
+    const getGenericLinkDomain = (url, fallback = '') => {
+        try {
+            return new URL(url).hostname.replace(/^www\./, '');
+        } catch (_) {
+            return fallback || '';
+        }
+    };
+
+    const openGenericLinkPreview = (url, preview = {}) => {
+        const targetUrl = String(url || preview.url || '').trim();
+        if (!targetUrl) return;
+        const normalizedUrl = /^https?:\/\//i.test(targetUrl) ? targetUrl : `https://${targetUrl}`;
+        const nextTarget = {
+            url: normalizedUrl,
+            title: preview.title || 'Page Preview',
+            description: preview.description || '',
+            image: preview.image || '',
+            domain: preview.domain || getGenericLinkDomain(normalizedUrl, 'Page Preview')
+        };
+        setGenericLinkPreviewTarget(nextTarget);
+        setGenericPreviewUrl(normalizedUrl);
+        setGenericPreviewAddress(normalizedUrl);
+        setGenericPreviewReloadKey(prev => prev + 1);
+        setIsGenericPreviewLoading(true);
+        setGenericPreviewHistory([normalizedUrl]);
+        setGenericPreviewHistoryIndex(0);
+        setFloatingPreviewLayout(prev => ({
+            ...prev,
+            width: Math.max(prev.width || 0, 860),
+            height: Math.max(prev.height || 0, 620)
+        }));
+    };
+
+    const closeGenericLinkPreview = () => {
+        setGenericLinkPreviewTarget(null);
+        setGenericPreviewUrl('');
+        setGenericPreviewAddress('');
+        setIsGenericPreviewLoading(false);
+        setGenericPreviewHistory([]);
+        setGenericPreviewHistoryIndex(-1);
+    };
+
+    const updateGenericPreviewLocation = (url, pushHistory = true) => {
+        const normalizedUrl = String(url || '').trim();
+        if (!normalizedUrl) return;
+        setGenericPreviewUrl(normalizedUrl);
+        setGenericPreviewAddress(normalizedUrl);
+        setGenericLinkPreviewTarget(prev => prev ? {
+            ...prev,
+            url: normalizedUrl,
+            domain: getGenericLinkDomain(normalizedUrl, prev.domain)
+        } : prev);
+        if (pushHistory) {
+            setGenericPreviewHistory(prev => {
+                const trimmed = genericPreviewHistoryIndex >= 0 ? prev.slice(0, genericPreviewHistoryIndex + 1) : prev;
+                if (trimmed[trimmed.length - 1] === normalizedUrl) return trimmed;
+                const next = [...trimmed, normalizedUrl];
+                setGenericPreviewHistoryIndex(next.length - 1);
+                return next;
+            });
+        }
+    };
+
+    const getCurrentGenericPreviewUrl = () => {
+        try {
+            const frameHref = linkPreviewFrameRef.current?.contentWindow?.location?.href;
+            if (!frameHref) return genericPreviewUrl || genericLinkPreviewTarget?.url || '';
+            const parsed = new URL(frameHref, window.location.origin);
+            return parsed.searchParams.get('url') || genericPreviewUrl || genericLinkPreviewTarget?.url || '';
+        } catch (_) {
+            return genericPreviewUrl || genericLinkPreviewTarget?.url || '';
+        }
+    };
+
+    const handleGenericPreviewLoad = () => {
+        const currentUrl = getCurrentGenericPreviewUrl();
+        if (currentUrl) {
+            updateGenericPreviewLocation(currentUrl);
+        }
+        setIsGenericPreviewLoading(false);
+    };
+
+    const navigateGenericPreviewToAddress = (event) => {
+        event.preventDefault();
+        openGenericLinkPreview(genericPreviewAddress, genericLinkPreviewTarget || {});
+    };
+
+    const goGenericPreviewBack = () => {
+        if (genericPreviewHistoryIndex <= 0) return;
+        const nextIndex = genericPreviewHistoryIndex - 1;
+        const nextUrl = genericPreviewHistory[nextIndex];
+        if (!nextUrl) return;
+        setGenericPreviewHistoryIndex(nextIndex);
+        updateGenericPreviewLocation(nextUrl, false);
+        setIsGenericPreviewLoading(true);
+        setGenericPreviewReloadKey(prev => prev + 1);
+    };
+
+    const goGenericPreviewForward = () => {
+        if (genericPreviewHistoryIndex < 0 || genericPreviewHistoryIndex >= genericPreviewHistory.length - 1) return;
+        const nextIndex = genericPreviewHistoryIndex + 1;
+        const nextUrl = genericPreviewHistory[nextIndex];
+        if (!nextUrl) return;
+        setGenericPreviewHistoryIndex(nextIndex);
+        updateGenericPreviewLocation(nextUrl, false);
+        setIsGenericPreviewLoading(true);
+        setGenericPreviewReloadKey(prev => prev + 1);
+    };
+
+    const reloadGenericPreview = () => {
+        setIsGenericPreviewLoading(true);
+        setGenericPreviewReloadKey(prev => prev + 1);
+    };
+
+    useEffect(() => {
+        const handlePreviewMessage = (event) => {
+            const data = event.data || {};
+            if (data.type !== 'neuchat-page-preview-navigate' || !data.url) return;
+            updateGenericPreviewLocation(data.url);
+            setIsGenericPreviewLoading(true);
+        };
+        window.addEventListener('message', handlePreviewMessage);
+        return () => window.removeEventListener('message', handlePreviewMessage);
+    }, [genericPreviewHistoryIndex]);
 
     const renderComposerLinkPreview = () => {
         if (!typingLinkPreview?.title) return null;
@@ -5749,7 +6311,11 @@ export default function Chat() {
                     className={`wa-link-preview-card ${!hasPreviewImage ? 'no-image' : ''} ${isYoutube ? 'youtube' : ''}`}
                     onClick={(event) => {
                         event.stopPropagation();
-                        if (isYoutube) setPreviewVideoUrl(previewUrl);
+                        if (isYoutube) {
+                            openYouTubeChoice(previewUrl, typingLinkPreview);
+                        } else {
+                            openGenericLinkPreview(previewUrl, typingLinkPreview);
+                        }
                     }}
                 >
                     <button
@@ -5820,7 +6386,8 @@ export default function Chat() {
 
     // --- Message Search Debounce ---
     useEffect(() => {
-        if (!messageSearchQuery.trim()) {
+        const normalizedQuery = messageSearchQuery.trim().toLowerCase();
+        if (!normalizedQuery && !messageSearchDate) {
             setSearchResults([]);
             setIsSearching(false);
             return;
@@ -5834,7 +6401,13 @@ export default function Chat() {
 
             if (Array.isArray(activeMsgs)) {
                 activeMsgs.forEach(msg => {
-                    if (msg.content && msg.content.toLowerCase().includes(messageSearchQuery.toLowerCase())) {
+                    const contentMatches = !normalizedQuery || (msg.content || '').toLowerCase().includes(normalizedQuery);
+                    const messageDate = msg.created_at ? new Date(msg.created_at) : null;
+                    const localDate = messageDate && !Number.isNaN(messageDate.getTime())
+                        ? `${messageDate.getFullYear()}-${String(messageDate.getMonth() + 1).padStart(2, '0')}-${String(messageDate.getDate()).padStart(2, '0')}`
+                        : '';
+                    const dateMatches = !messageSearchDate || localDate === messageSearchDate;
+                    if (contentMatches && dateMatches) {
                         const time = formatForSearch(msg.created_at);
                         results.push({ ...msg, time });
                     }
@@ -5848,36 +6421,49 @@ export default function Chat() {
         }, 2000);
 
         return () => clearTimeout(delayDebounceFn);
-    }, [messageSearchQuery, messages, groupMessages, selectedUser]);
+    }, [messageSearchQuery, messageSearchDate, messages, groupMessages, selectedUser]);
 
     useEffect(() => {
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         const match = input.match(urlRegex);
-        if (match) {
-            const url = match[0];
-            // Only fetch if it's a new URL or preview is null
-            if (!typingLinkPreview || typingLinkPreview.url !== url) {
-                const timer = setTimeout(async () => {
-                    try {
-                        const token = localStorage.getItem('token');
-                        const res = await axios.get(`/api/chat/link-preview?url=${encodeURIComponent(url)}`, {
-                            headers: { 'Authorization': `Bearer ${token}` }
-                        });
-                        if (res.data && res.data.title) {
-                            setTypingLinkPreview(res.data);
-                        } else {
-                            setTypingLinkPreview(null);
-                        }
-                    } catch (err) {
-                        console.error('Typing preview failed', err);
-                        setTypingLinkPreview(null);
-                    }
-                }, 1000); // 1s debounce
-                return () => clearTimeout(timer);
-            }
+        if (!match) {
             setTypingLinkPreview(null);
+            setComposerPreviewImageErrors({});
+            return;
         }
-    }, [input]);
+
+        const url = match[0];
+        if (typingLinkPreview?.url === url) return;
+
+        let isCancelled = false;
+        const timer = setTimeout(async () => {
+            try {
+                const token = localStorage.getItem('token');
+                const res = await axios.get(`/api/chat/link-preview?url=${encodeURIComponent(url)}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (isCancelled) return;
+                if (!input.match(urlRegex)?.includes(url)) {
+                    setTypingLinkPreview(null);
+                    return;
+                }
+                if (res.data && res.data.title) {
+                    setTypingLinkPreview(res.data);
+                } else {
+                    setTypingLinkPreview(null);
+                }
+            } catch (err) {
+                if (isCancelled) return;
+                console.error('Typing preview failed', err);
+                setTypingLinkPreview(null);
+            }
+        }, 1000); // 1s debounce
+
+        return () => {
+            isCancelled = true;
+            clearTimeout(timer);
+        }
+    }, [input, typingLinkPreview?.url]);
 
     // Critical: Keep ref in sync with state for socket listeners
     useEffect(() => {
@@ -7327,6 +7913,21 @@ export default function Chat() {
 
         const handleGlobalKeyDown = (e) => {
             if (e.key === 'Escape') {
+                if (isEncryptionStrategyOpen) {
+                    setIsEncryptionStrategyOpen(false);
+                    setOpenEncryptionStrategyPoint(null);
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                    return;
+                }
+
+                if (isProfileOpen && (isEditingProfileName || isEditingProfileAbout || isEditingProfilePhone)) {
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                    closeProfileDrawerSafely();
+                    return;
+                }
+
                 // Close preview overlays first; never leave current chat on first Esc.
                 if (previewVideoUrl) {
                     setPreviewVideoUrl(null);
@@ -7336,7 +7937,7 @@ export default function Chat() {
                 }
 
                 if (genericLinkPreviewTarget) {
-                    setGenericLinkPreviewTarget(null);
+                    closeGenericLinkPreview();
                     e.stopImmediatePropagation();
                     e.preventDefault();
                     return;
@@ -7402,6 +8003,7 @@ export default function Chat() {
                     setSelectedGroup(null);
                     if (selectedUserRef) selectedUserRef.current = null;
                     if (selectedGroupRef) selectedGroupRef.current = null;
+                    if (isProfileOpen && !closeProfileDrawerSafely()) return;
                     setIsProfileOpen(false);
                     setIsArchivedChatsOpen(false);
                     setIsGlobalStarredOpen(false);
@@ -7444,7 +8046,7 @@ export default function Chat() {
             window.removeEventListener('click', handleClickOutside);
             window.removeEventListener('keydown', handleGlobalKeyDown);
         };
-    }, [openDropdown, chatContextMenu, showMenu, isCountryDropdownOpen, selectedUser, selectedGroup, selectedCommunity, isNewChatOpen, isNewGroupOpen, showInputEmojiPicker, showUnblockModal, selectedFontSize, previewVideoUrl, genericLinkPreviewTarget, viewingImage, file, selectedFiles]);
+    }, [openDropdown, chatContextMenu, showMenu, isCountryDropdownOpen, selectedUser, selectedGroup, selectedCommunity, isNewChatOpen, isNewGroupOpen, showInputEmojiPicker, showUnblockModal, selectedFontSize, previewVideoUrl, genericLinkPreviewTarget, viewingImage, file, selectedFiles, isProfileOpen, isEditingProfileName, isEditingProfileAbout, isEditingProfilePhone, profileEditValue, userData, isEncryptionStrategyOpen]);
 
     useEffect(() => {
         const handleClickOutside = (e) => {
@@ -7947,8 +8549,9 @@ export default function Chat() {
         try {
             const token = localStorage.getItem('token');
             const memberIds = selectedGroupMembers.map(m => m._id);
+            const normalizedGroupName = groupSubject.trim() || 'Unnamed Group';
             const res = await axios.post('/api/groups/create', {
-                name: groupSubject.trim(),
+                name: normalizedGroupName,
                 icon: groupIcon || null,
                 memberIds,
                 permissions: groupPerms
@@ -7984,7 +8587,7 @@ export default function Chat() {
             // Open the group chat
             setSelectedGroup(newGroup);
             setSelectedUser(null);
-            fetchGroupMessages(newGroup._id);
+            fetchGroupMessages(newGroup._id || newGroup.id);
             setSnackbar({ message: 'Group created!', type: 'success', variant: 'system' });
         } catch (err) {
             console.error('createGroup error:', err);
@@ -12004,6 +12607,7 @@ export default function Chat() {
                     className={`wa-nav-icon-btn ${(!isProfileOpen && !isSettingsOpen) ? 'active' : ''}`}
                     data-tooltip={t('sidebar.chats')}
                     onClick={() => {
+                        if (isProfileOpen && !closeProfileDrawerSafely()) return;
                         setIsProfileOpen(false);
                         closeSettingsPanel();
                     }}
@@ -12013,15 +12617,6 @@ export default function Chat() {
                 </button>
             </div>
             <div className="wa-nav-bottom">
-                <button
-                    className={`wa-nav-icon-btn ${isSettingsOpen ? 'active' : ''}`}
-                    data-tooltip={t('sidebar.settings')}
-                    onClick={() => {
-                        openSettingsPanel();
-                    }}
-                >
-                    <Settings size={24} />
-                </button>
                 <button
                     className={`wa-nav-icon-btn wa-profile-btn ${isProfileOpen ? 'active' : ''}`}
                     onClick={() => {
@@ -12039,6 +12634,15 @@ export default function Chat() {
                         </div>
                     )}
                 </button>
+                <button
+                    className={`wa-nav-icon-btn ${isSettingsOpen ? 'active' : ''}`}
+                    data-tooltip={t('sidebar.settings')}
+                    onClick={() => {
+                        openSettingsPanel();
+                    }}
+                >
+                    <Settings size={24} />
+                </button>
             </div>
         </div>
     );
@@ -12046,6 +12650,15 @@ export default function Chat() {
     const renderProfileDrawer = () => (
         <div className={`wa-profile-drawer ${isProfileOpen ? 'active' : ''}`}>
             <div className="wa-drawer-header" style={{ position: 'relative', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px', background: 'transparent', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                <button
+                    type="button"
+                    className="wa-drawer-back-btn wa-back-pill"
+                    onClick={closeProfileDrawerSafely}
+                    aria-label="Back"
+                    style={{ position: 'absolute', left: 14, minWidth: 34, width: 34, padding: 0 }}
+                >
+                    <ArrowLeft size={16} />
+                </button>
 
                 <span style={{
                     position: 'absolute',
@@ -12094,6 +12707,20 @@ export default function Chat() {
                                         onKeyDown={(e) => e.key === 'Enter' && saveProfileField('name')}
                                     />
                                     <span style={{ fontSize: 12, color: '#94a3b8' }}>{25 - profileEditValue.length}</span>
+                                    <X
+                                        size={19}
+                                        color="#94a3b8"
+                                        style={{ cursor: 'pointer', marginLeft: 10 }}
+                                        onClick={() => {
+                                            const originalName = userData.displayName || userData.name || '';
+                                            if (profileEditValue !== originalName) {
+                                                setDiscardProfileEditAction('edit-only');
+                                                setIsDiscardProfileEditConfirmOpen(true);
+                                            } else {
+                                                confirmDiscardProfileEdit();
+                                            }
+                                        }}
+                                    />
                                     <CheckCheck size={20} color="#38bdf8" style={{ cursor: 'pointer', marginLeft: 10 }} onClick={() => saveProfileField('name')} />
                                 </div>
                             ) : (
@@ -12788,8 +13415,8 @@ export default function Chat() {
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
                                                                         const previewUrl = lp.url || msg.content;
-                                                                        if (getYouTubeVideoId(previewUrl)) setPreviewVideoUrl(previewUrl);
-                                                                        else window.open(previewUrl, '_blank');
+                                                                        if (getYouTubeVideoId(previewUrl)) openYouTubeChoice(previewUrl, lp);
+                                                                        else openGenericLinkPreview(previewUrl, lp);
                                                                     }}
                                                                     style={{ cursor: 'pointer', transition: 'none', marginBottom: (msg.content && msg.content.trim() !== lp.url.trim()) ? '8px' : '0' }}
                                                                 >
@@ -12801,7 +13428,7 @@ export default function Chat() {
                                                                                     className="wa-link-preview-play-btn"
                                                                                     onClick={(e) => {
                                                                                         e.stopPropagation();
-                                                                                        setPreviewVideoUrl(lp.url || msg.content);
+                                                                                        openYouTubeChoice(lp.url || msg.content, lp);
                                                                                     }}
                                                                                 >
                                                                                     <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
@@ -12816,9 +13443,9 @@ export default function Chat() {
                                                                             {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) ? (
                                                                                 <>
                                                                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                                                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ff0000" />
+                                                                                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#e5f4ff" />
                                                                                     </svg>
-                                                                                    <span style={{ color: '#ff0000', fontWeight: 'bold' }}>{lp.domain}</span>
+                                                                                    <span style={{ color: '#dbeafe', fontWeight: 'bold' }}>{lp.domain}</span>
                                                                                 </>
                                                                             ) : (
                                                                                 <>
@@ -16274,13 +16901,7 @@ export default function Chat() {
         <div className={`wa-search-sidebar ${isMessageSearchOpen ? 'active' : ''}`}>
             <div className="wa-header" style={{ height: 60, padding: '5px 10px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', background: 'transparent', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
                 <button
-                    onClick={() => {
-                        setIsMessageSearchOpen(false);
-                        setMessageSearchQuery('');
-                        if (searchSource.current === 'contact_info') {
-                            setIsContactInfoOpen(true);
-                        }
-                    }}
+                    onClick={closeMessageSearchPanel}
                     style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#38bdf8', justifySelf: 'start' }}
                 >
                     <span style={{ fontSize: 16, fontWeight: 500 }}>{t('lang_confirm.cancel')}</span>
@@ -16291,17 +16912,49 @@ export default function Chat() {
 
             <div style={{ padding: '20px 15px', background: 'transparent', flex: 1, overflowY: 'auto' }}>
 
-                <div style={{ background: 'rgba(15, 23, 42, 0.5)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center' }}>
+                <div className="wa-message-search-bar">
                     <Search size={20} color="#cbd5e1" style={{ marginRight: 12 }} />
                     <input
                         type="text"
-                        placeholder={t('settings.search_placeholder')}
+                        placeholder="Search messages"
                         value={messageSearchQuery}
                         onChange={(e) => setMessageSearchQuery(e.target.value)}
                         style={{ border: 'none', background: 'transparent', color: '#f8fafc', fontSize: 14, outline: 'none', width: '100%' }}
                         autoFocus
                     />
+                    <div className="wa-message-search-date-control">
+                        <button
+                            type="button"
+                            className={`wa-message-search-date-btn ${(messageSearchDate || isMessageDatePickerOpen) ? 'active' : ''}`}
+                            title="Search by date"
+                            aria-label={isMessageDatePickerOpen ? 'Close date picker' : 'Open date picker'}
+                            aria-pressed={isMessageDatePickerOpen}
+                            onClick={toggleMessageDatePicker}
+                        >
+                            <Calendar size={18} />
+                        </button>
+                        {renderMessageDatePicker()}
+                    </div>
+                    {(messageSearchQuery || messageSearchDate) && (
+                        <button
+                            type="button"
+                            className="wa-message-search-clear-btn"
+                            onClick={() => {
+                                setMessageSearchQuery('');
+                                setMessageSearchDate('');
+                            }}
+                            aria-label="Clear message search"
+                        >
+                            <X size={18} />
+                        </button>
+                    )}
                 </div>
+                {messageSearchDate && (
+                    <div className="wa-message-search-date-chip">
+                        <Calendar size={13} />
+                        <span>{new Date(`${messageSearchDate}T00:00:00`).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                    </div>
+                )}
 
                 <div style={{ marginTop: 20 }}>
                     {isSearching ? (
@@ -16320,17 +16973,19 @@ export default function Chat() {
                                             </div>
                                             <div className="wa-search-result-text" style={{ color: '#f8fafc' }}>
                                                 {/* Highlight Logic */}
-                                                {res.content.split(new RegExp(`(${messageSearchQuery})`, 'gi')).map((part, i) => (
-                                                    part.toLowerCase() === messageSearchQuery.toLowerCase() ?
-                                                        <span key={i} className="wa-search-highlight" style={{ color: '#38bdf8', fontWeight: 600 }}>{part}</span> : part
-                                                ))}
+                                                {messageSearchQuery
+                                                    ? res.content.split(new RegExp(`(${messageSearchQuery})`, 'gi')).map((part, i) => (
+                                                        part.toLowerCase() === messageSearchQuery.toLowerCase() ?
+                                                            <span key={i} className="wa-search-highlight">{part}</span> : part
+                                                    ))
+                                                    : (res.content || 'Message')}
                                             </div>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         ) : (
-                            messageSearchQuery ? (
+                            (messageSearchQuery || messageSearchDate) ? (
                                 <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 14, marginTop: 40 }}>
                                     No messages found.
                                 </div>
@@ -16827,7 +17482,7 @@ export default function Chat() {
                         <span style={{ fontSize: 16, fontWeight: 500, color: textColor, whiteSpace: 'nowrap', textAlign: 'center' }}>Group info</span>
                     </div>
 
-                    <div className="wa-contact-info-content" style={{ flex: 1, overflowY: 'auto', background: bgColor, paddingBottom: 40, height: 'calc(100% - 60px)' }}>
+                    <div className="wa-contact-info-content wa-group-info-content" style={{ flex: 1, overflowY: 'auto', background: bgColor, paddingBottom: 40, height: 'calc(100% - 60px)' }}>
                         <div style={{ background: itemBgColor, padding: '28px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
                             <div className="wa-contact-avatar-large" style={{ width: 200, height: 200, borderRadius: '50%', marginBottom: 20, overflow: 'hidden', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', display: 'flex', justifyContent: 'center', alignItems: 'center', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
                                 {displayPhoto ? (
@@ -16855,7 +17510,7 @@ export default function Chat() {
                                     <UserPlus size={24} color="#0EA5BE" />
                                     <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Add</span>
                                 </div>
-                                <div style={{ flex: 1, padding: '12px 0', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, cursor: 'pointer', maxWidth: 160, background: 'rgba(255, 255, 255, 0.03)' }} onClick={() => { setIsContactInfoOpen(false); setIsMessageSearchOpen(true); searchSource.current = 'contact_info'; }}>
+                                <div style={{ flex: 1, padding: '12px 0', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, cursor: 'pointer', maxWidth: 160, background: 'rgba(255, 255, 255, 0.03)' }} onClick={() => { setIsContactInfoOpen(false); openMessageSearchPanel('group_info'); }}>
                                     <Search size={24} color="#0EA5BE" />
                                     <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Search</span>
                                 </div>
@@ -16886,7 +17541,7 @@ export default function Chat() {
                             const previewItems = [...mediaMsgs, ...links, ...docs].slice(0, 4);
 
                             return (
-                                <div style={{ background: itemBgColor }}>
+                                <div className="wa-group-info-media-section" style={{ background: itemBgColor }}>
                                     <div className="clickable" onClick={() => { setSharedMediaTab('media'); setIsSharedMediaOpen(true); }} style={{ padding: '14px 30px', display: 'flex', flexDirection: 'column', cursor: 'pointer' }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                             <span style={{ color: textColor, fontSize: 16 }}>Media, links and docs</span>
@@ -16953,22 +17608,16 @@ export default function Chat() {
                             );
                         })()}
 
-                        <div className="wa-info-danger-actions" style={{ background: itemBgColor }}>
-                            {(() => {
-                                const starredCount = groupMessages.filter(m => m.is_starred).length;
-                                return (
-                                    <div className="clickable" onClick={() => { setIsContactInfoOpen(false); setIsStarredMessagesOpen(true); }} style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                            <Star size={24} color="#38bdf8" />
-                                            <span style={{ color: textColor, fontSize: 16 }}>Starred messages</span>
-                                        </div>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                            <span style={{ color: subTextColor, fontSize: 15 }}>{starredCount}</span>
-                                            <ChevronRight size={20} color="#38bdf8" />
-                                        </div>
-                                    </div>
-                                );
-                            })()}
+                        <div className="wa-info-danger-actions wa-group-info-actions-section" style={{ background: itemBgColor }}>
+                            <div className="clickable" onClick={() => { setIsContactInfoOpen(false); setIsStarredMessagesOpen(true); }} style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                    <Star size={24} color="#38bdf8" />
+                                    <span style={{ color: textColor, fontSize: 16 }}>Starred messages</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <ChevronRight size={20} color="#38bdf8" />
+                                </div>
+                            </div>
                             <div className="clickable" onClick={() => { setIsContactInfoOpen(false); setIsNotificationSettingsOpen(true); }} style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                                     <Bell size={24} color="#38bdf8" />
@@ -17007,9 +17656,9 @@ export default function Chat() {
                             </div>
                         </div>
 
-                        <div style={{ width: '100%', borderBottom: thickDivider }}></div>
+                        <div className="wa-group-info-post-members-divider" style={{ width: '100%', borderBottom: thickDivider }}></div>
 
-                        <div style={{ background: itemBgColor, padding: '14px 0' }}>
+                        <div className="wa-group-info-members-section" style={{ background: itemBgColor, padding: '14px 0' }}>
                             <div style={{ padding: '0 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                                 <span style={{ color: subTextColor, fontSize: 14, fontWeight: 500 }}>{membersCount} members</span>
                                 <Search
@@ -17114,7 +17763,7 @@ export default function Chat() {
                             </div>
                         </div>
 
-                        <div style={{ height: 40, background: bgColor }}></div>
+                        <div className="wa-group-info-bottom-spacer" style={{ height: 40, background: bgColor }}></div>
                     </div>
                 </div>
             );
@@ -17186,10 +17835,8 @@ export default function Chat() {
                         {/* Action Buttons */}
                         <div className="wa-contact-actions-row">
                             <div className="wa-contact-action-btn" onClick={() => {
-                                setIsContactInfoOpen(false); // Close contact info
-                                setIsMessageSearchOpen(true); // Open search sidebar
-                                searchSource.current = 'contact_info'; // Set source
-                                // Search query for selectedUser is already handled by renderSearchSidebar logic using selectedUser
+                                setIsContactInfoOpen(false);
+                                openMessageSearchPanel('contact_info');
                             }}>
                                 <div className="wa-action-icon-box" style={{ background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.2)' }}><Search size={20} color="#38bdf8" /></div>
                                 <span style={{ color: '#38bdf8' }}>Search</span>
@@ -17388,9 +18035,13 @@ export default function Chat() {
 
                                 return (
                                     <div className="wa-member-list">
-                                        {commonGroups.map(g => (
+                                        {commonGroups.map(g => {
+                                            const groupId = g._id || g.id;
+                                            const groupName = g.name || g.groupName || g.subject || 'Unnamed Group';
+                                            const memberCount = Array.isArray(g.members) ? g.members.length : 0;
+                                            return (
                                             <div
-                                                key={g._id}
+                                                key={groupId}
                                                 className="wa-common-group-item"
                                                 role="button"
                                                 tabIndex={0}
@@ -17401,17 +18052,18 @@ export default function Chat() {
                                                         setCommonGroupRedirectTarget(g);
                                                     }
                                                 }}
-                                                style={{ cursor: 'pointer' }}
+                                                style={{ cursor: 'pointer', background: 'transparent', border: 0, boxShadow: 'none', padding: '10px 0' }}
                                             >
-                                                <div className="wa-group-avatar" style={{ background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                    {g.icon ? <img src={g.icon} alt="grp" style={{ width: '100%', height: '100%', borderRadius: '50%' }} /> : <Users size={20} color="#abb4bb" />}
+                                                <div className="wa-common-group-plain-icon">
+                                                    {g.icon ? <img src={g.icon} alt="grp" /> : <Users size={19} color="#38d5ff" />}
                                                 </div>
                                                 <div className="wa-group-info">
-                                                    <div className="wa-group-name">{g.name}</div>
-                                                    <div className="wa-group-members">{g.members?.length || 0} members</div>
+                                                    <div className="wa-group-name">{groupName}</div>
+                                                    <div className="wa-group-members">{memberCount} members</div>
                                                 </div>
                                             </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 );
                             })()}
@@ -17664,6 +18316,97 @@ export default function Chat() {
                             style={{ opacity: (loading || !!error || !securityCode || !fingerprint || !targetId) ? 0.6 : 1 }}
                         >
                             {isVerified ? 'Verified' : 'Verify Code'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderEncryptionStrategyModal = () => {
+        if (!isEncryptionStrategyOpen) return null;
+        const strategyItems = [
+            {
+                id: 'ai',
+                icon: MessageSquare,
+                title: 'AI helps polish messages before sending.',
+                detail: 'Neural Chat can check grammar, tone, and meaningfulness so users can send clearer messages without leaving the chat.'
+            },
+            {
+                id: 'events',
+                icon: Calendar,
+                title: 'Chat events turn into reminders.',
+                detail: 'Plans discussed in chat can become event reminders, keeping meetings, calls, and important moments visible inside the app.'
+            },
+            {
+                id: 'communities',
+                icon: Users,
+                title: 'Communities keep related groups together.',
+                detail: 'Users can organize multiple groups under one community, making class, team, project, or family spaces easier to manage.'
+            },
+            {
+                id: 'privacy',
+                icon: ShieldCheck,
+                title: 'Privacy controls are built into everyday chat.',
+                detail: 'Read receipts, typing status, screenshot protection, watermarks, and clear-chat controls can be adjusted from settings.'
+            }
+        ];
+
+        return (
+            <div
+                className="wa-mute-modal-overlay wa-encryption-modal-overlay"
+                onClick={() => {
+                    setIsEncryptionStrategyOpen(false);
+                    setOpenEncryptionStrategyPoint(null);
+                }}
+                style={{ zIndex: 5000 }}
+            >
+                <div
+                    className="wa-mute-modal wa-encryption-modal wa-encryption-strategy-modal"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <div className="wa-encryption-modal-header">
+                        <div className="wa-encryption-icon-shell">
+                            <ShieldCheck size={20} color="#0EA5BE" />
+                        </div>
+                        <div>
+                            <h3 className="wa-encryption-title">Neural Chat features</h3>
+                            <p className="wa-encryption-subtitle">What makes conversations smarter and safer</p>
+                        </div>
+                    </div>
+
+                    <div className="wa-encryption-code-box">
+                        <div className="wa-encryption-code-label">Feature highlights</div>
+                        <div className="wa-encryption-strategy-list">
+                            {strategyItems.map(({ id, icon: Icon, title, detail }) => {
+                                const isOpen = openEncryptionStrategyPoint === id;
+                                return (
+                                <div key={id} className={`wa-encryption-strategy-item ${isOpen ? 'open' : ''}`}>
+                                    <button
+                                        type="button"
+                                        className="wa-encryption-strategy-summary"
+                                        onClick={() => setOpenEncryptionStrategyPoint(isOpen ? null : id)}
+                                    >
+                                        <span className="wa-encryption-strategy-icon"><Icon size={16} /></span>
+                                        <span>{title}</span>
+                                        <ChevronDown size={16} className="wa-encryption-strategy-chevron" />
+                                    </button>
+                                    {isOpen && <p>{detail}</p>}
+                                </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <div className="wa-encryption-actions">
+                        <button
+                            onClick={() => {
+                                setIsEncryptionStrategyOpen(false);
+                                setOpenEncryptionStrategyPoint(null);
+                            }}
+                            className="wa-encryption-btn wa-encryption-btn-primary"
+                        >
+                            Got it
                         </button>
                     </div>
                 </div>
@@ -17941,8 +18684,8 @@ export default function Chat() {
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
                                                                         const previewUrl = lp.url || msg.content;
-                                                                        if (getYouTubeVideoId(previewUrl)) setPreviewVideoUrl(previewUrl);
-                                                                        else window.open(previewUrl, '_blank');
+                                                                        if (getYouTubeVideoId(previewUrl)) openYouTubeChoice(previewUrl, lp);
+                                                                        else openGenericLinkPreview(previewUrl, lp);
                                                                     }}
                                                                     style={{ cursor: 'pointer', transition: 'none', marginBottom: (msg.content && msg.content.trim() !== lp.url.trim()) ? '8px' : '0' }}
                                                                 >
@@ -17954,7 +18697,7 @@ export default function Chat() {
                                                                                     className="wa-link-preview-play-btn"
                                                                                     onClick={(e) => {
                                                                                         e.stopPropagation();
-                                                                                        setPreviewVideoUrl(lp.url || msg.content);
+                                                                                        openYouTubeChoice(lp.url || msg.content, lp);
                                                                                     }}
                                                                                 >
                                                                                     <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
@@ -17969,9 +18712,9 @@ export default function Chat() {
                                                                             {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) ? (
                                                                                 <>
                                                                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                                                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ff0000" />
+                                                                                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#e5f4ff" />
                                                                                     </svg>
-                                                                                    <span style={{ color: '#ff0000', fontWeight: 'bold' }}>{lp.domain}</span>
+                                                                                    <span style={{ color: '#dbeafe', fontWeight: 'bold' }}>{lp.domain}</span>
                                                                                 </>
                                                                             ) : (
                                                                                 <>
@@ -18182,8 +18925,8 @@ export default function Chat() {
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     const previewUrl = lp.url || infoMessage.content;
-                                                    if (getYouTubeVideoId(previewUrl)) setPreviewVideoUrl(previewUrl);
-                                                    else window.open(previewUrl, '_blank');
+                                                    if (getYouTubeVideoId(previewUrl)) openYouTubeChoice(previewUrl, lp);
+                                                    else openGenericLinkPreview(previewUrl, lp);
                                                 }}
                                                 style={{ cursor: 'pointer', transition: 'none', marginBottom: (infoMessage.content && infoMessage.content.trim() !== lp.url.trim()) ? '8px' : '0' }}
                                             >
@@ -18195,7 +18938,7 @@ export default function Chat() {
                                                                 className="wa-link-preview-play-btn"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
-                                                                    setPreviewVideoUrl(lp.url || infoMessage.content);
+                                                                    openYouTubeChoice(lp.url || infoMessage.content, lp);
                                                                 }}
                                                             >
                                                                 <div className="wa-play-icon"><Play size={32} color="white" fill="white" /></div>
@@ -18210,9 +18953,9 @@ export default function Chat() {
                                                         {(lp.domain?.includes('youtube') || lp.domain?.includes('youtu.be')) ? (
                                                             <>
                                                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ff0000" />
+                                                                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#e5f4ff" />
                                                                 </svg>
-                                                                <span style={{ color: '#ff0000', fontWeight: 'bold' }}>{lp.domain}</span>
+                                                                <span style={{ color: '#dbeafe', fontWeight: 'bold' }}>{lp.domain}</span>
                                                             </>
                                                         ) : (
                                                             <>
@@ -19514,8 +20257,7 @@ export default function Chat() {
                                 </div>
                                 <div className="wa-dropdown-item" onClick={() => { setIsGlobalStarredOpen(true); setOpenDropdown(null); }}>
                                     <Star size={18} style={{ marginRight: 12, color: '#38bdf8' }} />
-                                    <span style={{ flex: 1 }}>Starred messages</span>
-                                    <span style={{ color: '#94a3b8', fontSize: 13, fontWeight: 600 }}>{globalStarredCount}</span>
+                            <span style={{ flex: 1 }}>Starred messages</span>
                                 </div>
                                 <div className="wa-dropdown-item" onClick={() => { setIsArchivedChatsOpen(true); setOpenDropdown(null); }}>
                                     <Archive size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> Archived
@@ -19635,8 +20377,19 @@ export default function Chat() {
                                 <div className="wa-dropdown-item" onClick={() => { setIsClearChatConfirmOpen(true); setOpenDropdown(null); }}>
                                     <Trash2 size={18} style={{ marginRight: 12, color: '#54656f' }} /> Clear messages
                                 </div>
-                                <div className="wa-dropdown-item danger-text" onClick={() => { requestExitGroup(selectedGroup); setOpenDropdown(null); }}>
-                                    <LogOut size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Exit group
+                                <div className="wa-dropdown-item danger-text" onClick={() => {
+                                    if (data.isCommunityAnnouncements) {
+                                        const communityTarget = selectedCommunity || communities.find(c =>
+                                            String(c.announcements?._id || c.announcements) === String(data._id || data.id) ||
+                                            String(c._id || c.id) === String(data.community_id || data.communityId)
+                                        );
+                                        handleExitCommunity(communityTarget || data);
+                                    } else {
+                                        requestExitGroup(selectedGroup);
+                                    }
+                                    setOpenDropdown(null);
+                                }}>
+                                    <LogOut size={18} style={{ marginRight: 12, color: '#ea0038' }} /> {data.isCommunityAnnouncements ? 'Exit community' : 'Exit group'}
                                 </div>
                             </>
                         )}
@@ -21749,7 +22502,7 @@ export default function Chat() {
                                                                                             toggleSelection(msg);
                                                                                             return;
                                                                                         }
-                                                                                        if (youtubeId) setPreviewVideoUrl(actualUrl);
+                                                                                        if (youtubeId) openLinkAction();
                                                                                     }}
                                                                                     aria-label="Play YouTube video in app"
                                                                                 >
@@ -21807,6 +22560,7 @@ export default function Chat() {
     const totalUnreadGroups = groups.filter(g => (g.unreadCount || 0) > 0).length;
 
     const getCustomListUnread = (list) => {
+        if (list?.muted) return 0;
         return list.members.reduce((acc, memberId) => {
             const u = users.find(x => String(x._id) === String(memberId));
             const g = groups.find(x => String(x._id || x.id) === String(memberId));
@@ -21814,6 +22568,123 @@ export default function Chat() {
             const target = u || g || c;
             return acc + ((target && !effectiveArchivedChatIds.includes(String(target._id || target.id)) && target.unreadCount > 0) ? 1 : 0);
         }, 0);
+    };
+
+    const openCustomListContextMenu = (event, list) => {
+        event.preventDefault();
+        event.stopPropagation();
+        customListContextOpenedRef.current = true;
+        const nextListId = String(list?._id || list?.id || '');
+        const activeListId = String(customListContextMenu?.list?._id || customListContextMenu?.list?.id || '');
+        if (nextListId && activeListId === nextListId) {
+            closeCustomListContextMenu();
+            return;
+        }
+        const point = event.touches?.[0] || event.changedTouches?.[0] || event;
+        setCustomListContextMenu({
+            list,
+            x: point.clientX || 0,
+            y: point.clientY || 0
+        });
+    };
+
+    const closeCustomListContextMenu = () => {
+        setCustomListContextMenu(null);
+        if (customListLongPressRef.current) {
+            clearTimeout(customListLongPressRef.current);
+            customListLongPressRef.current = null;
+        }
+    };
+
+    const updateCustomListById = (listId, updater) => {
+        setCustomLists(prev => prev.map(list => String(list._id || list.id) === String(listId) ? updater(list) : list));
+    };
+
+    const moveCustomList = (listId, direction) => {
+        setCustomLists(prev => {
+            const index = prev.findIndex(list => String(list._id || list.id) === String(listId));
+            if (index < 0) return prev;
+            const nextIndex = direction === 'up' ? index - 1 : index + 1;
+            if (nextIndex < 0 || nextIndex >= prev.length) return prev;
+            const next = [...prev];
+            [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+            return next;
+        });
+    };
+
+    const openEditCustomListDrawer = (list) => {
+        setEditingCustomList(list);
+        setEditListName(list.name || '');
+        setEditListMembers([...(list.members || [])]);
+        setEditListSearchQuery('');
+        setIsEditListPickerOpen(false);
+        setShowCustomListsDropdown(false);
+        closeCustomListContextMenu();
+    };
+
+    const saveEditedCustomList = () => {
+        if (!editingCustomList) return;
+        const listId = editingCustomList._id || editingCustomList.id;
+        const trimmedName = editListName.trim();
+        if (!trimmedName) {
+            setSnackbar({ message: 'List name is required', type: 'error', variant: 'system' });
+            return;
+        }
+        setCustomLists(prev => prev.map(list => String(list._id || list.id) === String(listId)
+            ? { ...list, name: trimmedName, members: editListMembers }
+            : list
+        ));
+        setIsEditListPickerOpen(false);
+        setEditingCustomList(null);
+    };
+
+    const deleteCustomList = (list) => {
+        const listId = list?._id || list?.id;
+        if (!listId) return;
+        if (!window.confirm(`Delete list "${list.name}"?`)) return;
+        setCustomLists(prev => prev.filter(item => String(item._id || item.id) !== String(listId)));
+        if (filterType === `custom_${listId}`) setFilterType('all');
+        if (editingCustomList && String(editingCustomList._id || editingCustomList.id) === String(listId)) {
+            setIsEditListPickerOpen(false);
+            setEditingCustomList(null);
+        }
+        closeCustomListContextMenu();
+    };
+
+    const renderCustomListContextMenu = () => {
+        if (!customListContextMenu?.list || !showCustomListsDropdown) return null;
+        const { list } = customListContextMenu;
+        const listId = list._id || list.id;
+
+        return (
+            <div className="wa-custom-list-context-menu" onClick={(e) => e.stopPropagation()}>
+                <button type="button" onClick={() => {
+                    setListMuteTarget(list);
+                    setListMuteOption('8');
+                    setIsListMuteModalOpen(true);
+                    closeCustomListContextMenu();
+                }}>
+                    {list.muted ? <Bell size={16} /> : <BellOff size={16} />}
+                    {list.muted ? 'Unmute' : 'Mute'}
+                </button>
+                <button type="button" onClick={() => openEditCustomListDrawer(list)}>
+                    <Pencil size={16} />
+                    Edit
+                </button>
+                <button type="button" className="danger" onClick={() => deleteCustomList(list)}>
+                    <Trash2 size={16} />
+                    Delete
+                </button>
+                <button type="button" onClick={() => {
+                    setIsReorderListsOpen(true);
+                    setShowCustomListsDropdown(false);
+                    closeCustomListContextMenu();
+                }}>
+                    <ChevronUp size={16} />
+                    Reorder lists
+                </button>
+            </div>
+        );
     };
 
     const renderNotificationDetails = () => {
@@ -21901,6 +22772,7 @@ export default function Chat() {
 
 
     const handleMouseDownResize = (e) => {
+        if (isMobile) return;
         e.preventDefault();
         setInlinePaintPaletteOpen(false);
         setInlineTextPaletteOpen(false);
@@ -21909,8 +22781,9 @@ export default function Chat() {
 
         const handleMouseMove = (moveEvent) => {
             const delta = moveEvent.clientX - startX;
-            const maxWidth = window.innerWidth / 2;
-            setLeftPanelWidth(Math.max(260, Math.min(maxWidth, startWidth + delta)));
+            const minWidth = 320;
+            const maxWidth = Math.max(minWidth, Math.min(Math.floor(window.innerWidth * 0.55), window.innerWidth - 360));
+            setLeftPanelWidth(Math.max(minWidth, Math.min(maxWidth, startWidth + delta)));
         };
 
         const handleMouseUp = () => {
@@ -22141,10 +23014,218 @@ export default function Chat() {
         </div>
     );
 
+    const getListMemberTarget = (memberId) => {
+        const targetUser = users.find(u => String(u._id || u.id) === String(memberId));
+        const targetGroup = groups.find(g => String(g._id || g.id) === String(memberId));
+        const targetComm = communities.find(c => String(c._id || c.id) === String(memberId));
+        const target = targetUser || targetGroup || targetComm;
+        if (!target) return null;
+        return {
+            target,
+            id: memberId,
+            name: target.name || (target.firstName ? `${target.firstName} ${target.lastName || ''}` : 'Unknown'),
+            type: targetComm ? 'Community' : (targetGroup ? 'Group' : 'Contact'),
+            avatar: target.profilePic || target.avatar || target.icon || target.image,
+            icon: targetComm || targetGroup ? <Users size={20} color="#7dd3fc" /> : <User size={20} color="#7dd3fc" />
+        };
+    };
+
+    const renderEditListDrawer = () => {
+        if (!editingCustomList) return null;
+        const listId = editingCustomList._id || editingCustomList.id;
+        const getCandidateName = (item) => item.name || (item.firstName ? `${item.firstName} ${item.lastName || ''}` : 'Unknown');
+        const candidates = [...users, ...groups, ...communities]
+            .filter(item => {
+                if (effectiveArchivedChatIds.includes(String(item._id || item.id))) return false;
+                const name = getCandidateName(item);
+                return name.toLowerCase().includes(editListSearchQuery.trim().toLowerCase());
+            })
+            .sort((a, b) => getCandidateName(a).localeCompare(getCandidateName(b), undefined, { sensitivity: 'base' }));
+        let previousCandidateLetter = '';
+
+        return (
+            <div className="wa-drawer open wa-edit-list-drawer">
+                <div className="wa-edit-list-header">
+                    <button type="button" onClick={() => {
+                        setIsEditListPickerOpen(false);
+                        setEditingCustomList(null);
+                    }}><ArrowLeft size={24} /></button>
+                    <input value={editListName} onChange={(e) => setEditListName(e.target.value)} aria-label="List name" />
+                    <button type="button" className="danger" onClick={() => deleteCustomList(editingCustomList)}><Trash2 size={22} /></button>
+                    <button type="button" onClick={saveEditedCustomList}><Check size={24} /></button>
+                </div>
+
+                <div className="wa-edit-list-content">
+                    <div className="wa-edit-list-section-title">Included</div>
+                    <button
+                        type="button"
+                        className="wa-edit-list-add-row"
+                        onClick={() => {
+                            setIsEditListPickerOpen(prev => {
+                                const nextOpen = !prev;
+                                if (!nextOpen) setEditListSearchQuery('');
+                                return nextOpen;
+                            });
+                        }}
+                    >
+                        <span><Plus size={24} /></span>
+                        Add people or groups
+                    </button>
+
+                    <div className="wa-edit-list-members">
+                        {editListMembers.map(memberId => {
+                            const item = getListMemberTarget(memberId);
+                            if (!item) return null;
+                            return (
+                                <div key={memberId} className="wa-edit-list-member-row">
+                                    <div className="wa-edit-list-avatar">
+                                        {item.avatar ? <img src={item.avatar} alt="" /> : item.icon}
+                                    </div>
+                                    <div>
+                                        <div className="wa-edit-list-member-name">{item.name}</div>
+                                        <div className="wa-edit-list-member-type">{item.type}</div>
+                                    </div>
+                                    <button type="button" onClick={() => setEditListMembers(prev => prev.filter(id => String(id) !== String(memberId)))}><X size={18} /></button>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {isEditListPickerOpen && (
+                        <>
+                            <div className="wa-edit-list-section-title">Add chats</div>
+                            <div className="wa-edit-list-search">
+                                <Search size={18} />
+                                <input
+                                    value={editListSearchQuery}
+                                    onChange={(e) => setEditListSearchQuery(e.target.value)}
+                                    placeholder="Search people or groups"
+                                    autoFocus
+                                />
+                            </div>
+                            <div className="wa-edit-list-candidates">
+                                {candidates.map(item => {
+                                    const id = item._id || item.id;
+                                    const info = getListMemberTarget(id);
+                                    if (!info) return null;
+                                    const selected = editListMembers.some(memberId => String(memberId) === String(id));
+                                    const candidateLetter = (info.name || '#').trim().charAt(0).toUpperCase();
+                                    const sectionLetter = /[A-Z]/.test(candidateLetter) ? candidateLetter : '#';
+                                    const showLetter = sectionLetter !== previousCandidateLetter;
+                                    previousCandidateLetter = sectionLetter;
+                                    return (
+                                        <React.Fragment key={id}>
+                                            {showLetter && <div className="wa-edit-list-alpha-header">{sectionLetter}</div>}
+                                            <button
+                                                type="button"
+                                                className={selected ? 'selected' : ''}
+                                                onClick={() => setEditListMembers(prev => selected ? prev.filter(memberId => String(memberId) !== String(id)) : [...prev, id])}
+                                            >
+                                                <div className="wa-edit-list-avatar">{info.avatar ? <img src={info.avatar} alt="" /> : info.icon}</div>
+                                                <div>
+                                                    <div className="wa-edit-list-member-name">{info.name}</div>
+                                                    <div className="wa-edit-list-member-type">{info.type}</div>
+                                                </div>
+                                                {selected && <Check size={18} />}
+                                            </button>
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </div>
+                        </>
+                    )}
+
+                    <div className="wa-edit-list-section-title">Notifications</div>
+                    <label className="wa-edit-list-toggle-row">
+                        <span>Mute</span>
+                        <input
+                            type="checkbox"
+                            checked={!!editingCustomList.muted}
+                            onChange={(e) => {
+                                const muted = e.target.checked;
+                                updateCustomListById(listId, current => ({ ...current, muted }));
+                                setEditingCustomList(prev => ({ ...prev, muted }));
+                            }}
+                        />
+                    </label>
+                </div>
+            </div>
+        );
+    };
+
+    const renderListMuteModal = () => {
+        if (!isListMuteModalOpen || !listMuteTarget) return null;
+        const listId = listMuteTarget._id || listMuteTarget.id;
+        return (
+            <div className="wa-mute-modal-overlay" onClick={() => setIsListMuteModalOpen(false)}>
+                <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()}>
+                    <div className="wa-mute-modal-content">
+                        <div className="wa-mute-header-centered">
+                            <div className="wa-mute-icon-wrapper"><BellOff size={28} /></div>
+                            <h3>{listMuteTarget.muted ? 'Unmute list?' : `Mute ${listMuteTarget.name}?`}</h3>
+                        </div>
+                        {!listMuteTarget.muted && (
+                            <div className="wa-mute-options-spaced">
+                                {[
+                                    ['1', '1 hour'],
+                                    ['8', '8 hours'],
+                                    ['24', '1 day'],
+                                    ['always', 'Always']
+                                ].map(([value, label]) => (
+                                    <div key={value} className="wa-mute-option-item" onClick={() => setListMuteOption(value)}>
+                                        <div className={`wa-radio-circle-custom ${listMuteOption === value ? 'selected' : ''}`}>
+                                            {listMuteOption === value && <div className="wa-radio-inner-custom" />}
+                                        </div>
+                                        <span>{label}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        <div className="wa-mute-footer-centered">
+                            <button className="wa-mute-btn-cancel" onClick={() => setIsListMuteModalOpen(false)}>Cancel</button>
+                            <button className="wa-mute-btn-confirm" onClick={() => {
+                                updateCustomListById(listId, current => ({
+                                    ...current,
+                                    muted: !current.muted,
+                                    mutedUntil: current.muted ? null : (listMuteOption === 'always' ? 'always' : Date.now() + Number(listMuteOption) * 60 * 60 * 1000)
+                                }));
+                                setIsListMuteModalOpen(false);
+                                setListMuteTarget(null);
+                            }}>{listMuteTarget.muted ? 'Unmute' : 'Mute'}</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderReorderListsDrawer = () => isReorderListsOpen && (
+        <div className="wa-drawer open wa-edit-list-drawer">
+            <div className="wa-edit-list-header">
+                <button type="button" onClick={() => setIsReorderListsOpen(false)}><ArrowLeft size={24} /></button>
+                <div className="wa-edit-list-title">Reorder lists</div>
+                <button type="button" onClick={() => setIsReorderListsOpen(false)}><Check size={24} /></button>
+            </div>
+            <div className="wa-edit-list-content">
+                {customLists.map((list, index) => (
+                    <div key={list._id || list.id} className="wa-edit-list-member-row">
+                        <div className="wa-edit-list-member-name">{list.name}</div>
+                        <div className="wa-reorder-actions">
+                            <button type="button" disabled={index === 0} onClick={() => moveCustomList(list._id || list.id, 'up')}><ChevronUp size={18} /></button>
+                            <button type="button" disabled={index === customLists.length - 1} onClick={() => moveCustomList(list._id || list.id, 'down')}><ChevronDown size={18} /></button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+
     const renderLeftPanel = () => (
-        <div className="wa-left-panel" style={{ width: leftPanelWidth, minWidth: isMobile ? '100%' : 260, maxWidth: isMobile ? '100%' : '50vw', flex: 'none', position: 'relative', overflow: 'hidden' }}>
+        <div className="wa-left-panel" style={{ width: isMobile ? '100%' : leftPanelWidth, minWidth: isMobile ? '100%' : 320, maxWidth: isMobile ? '100%' : '55vw', flex: 'none', position: 'relative', overflow: 'hidden' }}>
             {/* Drawers */}
             {isCreateListOpen && renderCreateListDrawer()}
+            {renderEditListDrawer()}
+            {renderReorderListsDrawer()}
             {isProfileOpen && renderProfileDrawer()}
             {isNewChatOpen && renderNewChatDrawer()}
             {isPhoneNumberPanelOpen && renderPhoneNumberPanel()}
@@ -22155,18 +23236,17 @@ export default function Chat() {
             {isGlobalStarredOpen && renderGlobalStarredDrawer()}
             {isRemindersModalOpen && (
                 <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: '#111b32', zIndex: 500, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)', background: '#111b32', padding: isMobile ? '12px 14px 10px' : '14px 18px 12px' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '40px 1fr 40px', alignItems: 'center', minHeight: 36 }}>
+                    <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)', background: '#111b32', padding: isMobile ? '12px 14px' : '14px 18px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '74px 1fr 42px' : '86px 1fr 118px', alignItems: 'center', gap: 8, minHeight: 38 }}>
                             <button
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', padding: 0, width: 40, height: 36 }}
+                                className="wa-back-pill"
+                                style={{ minWidth: 0, width: isMobile ? 74 : 86, height: 34 }}
                                 onClick={() => setIsRemindersModalOpen(false)}
                             >
-                                <ArrowLeft size={24} color="#38bdf8" />
+                                <ArrowLeft size={16} />
+                                <span>Back</span>
                             </button>
-                            <span style={{ fontSize: isMobile ? '17px' : '18px', color: '#f8fafc', fontWeight: 600, whiteSpace: 'nowrap', textAlign: 'center' }}>Event Reminders</span>
-                            <div />
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                            <span style={{ fontSize: isMobile ? '16px' : '18px', color: '#f8fafc', fontWeight: 700, whiteSpace: 'nowrap', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis' }}>Event Reminders</span>
                             <button
                                 type="button"
                                 onClick={handleClearAllReminders}
@@ -22176,7 +23256,7 @@ export default function Chat() {
                                     alignItems: 'center',
                                     gap: 6,
                                     justifyContent: 'center',
-                                    minWidth: isMobile ? 132 : 152,
+                                    minWidth: isMobile ? 42 : 112,
                                     border: visibleReminders.length === 0
                                         ? '1px solid rgba(100, 116, 139, 0.18)'
                                         : '1px solid rgba(251, 113, 133, 0.34)',
@@ -22184,8 +23264,8 @@ export default function Chat() {
                                         ? 'linear-gradient(135deg, rgba(51, 65, 85, 0.18), rgba(30, 41, 59, 0.16))'
                                         : 'linear-gradient(135deg, rgba(127, 29, 29, 0.22) 0%, rgba(159, 18, 57, 0.2) 52%, rgba(190, 24, 93, 0.18) 100%)',
                                     color: visibleReminders.length === 0 ? '#64748b' : '#fecdd3',
-                                    borderRadius: 14,
-                                    padding: isMobile ? '11px 16px' : '12px 18px',
+                                    borderRadius: 999,
+                                    padding: isMobile ? '9px 10px' : '10px 14px',
                                     fontSize: isMobile ? 15 : 15,
                                     fontWeight: 700,
                                     lineHeight: 1,
@@ -22196,7 +23276,7 @@ export default function Chat() {
                                 }}
                             >
                                 <Trash2 size={isMobile ? 16 : 16} />
-                                <span>Clear all</span>
+                                {!isMobile && <span>Clear all</span>}
                             </button>
                         </div>
                     </div>
@@ -22419,8 +23499,14 @@ export default function Chat() {
 
                                     <div>
                                         {sortedEvents.length === 0 ? (
-                                            <div style={{ textAlign: 'center', color: '#94a3b8', marginTop: 40, padding: isMobile ? '0 12px' : 0 }}>
-                                                No reminders are visible here. New or restored reminders will appear automatically.
+                                            <div style={{ textAlign: 'center', color: '#94a3b8', marginTop: 48, padding: isMobile ? '0 12px' : '0 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                                                <div style={{ width: 48, height: 48, borderRadius: '50%', border: '1px solid rgba(56, 189, 248, 0.2)', background: 'rgba(56, 189, 248, 0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                    <Calendar size={22} color="#38bdf8" />
+                                                </div>
+                                                <div style={{ color: '#eaf6ff', fontWeight: 700, fontSize: 15 }}>No event reminders</div>
+                                                <div style={{ color: '#9fb7c8', fontSize: 13, lineHeight: 1.45, maxWidth: 260 }}>
+                                                    Events you create or accept will appear here when reminders are available.
+                                                </div>
                                             </div>
                                         ) : (
                                             sortedEvents.map((m, i) => renderEventCard(m, `all-${m._id || i}`, false))
@@ -22491,19 +23577,21 @@ export default function Chat() {
 
 
             {/* Unread Messages Banner - Moved above Search Box */}
-            {(totalUnread > 0 && showNotificationDetails) && (
+            {showNotificationDetails && (
                 <div className="wa-unread-banner-field">
                     <div className="wa-unread-banner-header">
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                                 <Bell size={18} color="#0EA5BE" />
-                                <span className="wa-unread-header-badge">{totalUnread}</span>
+                                {totalUnread > 0 && <span className="wa-unread-header-badge">{totalUnread}</span>}
                             </div>
                             <span style={{ color: '#0EA5BE', fontWeight: 600 }}>{t('notifications.unread_title', 'Unread Messages')}</span>
                         </div>
                     </div>
                     <div className="wa-unread-banner-list">
-                        {[
+                        {totalUnread === 0 ? (
+                            <div className="wa-empty-inline-state">No unread notifications right now.</div>
+                        ) : ([
                             ...users.filter(u => u.unreadCount > 0 && !(u.requestStatus === 'rejected' && u.requestUpdatedAt && (new Date() - new Date(u.requestUpdatedAt)) < 24 * 60 * 60 * 1000)).map(u => ({ ...u, is_group: false, is_community: false })),
                             ...groups.filter(g => g.unreadCount > 0).map(g => ({ ...g, is_group: true, is_community: false })),
                             ...communities.filter(c => (c.unreadCount || 0) > 0).map(c => ({ ...c, is_community: true, is_group: false, _id: c.id, lastMessage: c.announcements?.lastMessage })),
@@ -22602,7 +23690,7 @@ export default function Chat() {
                                         <span className="wa-unread-item-count">{chat.unreadCount}</span>
                                     </div>
                                 </div>
-                            ))}
+                            )))}
                     </div>
                 </div>
             )}
@@ -22695,7 +23783,13 @@ export default function Chat() {
                     <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginLeft: 4 }}>
                         <button
                             className={`wa-nav-icon-btn wa-filter-plus-btn ${showCustomListsDropdown ? 'active' : ''}`}
-                            onClick={(e) => { e.stopPropagation(); setShowCustomListsDropdown(!showCustomListsDropdown); }}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowCustomListsDropdown(prev => {
+                                    if (prev) closeCustomListContextMenu();
+                                    return !prev;
+                                });
+                            }}
                             style={{ width: 26, height: 26, padding: 0, justifyContent: 'center', display: 'flex', alignItems: 'center', background: showCustomListsDropdown ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255, 255, 255, 0.05)', borderRadius: '50%', border: '1px solid rgba(255, 255, 255, 0.1)' }}
                         >
                             <ChevronDown size={14} color="#38bdf8" />
@@ -22708,40 +23802,66 @@ export default function Chat() {
                 <>
                     <div
                         style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999 }}
-                        onClick={(e) => { e.stopPropagation(); setShowCustomListsDropdown(false); }}
+                        onClick={(e) => { e.stopPropagation(); setShowCustomListsDropdown(false); closeCustomListContextMenu(); }}
                     />
-                    <div style={{ position: 'absolute', top: 150, right: 15, width: 220, zIndex: 1000, background: 'rgba(15, 23, 42, 0.9)', backdropFilter: 'blur(20px)', borderRadius: '12px', padding: '8px 0', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                    <div className="wa-custom-lists-popover" style={{ position: 'absolute', top: 150, right: 15, width: 260, zIndex: 1000, background: 'rgba(8, 28, 46, 0.98)', backdropFilter: 'blur(20px)', borderRadius: '14px', padding: '8px 0', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', border: '1px solid rgba(56, 189, 248, 0.22)' }}>
                         {customLists.map(list => {
                             const unreadCount = getCustomListUnread(list);
+                            const listId = list._id || list.id;
+                            const isContextActive = String(customListContextMenu?.list?._id || customListContextMenu?.list?.id || '') === String(listId);
                             return (
-                                <div
-                                    key={list._id || list.id}
-                                    className="wa-menu-item"
-                                    onClick={(e) => { e.stopPropagation(); setFilterType('custom_' + (list._id || list.id)); setShowCustomListsDropdown(false); }}
-                                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', cursor: 'pointer', color: '#f8fafc', background: 'transparent' }}
-                                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.1)'}
-                                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                                >
-                                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px', fontSize: '15px' }}>{list.name}</span>
-                                    {unreadCount > 0 && (
-                                        <span style={{
-                                            background: 'linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%)',
-                                            color: '#ffffff',
-                                            fontSize: '12px',
-                                            fontWeight: 'bold',
-                                            height: '20px',
-                                            minWidth: '20px',
-                                            borderRadius: '10px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            padding: '0 6px',
-                                            marginLeft: '8px'
-                                        }}>
-                                            {unreadCount}
-                                        </span>
-                                    )}
-                                </div>
+                                <React.Fragment key={listId}>
+                                    <div
+                                        className="wa-menu-item"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (customListContextOpenedRef.current) {
+                                                customListContextOpenedRef.current = false;
+                                                return;
+                                            }
+                                            setFilterType('custom_' + listId);
+                                            setShowCustomListsDropdown(false);
+                                            closeCustomListContextMenu();
+                                        }}
+                                        onContextMenu={(e) => openCustomListContextMenu(e, list)}
+                                        onTouchStart={(e) => {
+                                            if (customListLongPressRef.current) clearTimeout(customListLongPressRef.current);
+                                            customListLongPressRef.current = setTimeout(() => openCustomListContextMenu(e, list), 550);
+                                        }}
+                                        onTouchEnd={() => {
+                                            if (customListLongPressRef.current) clearTimeout(customListLongPressRef.current);
+                                            customListLongPressRef.current = null;
+                                        }}
+                                        onTouchMove={() => {
+                                            if (customListLongPressRef.current) clearTimeout(customListLongPressRef.current);
+                                            customListLongPressRef.current = null;
+                                        }}
+                                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 18px', cursor: 'pointer', color: '#f8fafc', background: isContextActive ? 'rgba(56, 189, 248, 0.12)' : 'transparent', gap: 10 }}
+                                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.1)'}
+                                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isContextActive ? 'rgba(56, 189, 248, 0.12)' : 'transparent'}
+                                    >
+                                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0, fontSize: '15px', fontWeight: 700 }}>{list.name}</span>
+                                        {list.muted && <BellOff size={14} color="#94a3b8" />}
+                                        {unreadCount > 0 && (
+                                            <span style={{
+                                                background: '#0EA5BE',
+                                                color: '#ffffff',
+                                                fontSize: '12px',
+                                                fontWeight: 'bold',
+                                                height: '20px',
+                                                minWidth: '20px',
+                                                borderRadius: '10px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                padding: '0 6px'
+                                            }}>
+                                                {unreadCount}
+                                            </span>
+                                        )}
+                                    </div>
+                                    {isContextActive && renderCustomListContextMenu()}
+                                </React.Fragment>
                             )
                         })}
                         <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)', margin: '4px 0' }}></div>
@@ -22878,8 +23998,11 @@ export default function Chat() {
                                     );
                                 }
 
-                                return displayItems.map(item => {
+                                return displayItems.map((item, itemIndex) => {
                                     const isGroup = item.is_group;
+                                    const itemId = item._id || item.id;
+                                    const itemType = item.is_community ? 'community' : (isGroup ? 'group' : 'user');
+                                    const chatListKey = `${itemType}-${String(itemId || item.name || itemIndex)}`;
                                     const displayName = item.is_community ? (item.name || 'Community') : (isGroup ? (item.name || 'Unnamed Group') : getContactDisplayName(item));
 
                                     const renderHighlightedContent = (content) => {
@@ -22909,7 +24032,7 @@ export default function Chat() {
 
                                     return (
                                         <div
-                                            key={item._id}
+                                            key={chatListKey}
                                             className={`wa-user-item ${((item.is_community && selectedCommunity?.id === item.id) || (isGroup && selectedGroup?._id === item._id) || (!isGroup && selectedUser?._id === item._id)) ? 'active' : ''}`}
                                             data-chat-preview={chatHoverPreview || undefined}
                                             onClick={() => {
@@ -23023,9 +24146,20 @@ export default function Chat() {
                                     Tap and hold on a chat for more options
                                 </div>
                                 <div className="wa-chat-list-end-note-encryption">
-                                    <Lock size={13} />
-                                    <span>
-                                        Your personal messages are <span className="wa-chat-list-end-note-green">end-to-end encrypted</span>
+                                    <span className={`wa-chat-list-end-note-copy ${leftPanelWidth < 390 ? 'compact' : ''}`}>
+                                        <Lock size={13} />
+                                        <span className="wa-chat-list-end-note-plain">Your personal messages are</span>
+                                        <button
+                                            type="button"
+                                            className="wa-chat-list-end-note-link"
+                                            onClick={() => {
+                                                setOpenEncryptionStrategyPoint(null);
+                                                setIsEncryptionStrategyOpen(true);
+                                            }}
+                                            title="Learn about Neural Chat features"
+                                        >
+                                            end-to-end encrypted
+                                        </button>
                                     </span>
                                 </div>
                             </div>
@@ -23115,7 +24249,7 @@ export default function Chat() {
                         width: 10,
                         height: '100%',
                         cursor: 'col-resize',
-                        zIndex: 100
+                        zIndex: 1200
                     }}
                 >
                     <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
@@ -24022,13 +25156,12 @@ export default function Chat() {
                                 <button className="wa-nav-icon-btn wa-header-call-icon"><Video size={20} /></button>
                                 <button className="wa-nav-icon-btn wa-header-call-icon"><Phone size={20} /></button>
                                 <button
-                                    className={`wa-nav-icon-btn ${isMessageSearchOpen ? 'active' : ''}`}
+                                    className={`wa-nav-icon-btn ${isMessageSearchOpen && messageSearchSource === 'chat_header' ? 'active' : ''}`}
                                     onClick={() => {
-                                        if (isMessageSearchOpen) {
-                                            setIsMessageSearchOpen(false);
+                                        if (isMessageSearchOpen && messageSearchSource === 'chat_header') {
+                                            closeMessageSearchPanel();
                                         } else {
-                                            setIsMessageSearchOpen(true);
-                                            searchSource.current = 'chat_header';
+                                            openMessageSearchPanel('chat_header');
                                         }
                                     }}
                                 >
@@ -24238,7 +25371,7 @@ export default function Chat() {
                         >
                             <MessageList
                                 messages={messages}
-                                messageSearchQuery={messageSearchQuery}
+                                messageSearchQuery=""
                                 formatDateForSeparator={formatDateForSeparator}
                                 t={t}
                                 getLangCode={getLangCode}
@@ -24297,6 +25430,8 @@ export default function Chat() {
                                 scrollerRef={chatMessagesRef}
                                 jumpToMessageTarget={jumpToMessageTarget}
                                 isMobile={isMobile}
+                                openYouTubeChoice={openYouTubeChoice}
+                                openGenericLinkPreview={openGenericLinkPreview}
                                 onViewOncePreviewOpenChange={setIsViewOncePreviewOpen}
                             />
                         </div>
@@ -24675,16 +25810,21 @@ export default function Chat() {
                                 </div>
                             </div>
                             <div className="wa-header-icons">
-                                <button className="wa-call-dropdown-btn">
-                                    <Video size={18} style={{ marginRight: 8 }} />
-                                    <span>Call</span>
-                                    <ChevronDown size={14} style={{ marginLeft: 6 }} />
-                                </button>
+                                {!selectedGroup.isCommunityAnnouncements && !selectedGroup.isAnnouncementGroup && (
+                                    <button className="wa-call-dropdown-btn">
+                                        <Video size={18} style={{ marginRight: 8 }} />
+                                        <span>Call</span>
+                                        <ChevronDown size={14} style={{ marginLeft: 6 }} />
+                                    </button>
+                                )}
                                 <button
-                                    className={`wa-nav-icon-btn ${isMessageSearchOpen ? 'active' : ''}`}
+                                    className={`wa-nav-icon-btn ${isMessageSearchOpen && messageSearchSource === 'group_header' ? 'active' : ''}`}
                                     onClick={() => {
-                                        setIsMessageSearchOpen(!isMessageSearchOpen);
-                                        searchSource.current = 'group_header';
+                                        if (isMessageSearchOpen && messageSearchSource === 'group_header') {
+                                            closeMessageSearchPanel();
+                                        } else {
+                                            openMessageSearchPanel('group_header');
+                                        }
                                     }}
                                 >
                                     <Search size={20} />
@@ -24872,7 +26012,7 @@ export default function Chat() {
                                     </div>
                                 }
                                 messages={groupMessages}
-                                messageSearchQuery={messageSearchQuery}
+                                messageSearchQuery=""
                                 formatDateForSeparator={formatDateForSeparator}
                                 t={t}
                                 getLangCode={getLangCode}
@@ -24931,6 +26071,8 @@ export default function Chat() {
                                 scrollerRef={chatMessagesRef}
                                 jumpToMessageTarget={jumpToMessageTarget}
                                 isMobile={isMobile}
+                                openYouTubeChoice={openYouTubeChoice}
+                                openGenericLinkPreview={openGenericLinkPreview}
                                 onViewOncePreviewOpenChange={setIsViewOncePreviewOpen}
                             />
 
@@ -25463,6 +26605,7 @@ export default function Chat() {
             {renderUnblockModal()}
             {renderEventDetailsPanel()}
             {renderEncryptionInfoModal()}
+            {renderEncryptionStrategyModal()}
         </div >
     );
 
@@ -27522,17 +28665,17 @@ export default function Chat() {
                                         {settingsTabs.find(tab => tab.id === activeSettingsTab)?.label || activeSettingsTab}
                                     </h2>
                                 </div>
-                                {activeSettingsTab === 'profile' && (
-                                    <div className="wa-settings-header-actions">
-                                        {!isSettingsEditing ? (
-                                            <button className="wa-settings-btn-edit" onClick={() => setIsSettingsEditing(true)}>
+                                        {activeSettingsTab === 'profile' && (
+                                            <div className="wa-settings-header-actions">
+                                                {!isSettingsEditing ? (
+                                            <button className="wa-settings-btn-edit" onClick={() => { setProfileEditSnapshot(userData); setIsSettingsEditing(true); }}>
                                                 <Pencil size={14} />
                                                 <span className="wa-settings-btn-text-desktop">{t('settings.edit_identity')}</span>
                                                 <span className="wa-settings-btn-text-mobile">Edit</span>
                                             </button>
                                         ) : (
                                             <>
-                                                <button className="wa-settings-btn-cancel" onClick={() => setIsSettingsEditing(false)}>{t('settings.discard_changes')}</button>
+                                                <button className="wa-settings-btn-cancel" onClick={requestDiscardSettingsEdit}>{t('settings.discard_changes')}</button>
                                                 <button className="wa-settings-btn-commit" onClick={handleUpdateProfile}>{t('settings.commit_updates')}</button>
                                             </>
                                         )}
@@ -27799,6 +28942,7 @@ export default function Chat() {
             {/* Global Dropdown Menu */}
             {openDropdown && renderDropdownMenu(openDropdown.type, openDropdown.id, openDropdown.data)}
             {isMuteModalOpen && renderMuteModal()}
+            {renderListMuteModal()}
             {pinReplaceModal && renderPinReplaceModal()}
             {isForwardModalOpen && renderForwardModal()}
 
@@ -28035,6 +29179,17 @@ export default function Chat() {
             />
 
             <ConfirmModal
+                isOpen={isDiscardProfileEditConfirmOpen}
+                title="Discard profile changes?"
+                message="Your unsaved profile edits will be removed."
+                confirmText="Discard"
+                cancelText="Keep editing"
+                confirmVariant="danger"
+                onConfirm={confirmDiscardProfileEdit}
+                onCancel={() => setIsDiscardProfileEditConfirmOpen(false)}
+            />
+
+            <ConfirmModal
                 isOpen={isClearRemindersConfirmOpen}
                 title="Clear all reminders?"
                 message="This will remove the current reminders from your Event Reminders panel on this account. Event messages in chats will stay untouched."
@@ -28216,13 +29371,13 @@ export default function Chat() {
                                     if (linkActionTarget.youtubeId) {
                                         setPreviewVideoUrl(linkActionTarget.url);
                                     } else {
-                                        setGenericLinkPreviewTarget(linkActionTarget);
+                                        openGenericLinkPreview(linkActionTarget.url, linkActionTarget);
                                     }
                                     setLinkActionTarget(null);
                                 }}
                             >
                                 <Play size={16} />
-                                <span>Preview in app</span>
+                                <span>Open in app</span>
                             </button>
                             <button
                                 onClick={() => {
@@ -28251,25 +29406,57 @@ export default function Chat() {
                     >
                         <div className="wa-link-preview-modal-header wa-floating-preview-drag-handle" onPointerDown={startFloatingPreviewDrag}>
                             <span>{genericLinkPreviewTarget.domain || 'Page Preview'}</span>
-                            <button className="wa-link-action-close wa-text-close-btn" onPointerDown={(e) => e.stopPropagation()} onClick={() => setGenericLinkPreviewTarget(null)} aria-label="Close">
+                            <button className="wa-link-action-close wa-text-close-btn" onPointerDown={(e) => e.stopPropagation()} onClick={closeGenericLinkPreview} aria-label="Close">
                                 Close
                             </button>
                         </div>
+                        <div className="wa-in-app-browser-toolbar" onPointerDown={(e) => e.stopPropagation()}>
+                            <button type="button" className="wa-browser-icon-btn" onClick={goGenericPreviewBack} title="Back" aria-label="Back" disabled={genericPreviewHistoryIndex <= 0}>
+                                <ChevronLeft size={18} />
+                            </button>
+                            <button type="button" className="wa-browser-icon-btn" onClick={goGenericPreviewForward} title="Forward" aria-label="Forward" disabled={genericPreviewHistoryIndex < 0 || genericPreviewHistoryIndex >= genericPreviewHistory.length - 1}>
+                                <ChevronRight size={18} />
+                            </button>
+                            <button type="button" className="wa-browser-icon-btn" onClick={reloadGenericPreview} title="Reload" aria-label="Reload">
+                                <RotateCcw size={16} />
+                            </button>
+                            <form className="wa-browser-address-form" onSubmit={navigateGenericPreviewToAddress}>
+                                <input
+                                    value={genericPreviewAddress}
+                                    onChange={(event) => setGenericPreviewAddress(event.target.value)}
+                                    onFocus={(event) => event.currentTarget.select()}
+                                    aria-label="Preview URL"
+                                />
+                            </form>
+                            <button
+                                type="button"
+                                className="wa-browser-open-btn"
+                                onClick={() => {
+                                    window.open(genericPreviewUrl || genericLinkPreviewTarget.url, '_blank', 'noopener,noreferrer');
+                                }}
+                            >
+                                <ExternalLink size={16} />
+                                <span>New tab</span>
+                            </button>
+                        </div>
+                        {isGenericPreviewLoading && <div className="wa-in-app-browser-loading" />}
                         <iframe
+                            ref={linkPreviewFrameRef}
+                            key={`${genericPreviewUrl || genericLinkPreviewTarget.url}-${genericPreviewReloadKey}`}
                             className="wa-link-preview-page-frame"
-                            src={buildApiUrl(`/api/chat/page-preview?url=${encodeURIComponent(genericLinkPreviewTarget.url)}`)}
+                            src={buildApiUrl(`/api/chat/page-preview?url=${encodeURIComponent(genericPreviewUrl || genericLinkPreviewTarget.url)}`)}
                             title={genericLinkPreviewTarget.title || 'Link preview'}
                             sandbox="allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
+                            onLoad={handleGenericPreviewLoad}
                         />
                         <div className="wa-link-action-buttons">
                             <button
                                 onClick={() => {
-                                    window.open(genericLinkPreviewTarget.url, '_blank', 'noopener,noreferrer');
-                                    setGenericLinkPreviewTarget(null);
+                                    window.open(genericPreviewUrl || genericLinkPreviewTarget.url, '_blank', 'noopener,noreferrer');
                                 }}
                             >
                                 <ExternalLink size={16} />
-                                <span>Open page</span>
+                                <span>Open current page in new tab</span>
                             </button>
                         </div>
                     </div>
@@ -28290,6 +29477,7 @@ export default function Chat() {
                         </div>
                         <div className="wa-video-preview-body">
                             <iframe
+                                ref={youtubePreviewFrameRef}
                                 key={previewVideoUrl}
                                 width="100%"
                                 height="100%"
@@ -28299,6 +29487,68 @@ export default function Chat() {
                                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                                 allowFullScreen
                             ></iframe>
+                            <div className="wa-youtube-preview-controls" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+                                <button
+                                    type="button"
+                                    className="wa-youtube-preview-icon-btn"
+                                    onClick={toggleYoutubePreviewPlayback}
+                                    aria-label={isYoutubePreviewPlaying ? 'Pause video' : 'Play video'}
+                                    title={isYoutubePreviewPlaying ? 'Pause' : 'Play'}
+                                >
+                                    {isYoutubePreviewPlaying ? <Pause size={18} /> : <Play size={18} fill="currentColor" />}
+                                </button>
+                                <div className="wa-youtube-preview-volume">
+                                    <button
+                                        type="button"
+                                        className="wa-youtube-preview-icon-btn"
+                                        onClick={toggleYoutubePreviewMute}
+                                        aria-label={isYoutubePreviewMuted ? 'Unmute video' : 'Mute video'}
+                                        title={isYoutubePreviewMuted ? 'Unmute' : 'Mute'}
+                                    >
+                                        <Volume2 size={19} />
+                                    </button>
+                                    <input
+                                        className="wa-youtube-preview-volume-range"
+                                        type="range"
+                                        min="0"
+                                        max="100"
+                                        value={isYoutubePreviewMuted ? 0 : youtubePreviewVolume}
+                                        onChange={(event) => setYoutubePreviewVolume(Number(event.target.value))}
+                                        aria-label="Video volume"
+                                    />
+                                </div>
+                                <div className="wa-youtube-preview-settings-wrap">
+                                    <button
+                                        type="button"
+                                        className={`wa-youtube-preview-icon-btn ${isYoutubePreviewSettingsOpen ? 'active' : ''}`}
+                                        onClick={() => setIsYoutubePreviewSettingsOpen(prev => !prev)}
+                                        aria-label="Video settings"
+                                        title="Settings"
+                                    >
+                                        <Settings size={19} />
+                                    </button>
+                                    {isYoutubePreviewSettingsOpen && (
+                                        <div className="wa-youtube-preview-settings-menu">
+                                            <div className="wa-youtube-preview-settings-row">
+                                                <span>Speed</span>
+                                                <div className="wa-youtube-preview-speed-options">
+                                                    {[0.5, 1, 1.5, 2].map(speed => (
+                                                        <button
+                                                            key={speed}
+                                                            type="button"
+                                                            className={youtubePreviewSpeed === speed ? 'active' : ''}
+                                                            onClick={() => selectYoutubePreviewSpeed(speed)}
+                                                        >
+                                                            {speed === 1 ? 'Normal' : `${speed}x`}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div className="wa-youtube-preview-settings-note">Quality and captions stay managed by YouTube.</div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -28308,18 +29558,18 @@ export default function Chat() {
 
             {adminConfirmModal && (
                 <div className="wa-mute-modal-overlay" onClick={() => setAdminConfirmModal(null)}>
-                    <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ width: 400, padding: 24, borderRadius: 12 }}>
-                        <div style={{ textAlign: 'left', marginBottom: 20 }}>
-                            <h3 style={{ fontSize: 16, color: '#3b4a54', fontWeight: 400, margin: 0 }}>
+                    <div className="wa-mute-modal wa-admin-confirm-modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="wa-admin-confirm-copy">
+                            <h3>
                                 {adminConfirmModal.type === 'add'
                                     ? `Are you sure you want to make ${adminConfirmModal.member.name || 'this person'} an admin?`
                                     : `You want to remove this person as Group admin?`}
                             </h3>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 32 }}>
+                        <div className="wa-admin-confirm-actions">
                             <button
                                 onClick={() => setAdminConfirmModal(null)}
-                                style={{ padding: '8px 24px', borderRadius: 24, border: '1px solid #d1d7db', background: 'transparent', color: '#0EA5BE', cursor: 'pointer', fontWeight: 500 }}
+                                className="wa-admin-confirm-cancel"
                             >
                                 Cancel
                             </button>
@@ -28373,7 +29623,7 @@ export default function Chat() {
                                         setAdminConfirmModal(null);
                                     }
                                 }}
-                                style={{ padding: '8px 24px', borderRadius: 24, border: 'none', background: '#0EA5BE', color: 'white', cursor: 'pointer', fontWeight: 500 }}
+                                className="wa-admin-confirm-ok"
                             >
                                 OK
                             </button>
@@ -28383,14 +29633,15 @@ export default function Chat() {
             )}
             {groupMemberActionModal && (
                 <div className="wa-mute-modal-overlay" onClick={() => setGroupMemberActionModal(null)}>
-                    <div className="wa-mute-modal" onClick={(e) => e.stopPropagation()} style={{ width: 420, padding: 0, borderRadius: 16, overflow: 'hidden' }}>
-                        <div style={{ background: '#F3FDFE', padding: '18px 20px', borderBottom: '1px solid #e9edef' }}>
-                            <div style={{ fontSize: 11, color: '#54656f', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 4 }}>Member actions</div>
-                            <div style={{ fontSize: 17, fontWeight: 600, color: '#111b21' }}>{groupMemberActionModal.member?.name}</div>
+                    <div className="wa-mute-modal wa-group-member-actions-modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="wa-group-member-actions-header">
+                            <div className="wa-group-member-actions-eyebrow">Member actions</div>
+                            <div className="wa-group-member-actions-name">{groupMemberActionModal.member?.name}</div>
                         </div>
 
-                        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div className="wa-group-member-actions-body">
                             <button
+                                className="wa-group-member-action-btn"
                                 onClick={() => {
                                     setAdminConfirmModal({
                                         member: groupMemberActionModal.member,
@@ -28398,26 +29649,25 @@ export default function Chat() {
                                     });
                                     setGroupMemberActionModal(null);
                                 }}
-                                style={{ width: '100%', padding: '12px 16px', borderRadius: 12, border: '1px solid #dfe5e7', background: 'white', color: '#111b21', cursor: 'pointer', textAlign: 'left', fontWeight: 500 }}
                             >
                                 {groupMemberActionModal.isAdmin ? 'Remove group admin role' : 'Make group admin'}
                             </button>
                             <button
+                                className="wa-group-member-action-btn danger"
                                 onClick={async () => {
                                     const target = groupMemberActionModal;
                                     setGroupMemberActionModal(null);
                                     await handleRemoveGroupMember(target.group, target.member);
                                 }}
-                                style={{ width: '100%', padding: '12px 16px', borderRadius: 12, border: '1px solid rgba(248, 113, 113, 0.35)', background: 'rgba(248, 113, 113, 0.08)', color: '#f87171', cursor: 'pointer', textAlign: 'left', fontWeight: 500 }}
                             >
                                 Remove from group
                             </button>
                         </div>
 
-                        <div style={{ padding: '0 20px 18px', display: 'flex', justifyContent: 'flex-end' }}>
+                        <div className="wa-group-member-actions-footer">
                             <button
+                                className="wa-group-member-action-close"
                                 onClick={() => setGroupMemberActionModal(null)}
-                                style={{ padding: '9px 22px', borderRadius: 24, border: '1px solid #d1d7db', background: 'transparent', color: '#0EA5BE', cursor: 'pointer', fontWeight: 500 }}
                             >
                                 Close
                             </button>
@@ -28936,31 +30186,31 @@ export default function Chat() {
             {/* Assign New Owner Right Panel */}
             {isAssignNewOwnerOpen && exitCommunityTarget && (
                 <div
-                    className="wa-contact-info-panel active"
+                    className="wa-contact-info-panel wa-assign-owner-panel active"
                     style={{
                         zIndex: 12000,
                         display: 'flex',
                         flexDirection: 'column',
                         animation: 'slideInRight 0.25s ease-out',
-                        background: '#f0f2f5'
+                        background: 'linear-gradient(180deg, rgba(8, 28, 46, 0.98), rgba(4, 18, 32, 0.98))'
                     }}
                 >
-                    <div style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'white', borderBottom: '1px solid #e9edef', position: 'relative', flexShrink: 0 }}>
+                    <div style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'rgba(8, 28, 46, 0.98)', borderBottom: '1px solid rgba(56, 189, 248, 0.18)', position: 'relative', flexShrink: 0 }}>
                         <button onClick={() => setIsAssignNewOwnerOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', position: 'absolute', left: 16 }}>
-                            <ArrowLeft size={24} color="#54656f" />
+                            <ArrowLeft size={24} color="#cbd5e1" />
                         </button>
-                        <div style={{ flex: 1, textAlign: 'center', fontSize: 18, fontWeight: 500, color: '#3b4a54', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', margin: '0 48px' }}>
+                        <div style={{ flex: 1, textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', margin: '0 48px' }}>
                             Assign new owner
                         </div>
                     </div>
 
-                    <div style={{ padding: '12px 20px 16px', background: '#f0f2f5', borderBottom: '1px solid #e9edef' }}>
-                        <p style={{ fontSize: 13, color: '#667781', margin: 0, lineHeight: '1.5' }}>
+                    <div style={{ padding: '14px 20px 16px', background: 'rgba(15, 23, 42, 0.35)', borderBottom: '1px solid rgba(56, 189, 248, 0.14)' }}>
+                        <p style={{ fontSize: 14, color: '#b6c8d8', margin: 0, lineHeight: '1.5' }}>
                             Select an admin to transfer ownership before you exit the community.
                         </p>
                     </div>
 
-                    <div style={{ flex: 1, overflowY: 'auto', background: '#f0f2f5' }}>
+                    <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
                         {(() => {
                             const adminsExceptMe = (exitCommunityTarget.admins || []).filter(admin =>
                                 String(admin._id || admin.id) !== String(user.id || user._id)
@@ -28969,8 +30219,8 @@ export default function Chat() {
                             if (adminsExceptMe.length === 0) {
                                 return (
                                     <div style={{ padding: '60px 20px', textAlign: 'center' }}>
-                                        <Users size={48} color="#ccc" style={{ marginBottom: 16 }} />
-                                        <p style={{ color: '#667781', fontSize: 14, lineHeight: 1.5 }}>
+                                        <Users size={48} color="#6fa9bf" style={{ marginBottom: 16 }} />
+                                        <p style={{ color: '#b6c8d8', fontSize: 15, lineHeight: 1.5 }}>
                                             No other admins found in this community.<br />
                                             Please promote a member to admin first.
                                         </p>
@@ -28994,25 +30244,25 @@ export default function Chat() {
                                                     display: 'flex',
                                                     alignItems: 'center',
                                                     padding: '14px 20px',
-                                                    background: 'white',
-                                                    borderBottom: '1px solid #f0f2f5',
+                                                    background: 'rgba(15, 23, 42, 0.54)',
+                                                    borderBottom: '1px solid rgba(56, 189, 248, 0.12)',
                                                     cursor: 'pointer',
                                                     transition: 'background 0.15s',
                                                     gap: 14
                                                 }}
                                             >
-                                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(56, 189, 248, 0.12)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                                     {admin.avatar || admin.image || admin.profile_photo ? (
                                                         <img src={admin.avatar || admin.image || admin.profile_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                     ) : (
-                                                        <UserIcon size={22} color="#8696a0" />
+                                                        <UserIcon size={22} color="#7dd3fc" />
                                                     )}
                                                 </div>
                                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                                    <div style={{ color: '#111b21', fontWeight: 500, fontSize: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{admin.name}</div>
-                                                    <div style={{ color: '#667781', fontSize: 13, marginTop: 2 }}>Community Admin</div>
+                                                    <div style={{ color: '#f8fafc', fontWeight: 700, fontSize: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{admin.name}</div>
+                                                    <div style={{ color: '#9fb7c8', fontSize: 13, marginTop: 2 }}>Community Admin</div>
                                                 </div>
-                                                <ChevronRight size={18} color="#8696a0" />
+                                                <ChevronRight size={18} color="#7dd3fc" />
                                             </div>
                                         );
                                     })}
