@@ -17,12 +17,55 @@ const generateSignature = (password) => {
 };
 
 const normalizeMobile = (mobile = '') => String(mobile).replace(/\D/g, '').slice(-10);
+const normalizeEmail = (email = '') => String(email).trim().toLowerCase();
 
 const generateMobileSignature = (mobile) => {
     const normalized = normalizeMobile(mobile);
     return crypto.createHmac('sha256', process.env.JWT_SECRET)
         .update(`mobile:${normalized}`)
         .digest('hex');
+};
+
+const generateEmailSignature = (email) => {
+    const normalized = normalizeEmail(email);
+    return crypto.createHmac('sha256', process.env.JWT_SECRET)
+        .update(`email:${normalized}`)
+        .digest('hex');
+};
+
+const rememberEmailSignature = async (user, email) => {
+    if (!user || user.email_signature) return;
+    await User.updateOne(
+        { _id: user._id },
+        { $set: { email_signature: generateEmailSignature(email || user.email) } }
+    );
+};
+
+const findUserByEmail = async (email, filters = {}, select = '') => {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return null;
+
+    const signature = generateEmailSignature(normalized);
+    let query = User.findOne({ ...filters, email_signature: signature });
+    if (select) query = query.select(select);
+    const signatureMatch = await query;
+    if (signatureMatch) return signatureMatch;
+
+    // Backward-compatible fallback for records saved before email_signature existed.
+    let fallbackQuery = User.find(filters);
+    if (select) fallbackQuery = fallbackQuery.select(select);
+    const users = await fallbackQuery;
+    const user = users.find((candidate) => normalizeEmail(candidate.email) === normalized) || null;
+    if (user) await rememberEmailSignature(user, normalized);
+    return user;
+};
+
+const findUserByName = async (name, filters = {}) => {
+    const normalized = String(name || '').trim().toLowerCase();
+    if (!normalized) return null;
+
+    const users = await User.find(filters).select('name role __enc_name');
+    return users.find((user) => String(user.name || '').trim().toLowerCase() === normalized) || null;
 };
 
 const findUsersByMobile = async (mobile) => {
@@ -132,18 +175,18 @@ router.post('/register', async (req, res) => {
             return res.status(400).json({ error: 'This number is already taken' });
         }
 
-        const existing = await User.findOne({ $or: [{ email }, { name }] });
+        const existing = await findUserByEmail(email) || await findUserByName(name);
         if (existing) {
             let field = 'details';
-            if (existing.email === email) field = 'email';
-            else if (existing.name === name) field = 'name';
+            if (normalizeEmail(existing.email) === normalizeEmail(email)) field = 'email';
+            else if (String(existing.name || '').trim().toLowerCase() === String(name || '').trim().toLowerCase()) field = 'name';
 
             const role = existing.role === 'admin' ? 'Admin' : 'User';
             return res.status(400).json({ error: `${role} with this ${field} already exists` });
         }
 
         // Insert as pending
-        const newUser = await User.create({ name, displayName: name, email, mobile: cleanMobile, mobile_signature: generateMobileSignature(cleanMobile), countryCode, designation, status: 'pending', is_temporary_password: false });
+        const newUser = await User.create({ name, displayName: name, email, email_signature: generateEmailSignature(email), mobile: cleanMobile, mobile_signature: generateMobileSignature(cleanMobile), countryCode, designation, status: 'pending', is_temporary_password: false });
 
         // Emit Socket Event
         if (req.io) {
@@ -203,13 +246,12 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
     const { email, loginId, password, force } = req.body;
 
-    let query = {};
-    if (email) query.email = email;
-    else if (loginId) query.login_id = loginId;
-    else return res.status(400).json({ error: 'Missing Login ID or Email' });
+    if (!email && !loginId) return res.status(400).json({ error: 'Missing Login ID or Email' });
 
     try {
-        const user = await User.findOne(query);
+        const user = email
+            ? await findUserByEmail(email)
+            : await User.findOne({ login_id: loginId });
         if (!user) return res.status(400).json({ error: 'User not found' });
 
         if (user.status !== 'approved') {
@@ -271,11 +313,9 @@ router.post('/forgot-password', async (req, res) => {
     }
 
     try {
-        let query = {};
-        if (email) query.email = email;
-        else if (loginId) query.login_id = loginId;
-
-        const user = await User.findOne(query);
+        const user = email
+            ? await findUserByEmail(email)
+            : await User.findOne({ login_id: loginId });
         if (!user) return res.status(400).json({ error: 'User not found' });
 
         const newReset = await PasswordReset.create({ user_id: user._id });
@@ -368,7 +408,7 @@ router.post('/admin/register', async (req, res) => {
         if (!/^\d{10}$/.test(cleanMobile)) return res.status(400).json({ error: 'Mobile number must be exactly 10 digits.' });
         if (await findUserByMobile(cleanMobile)) return res.status(400).json({ error: 'This number is already taken' });
 
-        const existing = await User.findOne({ email });
+        const existing = await findUserByEmail(email);
         if (existing) return res.status(400).json({ error: 'Email already exists' });
 
         // Check Password Uniqueness
@@ -383,6 +423,7 @@ router.post('/admin/register', async (req, res) => {
             name,
             displayName: name,
             email,
+            email_signature: generateEmailSignature(email),
             password: hash,
             password_signature: signature,
             role: 'admin',
@@ -406,7 +447,7 @@ router.post('/admin/reset', async (req, res) => {
     let adminName = 'Admin';
     try {
         if (email) {
-            const adminUser = await User.findOne({ email, role: 'admin' });
+            const adminUser = await findUserByEmail(email, { role: 'admin' });
             if (adminUser) adminName = adminUser.name;
         }
     } catch (e) {
@@ -424,14 +465,14 @@ router.post('/admin/reset', async (req, res) => {
         // Check uniqueness (exclude current admin if same email - though admin email is unique)
         const passExists = await User.findOne({ password_signature: signature });
         // We act on email, need id to exclude.
-        const adminUser = await User.findOne({ email, role: 'admin' });
+        const adminUser = await findUserByEmail(email, { role: 'admin' });
         if (passExists && (!adminUser || passExists.id !== adminUser.id)) {
             return res.status(400).json({ error: 'Password already used by another user.' });
         }
 
         const hash = await bcrypt.hash(newPassword, 10);
         const result = await User.updateOne(
-            { email: email, role: 'admin' },
+            { _id: adminUser?._id, role: 'admin' },
             { password: hash, password_signature: signature }
         );
 
@@ -609,11 +650,9 @@ router.post('/send-call-otp', async (req, res) => {
     try {
         let finalMobile = mobile;
         if (!finalMobile && identifier) {
-            let query = {};
-            if (context.includes('admin') || identifier.includes('@')) query.email = identifier;
-            else query.login_id = identifier;
-
-            user = await User.findOne(query); // Assign to the declared user variable
+            user = (context.includes('admin') || identifier.includes('@'))
+                ? await findUserByEmail(identifier)
+                : await User.findOne({ login_id: identifier }); // Assign to the declared user variable
             if (!user) return res.status(404).json({ error: 'User not found' });
             if (!user.mobile) return res.status(400).json({ error: 'No mobile number registered to this account' });
             finalMobile = user.mobile;
