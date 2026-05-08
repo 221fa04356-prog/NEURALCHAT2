@@ -444,6 +444,10 @@ export default function AdminDashboard() {
     const chartScrollRef = useRef(null);
     const mainScrollRef = useRef(null);
     const reviewScrollRef = useRef(null);
+    const viewChatRef = useRef(null);
+    const selectedContactRef = useRef(null);
+    const selectedDateRef = useRef(null);
+    const chatStepRef = useRef(chatStep);
 
     // Sidebar & UI State
     const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 1024);
@@ -961,6 +965,13 @@ export default function AdminDashboard() {
     }, [viewChat?.messages, chatStep]);
 
     useEffect(() => {
+        viewChatRef.current = viewChat;
+        selectedContactRef.current = selectedContact;
+        selectedDateRef.current = selectedDate;
+        chatStepRef.current = chatStep;
+    }, [viewChat, selectedContact, selectedDate, chatStep]);
+
+    useEffect(() => {
         if (!highlightedRedirectRow) return;
 
         const timer = setTimeout(() => setHighlightedRedirectRow(null), 4500);
@@ -1196,11 +1207,79 @@ export default function AdminDashboard() {
                     // Check if message already exists (prevent duplicates)
                     const isDuplicate = prev.messages.some(m => String(m._id || m.id) === String(newMsg._id || newMsg.id));
                     if (isDuplicate) return prev;
+                    const scheduledMessageId = String(newMsg.scheduled_message_id || '');
+                    if (scheduledMessageId) {
+                        const hasScheduledPreview = prev.messages.some(m => String(m.scheduled_message_id || '') === scheduledMessageId);
+                        if (hasScheduledPreview) {
+                            return {
+                                ...prev,
+                                messages: prev.messages.map(m => String(m.scheduled_message_id || '') === scheduledMessageId
+                                    ? {
+                                        ...m,
+                                        ...newMsg,
+                                        _id: newMsg._id || newMsg.id,
+                                        id: newMsg._id || newMsg.id,
+                                        is_scheduled: false,
+                                        is_scheduled_preview: false,
+                                        is_scheduled_delivery: true,
+                                        scheduled_at: newMsg.scheduled_at || m.scheduled_at,
+                                        scheduled_requested_at: newMsg.scheduled_requested_at || m.scheduled_requested_at,
+                                        scheduled_sent_at: newMsg.scheduled_sent_at || newMsg.created_at
+                                    }
+                                    : m)
+                            };
+                        }
+                    }
 
                     console.log('Admin Dashboard: Adding message to live view');
                     return { ...prev, messages: [...prev.messages, { ...newMsg, _id: newMsg._id || newMsg.id }] };
                 }
                 return prev;
+            });
+        });
+
+        socket.on('scheduled_message_created', (data) => {
+            const preview = data?.preview;
+            if (!preview) return;
+
+            const senderId = String(preview.user_id?._id || preview.user_id || preview.sender_id || '');
+            const targetId = String(preview.receiver_id?._id || preview.receiver_id || preview.group_id || '');
+            const currentView = viewChatRef.current;
+            const currentUserId = String(currentView?.user?.id || currentView?.user?._id || '');
+            const currentContact = selectedContactRef.current;
+            const currentContactId = String(currentContact?.id || currentContact?._id || '');
+            const createdDate = preview.created_at ? new Date(preview.created_at).toISOString().split('T')[0] : '';
+            const currentDate = selectedDateRef.current;
+
+            if (senderId && senderId === currentUserId) {
+                if (createdDate) {
+                    setChatDates(prev => prev.includes(createdDate) ? prev : [...prev, createdDate].sort((a, b) => new Date(a) - new Date(b)));
+                }
+                if (!currentContactId) {
+                    axios.get(`/api/admin/chat/contacts/${currentUserId}`)
+                        .then(res => setChatContacts(res.data))
+                        .catch(() => { });
+                }
+            }
+
+            if (
+                chatStepRef.current !== 'messages'
+                || !currentView?.messages
+                || senderId !== currentUserId
+                || targetId !== currentContactId
+                || createdDate !== currentDate
+            ) {
+                return;
+            }
+
+            setViewChat(prev => {
+                if (!prev?.messages) return prev;
+                const messageId = String(preview._id || preview.id || preview.scheduled_message_id || '');
+                if (messageId && prev.messages.some(m => String(m._id || m.id || m.scheduled_message_id) === messageId)) return prev;
+                return {
+                    ...prev,
+                    messages: [...prev.messages, preview].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+                };
             });
         });
 

@@ -481,6 +481,7 @@ router.post('/poll/send', authenticateToken, async (req, res) => {
             targetType: 'group',
             targetId: groupId,
             scheduledAt: scheduledAt || scheduled_at,
+            io: req.io,
             payload: {
                 content: question,
                 type: 'poll',
@@ -612,6 +613,7 @@ router.post('/event/send', authenticateToken, async (req, res) => {
             targetType: 'group',
             targetId: groupId,
             scheduledAt: scheduledAt || scheduled_at,
+            io: req.io,
             payload: {
                 content: eventData.name,
                 type: 'event',
@@ -1070,6 +1072,7 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             targetType: 'group',
             targetId: groupId,
             scheduledAt: req.body.scheduled_at || req.body.scheduledAt,
+            io: req.io,
             payload: {
                 content: content || '',
                 email_content: req.body.email_content || content || '',
