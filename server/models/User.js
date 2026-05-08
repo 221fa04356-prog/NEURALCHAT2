@@ -17,6 +17,7 @@ const userSchema = new mongoose.Schema({
     name: { type: String, required: true },
     displayName: { type: String, default: '' },
     email: { type: String, unique: true, required: true },
+    email_signature: { type: String, unique: true, sparse: true, select: true },
     mobile: { type: String, unique: true, required: true },
     mobile_signature: { type: String, unique: true, sparse: true, select: true },
     countryCode: { type: String, required: true, default: '+91' },
