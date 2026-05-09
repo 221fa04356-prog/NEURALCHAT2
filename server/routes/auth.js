@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const getClientBaseUrl = require('../utils/getClientBaseUrl');
 const sendBrevoMail = require('../brevoMailer');
 const { renderEmailShell } = require('../utils/emailTemplates');
+const { loginRequestLimiter, loginFailureLimiter } = require('../middleware/rateLimiters');
 
 
 const generateSignature = (password) => {
@@ -271,7 +272,7 @@ router.post('/register', async (req, res) => {
 });
 
 // Login
-router.post('/login', async (req, res) => {
+router.post('/login', loginRequestLimiter, loginFailureLimiter, async (req, res) => {
     const { email, loginId, password, force, adminLogin } = req.body;
 
     if (!email && !loginId) return res.status(400).json({ error: 'Missing Login ID or Email' });

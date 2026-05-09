@@ -272,6 +272,63 @@
     color: #94a3b8;
 }
 
+.login-lock-countdown {
+    width: min(100%, 254px);
+    margin: 0.85rem auto 0;
+    padding: 0.52rem 0.7rem;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.72rem;
+    border-radius: 999px;
+    border: 1px solid rgba(56, 189, 248, 0.22);
+    background: linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(79, 70, 229, 0.14));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 24px rgba(14, 165, 233, 0.08);
+    color: #dbeafe;
+}
+
+.login-lock-icon {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    color: #38bdf8;
+    background: rgba(14, 165, 233, 0.15);
+    border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.login-lock-copy {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-right: 28px;
+}
+
+.login-lock-label {
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.075em;
+    color: #93c5fd;
+    white-space: nowrap;
+}
+
+.login-lock-label strong {
+    display: inline-block;
+    margin-left: 0.5rem;
+    color: #f8fafc;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.95rem;
+    font-weight: 900;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+}
+
 .login-form {
     display: flex;
     flex-direction: column;
@@ -499,6 +556,37 @@
         width: 100%;
         margin: 1rem 0;
     }
+
+    .login-lock-countdown {
+        width: min(100%, 246px);
+        padding: 0.48rem 0.62rem;
+        gap: 0.62rem;
+        box-sizing: border-box;
+    }
+
+    .login-lock-icon {
+        width: 26px;
+        height: 26px;
+        flex-basis: 26px;
+    }
+
+    .login-lock-label {
+        font-size: 0.64rem;
+        letter-spacing: 0.06em;
+    }
+
+    .login-lock-label strong {
+        margin-left: 0.42rem;
+        font-size: 0.88rem;
+    }
+
+    .login-lock-copy {
+        padding-right: 26px;
+    }
+
+    .login-submit-btn.is-locked {
+        gap: 0;
+    }
 }
 
 
@@ -524,6 +612,26 @@
 .btn-primary-neural:hover {
     transform: translateY(-3px) scale(1.02);
     box-shadow: 0 15px 35px rgba(14, 165, 233, 0.45);
+}
+
+.btn-primary-neural:disabled {
+    opacity: 1;
+    transform: none;
+    box-shadow: none;
+    background: linear-gradient(135deg, rgba(71, 85, 105, 0.92) 0%, rgba(51, 65, 85, 0.94) 100%);
+    color: #dbeafe;
+}
+
+.btn-primary-neural:disabled:hover {
+    transform: none;
+    box-shadow: none;
+}
+
+.login-submit-btn.is-locked {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
 }
 
 .btn-outline-neural {

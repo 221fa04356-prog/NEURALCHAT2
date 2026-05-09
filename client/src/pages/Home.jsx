@@ -8,6 +8,27 @@ import Snackbar from '../components/Snackbar';
 import HumanVerification from '../components/HumanVerification';
 import '../styles/Home.css';
 
+const LOGIN_BLOCK_STORAGE_KEY = 'neural_login_block_until';
+
+const readStoredLoginBlocks = () => {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(LOGIN_BLOCK_STORAGE_KEY) || '{}');
+        return {
+            user: Number(parsed.user) || 0,
+            admin: Number(parsed.admin) || 0
+        };
+    } catch {
+        return { user: 0, admin: 0 };
+    }
+};
+
+const formatCountdown = (milliseconds) => {
+    const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+};
+
 export default function Home() {
     const [isAdmin, setIsAdmin] = useState(false);
     const [showLoginForm, setShowLoginForm] = useState(false);
@@ -26,9 +47,16 @@ export default function Home() {
     // Replaced separate error/msg state with Snackbar state
     const [snackbar, setSnackbar] = useState({ open: false, message: '', type: 'info' });
     const [isExpired, setIsExpired] = useState(false);
+    const [loginBlockedUntil, setLoginBlockedUntil] = useState(() => readStoredLoginBlocks());
+    const [nowMs, setNowMs] = useState(() => Date.now());
 
     const navigate = useNavigate();
     const location = useLocation();
+    const loginRole = isAdmin ? 'admin' : 'user';
+    const activeBlockedUntil = loginBlockedUntil[loginRole] || 0;
+    const activeBlockRemainingMs = Math.max(0, activeBlockedUntil - nowMs);
+    const isLoginBlocked = activeBlockRemainingMs > 0;
+    const loginBlockCountdown = formatCountdown(activeBlockRemainingMs);
 
     useEffect(() => {
         // Handle State-based navigation
@@ -74,8 +102,80 @@ export default function Home() {
         }
     }, [location]);
 
+    useEffect(() => {
+        const timer = setInterval(() => setNowMs(Date.now()), 1000);
+        return () => clearInterval(timer);
+    }, []);
+
+    useEffect(() => {
+        const nextBlocks = { ...loginBlockedUntil };
+        let changed = false;
+
+        Object.keys(nextBlocks).forEach((role) => {
+            if (nextBlocks[role] && nowMs >= nextBlocks[role]) {
+                nextBlocks[role] = 0;
+                changed = true;
+            }
+        });
+
+        if (changed) {
+            setLoginBlockedUntil(nextBlocks);
+            localStorage.setItem(LOGIN_BLOCK_STORAGE_KEY, JSON.stringify(nextBlocks));
+        }
+    }, [loginBlockedUntil, nowMs]);
+
+    const rememberLoginBlock = (role, blockedUntil) => {
+        if (!blockedUntil || blockedUntil <= Date.now()) return;
+
+        setLoginBlockedUntil((prev) => {
+            const next = { ...prev, [role]: blockedUntil };
+            localStorage.setItem(LOGIN_BLOCK_STORAGE_KEY, JSON.stringify(next));
+            return next;
+        });
+        setNowMs(Date.now());
+    };
+
+    const clearLoginBlock = (role) => {
+        setLoginBlockedUntil((prev) => {
+            if (!prev[role]) return prev;
+            const next = { ...prev, [role]: 0 };
+            localStorage.setItem(LOGIN_BLOCK_STORAGE_KEY, JSON.stringify(next));
+            return next;
+        });
+    };
+
+    const resetLoginInputs = () => {
+        setAdminEmail('');
+        setAdminPassword('');
+        setUserLoginId('');
+        setUserPassword('');
+        setShowPassword(false);
+        setIsHumanVerified(false);
+        setShowForceLogout(false);
+    };
+
+    const openLoginPortal = (adminMode) => {
+        resetLoginInputs();
+        setIsAdmin(adminMode);
+        setShowLoginForm(true);
+    };
+
+    const handleBackToHome = () => {
+        resetLoginInputs();
+        setShowLoginForm(false);
+    };
+
     const handleLogin = async (e, forceParams = false) => {
         if (e) e.preventDefault();
+
+        if (isLoginBlocked) {
+            setSnackbar({
+                open: true,
+                message: `Login is temporarily blocked. Try again in ${loginBlockCountdown}.`,
+                type: 'error'
+            });
+            return;
+        }
 
         if (!isHumanVerified) {
             setSnackbar({ open: true, message: 'Please complete the Human Verification first.', type: 'error' });
@@ -90,6 +190,7 @@ export default function Home() {
             const res = await axios.post('/api/auth/login', payload);
             const user = res.data.user;
             const token = res.data.token;
+            clearLoginBlock(loginRole);
             const normalizedUser = user ? {
                 ...user,
                 loginId: user.loginId || user.login_id,
@@ -110,6 +211,15 @@ export default function Home() {
             if (err.response?.status === 409 && err.response?.data?.needsForce) {
                 setShowForceLogout(true);
             } else {
+                const blockedUntil = Number(err.response?.data?.blockedUntil)
+                    || (Number(err.response?.data?.retryAfterSeconds) > 0
+                        ? Date.now() + Number(err.response.data.retryAfterSeconds) * 1000
+                        : 0);
+
+                if (err.response?.data?.rateLimited && blockedUntil) {
+                    rememberLoginBlock(loginRole, blockedUntil);
+                }
+
                 setSnackbar({
                     open: true,
                     message: err.response?.data?.error || 'Login failed',
@@ -261,13 +371,13 @@ export default function Home() {
                                 </div>
                                 <div className="button-group-expansive">
                                     <button
-                                        onClick={() => { setIsAdmin(false); setShowLoginForm(true); }}
+                                        onClick={() => openLoginPortal(false)}
                                         className="btn-primary-neural hero-btn"
                                     >
                                         <User size={20} /> User Login
                                     </button>
                                     <button
-                                        onClick={() => { setIsAdmin(true); setShowLoginForm(true); }}
+                                        onClick={() => openLoginPortal(true)}
                                         className="btn-outline-neural hero-btn"
                                     >
                                         <Lock size={20} /> Admin Login
@@ -317,7 +427,7 @@ export default function Home() {
                     <div className="login-card-container fade-in-scale">
                         <div className="login-card">
                             <button
-                                onClick={() => setShowLoginForm(false)}
+                                onClick={handleBackToHome}
                                 className="back-button"
                             >
                                 <ArrowLeft size={18} /> Back
@@ -328,6 +438,18 @@ export default function Home() {
                                     {isAdmin ? 'Admin Login' : 'User Login'}
                                 </h2>
                                 <p className="login-subtitle">Access your Neural Portal</p>
+                                {isLoginBlocked && (
+                                    <div className="login-lock-countdown" role="status" aria-live="polite">
+                                        <span className="login-lock-icon" aria-hidden="true">
+                                            <Lock size={14} />
+                                        </span>
+                                        <span className="login-lock-copy">
+                                            <span className="login-lock-label">
+                                                Try again in <strong>{loginBlockCountdown}</strong>
+                                            </span>
+                                        </span>
+                                    </div>
+                                )}
                             </div>
 
                             <form onSubmit={handleLogin} className="login-form">
@@ -394,8 +516,13 @@ export default function Home() {
                                     />
                                 </div>
 
-                                <button type="submit" className="btn-primary-neural" style={{ width: '100%', padding: '1.2rem', borderRadius: '1rem', border: 'none', fontWeight: '800', fontSize: '1.1rem', cursor: 'pointer', marginTop: '0.5rem' }}>
-                                    Log In Now
+                                <button
+                                    type="submit"
+                                    className={`btn-primary-neural login-submit-btn ${isLoginBlocked ? 'is-locked' : ''}`}
+                                    disabled={isLoginBlocked}
+                                    style={{ width: '100%', padding: '1.2rem', borderRadius: '1rem', border: 'none', fontWeight: '800', fontSize: '1.1rem', cursor: isLoginBlocked ? 'not-allowed' : 'pointer', marginTop: '0.5rem' }}
+                                >
+                                    {isLoginBlocked ? 'Login locked' : 'Log In Now'}
                                 </button>
 
                                 <div className="login-footer">
