@@ -21,6 +21,102 @@ const { renderEmailShell } = require('../utils/emailTemplates');
 
 const SCHEDULED_PENDING_STATUSES = ['scheduled', 'sending'];
 const JWT_SECRET = process.env.JWT_SECRET;
+const REVIEW_CHAT_TOTP_PERIOD_SECONDS = Number(process.env.REVIEW_CHAT_TOTP_PERIOD_SECONDS || 60);
+const REVIEW_CHAT_UNLOCK_TTL_SECONDS = Number(process.env.REVIEW_CHAT_UNLOCK_TTL_SECONDS || 10 * 60);
+
+const normalizeBase32 = (value = '') => String(value).replace(/=+$/g, '').replace(/\s+/g, '').toUpperCase();
+
+const base32ToBuffer = (value = '') => {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    const clean = normalizeBase32(value);
+    let bits = '';
+    for (const char of clean) {
+        const index = alphabet.indexOf(char);
+        if (index === -1) throw new Error('Invalid base32 secret');
+        bits += index.toString(2).padStart(5, '0');
+    }
+    const bytes = [];
+    for (let i = 0; i + 8 <= bits.length; i += 8) {
+        bytes.push(parseInt(bits.slice(i, i + 8), 2));
+    }
+    return Buffer.from(bytes);
+};
+
+const bufferToBase32 = (buffer) => {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    let bits = '';
+    for (const byte of buffer) bits += byte.toString(2).padStart(8, '0');
+    let output = '';
+    for (let i = 0; i < bits.length; i += 5) {
+        const chunk = bits.slice(i, i + 5).padEnd(5, '0');
+        output += alphabet[parseInt(chunk, 2)];
+    }
+    return output;
+};
+
+const getReviewChatTotpSecret = () => {
+    if (process.env.REVIEW_CHAT_TOTP_SECRET) return normalizeBase32(process.env.REVIEW_CHAT_TOTP_SECRET);
+    const seed = process.env.JWT_SECRET || process.env.DEFAULT_ENCRYPTION_SECRET || 'neuralchat-review-chat';
+    return bufferToBase32(crypto.createHash('sha256').update(`review-chat:${seed}`).digest().subarray(0, 20));
+};
+
+const generateTotpCode = (secret, timeStep) => {
+    const key = base32ToBuffer(secret);
+    const counter = Buffer.alloc(8);
+    counter.writeUInt32BE(Math.floor(timeStep / 0x100000000), 0);
+    counter.writeUInt32BE(timeStep >>> 0, 4);
+    const hmac = crypto.createHmac('sha1', key).update(counter).digest();
+    const offset = hmac[hmac.length - 1] & 0x0f;
+    const binary = ((hmac[offset] & 0x7f) << 24)
+        | ((hmac[offset + 1] & 0xff) << 16)
+        | ((hmac[offset + 2] & 0xff) << 8)
+        | (hmac[offset + 3] & 0xff);
+    return String(binary % 1000000).padStart(6, '0');
+};
+
+const verifyReviewChatTotp = (code) => {
+    const normalizedCode = String(code || '').replace(/\s+/g, '');
+    if (!/^\d{6}$/.test(normalizedCode)) return false;
+    const secret = getReviewChatTotpSecret();
+    const acceptedPeriods = [...new Set([REVIEW_CHAT_TOTP_PERIOD_SECONDS, 30, 60].filter(Boolean))];
+    const now = Math.floor(Date.now() / 1000);
+
+    for (const period of acceptedPeriods) {
+        const currentStep = Math.floor(now / period);
+        for (let offset = -1; offset <= 1; offset += 1) {
+            if (generateTotpCode(secret, currentStep + offset) === normalizedCode) return true;
+        }
+    }
+    return false;
+};
+
+const signReviewChatAccessToken = (adminId, userId) => jwt.sign(
+    { type: 'review-chat-access', adminId: String(adminId), userId: String(userId) },
+    JWT_SECRET,
+    { expiresIn: REVIEW_CHAT_UNLOCK_TTL_SECONDS }
+);
+
+const requireReviewChatAccess = (req, res, next) => {
+    const reviewedUserId = String(req.params.userId || req.query.userId || req.body.userId || '');
+    const token = req.headers['x-review-chat-token'];
+    if (!reviewedUserId || !token) {
+        return res.status(423).json({ error: 'Review chat is locked. Enter the current authenticator code.' });
+    }
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (
+            decoded?.type !== 'review-chat-access'
+            || String(decoded.adminId) !== String(req.adminUser._id)
+            || String(decoded.userId) !== reviewedUserId
+        ) {
+            return res.status(403).json({ error: 'Review chat unlock is not valid for this user.' });
+        }
+        next();
+    } catch (_) {
+        return res.status(423).json({ error: 'Review chat unlock expired. Enter a fresh authenticator code.' });
+    }
+};
 
 const buildScheduledPreviewMessage = (scheduled, senderName = '') => {
     const row = scheduled.toObject ? scheduled.toObject() : scheduled;
@@ -142,6 +238,38 @@ router.get('/me', async (req, res) => {
         name: req.adminUser.name,
         email: req.adminUser.email,
         role: req.adminUser.role
+    });
+});
+
+router.get('/chat/review-lock/setup', async (req, res) => {
+    const secret = getReviewChatTotpSecret();
+    const hasConfiguredSecret = Boolean(process.env.REVIEW_CHAT_TOTP_SECRET);
+    const issuer = encodeURIComponent(process.env.REVIEW_CHAT_TOTP_ISSUER || 'NeuralChat');
+    const label = encodeURIComponent(`NeuralChat Review Chat:${req.adminUser.email || req.adminUser.name || 'Admin'}`);
+
+    res.json({
+        secret: hasConfiguredSecret ? undefined : secret,
+        setupRequired: !hasConfiguredSecret,
+        period: REVIEW_CHAT_TOTP_PERIOD_SECONDS,
+        digits: 6,
+        algorithm: 'SHA1',
+        otpauthUrl: hasConfiguredSecret ? undefined : `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&period=${REVIEW_CHAT_TOTP_PERIOD_SECONDS}&digits=6`
+    });
+});
+
+router.post('/chat/review-lock/verify', async (req, res) => {
+    const { userId, code } = req.body || {};
+    if (!userId || !code) return res.status(400).json({ error: 'Missing user or authenticator code' });
+
+    const reviewedUser = await User.exists({ _id: userId, role: { $ne: 'admin' } });
+    if (!reviewedUser) return res.status(404).json({ error: 'Reviewed user not found' });
+    if (!verifyReviewChatTotp(code)) {
+        return res.status(401).json({ error: 'Invalid or expired authenticator code' });
+    }
+
+    res.json({
+        reviewToken: signReviewChatAccessToken(req.adminUser._id, userId),
+        expiresIn: REVIEW_CHAT_UNLOCK_TTL_SECONDS
     });
 });
 
@@ -573,7 +701,7 @@ router.delete('/chat/:userId', async (req, res) => {
 });
 
 // Delete specific messages
-router.delete('/chat/messages/delete', async (req, res) => {
+router.delete('/chat/messages/delete', requireReviewChatAccess, async (req, res) => {
     const { messageIds } = req.body;
     if (!messageIds || !Array.isArray(messageIds)) {
         return res.status(400).json({ error: 'Invalid message IDs' });
@@ -592,7 +720,7 @@ router.delete('/chat/messages/delete', async (req, res) => {
 // --- Advanced Chat Review Routes ---
 
 // Get all contacts a user has interacted with (including AI)
-router.get('/chat/contacts/:userId', async (req, res) => {
+router.get('/chat/contacts/:userId', requireReviewChatAccess, async (req, res) => {
     try {
         const { userId } = req.params;
 
@@ -673,7 +801,7 @@ router.get('/chat/contacts/:userId', async (req, res) => {
 });
 
 // Get unique dates for a specific conversation
-router.get('/chat/dates/:userId/:otherUserId', async (req, res) => {
+router.get('/chat/dates/:userId/:otherUserId', requireReviewChatAccess, async (req, res) => {
     try {
         const { userId, otherUserId } = req.params;
         let query = {};
@@ -1068,7 +1196,7 @@ router.get('/debug-unblock', async (req, res) => {
     }
 });
 
-router.get('/chat/history-filtered', async (req, res) => {
+router.get('/chat/history-filtered', requireReviewChatAccess, async (req, res) => {
     try {
         const { userId, otherUserId, date } = req.query;
         if (!userId || !otherUserId || !date) return res.status(400).json({ error: 'Missing parameters' });

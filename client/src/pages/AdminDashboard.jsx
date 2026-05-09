@@ -421,6 +421,12 @@ export default function AdminDashboard() {
 
     // Chat Review State
     const [viewChat, setViewChat] = useState(null);
+    const [pendingReviewUnlock, setPendingReviewUnlock] = useState(null);
+    const [reviewUnlockCode, setReviewUnlockCode] = useState('');
+    const [reviewUnlockError, setReviewUnlockError] = useState('');
+    const [reviewUnlocking, setReviewUnlocking] = useState(false);
+    const [reviewLockSetup, setReviewLockSetup] = useState(null);
+    const [reviewChatToken, setReviewChatToken] = useState('');
     const [viewingMedia, setViewingMedia] = useState(null);
     const [zoomLevel, setZoomLevel] = useState(1);
     const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -943,13 +949,32 @@ export default function AdminDashboard() {
         }
 
         // 3. Date Handling
+        return openReviewUnlock(user, { type: 'alert', alert });
+    };
+
+    const loadReviewAlertContext = async (alert, token) => {
+        const actorId = alert.userId || alert.sender_id;
+        const user = users.find(u => u.id === actorId || u._id === actorId) || { id: actorId, name: alert.userName || alert.deletedBy || 'User', email: 'N/A' };
+
+        let contact = null;
+        if (alert.isGroup) {
+            contact = { id: alert.groupId, name: alert.partnerName || 'Group Chat', type: 'group' };
+        } else {
+            const otherId = alert.receiverId || alert.otherUserId;
+            if (otherId) {
+                contact = users.find(u => u.id === otherId || u._id === otherId);
+                if (!contact) contact = { id: otherId, name: alert.partnerName || 'Unknown User', type: 'user' };
+            } else {
+                contact = { id: 'ai', name: 'AI Assistant', type: 'ai' };
+            }
+        }
+
         const dateObj = new Date(alert.timestamp || alert.createdAt);
         const year = dateObj.getFullYear().toString();
         const month = (dateObj.getMonth() + 1).toString().padStart(2, '0');
         const day = dateObj.getDate().toString().padStart(2, '0');
         const dateString = `${year}-${month}-${day}`;
 
-        // 4. Update State & Fetch
         setShowNotifications(false);
         setShowUnethicalModal(false);
         setUnethicalModalUser(null);
@@ -965,6 +990,7 @@ export default function AdminDashboard() {
             // Updated Logic: Fetch context data for "Back" navigation
             const [historyRes, contactsRes, datesRes] = await Promise.all([
                 axios.get(`/api/admin/chat/history-filtered`, {
+                    ...getReviewChatHeaders(token),
                     params: {
                         userId: user.id || user._id,
                         otherUserId: contact.id || contact._id,
@@ -972,8 +998,8 @@ export default function AdminDashboard() {
                         isGroup: alert.isGroup
                     }
                 }),
-                axios.get(`/api/admin/chat/contacts/${user.id || user._id}`),
-                axios.get(`/api/admin/chat/dates/${user.id || user._id}/${contact.id || contact._id}`)
+                axios.get(`/api/admin/chat/contacts/${user.id || user._id}`, getReviewChatHeaders(token)),
+                axios.get(`/api/admin/chat/dates/${user.id || user._id}/${contact.id || contact._id}`, getReviewChatHeaders(token))
             ]);
 
             setChatContacts(contactsRes.data);
@@ -1333,7 +1359,7 @@ export default function AdminDashboard() {
                     setChatDates(prev => prev.includes(createdDate) ? prev : [...prev, createdDate].sort((a, b) => new Date(a) - new Date(b)));
                 }
                 if (!currentContactId) {
-                    axios.get(`/api/admin/chat/contacts/${currentUserId}`)
+                    axios.get(`/api/admin/chat/contacts/${currentUserId}`, getReviewChatHeaders())
                         .then(res => setChatContacts(res.data))
                         .catch(() => { });
                 }
@@ -1466,7 +1492,7 @@ export default function AdminDashboard() {
         });
 
         return () => socket.disconnect();
-    }, [adminUser?.role, adminUser?.id, adminUser?._id]);
+    }, [adminUser?.role, adminUser?.id, adminUser?._id, reviewChatToken]);
 
     const fetchData = async () => {
         try {
@@ -1632,8 +1658,37 @@ export default function AdminDashboard() {
         });
     };
 
-    // ... (Chat logic remains similar but UI is overhauled) ...
-    const handleReviewChat = async (user) => {
+    const getReviewChatHeaders = (token = reviewChatToken) => (
+        token ? { headers: { 'x-review-chat-token': token } } : {}
+    );
+
+    const closeReviewChat = () => {
+        setViewChat(null);
+        setPendingReviewUnlock(null);
+        setReviewUnlockCode('');
+        setReviewUnlockError('');
+        setReviewChatToken('');
+        setChatContacts([]);
+        setChatDates([]);
+        setSelectedContact(null);
+        setSelectedDate(null);
+        setViewingMedia(null);
+    };
+
+    const openReviewUnlock = async (user, context = null) => {
+        setPendingReviewUnlock({ user, context });
+        setReviewUnlockCode('');
+        setReviewUnlockError('');
+        setReviewChatToken('');
+        setShowNotifications(false);
+        if (!reviewLockSetup) {
+            axios.get('/api/admin/chat/review-lock/setup')
+                .then(res => setReviewLockSetup(res.data))
+                .catch(() => setReviewLockSetup(null));
+        }
+    };
+
+    const loadReviewContacts = async (user, token) => {
         setLoadingChat(true);
         setViewChat({ user, messages: [] });
         setChatStep('contacts');
@@ -1643,12 +1698,44 @@ export default function AdminDashboard() {
         setSelectedMonth(null);
         setDateSearchQuery('');
         try {
-            const res = await axios.get(`/api/admin/chat/contacts/${user.id}`);
+            const res = await axios.get(`/api/admin/chat/contacts/${user.id || user._id}`, getReviewChatHeaders(token));
             setChatContacts(res.data);
         } catch (err) {
             showSnackbar('Failed to fetch contacts', 'error');
         } finally {
             setLoadingChat(false);
+        }
+    };
+
+    const handleReviewChat = async (user) => {
+        openReviewUnlock(user);
+    };
+
+    const handleReviewUnlockSubmit = async (e) => {
+        e?.preventDefault?.();
+        const target = pendingReviewUnlock?.user;
+        if (!target) return;
+        setReviewUnlocking(true);
+        setReviewUnlockError('');
+        try {
+            const userId = target.id || target._id;
+            const res = await axios.post('/api/admin/chat/review-lock/verify', {
+                userId,
+                code: reviewUnlockCode
+            });
+            const token = res.data.reviewToken;
+            setReviewChatToken(token);
+            setPendingReviewUnlock(null);
+            setReviewUnlockCode('');
+            if (pendingReviewUnlock.context?.type === 'alert') {
+                await loadReviewAlertContext(pendingReviewUnlock.context.alert, token);
+            } else {
+                await loadReviewContacts(target, token);
+            }
+        } catch (err) {
+            setReviewUnlockError(err.response?.data?.error || 'Unable to unlock review chat');
+        } finally {
+            setReviewUnlocking(false);
         }
     };
 
@@ -1661,7 +1748,7 @@ export default function AdminDashboard() {
         setDateSearchQuery('');
         const userId = viewChat.user.id || viewChat.user._id;
         const otherUserId = contact.id || contact._id;
-        axios.get(`/api/admin/chat/dates/${userId}/${otherUserId}`)
+        axios.get(`/api/admin/chat/dates/${userId}/${otherUserId}`, getReviewChatHeaders())
             .then(res => {
                 const sortedDates = [...res.data].sort((a, b) => new Date(a) - new Date(b));
                 setChatDates(sortedDates);
@@ -1700,7 +1787,7 @@ export default function AdminDashboard() {
         const handleEsc = (e) => {
             if (e.key === 'Escape') {
                 if (showNotifications) setShowNotifications(false);
-                if (viewChat) setViewChat(null);
+                if (viewChat || pendingReviewUnlock) closeReviewChat();
                 if (viewingMedia) setViewingMedia(null);
                 if (unethicalModalUser) setUnethicalModalUser(null);
                 if (showUnethicalModal) setShowUnethicalModal(false);
@@ -1710,7 +1797,7 @@ export default function AdminDashboard() {
         };
         window.addEventListener('keydown', handleEsc);
         return () => window.removeEventListener('keydown', handleEsc);
-    }, [showNotifications, viewChat, viewingMedia, unethicalModalUser, showUnethicalModal, confirmConfig, msgDropdown]);
+    }, [showNotifications, viewChat, pendingReviewUnlock, viewingMedia, unethicalModalUser, showUnethicalModal, confirmConfig, msgDropdown]);
 
     useEffect(() => {
         const handleClick = () => {
@@ -1727,7 +1814,7 @@ export default function AdminDashboard() {
         setSelectedDate(date);
         setLoadingChat(true);
         try {
-            const res = await axios.get(`/api/admin/chat/history-filtered`, { params: { userId: viewChat.user.id, otherUserId: selectedContact.id, date } });
+            const res = await axios.get(`/api/admin/chat/history-filtered`, { params: { userId: viewChat.user.id, otherUserId: selectedContact.id, date }, ...getReviewChatHeaders() });
             setViewChat({ ...viewChat, messages: res.data });
             setChatStep('messages');
         } catch (err) {
@@ -4362,10 +4449,65 @@ export default function AdminDashboard() {
             </div>
 
             {/* Chat Overlays & Modals (Overhauled for premium look) */}
+            {pendingReviewUnlock && (
+                <div
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(2, 6, 23, 0.62)', backdropFilter: 'blur(6px)', zIndex: 1001, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '1rem' }}
+                    onClick={closeReviewChat}
+                >
+                    <form
+                        onSubmit={handleReviewUnlockSubmit}
+                        onClick={e => e.stopPropagation()}
+                        style={{ width: '100%', maxWidth: '440px', background: '#0f172a', border: '1px solid rgba(148, 163, 184, 0.18)', borderRadius: '1.25rem', boxShadow: '0 30px 80px rgba(2, 6, 23, 0.45)', overflow: 'hidden' }}
+                    >
+                        <div style={{ padding: '1.25rem 1.35rem', background: ADMIN_PILL_GRADIENT, color: 'white', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <div style={{ width: 42, height: 42, borderRadius: '12px', background: 'rgba(255,255,255,0.16)', display: 'grid', placeItems: 'center', flex: '0 0 auto' }}>
+                                <Key size={21} />
+                            </div>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800 }}>Review Chat Locked</h3>
+                                <p style={{ margin: '3px 0 0', fontSize: '0.78rem', opacity: 0.88 }}>Enter the current Google Authenticator code</p>
+                            </div>
+                        </div>
+                        <div style={{ padding: '1.35rem', display: 'grid', gap: '0.9rem' }}>
+                            <div style={{ color: '#cbd5e1', fontSize: '0.86rem', lineHeight: 1.45 }}>
+                                Unlocking access for <strong style={{ color: '#f8fafc' }}>{pendingReviewUnlock.user?.name || 'this user'}</strong>. The unlock stays only for this review window and clears when you close it.
+                            </div>
+                            <input
+                                value={reviewUnlockCode}
+                                onChange={(e) => {
+                                    setReviewUnlockCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+                                    setReviewUnlockError('');
+                                }}
+                                inputMode="numeric"
+                                autoFocus
+                                placeholder="000000"
+                                style={{ width: '100%', boxSizing: 'border-box', border: '1px solid rgba(148, 163, 184, 0.24)', background: '#111827', color: '#f8fafc', borderRadius: '0.8rem', padding: '0.95rem 1rem', fontSize: '1.35rem', fontWeight: 800, letterSpacing: '0.18em', textAlign: 'center', outline: 'none' }}
+                            />
+                            {reviewUnlockError && (
+                                <div style={{ color: '#fca5a5', fontSize: '0.8rem', fontWeight: 700 }}>{reviewUnlockError}</div>
+                            )}
+                            {reviewLockSetup?.secret && (
+                                <div style={{ border: '1px solid rgba(56, 189, 248, 0.18)', background: 'rgba(14, 165, 233, 0.08)', borderRadius: '0.8rem', padding: '0.75rem', color: '#bae6fd', fontSize: '0.76rem', lineHeight: 1.45 }}>
+                                    Google Authenticator setup secret: <strong>{reviewLockSetup.secret}</strong>
+                                    <div>Refreshes every {reviewLockSetup.period || 60} seconds.</div>
+                                </div>
+                            )}
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', flexWrap: 'nowrap', width: '100%' }}>
+                                <button type="button" onClick={closeReviewChat} style={{ flex: '1 1 0', minWidth: 0, background: 'rgba(148, 163, 184, 0.14)', border: 'none', color: '#e2e8f0', padding: isMobile ? '0.72rem 0.65rem' : '0.65rem 1rem', borderRadius: '999px', cursor: 'pointer', fontWeight: 800, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    Cancel
+                                </button>
+                                <button type="submit" disabled={reviewUnlocking || reviewUnlockCode.length !== 6} style={{ flex: '1 1 0', minWidth: 0, background: ADMIN_PILL_GRADIENT, border: 'none', color: 'white', padding: isMobile ? '0.72rem 0.65rem' : '0.65rem 1.1rem', borderRadius: '999px', cursor: reviewUnlocking || reviewUnlockCode.length !== 6 ? 'not-allowed' : 'pointer', opacity: reviewUnlocking || reviewUnlockCode.length !== 6 ? 0.65 : 1, fontWeight: 800, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {reviewUnlocking ? 'Unlocking...' : 'Unlock'}
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            )}
             {viewChat && (
                 <div
                     style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(50,50,93,0.3)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}
-                    onClick={() => setViewChat(null)}
+                    onClick={closeReviewChat}
                 >
                     <div
                         style={{ background: '#0f172a', width: isMobile ? '95%' : '90%', maxWidth: '800px', height: isMobile ? '90vh' : '85vh', borderRadius: '1.5rem', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 50px 100px rgba(2, 6, 23, 0.42)', position: 'relative', border: '1px solid rgba(148, 163, 184, 0.14)' }}
@@ -4416,7 +4558,7 @@ export default function AdminDashboard() {
                                     </button>
                                 )}
                                 <button
-                                    onClick={() => setViewChat(null)}
+                                    onClick={closeReviewChat}
                                     style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', padding: isMobile ? '6px 12px' : '6px 16px', borderRadius: '20px', cursor: 'pointer', fontSize: isMobile ? '0.8rem' : '0.9rem', fontWeight: '700', transition: 'all 0.2s', whiteSpace: 'nowrap' }}
                                     onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.3)'}
                                     onMouseOut={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.2)'}
