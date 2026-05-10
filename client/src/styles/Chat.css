@@ -1556,6 +1556,8 @@ html {
     gap: 8px;
     flex-shrink: 0;
     align-items: center;
+    position: relative;
+    z-index: 40000;
 }
 
 .wa-search-section {
@@ -4126,9 +4128,9 @@ html.wa-screenshot-protection-active .wa-app-container {
     border: 1px solid rgba(17, 27, 33, 0.08);
     border-radius: 16px;
     padding: 10px 10px 0;
-    width: min(360px, 100%);
-    min-width: 0;
-    max-width: 100%;
+    width: fit-content;
+    min-width: min(280px, 100%);
+    max-width: min(340px, 100%);
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
@@ -4149,7 +4151,9 @@ html.wa-screenshot-protection-active .wa-app-container {
 
 @media (max-width: 480px) {
     .wa-msg-doc-bubble {
-        width: min(100%, 300px);
+        width: fit-content;
+        min-width: min(260px, 100%);
+        max-width: min(300px, 100%);
         padding: 9px 9px 0;
     }
 
@@ -5180,7 +5184,8 @@ html.wa-screenshot-protection-active .wa-app-container {
 .wa-info-message-preview .wa-bubble {
     z-index: 1;
     max-width: 85%;
-    width: min(100%, 420px);
+    width: fit-content;
+    min-width: min(220px, 100%);
     background-color: var(--wa-outgoing-msg-bg);
     padding: 8px 12px 6px 12px;
     border-radius: 8px;
@@ -5192,18 +5197,22 @@ html.wa-screenshot-protection-active .wa-app-container {
     /* Text inside bubble should be left-aligned */
     overflow: hidden;
     box-sizing: border-box;
+    align-self: center;
 }
 
 .wa-info-message-preview .wa-bubble .wa-info-doc-bubble {
-    width: min(100%, 360px);
+    width: fit-content;
+    min-width: min(280px, 100%);
+    max-width: min(300px, 100%);
     margin: 0;
 }
 
 .wa-info-message-preview .wa-bubble:has(.wa-info-doc-bubble) {
-    padding: 0;
-    background: transparent;
-    box-shadow: none;
-    overflow: visible;
+    padding: 8px 8px 18px;
+    background: linear-gradient(135deg, rgba(8, 145, 178, 0.7) 0%, rgba(30, 64, 175, 0.72) 100%) !important;
+    border: 1px solid rgba(56, 189, 248, 0.26);
+    box-shadow: 0 14px 30px rgba(2, 6, 23, 0.22);
+    overflow: hidden;
 }
 
 .wa-info-message-preview .wa-bubble:has(.wa-info-media-frame) {
@@ -5220,6 +5229,10 @@ html.wa-screenshot-protection-active .wa-app-container {
     word-break: break-word;
     white-space: pre-wrap;
     line-height: 1.4;
+}
+
+.wa-info-message-preview .wa-bubble > p {
+    text-align: center;
 }
 
 .wa-info-media-frame {
@@ -5250,7 +5263,8 @@ html.wa-screenshot-protection-active .wa-app-container {
 
     .wa-info-message-preview .wa-bubble {
         max-width: 100%;
-        width: min(100%, 320px);
+        width: fit-content;
+        min-width: min(200px, 100%);
         padding: 8px 8px 6px;
         border-radius: 10px;
     }
@@ -5270,7 +5284,9 @@ html.wa-screenshot-protection-active .wa-app-container {
     }
 
     .wa-info-message-preview .wa-bubble {
-        width: min(100%, 100%);
+        width: fit-content;
+        min-width: min(180px, 100%);
+        max-width: 100%;
         padding: 6px 6px 4px;
         border-radius: 10px;
     }
@@ -6901,19 +6917,37 @@ html.wa-screenshot-protection-active .wa-app-container {
     width: 44px;
     height: 44px;
     border-radius: 50%;
-    background-color: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background:
+        linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(14, 165, 233, 0.66));
+    border: 1px solid rgba(125, 211, 252, 0.46);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    color: #f8fafc;
+    color: #ffffff;
     z-index: 20;
-    transition: all 0.2s;
+    box-shadow:
+        0 10px 24px rgba(2, 6, 23, 0.42),
+        0 0 0 1px rgba(2, 6, 23, 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
+    transition: transform 0.2s, background 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+.wa-viewer-nav-btn svg {
+    filter: drop-shadow(0 1px 2px rgba(2, 6, 23, 0.9));
+    stroke-width: 2.6;
 }
 
 .wa-viewer-nav-btn:hover {
-    background-color: rgba(255, 255, 255, 0.15);
+    background:
+        linear-gradient(135deg, rgba(30, 41, 59, 0.96), rgba(56, 189, 248, 0.82));
+    border-color: rgba(186, 230, 253, 0.7);
+    box-shadow:
+        0 14px 28px rgba(2, 6, 23, 0.5),
+        0 0 18px rgba(56, 189, 248, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.28);
     transform: translateY(-50%) scale(1.1);
 }
 
@@ -7161,8 +7195,16 @@ html.wa-screenshot-protection-active .wa-app-container {
     }
 
     .wa-viewer-nav-btn {
-        width: 38px;
-        height: 38px;
+        width: 40px;
+        height: 40px;
+        background:
+            linear-gradient(135deg, rgba(8, 19, 39, 0.96), rgba(14, 165, 233, 0.78));
+        border-color: rgba(186, 230, 253, 0.58);
+        box-shadow:
+            0 8px 22px rgba(2, 6, 23, 0.52),
+            0 0 0 1px rgba(2, 6, 23, 0.36),
+            0 0 16px rgba(56, 189, 248, 0.2),
+            inset 0 1px 0 rgba(255, 255, 255, 0.24);
     }
 
     .wa-viewer-nav-btn.prev {
@@ -7176,30 +7218,39 @@ html.wa-screenshot-protection-active .wa-app-container {
 
 @media (max-width: 640px) {
     .wa-viewer-header {
-        align-items: flex-start;
-        flex-direction: column;
-        min-height: auto;
-        padding: 8px 10px 6px;
+        align-items: center;
+        flex-direction: row;
+        min-height: 66px;
+        padding: 8px 10px;
+        gap: 8px;
     }
 
     .wa-viewer-user-info {
-        width: 100%;
+        width: auto;
+        flex: 1 1 120px;
+        min-width: 0;
+    }
+
+    .wa-viewer-user-info .wa-avatar {
+        width: 36px !important;
+        height: 36px !important;
+        margin-right: 8px !important;
     }
 
     .wa-viewer-actions {
-        width: 100%;
-        justify-content: flex-start;
-        overflow-x: auto;
-        padding-bottom: 2px;
-        scrollbar-width: none;
-    }
-
-    .wa-viewer-actions::-webkit-scrollbar {
-        display: none;
+        width: auto;
+        flex: 0 0 auto;
+        justify-content: flex-end;
+        overflow: visible;
+        gap: 2px;
+        padding-bottom: 0;
     }
 
     .wa-viewer-btn {
         flex: 0 0 auto;
+        width: 32px;
+        height: 32px;
+        padding: 5px;
     }
 }
 
@@ -10593,20 +10644,45 @@ html.wa-screenshot-protection-active .wa-app-container {
 
     /* Header on mobile */
     .wa-settings-header {
-        min-height: 88px;
+        min-height: 72px;
         height: auto;
-        padding: 16px 18px;
-        gap: 12px;
+        padding: 12px 14px;
+        gap: 10px;
         align-items: center;
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr) auto;
+        position: relative;
+    }
+
+    .wa-settings-back-btn {
+        grid-column: 1;
+        position: relative;
+        z-index: 3;
+        width: 40px;
+        height: 40px;
+    }
+
+    .wa-settings-header-info {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        min-width: 0;
+        align-items: center;
+        text-align: center;
+        padding: 0 96px;
+        pointer-events: none;
     }
 
     .wa-settings-tab-title {
-        font-size: 1.35rem;
+        font-size: 1.18rem;
         line-height: 1.2;
-        white-space: normal;
-        overflow: visible;
-        text-overflow: unset;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
         max-width: none;
+        width: 100%;
     }
 
     .wa-settings-btn-text-desktop {
@@ -10618,8 +10694,9 @@ html.wa-screenshot-protection-active .wa-app-container {
     }
 
     .wa-settings-btn-edit {
-        padding: 0 12px;
-        height: 36px;
+        padding: 0 10px;
+        height: 34px;
+        min-width: 74px;
         flex-shrink: 0;
     }
 
@@ -10628,8 +10705,61 @@ html.wa-screenshot-protection-active .wa-app-container {
     }
 
     .wa-settings-header-actions {
-        margin-left: auto;
-        gap: 10px;
+        grid-column: 3;
+        grid-row: 1;
+        width: auto;
+        margin-left: 0;
+        gap: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        justify-self: end;
+        position: relative;
+        z-index: 3;
+    }
+
+    .wa-settings-header-actions:has(.wa-settings-btn-cancel) {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 8px;
+        margin-top: 14px;
+    }
+
+    .wa-settings-header:has(.wa-settings-btn-cancel) {
+        min-height: 118px;
+        align-content: start;
+        padding-top: 14px;
+        padding-bottom: 14px;
+    }
+
+    .wa-settings-header:has(.wa-settings-btn-cancel) .wa-settings-header-info {
+        top: 20px;
+        transform: none;
+    }
+
+    .wa-settings-header-actions .wa-settings-btn-cancel,
+    .wa-settings-header-actions .wa-settings-btn-commit {
+        width: auto;
+        min-width: 82px;
+        height: 38px;
+        padding-left: 10px;
+        padding-right: 10px;
+        white-space: nowrap;
+        line-height: 1;
+        font-size: 11px;
+        border-radius: 10px;
+    }
+
+    .wa-settings-header-actions .wa-settings-btn-commit {
+        min-width: 92px;
+    }
+
+    .wa-settings-header-actions .wa-settings-btn-cancel {
+        color: #dbeafe;
+        font-weight: 800;
     }
 
     /* Content on mobile */
@@ -12361,6 +12491,28 @@ html.wa-screenshot-protection-active .wa-app-container {
 .wa-msg-document-action-btn:hover {
     background: rgba(56, 189, 248, 0.12) !important;
     color: #7dd3fc !important;
+}
+
+.wa-message-bubble:has(.wa-msg-doc-bubble) {
+    width: fit-content !important;
+    max-width: min(340px, calc(100vw - 64px)) !important;
+    padding: 8px 8px 18px !important;
+    overflow: hidden !important;
+}
+
+.wa-message-bubble:has(.wa-msg-doc-bubble) .wa-msg-meta {
+    padding: 0;
+    margin-top: 4px;
+    justify-content: flex-end;
+}
+
+.wa-message-bubble:has(.wa-msg-doc-bubble) .wa-msg-doc-bubble {
+    max-width: min(300px, calc(100vw - 88px));
+}
+
+.wa-message-bubble:has(.wa-msg-doc-bubble) .wa-dropdown-trigger {
+    top: 6px;
+    right: 6px;
 }
 
 /* Alerts / Banners */
@@ -14110,6 +14262,53 @@ background: rgba(56, 189, 248, 0.2) !important;
     -webkit-backdrop-filter: none !important;
 }
 
+.wa-info-panel .wa-info-message-preview {
+    align-items: center !important;
+}
+
+.wa-info-panel .wa-info-message-preview .wa-bubble {
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
+
+.wa-info-panel .wa-info-message-preview .wa-info-doc-bubble {
+    background: linear-gradient(180deg, #dff1fb 0%, #d4e9f5 100%) !important;
+    border: 1px solid rgba(17, 27, 33, 0.08) !important;
+    box-shadow: 0 14px 26px rgba(2, 6, 23, 0.18) !important;
+}
+
+.wa-info-panel .wa-info-message-preview .wa-info-doc-bubble .wa-doc-title,
+.wa-info-panel .wa-info-message-preview .wa-info-doc-bubble .wa-doc-filename,
+.wa-info-panel .wa-info-message-preview .wa-info-doc-bubble .wa-doc-meta {
+    color: #1b2f3a !important;
+}
+
+.wa-info-panel .wa-info-message-preview .wa-info-doc-bubble .wa-doc-title,
+.wa-info-panel .wa-info-message-preview .wa-info-doc-bubble .wa-doc-meta {
+    color: #2c4f63 !important;
+    opacity: 0.9;
+}
+
+.wa-info-panel .wa-info-message-preview .wa-bubble:has(.wa-info-doc-bubble) .wa-msg-meta {
+    margin-top: 4px;
+}
+
+@media (max-width: 768px) {
+    .wa-profile-drawer.active {
+        height: 100dvh !important;
+        max-height: 100dvh !important;
+        overflow: hidden !important;
+    }
+
+    .wa-profile-drawer.active .wa-drawer-content {
+        min-height: 0 !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+        padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px)) !important;
+    }
+}
+
 .wa-contact-info-panel:not(.wa-new-group-drawer) [style*="border"],
 .wa-info-panel [style*="border"] {
     border-color: transparent !important;
@@ -15070,6 +15269,21 @@ background: rgba(56, 189, 248, 0.2) !important;
     color: #a9c2d8 !important;
 }
 
+.wa-message-bubble .wa-event-card .wa-event-card-title {
+    color: #f8fbff !important;
+    text-shadow: 0 1px 12px rgba(2, 6, 23, 0.55);
+}
+
+.wa-message-bubble .wa-event-card .wa-event-card-time {
+    color: #c7d7e8 !important;
+}
+
+.wa-message-bubble .wa-event-card .wa-event-card-response-count,
+.wa-message-bubble .wa-event-card .wa-event-card-action-label,
+.wa-message-bubble .wa-event-card .wa-event-card-status {
+    color: #38d5ef !important;
+}
+
 .wa-message-bubble .wa-event-card .wa-avatar,
 .wa-message-bubble .wa-contact-msg-card .wa-avatar,
 .wa-message-bubble .wa-contact-msg-card-multiple .wa-avatar {
@@ -15162,6 +15376,70 @@ background: rgba(56, 189, 248, 0.2) !important;
     text-overflow: clip !important;
     line-height: 1.2 !important;
     z-index: 45000 !important;
+}
+
+.wa-chat-list-view,
+.wa-header {
+    overflow: visible !important;
+}
+
+.wa-header {
+    position: relative;
+    z-index: 60000;
+}
+
+.wa-unread-banner-field {
+    position: relative;
+    z-index: 1;
+}
+
+.wa-header-icons,
+.wa-header-icons .wa-nav-icon-btn {
+    position: relative;
+    z-index: 60001;
+}
+
+.wa-header-icons .wa-nav-icon-btn[data-tooltip]::after {
+    display: block !important;
+    width: max-content !important;
+    min-width: max-content !important;
+    max-width: none !important;
+    height: auto !important;
+    background: rgba(8, 19, 39, 0.98) !important;
+    color: #e5f4ff !important;
+    border: 1px solid rgba(56, 189, 248, 0.34) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 12px 28px rgba(2, 6, 23, 0.46) !important;
+    backdrop-filter: blur(12px) saturate(135%) !important;
+    -webkit-backdrop-filter: blur(12px) saturate(135%) !important;
+    padding: 7px 10px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: clip !important;
+    z-index: 60002 !important;
+}
+
+.wa-header-icons .wa-nav-icon-btn[data-tooltip]:not(:hover)::after,
+.wa-header-icons .wa-nav-icon-btn[data-tooltip]:not(:hover)::before {
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
+
+.wa-header-icons .wa-nav-icon-btn[data-tooltip]:hover::after {
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+.wa-left-panel > .wa-profile-drawer.active,
+.wa-left-panel > .wa-new-chat-drawer.active,
+.wa-left-panel > .wa-new-community-drawer.active,
+.wa-left-panel > .wa-community-home-drawer.active {
+    z-index: 70000 !important;
+}
+
+.wa-left-panel > .wa-drawer.open,
+.wa-left-panel > .wa-edit-list-drawer {
+    z-index: 70020 !important;
 }
 
 .wa-community-info-action,

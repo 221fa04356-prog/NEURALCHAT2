@@ -2134,27 +2134,27 @@ const MessageList = memo(({
                                                 style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: isMobile ? '240px' : '260px', maxWidth: '100%', cursor: 'pointer', opacity: msg.event.cancelled ? 0.7 : 1, border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginBottom: '8px', position: 'relative' }}
                                             >
                                                 <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' }}>
-                                                    <div style={{ display: 'flex', gap: '14px' }}>
-                                                        <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                                            <Calendar size={24} color="#0EA5BE" />
+                                                    <div style={{ display: 'grid', gridTemplateColumns: '58px minmax(0, 1fr)', columnGap: '14px', rowGap: '10px', alignItems: 'start' }}>
+                                                        <div className="wa-event-card-side" style={{ width: '58px', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                                            <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                <Calendar size={24} color="#0EA5BE" />
+                                                            </div>
                                                         </div>
-                                                        <div style={{ flex: 1, minWidth: 0 }}>
-                                                            <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>
+                                                        <div style={{ flex: 1, minWidth: 0, paddingTop: '2px' }}>
+                                                            <div className="wa-event-card-title" style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>
                                                                 {msg.event.name || 'Event'}
                                                             </div>
-                                                            <div style={{ fontSize: '14px', color: '#667781' }}>
+                                                            <div className="wa-event-card-time" style={{ fontSize: '14px', color: '#667781' }}>
                                                                 {formatInlineEventTime(msg.event)}
                                                             </div>
-                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
-                                                                <div style={{ display: 'flex', position: 'relative', width: '20px', height: '20px' }}>
-                                                                    <div style={{ position: 'absolute', width: '20px', height: '20px', borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                                                                        <UserIcon size={12} color="#8696a0" style={{ marginTop: '1px' }} />
-                                                                    </div>
-                                                                </div>
-                                                                <span style={{ fontSize: '14px', color: '#0EA5BE', fontWeight: 500 }}>
-                                                                    {respondedCount} responded
-                                                                </span>
+                                                        </div>
+                                                        <div className="wa-event-card-response-stack" style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: '6px', width: '100%', paddingLeft: '4px', marginTop: '2px' }}>
+                                                            <div style={{ width: '18px', height: '18px', borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+                                                                <UserIcon size={11} color="#8696a0" style={{ marginTop: '1px' }} />
                                                             </div>
+                                                            <span className="wa-event-card-response-count" style={{ fontSize: '13px', color: '#0EA5BE', fontWeight: 600, lineHeight: 1.2, whiteSpace: 'nowrap' }}>
+                                                                {respondedCount} responded
+                                                            </span>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -2201,13 +2201,13 @@ const MessageList = memo(({
                                                         }}
                                                         style={{ color: actionTone, fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', minHeight: '22px', paddingTop: '12px', paddingBottom: hasStatusRow ? '10px' : '2px', cursor: (canEditEvent || canOpenRespond) ? 'pointer' : 'default', opacity: (!isSenderEvent && !canOpenRespond) || (isSenderEvent && !canEditEvent) ? 0.75 : 1 }}
                                                     >
-                                                        <span>{actionLabel}</span>
+                                                        <span className="wa-event-card-action-label">{actionLabel}</span>
                                                         {!isSenderEvent && <ChevronDown size={16} color={actionTone} />}
                                                     </div>
 
                                                     {hasStatusRow && (
                                                         <div style={{ borderTop: '1px solid #eef2f5', paddingTop: '10px' }}>
-                                                            <div style={{ color: statusTone, fontWeight: '600', fontSize: '15px', minHeight: '22px' }}>
+                                                            <div className="wa-event-card-status" style={{ color: statusTone, fontWeight: '600', fontSize: '15px', minHeight: '22px' }}>
                                                                 {lifecycle.statusLabel}
                                                             </div>
                                                         </div>
