@@ -16031,6 +16031,201 @@ background: rgba(56, 189, 248, 0.2) !important;
     box-shadow: -26px 0 60px rgba(56, 189, 248, 0.18);
 }
 
+/* Stable tooltip chips for sidebar, header, and composer action buttons. */
+.wa-nav-sidebar .wa-nav-icon-btn[data-tooltip]::after,
+.wa-header-icons .wa-nav-icon-btn[data-tooltip]::after,
+.wa-footer-right-icons-inner .wa-nav-icon-btn[data-tooltip]::after {
+    display: block !important;
+    width: max-content !important;
+    min-width: max-content !important;
+    max-width: calc(100vw - 24px) !important;
+    height: auto !important;
+    padding: 7px 10px !important;
+    border: 1px solid rgba(56, 189, 248, 0.34) !important;
+    border-radius: 8px !important;
+    background: rgba(8, 19, 39, 0.98) !important;
+    color: #e5f4ff !important;
+    box-shadow: 0 12px 28px rgba(2, 6, 23, 0.46) !important;
+    backdrop-filter: blur(12px) saturate(135%) !important;
+    -webkit-backdrop-filter: blur(12px) saturate(135%) !important;
+    font-size: 11px !important;
+    font-weight: 800 !important;
+    line-height: 1.15 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: clip !important;
+    pointer-events: none !important;
+    text-shadow: none !important;
+    z-index: 80000 !important;
+}
+
+.wa-nav-sidebar .wa-nav-icon-btn[data-tooltip]::after {
+    left: calc(100% + 10px) !important;
+    right: auto !important;
+    top: 50% !important;
+    bottom: auto !important;
+    transform: translateY(-50%) translateX(-4px) !important;
+}
+
+.wa-nav-sidebar .wa-nav-icon-btn[data-tooltip]:hover::after,
+.wa-nav-sidebar .wa-nav-icon-btn[data-tooltip]:focus-visible::after {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateY(-50%) translateX(0) !important;
+}
+
+.wa-header-icons .wa-nav-icon-btn[data-tooltip]::after {
+    left: 50% !important;
+    right: auto !important;
+    top: calc(100% + 10px) !important;
+    bottom: auto !important;
+    transform: translateX(-50%) translateY(-4px) !important;
+}
+
+.wa-header-icons .wa-nav-icon-btn[data-tooltip]:hover::after,
+.wa-header-icons .wa-nav-icon-btn[data-tooltip]:focus-visible::after {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateX(-50%) translateY(0) !important;
+}
+
+.wa-footer-right-icons-inner .wa-nav-icon-btn[data-tooltip]::after {
+    left: 50% !important;
+    right: auto !important;
+    top: auto !important;
+    bottom: calc(100% + 10px) !important;
+    transform: translateX(-50%) translateY(4px) !important;
+}
+
+.wa-footer-right-icons-inner .wa-nav-icon-btn[data-tooltip]:hover::after,
+.wa-footer-right-icons-inner .wa-nav-icon-btn[data-tooltip]:focus-visible::after {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateX(-50%) translateY(0) !important;
+}
+
+.wa-input-pill:has(.wa-schedule-tooltip-btn),
+.wa-footer-right-icons-inner {
+    overflow: visible !important;
+}
+
+.wa-schedule-tooltip-btn[data-tooltip],
+.wa-event-schedule-btn[data-tooltip] {
+    position: relative !important;
+    overflow: visible !important;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.wa-schedule-tooltip-btn[data-tooltip]::after,
+.wa-event-schedule-btn[data-tooltip]::after {
+    content: attr(data-tooltip) !important;
+    position: absolute !important;
+    left: 50% !important;
+    right: auto !important;
+    top: auto !important;
+    bottom: calc(100% + 10px) !important;
+    display: block !important;
+    width: max-content !important;
+    min-width: 92px !important;
+    max-width: min(220px, calc(100vw - 24px)) !important;
+    box-sizing: border-box !important;
+    padding: 8px 11px !important;
+    border: 1px solid rgba(56, 189, 248, 0.34) !important;
+    border-radius: 8px !important;
+    background: rgba(8, 19, 39, 0.98) !important;
+    color: #e5f4ff !important;
+    box-shadow: 0 12px 28px rgba(2, 6, 23, 0.46) !important;
+    backdrop-filter: blur(12px) saturate(135%) !important;
+    -webkit-backdrop-filter: blur(12px) saturate(135%) !important;
+    font-size: 12px !important;
+    font-weight: 800 !important;
+    line-height: 1.15 !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    pointer-events: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    transform: translateX(-50%) translateY(4px) !important;
+    transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s ease !important;
+    z-index: 120000 !important;
+}
+
+.wa-schedule-tooltip-btn[data-tooltip]:hover::after,
+.wa-schedule-tooltip-btn[data-tooltip]:focus-visible::after,
+.wa-schedule-tooltip-btn[data-tooltip]:focus::after,
+.wa-schedule-tooltip-btn[data-tooltip]:active::after,
+.wa-event-schedule-btn[data-tooltip]:hover::after,
+.wa-event-schedule-btn[data-tooltip]:focus-visible::after,
+.wa-event-schedule-btn[data-tooltip]:focus::after,
+.wa-event-schedule-btn[data-tooltip]:active::after {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateX(-50%) translateY(0) !important;
+}
+
+.wa-schedule-tooltip-btn[data-tooltip]::before,
+.wa-event-schedule-btn[data-tooltip]::before {
+    display: none !important;
+}
+
+.wa-nav-sidebar .wa-nav-icon-btn[data-tooltip]::before,
+.wa-header-icons .wa-nav-icon-btn[data-tooltip]::before,
+.wa-footer-right-icons-inner .wa-nav-icon-btn[data-tooltip]::before {
+    display: none !important;
+}
+
+@media (max-width: 768px) {
+    .wa-header-icons .wa-nav-icon-btn[data-tooltip]::after,
+    .wa-footer-right-icons-inner .wa-nav-icon-btn[data-tooltip]::after {
+        max-width: calc(100vw - 18px) !important;
+    }
+
+    .wa-header-icons .wa-nav-icon-btn[data-tooltip]::after {
+        top: calc(100% + 8px) !important;
+        bottom: auto !important;
+    }
+
+    .wa-footer-right-icons-inner .wa-nav-icon-btn[data-tooltip]::after {
+        left: auto !important;
+        right: -6px !important;
+        transform: translateY(4px) !important;
+    }
+
+    .wa-footer-right-icons-inner .wa-schedule-tooltip-btn[data-tooltip]::after {
+        left: auto !important;
+        right: -2px !important;
+        transform: translateY(4px) !important;
+    }
+
+    .wa-footer-right-icons-inner .wa-schedule-tooltip-btn[data-tooltip]:hover::after,
+    .wa-footer-right-icons-inner .wa-schedule-tooltip-btn[data-tooltip]:focus-visible::after,
+    .wa-footer-right-icons-inner .wa-schedule-tooltip-btn[data-tooltip]:focus::after,
+    .wa-footer-right-icons-inner .wa-schedule-tooltip-btn[data-tooltip]:active::after {
+        transform: translateY(0) !important;
+    }
+
+    .wa-event-schedule-btn[data-tooltip]::after {
+        left: 50% !important;
+        right: auto !important;
+        bottom: calc(100% + 10px) !important;
+        transform: translateX(-50%) translateY(4px) !important;
+    }
+
+    .wa-event-schedule-btn[data-tooltip]:hover::after,
+    .wa-event-schedule-btn[data-tooltip]:focus-visible::after,
+    .wa-event-schedule-btn[data-tooltip]:focus::after,
+    .wa-event-schedule-btn[data-tooltip]:active::after {
+        transform: translateX(-50%) translateY(0) !important;
+    }
+
+    .wa-footer-right-icons-inner .wa-nav-icon-btn[data-tooltip]:hover::after,
+    .wa-footer-right-icons-inner .wa-nav-icon-btn[data-tooltip]:focus-visible::after {
+        transform: translateY(0) !important;
+    }
+}
+
 @keyframes wa-community-overlay-in {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -16060,5 +16255,170 @@ background: rgba(56, 189, 248, 0.2) !important;
     to {
         opacity: 0;
         transform: translateY(-10px) scale(0.982);
+    }
+}
+
+/* Final schedule-clock tooltip override: this must beat the generic footer icon tooltip. */
+.wa-footer-right-icons-inner .wa-nav-icon-btn.wa-schedule-tooltip-btn[data-tooltip]::after,
+.wa-footer-right-icons-inner button[aria-label="Schedule send"][data-tooltip]::after {
+    content: attr(data-tooltip) !important;
+    position: absolute !important;
+    left: auto !important;
+    right: -4px !important;
+    top: auto !important;
+    bottom: calc(100% + 10px) !important;
+    display: block !important;
+    width: max-content !important;
+    min-width: 108px !important;
+    max-width: calc(100vw - 24px) !important;
+    box-sizing: border-box !important;
+    padding: 8px 12px !important;
+    border: 1px solid rgba(56, 189, 248, 0.34) !important;
+    border-radius: 8px !important;
+    background: rgba(8, 19, 39, 0.98) !important;
+    color: #e5f4ff !important;
+    box-shadow: 0 12px 28px rgba(2, 6, 23, 0.46) !important;
+    font-size: 12px !important;
+    font-weight: 800 !important;
+    line-height: 1.15 !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    transform: translateY(4px) !important;
+    z-index: 150000 !important;
+}
+
+.wa-footer-right-icons-inner .wa-nav-icon-btn.wa-schedule-tooltip-btn[data-tooltip]:hover::after,
+.wa-footer-right-icons-inner .wa-nav-icon-btn.wa-schedule-tooltip-btn[data-tooltip]:focus::after,
+.wa-footer-right-icons-inner .wa-nav-icon-btn.wa-schedule-tooltip-btn[data-tooltip]:focus-visible::after,
+.wa-footer-right-icons-inner .wa-nav-icon-btn.wa-schedule-tooltip-btn[data-tooltip]:active::after,
+.wa-footer-right-icons-inner .wa-nav-icon-btn.wa-schedule-tooltip-btn.schedule-tooltip-visible[data-tooltip]::after,
+.wa-footer-right-icons-inner button[aria-label="Schedule send"][data-tooltip]:hover::after,
+.wa-footer-right-icons-inner button[aria-label="Schedule send"][data-tooltip]:focus::after,
+.wa-footer-right-icons-inner button[aria-label="Schedule send"][data-tooltip]:focus-visible::after,
+.wa-footer-right-icons-inner button[aria-label="Schedule send"][data-tooltip]:active::after,
+.wa-footer-right-icons-inner button[aria-label="Schedule send"].schedule-tooltip-visible[data-tooltip]::after {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateY(0) !important;
+}
+
+.wa-schedule-tooltip-btn.schedule-tooltip-visible[data-tooltip]:not(.wa-nav-icon-btn)::after,
+.wa-event-schedule-btn.schedule-tooltip-visible[data-tooltip]::after {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateX(-50%) translateY(0) !important;
+}
+
+.wa-footer-right-icons-inner .wa-nav-icon-btn.wa-schedule-tooltip-btn[data-tooltip]::before,
+.wa-footer-right-icons-inner button[aria-label="Schedule send"][data-tooltip]::before {
+    display: none !important;
+}
+
+/* Message edit overlay: align with the dark glass chat theme. */
+.wa-edit-overlay {
+    background:
+        radial-gradient(circle at 50% 18%, rgba(56, 189, 248, 0.12), transparent 34%),
+        rgba(2, 8, 20, 0.68) !important;
+    backdrop-filter: blur(14px) saturate(1.08) !important;
+    -webkit-backdrop-filter: blur(14px) saturate(1.08) !important;
+}
+
+.wa-edit-container {
+    max-width: min(660px, calc(100vw - 28px)) !important;
+    gap: 20px !important;
+}
+
+.wa-edit-preview-bubble {
+    background: linear-gradient(145deg, rgba(15, 31, 52, 0.96), rgba(10, 23, 42, 0.96)) !important;
+    border: 1px solid rgba(56, 189, 248, 0.22) !important;
+    box-shadow: 0 18px 42px rgba(2, 6, 23, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+    color: #f8fafc !important;
+}
+
+.wa-edit-preview-bubble.outgoing {
+    background: linear-gradient(135deg, rgba(14, 126, 181, 0.86), rgba(37, 99, 235, 0.76)) !important;
+    border-color: rgba(125, 211, 252, 0.3) !important;
+}
+
+.wa-edit-preview-bubble > div:first-child {
+    color: #f8fafc !important;
+}
+
+.wa-edit-preview-bubble > div:first-child span {
+    color: #94a3b8 !important;
+}
+
+.wa-edit-preview-bubble > div:last-child {
+    color: #cbd5e1 !important;
+}
+
+.wa-edit-input-panel {
+    background: linear-gradient(145deg, rgba(8, 28, 46, 0.98), rgba(5, 18, 34, 0.98)) !important;
+    border: 1px solid rgba(56, 189, 248, 0.24) !important;
+    border-radius: 28px !important;
+    box-shadow: 0 18px 46px rgba(2, 6, 23, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+    backdrop-filter: blur(18px) saturate(1.08) !important;
+    -webkit-backdrop-filter: blur(18px) saturate(1.08) !important;
+}
+
+.wa-edit-input-panel .wa-inline-emoji-trigger,
+.wa-edit-input-panel > svg {
+    color: #9fd8ef !important;
+}
+
+.wa-edit-box {
+    background: rgba(15, 23, 42, 0.72) !important;
+    border: 1px solid rgba(56, 189, 248, 0.26) !important;
+    color: #f8fafc !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+.wa-edit-box:focus {
+    border-color: rgba(56, 189, 248, 0.55) !important;
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+.wa-edit-cancel-btn {
+    background: rgba(15, 23, 42, 0.72) !important;
+    color: #cbd5e1 !important;
+    border: 1px solid rgba(148, 163, 184, 0.18) !important;
+}
+
+.wa-edit-cancel-btn:hover {
+    background: rgba(148, 163, 184, 0.14) !important;
+    color: #f8fafc !important;
+}
+
+.wa-edit-save-btn {
+    background: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 48%, #4f46e5 100%) !important;
+    box-shadow: 0 12px 28px rgba(56, 189, 248, 0.3) !important;
+}
+
+.wa-edit-shortcuts-hint {
+    background: rgba(15, 23, 42, 0.82) !important;
+    color: #b7c9d8 !important;
+    border: 1px solid rgba(56, 189, 248, 0.18) !important;
+    box-shadow: 0 10px 24px rgba(2, 6, 23, 0.24) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+}
+
+@media (max-width: 640px) {
+    .wa-edit-container {
+        width: calc(100vw - 24px) !important;
+    }
+
+    .wa-edit-input-panel {
+        border-radius: 22px !important;
+        padding: 8px !important;
+        gap: 8px !important;
+    }
+
+    .wa-edit-box {
+        min-width: 0 !important;
+        padding: 9px 12px !important;
     }
 }

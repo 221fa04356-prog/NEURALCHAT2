@@ -6952,7 +6952,7 @@ export default function Chat() {
                         setIsProfileOpen(false);
                         setIsSettingsOpen(false);
                     }}
-                    title={t('sidebar.chats')}
+                    data-tooltip={t('sidebar.chats')}
                 >
                     <MessageSquare size={24} />
                     {/* Optional: Add red dot for total unread */}
@@ -6964,7 +6964,7 @@ export default function Chat() {
             <div className="wa-nav-bottom">
                 <button
                     className={`wa-nav-icon-btn ${isSettingsOpen ? 'active' : ''}`}
-                    title={t('sidebar.settings')}
+                    data-tooltip={t('sidebar.settings')}
                     onClick={() => {
                         setIsSettingsOpen(true);
                         setIsProfileOpen(false);
@@ -6978,7 +6978,7 @@ export default function Chat() {
                         setIsProfileOpen(true);
                         setIsSettingsOpen(false);
                     }}
-                    title={t('sidebar.profile')}
+                    data-tooltip={t('sidebar.profile')}
                 >
                     {/* User Profile Image as Icon */}
                     {userData.image ? (
@@ -8125,7 +8125,7 @@ export default function Chat() {
                         />
                     </div>
                 ) : (
-                    <div style={{
+                    <div className={`wa-edit-preview-bubble ${isMeEditing ? 'outgoing' : 'incoming'}`} style={{
                         textAlign: 'center',
                         padding: 60,
                         background: '#ffffff',
@@ -12884,7 +12884,7 @@ export default function Chat() {
                     <div style={{ position: 'relative' }}>
                         <button
                             className={`wa-nav-icon-btn ${isRemindersModalOpen ? 'active' : ''}`}
-                            title="Reminders"
+                            data-tooltip="Events"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 fetchReminders();
@@ -12897,7 +12897,7 @@ export default function Chat() {
                     <div style={{ position: 'relative' }}>
                         <button
                             className={`wa-nav-icon-btn ${showNotificationDetails ? 'active' : ''}`}
-                            title="Notifications"
+                            data-tooltip="Notifications"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 setShowNotificationDetails(!showNotificationDetails);
@@ -17430,11 +17430,12 @@ export default function Chat() {
         return (
             <div className="wa-mute-modal-overlay" onClick={() => setIsEventModalOpen(false)} style={{ zIndex: 3000 }}>
                 <div className="wa-mute-modal" onClick={e => e.stopPropagation()} style={{ width: '400px', maxWidth: '90%', padding: '0', background: '#ffffff', borderRadius: '12px', display: 'flex', flexDirection: 'column', height: 'auto', maxHeight: '90vh', color: '#111b21', boxShadow: '0 10px 40px rgba(0,0,0,0.1)' }}>
-                    <div style={{ padding: '15px 20px', display: 'flex', alignItems: 'center', borderTopLeftRadius: '12px', borderTopRightRadius: '12px', flexShrink: 0 }}>
-                        <button onClick={() => setIsEventModalOpen(false)} style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={24} /></button>
-                        <div style={{ flex: 1, textAlign: 'center', marginRight: '34px' }}>
+                    <div style={{ padding: '15px 20px', display: 'grid', gridTemplateColumns: '34px 1fr 34px', alignItems: 'center', borderTopLeftRadius: '12px', borderTopRightRadius: '12px', flexShrink: 0 }}>
+                        <button onClick={() => setIsEventModalOpen(false)} style={{ width: 34, height: 34, background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}><X size={24} /></button>
+                        <div style={{ textAlign: 'center' }}>
                             <span style={{ fontSize: '19px', fontWeight: '500', whiteSpace: 'nowrap' }}>Create event</span>
                         </div>
+                        <span aria-hidden="true" />
                     </div>
 
                     <div className="custom-scrollbar" style={{ padding: '20px', flex: 1, overflowY: 'auto' }}>
@@ -17895,7 +17896,7 @@ export default function Chat() {
                 }} onClick={e => e.stopPropagation()}>
 
                     {/* Message Preview */}
-                    <div style={{
+                    <div className="wa-edit-input-panel" style={{
                         alignSelf: isMeEditing ? 'flex-end' : 'flex-start',
                         background: isMeEditing ? '#e1f5fe' : 'white',
                         padding: '8px 12px 16px 12px',
@@ -17957,6 +17958,7 @@ export default function Chat() {
                         />
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                             <button
+                                className="wa-edit-cancel-btn"
                                 onClick={() => setEditingMessage(null)}
                                 style={{
                                     background: '#f1f5f9',
@@ -17975,6 +17977,7 @@ export default function Chat() {
                                 <X size={20} />
                             </button>
                             <button
+                                className="wa-edit-save-btn"
                                 onClick={handleEditMessageSubmit}
                                 style={{
                                     background: '#027EB5',
@@ -17997,7 +18000,7 @@ export default function Chat() {
                             </button>
                         </div>
                     </div>
-                    <div style={{ fontSize: '13px', color: '#667781', background: 'rgba(255,255,255,0.7)', padding: '4px 12px', borderRadius: '12px' }}>
+                    <div className="wa-edit-shortcuts-hint" style={{ fontSize: '13px', color: '#667781', background: 'rgba(255,255,255,0.7)', padding: '4px 12px', borderRadius: '12px' }}>
                         Press Esc to cancel • Enter to save
                     </div>
                 </div>

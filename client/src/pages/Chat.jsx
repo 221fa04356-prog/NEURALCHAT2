@@ -2579,6 +2579,8 @@ export default function Chat() {
     const [isConfirmContactSendOpen, setIsConfirmContactSendOpen] = useState(false);
     const [isScheduleSendOpen, setIsScheduleSendOpen] = useState(false);
     const [scheduledSendAt, setScheduledSendAt] = useState('');
+    const [activeScheduleTooltip, setActiveScheduleTooltip] = useState(null);
+    const scheduleTooltipTimerRef = useRef(null);
 
     // Sleep Mode Effect
     useEffect(() => {
@@ -12326,6 +12328,21 @@ export default function Chat() {
         setIsScheduleSendOpen(true);
     };
 
+    const showScheduleTooltip = (id, autoHide = false) => {
+        if (scheduleTooltipTimerRef.current) clearTimeout(scheduleTooltipTimerRef.current);
+        setActiveScheduleTooltip(id);
+        if (autoHide) {
+            scheduleTooltipTimerRef.current = setTimeout(() => {
+                setActiveScheduleTooltip(current => current === id ? null : current);
+            }, 1500);
+        }
+    };
+
+    const hideScheduleTooltip = (id) => {
+        if (scheduleTooltipTimerRef.current) clearTimeout(scheduleTooltipTimerRef.current);
+        setActiveScheduleTooltip(current => current === id ? null : current);
+    };
+
     const confirmScheduledSend = (e) => {
         if (!scheduledSendAt || new Date(scheduledSendAt) <= new Date()) {
             setSnackbar({ message: 'Please select a future date and time.', type: 'error', variant: 'system' });
@@ -15862,7 +15879,7 @@ export default function Chat() {
                 zIndex: 1000
             }}>
                 {isImagePreview && (
-                    <div style={{
+                    <div className={`wa-edit-preview-bubble ${isMeEditing ? 'outgoing' : 'incoming'}`} style={{
                         height: 56,
                         padding: '0 18px',
                         background: 'transparent',
@@ -16013,7 +16030,7 @@ export default function Chat() {
                 )}
                 {/* Header (non-image preview only) */}
                 {!isImagePreview && (
-                    <div style={{
+                    <div className="wa-edit-input-panel" style={{
                         padding: '16px 24px',
                         display: 'flex',
                         alignItems: 'center',
@@ -17351,7 +17368,13 @@ export default function Chat() {
                             type="button"
                             onClick={openScheduleSend}
                             disabled={isPreviewSendBlockedByAI}
-                            title={isPreviewSendBlockedByAI ? 'Please apply AI grammar suggestion first' : 'Schedule send'}
+                            className={`wa-schedule-tooltip-btn ${activeScheduleTooltip === 'preview-schedule' ? 'schedule-tooltip-visible' : ''}`}
+                            data-tooltip={isPreviewSendBlockedByAI ? 'Please apply AI grammar suggestion first' : 'Schedule send'}
+                            onMouseEnter={() => showScheduleTooltip('preview-schedule')}
+                            onMouseLeave={() => hideScheduleTooltip('preview-schedule')}
+                            onFocus={() => showScheduleTooltip('preview-schedule')}
+                            onBlur={() => hideScheduleTooltip('preview-schedule')}
+                            onTouchStart={() => showScheduleTooltip('preview-schedule', true)}
                             style={{
                                 width: 50,
                                 height: 50,
@@ -26632,9 +26655,14 @@ export default function Chat() {
                                                                 <button
                                                                     type="button"
                                                                     onClick={openScheduleSend}
-                                                                    className="wa-nav-icon-btn"
+                                                                    className={`wa-nav-icon-btn wa-schedule-tooltip-btn ${activeScheduleTooltip === 'p2p-schedule' ? 'schedule-tooltip-visible' : ''}`}
                                                                     data-tooltip="Schedule send"
                                                                     aria-label="Schedule send"
+                                                                    onMouseEnter={() => showScheduleTooltip('p2p-schedule')}
+                                                                    onMouseLeave={() => hideScheduleTooltip('p2p-schedule')}
+                                                                    onFocus={() => showScheduleTooltip('p2p-schedule')}
+                                                                    onBlur={() => hideScheduleTooltip('p2p-schedule')}
+                                                                    onTouchStart={() => showScheduleTooltip('p2p-schedule', true)}
                                                                 >
                                                                     <Clock size={22} color={scheduledSendAt ? "#0EA5BE" : "#54656f"} />
                                                                 </button>
@@ -27462,9 +27490,14 @@ export default function Chat() {
                                                                 <button
                                                                     type="button"
                                                                     onClick={openScheduleSend}
-                                                                    className="wa-nav-icon-btn"
+                                                                    className={`wa-nav-icon-btn wa-schedule-tooltip-btn ${activeScheduleTooltip === 'group-schedule' ? 'schedule-tooltip-visible' : ''}`}
                                                                     data-tooltip="Schedule send"
                                                                     aria-label="Schedule send"
+                                                                    onMouseEnter={() => showScheduleTooltip('group-schedule')}
+                                                                    onMouseLeave={() => hideScheduleTooltip('group-schedule')}
+                                                                    onFocus={() => showScheduleTooltip('group-schedule')}
+                                                                    onBlur={() => hideScheduleTooltip('group-schedule')}
+                                                                    onTouchStart={() => showScheduleTooltip('group-schedule', true)}
                                                                 >
                                                                     <Clock size={22} color={scheduledSendAt ? "#0EA5BE" : "#54656f"} />
                                                                 </button>
@@ -28126,11 +28159,12 @@ export default function Chat() {
         return (
             <div className="wa-mute-modal-overlay" onClick={() => setIsEventModalOpen(false)} style={{ zIndex: 3000 }}>
                 <div className="wa-mute-modal" onClick={e => e.stopPropagation()} style={{ width: '400px', maxWidth: '90%', padding: '0', background: '#0b2236', borderRadius: '12px', display: 'flex', flexDirection: 'column', height: 'auto', maxHeight: '90vh', color: '#f8fafc', boxShadow: '0 10px 40px rgba(0,0,0,0.35)', border: '1px solid rgba(14, 165, 190, 0.25)' }}>
-                    <div style={{ padding: '15px 20px', display: 'flex', alignItems: 'center', borderTopLeftRadius: '12px', borderTopRightRadius: '12px', flexShrink: 0 }}>
-                        <button onClick={() => setIsEventModalOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={24} /></button>
-                        <div style={{ flex: 1, textAlign: 'center', marginRight: '34px' }}>
+                    <div style={{ padding: '15px 20px', display: 'grid', gridTemplateColumns: '34px 1fr 34px', alignItems: 'center', borderTopLeftRadius: '12px', borderTopRightRadius: '12px', flexShrink: 0 }}>
+                        <button onClick={() => setIsEventModalOpen(false)} style={{ width: 34, height: 34, background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}><X size={24} /></button>
+                        <div style={{ textAlign: 'center' }}>
                             <span style={{ fontSize: '19px', fontWeight: '500', whiteSpace: 'nowrap' }}>Create event</span>
                         </div>
+                        <span aria-hidden="true" />
                     </div>
 
                     <div className="custom-scrollbar" style={{ padding: '20px', flex: 1, overflowY: 'auto' }}>
@@ -28322,6 +28356,13 @@ export default function Chat() {
                         <button
                             type="button"
                             onClick={openScheduleSend}
+                            className={`wa-event-schedule-btn ${activeScheduleTooltip === 'event-schedule' ? 'schedule-tooltip-visible' : ''}`}
+                            data-tooltip="Schedule event"
+                            onMouseEnter={() => showScheduleTooltip('event-schedule')}
+                            onMouseLeave={() => hideScheduleTooltip('event-schedule')}
+                            onFocus={() => showScheduleTooltip('event-schedule')}
+                            onBlur={() => hideScheduleTooltip('event-schedule')}
+                            onTouchStart={() => showScheduleTooltip('event-schedule', true)}
                             style={{ background: scheduledSendAt ? '#d9f6fb' : '#e5edf1', width: '54px', height: '54px', borderRadius: '50%', border: 'none', color: scheduledSendAt ? '#0EA5BE' : '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
                             aria-label="Schedule event"
                         >
@@ -28711,6 +28752,7 @@ export default function Chat() {
                         />
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                             <button
+                                className="wa-edit-cancel-btn"
                                 onClick={() => setEditingMessage(null)}
                                 style={{
                                     background: '#f1f5f9',
@@ -28729,6 +28771,7 @@ export default function Chat() {
                                 <X size={20} />
                             </button>
                             <button
+                                className="wa-edit-save-btn"
                                 onClick={handleEditMessageSubmit}
                                 disabled={isEditSaveBlocked}
                                 title={isEditSaveBlocked ? (isEditGrammarLoading ? 'Please wait for Neural Chat AI' : 'Please select a grammar level') : 'Save edit'}
@@ -28755,7 +28798,7 @@ export default function Chat() {
                         </div>
                         </div>
                     </div>
-                    <div style={{ fontSize: '13px', color: '#667781', background: 'rgba(255,255,255,0.7)', padding: '4px 12px', borderRadius: '12px' }}>
+                    <div className="wa-edit-shortcuts-hint" style={{ fontSize: '13px', color: '#667781', background: 'rgba(255,255,255,0.7)', padding: '4px 12px', borderRadius: '12px' }}>
                         Press Esc to cancel | Enter to save
                     </div>
                 </div>
