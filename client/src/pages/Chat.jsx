@@ -4383,7 +4383,14 @@ export default function Chat() {
     const [showGrammarBar, setShowGrammarBar] = useState(false);
     const [suggestionApplied, setSuggestionApplied] = useState(false);
     const [isGarbageMessage, setIsGarbageMessage] = useState(false);
+    const [editGrammarSuggestions, setEditGrammarSuggestions] = useState(null);
+    const [isEditGrammarLoading, setIsEditGrammarLoading] = useState(false);
+    const [showEditGrammarBar, setShowEditGrammarBar] = useState(false);
+    const [editSuggestionApplied, setEditSuggestionApplied] = useState(true);
+    const [isEditGarbageMessage, setIsEditGarbageMessage] = useState(false);
     const lastGrammarAlertRef = useRef('');
+    const lastEditGrammarAlertRef = useRef('');
+    const isApplyingEditSuggestionRef = useRef(false);
 
     const [isEditingProfileName, setIsEditingProfileName] = useState(false);
 
@@ -4758,6 +4765,18 @@ export default function Chat() {
 
     const handleEditMessageSubmit = async () => {
         if (!editInput.trim() || !editingMessage) return;
+        const editIssue = getInlineTextAiIssue(editInput.trim());
+        if (!isLinkLikeText(editInput) && (editIssue || isEditGarbageMessage || isEditGrammarLoading || ((showEditGrammarBar || editGrammarSuggestions) && !editSuggestionApplied))) {
+            setShowEditGrammarBar(true);
+            setSnackbar({
+                message: editIssue || (isEditGrammarLoading ? 'Please wait for Neural Chat AI' : 'Please select a grammar level before saving'),
+                type: 'error',
+                variant: 'system',
+                duration: 3500,
+                forceShow: true
+            });
+            return;
+        }
         try {
             const id = editingMessage._id || editingMessage.id;
             const endpoint = editingMessage.group_id
@@ -4796,6 +4815,9 @@ export default function Chat() {
                 }
                 setEditingMessage(null);
                 setEditInput("");
+                setShowEditGrammarBar(false);
+                setEditGrammarSuggestions(null);
+                setEditSuggestionApplied(true);
                 setSnackbar({ message: "Message edited", type: 'success' });
             }
         } catch (err) {
@@ -4998,6 +5020,60 @@ export default function Chat() {
     const [isCommunityHomeOpen, setIsCommunityHomeOpen] = useState(false);
     const [selectedCommunity, setSelectedCommunity] = useState(null);
     useEffect(() => { selectedCommunityRef.current = selectedCommunity; }, [selectedCommunity]);
+
+    const getReplySenderName = useCallback((messageRef) => {
+        if (!messageRef) return 'Member';
+
+        const senderObj = (
+            (typeof messageRef.sender_id === 'object' ? messageRef.sender_id : null) ||
+            (typeof messageRef.user_id === 'object' ? messageRef.user_id : null) ||
+            {}
+        );
+        const senderId = String(
+            senderObj._id ||
+            senderObj.id ||
+            messageRef.sender_id ||
+            messageRef.user_id ||
+            ''
+        ).trim();
+        const currentUserId = String(user?.id || user?._id || '').trim();
+        if (senderId && currentUserId && senderId === currentUserId) return 'You';
+
+        const directName = (
+            senderObj.name ||
+            senderObj.displayName ||
+            senderObj.firstName ||
+            messageRef.sender_name ||
+            messageRef.senderName ||
+            messageRef.user_name ||
+            messageRef.name
+        );
+        if (directName) return directName;
+
+        const memberSources = [
+            selectedGroup?.members,
+            selectedGroup?.admins,
+            selectedCommunity?.members,
+            selectedCommunity?.admins,
+            selectedCommunity?.announcements?.members,
+            users
+        ].filter(Array.isArray);
+
+        for (const source of memberSources) {
+            const match = source.find((member) => {
+                const id = String(member?._id || member?.id || member || '').trim();
+                return senderId && id === senderId;
+            });
+            const name = match?.name || match?.displayName || match?.firstName || match?.mobile || match?.phone;
+            if (name) return name;
+        }
+
+        if (selectedUser && senderId && String(selectedUser._id || selectedUser.id || '') === senderId) {
+            return getContactDisplayName(selectedUser);
+        }
+
+        return selectedUser?.name || selectedUser?.displayName || 'Member';
+    }, [selectedCommunity, selectedGroup, selectedUser, user?.id, user?._id, users]);
 
     useEffect(() => {
         if (!isContactInfoOpen) {
@@ -6160,6 +6236,119 @@ export default function Chat() {
             forceShow: true
         });
     }, [isGarbageMessage, input, setSnackbar]);
+
+    useEffect(() => {
+        if (isApplyingEditSuggestionRef.current) {
+            isApplyingEditSuggestionRef.current = false;
+            return;
+        }
+
+        if (!editingMessage) {
+            setShowEditGrammarBar(false);
+            setEditGrammarSuggestions(null);
+            setIsEditGrammarLoading(false);
+            setIsEditGarbageMessage(false);
+            setEditSuggestionApplied(true);
+            return;
+        }
+
+        const trimmedInput = editInput.trim();
+        const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(editInput);
+        const containsUrl = isLinkLikeText(editInput);
+
+        if (!trimmedInput || containsUrl || isEmojiPresent) {
+            setEditGrammarSuggestions(null);
+            setShowEditGrammarBar(false);
+            setIsEditGrammarLoading(false);
+            setIsEditGarbageMessage(false);
+            setEditSuggestionApplied(true);
+            return;
+        }
+
+        setEditSuggestionApplied(false);
+        setShowEditGrammarBar(true);
+        setIsEditGrammarLoading(true);
+
+        const syncIssue = getInlineTextAiIssue(trimmedInput);
+        if (syncIssue) {
+            setIsEditGarbageMessage(true);
+            setEditGrammarSuggestions(null);
+            setIsEditGrammarLoading(false);
+            return;
+        }
+        setIsEditGarbageMessage(false);
+
+        const timer = setTimeout(async () => {
+            const immediateIssue = getInlineTextAiIssue(trimmedInput);
+            if (immediateIssue) {
+                setIsEditGarbageMessage(true);
+                setEditGrammarSuggestions(null);
+                setEditSuggestionApplied(false);
+                setIsEditGrammarLoading(false);
+                return;
+            }
+
+            const hasVowels = /[aeiouy]/i.test(trimmedInput);
+            const hasNumbers = /[0-9]/.test(trimmedInput);
+            const isMeaningful = trimmedInput.length >= 1 && (/[a-zA-Z0-9]/.test(trimmedInput) || isEmojiPresent);
+            const isProbablyGarbage = (trimmedInput.length >= 3 && !hasVowels && !hasNumbers && !isEmojiPresent) ||
+                /([^aeiouy0-9\s])\1{2,}/i.test(trimmedInput) ||
+                (trimmedInput.length >= 4 && !hasVowels && !hasNumbers && !isEmojiPresent);
+
+            if (isProbablyGarbage || (!isMeaningful && !isEmojiPresent)) {
+                setIsEditGarbageMessage(true);
+                setIsEditGrammarLoading(false);
+                return;
+            }
+
+            try {
+                const token = localStorage.getItem('token');
+                const res = await axios.post('/api/chat/grammar-check', { text: trimmedInput }, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const suggestions = res.data;
+                setEditGrammarSuggestions(suggestions);
+
+                const sFluent = (suggestions.fluent || '').trim().toLowerCase();
+                const sBasic = (suggestions.basic || '').trim().toLowerCase();
+                const tInput = trimmedInput.toLowerCase();
+
+                if (tInput === sFluent || tInput === sBasic) {
+                    setEditSuggestionApplied(true);
+                    setEditGrammarSuggestions(null);
+                } else {
+                    setEditSuggestionApplied(false);
+                }
+            } catch (err) {
+                console.error("Edit grammar check failed", err);
+                setEditSuggestionApplied(true);
+            } finally {
+                setIsEditGrammarLoading(false);
+            }
+        }, 800);
+
+        return () => clearTimeout(timer);
+    }, [editInput, editingMessage]);
+
+    useEffect(() => {
+        if (!isEditGarbageMessage) {
+            lastEditGrammarAlertRef.current = '';
+            return;
+        }
+
+        const issue = getInlineTextAiIssue(editInput) || 'Please write a meaningful word or sentence.';
+        if (!issue || issue === lastEditGrammarAlertRef.current) return;
+
+        lastEditGrammarAlertRef.current = issue;
+        setSnackbar({
+            message: issue,
+            type: 'error',
+            variant: 'system',
+            duration: 4500,
+            forceShow: true
+        });
+    }, [isEditGarbageMessage, editInput, setSnackbar]);
+
     const applyGrammarSuggestion = (text) => {
         const trimmedInput = input.trim();
         const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(trimmedInput);
@@ -6174,14 +6363,37 @@ export default function Chat() {
         setSuggestionApplied(true);
     };
 
+    const applyEditGrammarSuggestion = (text) => {
+        const trimmedInput = editInput.trim();
+        const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(trimmedInput);
+        if (!isEmojiPresent && (trimmedInput.length < 2 || !/[a-zA-Z0-9]/.test(trimmedInput))) {
+            setSnackbar({ message: "write a meaningful word or sentence to edit the message", type: 'info' });
+            return;
+        }
+        isApplyingEditSuggestionRef.current = true;
+        setEditInput(text);
+        setShowEditGrammarBar(false);
+        setEditGrammarSuggestions(null);
+        setEditSuggestionApplied(true);
+    };
+
     const renderGrammarBar = (options = {}) => {
-        const { floating = false } = options;
-        if (!showGrammarBar || (!isGarbageMessage && !grammarSuggestions && !isGrammarLoading && !suggestionApplied)) return null;
+        const {
+            floating = false,
+            show = showGrammarBar,
+            garbage = isGarbageMessage,
+            suggestions = grammarSuggestions,
+            loading = isGrammarLoading,
+            applied = suggestionApplied,
+            onApply = applyGrammarSuggestion,
+            onClose = () => setShowGrammarBar(false)
+        } = options;
+        if (!show || (!garbage && !suggestions && !loading && !applied)) return null;
         const renderLevelPills = (disabled = false) => (
             <>
                 <div
                     className={`wa-grammar-pill-wrapper ${disabled ? 'disabled' : ''}`}
-                    onClick={() => !disabled && grammarSuggestions?.basic && applyGrammarSuggestion(grammarSuggestions.basic)}
+                    onClick={() => !disabled && suggestions?.basic && onApply(suggestions.basic)}
                     aria-disabled={disabled}
                 >
                     <span className="pill-tag basic">
@@ -6191,7 +6403,7 @@ export default function Chat() {
                 </div>
                 <div
                     className={`wa-grammar-pill-wrapper ${disabled ? 'disabled' : ''}`}
-                    onClick={() => !disabled && grammarSuggestions?.fluent && applyGrammarSuggestion(grammarSuggestions.fluent)}
+                    onClick={() => !disabled && suggestions?.fluent && onApply(suggestions.fluent)}
                     aria-disabled={disabled}
                 >
                     <span className="pill-tag fluent">
@@ -6201,7 +6413,7 @@ export default function Chat() {
                 </div>
                 <div
                     className={`wa-grammar-pill-wrapper ${disabled ? 'disabled' : ''}`}
-                    onClick={() => !disabled && grammarSuggestions?.formal && applyGrammarSuggestion(grammarSuggestions.formal)}
+                    onClick={() => !disabled && suggestions?.formal && onApply(suggestions.formal)}
                     aria-disabled={disabled}
                 >
                     <span className="pill-tag formal">
@@ -6241,7 +6453,7 @@ export default function Chat() {
                         <span style={{ color: '#027EB5', fontSize: '13px', fontWeight: '600', whiteSpace: 'nowrap' }}>
                             Neural Chat AI
                         </span>
-                        {isGrammarLoading && (
+                        {loading && (
                             <div className="wa-grammar-loader-dots">
                                 <div className="wa-grammar-dot" />
                                 <div className="wa-grammar-dot" />
@@ -6251,11 +6463,11 @@ export default function Chat() {
                     </div>
 
                     <div className="wa-grammar-options" style={{ display: 'flex', flexWrap: 'nowrap', gap: '4px', justifyContent: 'flex-start' }}>
-                        {isGarbageMessage ? (
+                        {garbage ? (
                             renderLevelPills(true)
-                        ) : grammarSuggestions ? (
+                        ) : suggestions ? (
                             renderLevelPills(false)
-                        ) : suggestionApplied ? (
+                        ) : applied ? (
                             <div style={{ color: '#087f5b', fontSize: '13px', fontWeight: 700, padding: 0, display: 'flex', alignItems: 'center', gap: 7 }}>
                                 <Check size={15} strokeWidth={2.6} />
                                 <span>Text looks good</span>
@@ -6271,7 +6483,7 @@ export default function Chat() {
                     <X
                         size={18}
                         style={{ cursor: 'pointer', color: '#667781', opacity: 0.7 }}
-                        onClick={() => setShowGrammarBar(false)}
+                        onClick={onClose}
                         className="wa-grammar-close-btn"
                     />
                 </div>
@@ -7029,6 +7241,7 @@ export default function Chat() {
                     ? { ...msg, is_deleted_by_admin: data.is_deleted_by_admin, is_deleted_by_user: data.is_deleted_by_user }
                     : msg
             ));
+            removeDeletedMessagesFromStarredPanels(data.messageId);
             fetchUsers();
         };
 
@@ -8244,7 +8457,7 @@ export default function Chat() {
             const res = await axios.get('/api/chat/messages/starred/all', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            const starred = Array.isArray(res.data) ? res.data : [];
+            const starred = (Array.isArray(res.data) ? res.data : []).filter(m => !isDeletedForCurrentUser(m));
             setGlobalStarredMessages(starred);
             setGlobalStarredCount(starred.length);
         } catch (err) {
@@ -8734,9 +8947,21 @@ export default function Chat() {
     const handleAcceptRequest = async (requestId) => {
         try {
             const token = localStorage.getItem('token');
-            await axios.post('/api/chat/requests/accept', { requestId }, {
+            const request = messageRequests.find(req => String(req._id) === String(requestId));
+            const res = await axios.post('/api/chat/requests/accept', { requestId }, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+            if (res.data?.status === 'invalid') {
+                setMessageRequests(prev => prev.filter(req => String(req._id) !== String(requestId)));
+                const requestUserId = String(request?.fromUserId?._id || request?.fromUserId || '');
+                if (requestUserId) {
+                    setSelectedUser(prev => prev && String(prev._id || prev.id) === requestUserId ? null : prev);
+                    setUsers(prev => prev.filter(u => String(u._id || u.id) !== requestUserId));
+                }
+                setSnackbar({ message: 'This request is no longer valid', type: 'info', variant: 'system' });
+                fetchMessageRequests();
+                return;
+            }
             setSnackbar({ message: 'Request accepted!', type: 'success', variant: 'system' });
             fetchMessageRequests();
             fetchUsers(); // Refresh contacts list to show new contact
@@ -8749,9 +8974,22 @@ export default function Chat() {
     const handleRejectRequest = async (requestId) => {
         try {
             const token = localStorage.getItem('token');
-            await axios.post('/api/chat/requests/reject', { requestId }, {
+            const request = messageRequests.find(req => String(req._id) === String(requestId));
+            const res = await axios.post('/api/chat/requests/reject', { requestId }, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+
+            if (res.data?.status === 'invalid') {
+                setMessageRequests(prev => prev.filter(req => String(req._id) !== String(requestId)));
+                const requestUserId = String(request?.fromUserId?._id || request?.fromUserId || '');
+                if (requestUserId) {
+                    setSelectedUser(prev => prev && String(prev._id || prev.id) === requestUserId ? null : prev);
+                    setUsers(prev => prev.filter(u => String(u._id || u.id) !== requestUserId));
+                }
+                setSnackbar({ message: 'This request is no longer valid', type: 'info', variant: 'system' });
+                fetchMessageRequests();
+                return;
+            }
 
             // Update local state immediately for better responsiveness
             setSelectedUser(prev => prev ? {
@@ -8766,6 +9004,73 @@ export default function Chat() {
         } catch (err) {
             console.error('handleRejectRequest error:', err);
             setSnackbar({ message: err.response?.data?.error || 'Failed to reject request', type: 'error', variant: 'system' });
+        }
+    };
+
+    const handleDismissRequest = async (requestId) => {
+        const request = messageRequests.find(req => String(req._id) === String(requestId));
+        try {
+            const token = localStorage.getItem('token');
+            await axios.post('/api/chat/requests/dismiss', { requestId }, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            const nextRequests = messageRequests.filter(req => String(req._id) !== String(requestId));
+            setMessageRequests(nextRequests);
+            if (nextRequests.length === 0) setIsRequestsModalOpen(false);
+
+            const requestUserId = String(request?.fromUserId?._id || request?.fromUserId || '');
+            if (requestUserId) {
+                setUsers(prev => prev.map(u =>
+                    String(u._id || u.id) === requestUserId
+                        ? { ...u, requestStatus: undefined, requestUpdatedAt: undefined }
+                        : u
+                ));
+                setSelectedUser(prev =>
+                    prev && String(prev._id || prev.id) === requestUserId
+                        ? { ...prev, requestStatus: undefined, requestUpdatedAt: undefined }
+                        : prev
+                );
+            }
+
+            setSnackbar({ message: 'Request cleared', type: 'info', variant: 'system' });
+        } catch (err) {
+            console.error('handleDismissRequest error:', err);
+            setSnackbar({ message: err.response?.data?.error || 'Failed to clear request', type: 'error', variant: 'system' });
+        }
+    };
+
+    const handleClearAllRequests = async () => {
+        if (messageRequests.length === 0) return;
+        try {
+            const token = localStorage.getItem('token');
+            await axios.post('/api/chat/requests/clear', {}, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            const requestUserIds = new Set(messageRequests
+                .map(req => String(req?.fromUserId?._id || req?.fromUserId || ''))
+                .filter(Boolean));
+
+            setMessageRequests([]);
+            setIsRequestsModalOpen(false);
+            if (requestUserIds.size > 0) {
+                setUsers(prev => prev.map(u =>
+                    requestUserIds.has(String(u._id || u.id))
+                        ? { ...u, requestStatus: undefined, requestUpdatedAt: undefined }
+                        : u
+                ));
+                setSelectedUser(prev =>
+                    prev && requestUserIds.has(String(prev._id || prev.id))
+                        ? { ...prev, requestStatus: undefined, requestUpdatedAt: undefined }
+                        : prev
+                );
+            }
+
+            setSnackbar({ message: 'All message requests cleared', type: 'info', variant: 'system' });
+        } catch (err) {
+            console.error('handleClearAllRequests error:', err);
+            setSnackbar({ message: err.response?.data?.error || 'Failed to clear requests', type: 'error', variant: 'system' });
         }
     };
 
@@ -9380,6 +9685,29 @@ export default function Chat() {
         } catch (err) { console.error("Star toggle failed", err); }
     };
 
+    const removeDeletedMessagesFromStarredPanels = (ids) => {
+        const idSet = new Set((Array.isArray(ids) ? ids : [ids]).filter(Boolean).map(id => String(id)));
+        if (idSet.size === 0) return;
+
+        const currentStarredIds = new Set(
+            [...messages, ...groupMessages, ...globalStarredMessages]
+                .filter(m => idSet.has(String(m._id || m.id)) && m.is_starred)
+                .map(m => String(m._id || m.id))
+        );
+
+        setGlobalStarredMessages(prev => {
+            const next = prev.filter(m => !idSet.has(String(m._id || m.id)));
+            const removedFromCache = prev.length - next.length;
+            if (removedFromCache > currentStarredIds.size) {
+                setGlobalStarredCount(count => Math.max(0, count - (removedFromCache - currentStarredIds.size)));
+            }
+            return next;
+        });
+        if (currentStarredIds.size > 0) {
+            setGlobalStarredCount(prev => Math.max(0, prev - currentStarredIds.size));
+        }
+    };
+
     const handleToggleFavorite = async (targetId, isFav) => {
         try {
             const isComm = communities.some(c => String(c.id) === String(targetId));
@@ -9782,7 +10110,7 @@ export default function Chat() {
     const confirmDelete = () => {
         if (msgToDelete) {
             if (Array.isArray(msgToDelete)) {
-                handleBulkDeleteMessage(msgToDelete);
+                handleBulkDeleteMessage(msgToDelete, deleteOption);
             } else {
                 handleDeleteMessage(msgToDelete, deleteOption);
             }
@@ -9846,6 +10174,7 @@ export default function Chat() {
 
                 setMessages(updateMsgsState);
                 setGroupMessages(updateMsgsState);
+                removeDeletedMessagesFromStarredPanels(validIds);
 
                 setSnackbar({
                     message: deleteOption === 'everyone' ? 'Messages deleted for everyone' : 'Messages deleted',
@@ -9899,6 +10228,7 @@ export default function Chat() {
                     setMessages(updateFn);
                     setGroupMessages(updateFn);
                 }
+                removeDeletedMessagesFromStarredPanels(msgId);
                 setSnackbar({ message: deleteOption === 'everyone' ? 'Message deleted for everyone' : 'Message deleted', type: 'success', variant: 'system' });
             }
         } catch (err) {
@@ -10162,7 +10492,7 @@ export default function Chat() {
     };
 
     const confirmUnstarAll = async () => {
-        const currentChatMessages = (selectedGroup || selectedCommunity ? groupMessages : messages).filter(m => m.is_starred);
+        const currentChatMessages = (selectedGroup || selectedCommunity ? groupMessages : messages).filter(m => m.is_starred && !isDeletedForCurrentUser(m));
         const targetMsgs = unstarTarget === 'global' ? globalStarredMessages : currentChatMessages;
         if (targetMsgs.length === 0) {
             setIsUnstarConfirmOpen(false);
@@ -12946,18 +13276,17 @@ export default function Chat() {
 
         return (
             <div className={`wa-profile-drawer wa-new-chat-drawer ${isNewChatOpen ? 'active' : ''}`}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', boxSizing: 'border-box', width: '100%' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 44px', alignItems: 'center', padding: '0', background: 'transparent', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', boxSizing: 'border-box', width: '100%' }}>
                     <button
                         onClick={() => setIsNewChatOpen(false)}
-                        style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', marginRight: 10, display: 'flex', alignItems: 'center', width: 32, padding: 0, flexShrink: 0 }}
+                        style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 44, padding: 0, flexShrink: 0, gridColumn: 1 }}
                     >
                         <X size={24} />
                     </button>
-                    <span style={{ fontSize: 19, fontWeight: 600, color: '#f8fafc', whiteSpace: 'nowrap', flexShrink: 0, letterSpacing: '-0.01em' }}>{t('new_chat.title')}</span>
-                    <div style={{ flex: 1 }}></div>
+                    <span style={{ fontSize: 19, fontWeight: 600, color: '#f8fafc', whiteSpace: 'nowrap', minWidth: 0, textAlign: 'center', letterSpacing: '-0.01em', gridColumn: 2 }}>{t('new_chat.title')}</span>
                     <button
                         onClick={() => setIsPhoneNumberPanelOpen(true)}
-                        style={{ background: 'none', border: 'none', color: '#e2e8f0', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, padding: 0, flexShrink: 0, opacity: 0.95 }}
+                        style={{ background: 'none', border: 'none', color: '#e2e8f0', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 44, padding: 0, flexShrink: 0, opacity: 0.95, gridColumn: 3 }}
                     >
                         <LayoutGrid size={22} />
                     </button>
@@ -13082,14 +13411,14 @@ export default function Chat() {
         return (
             <div className={`wa-profile-drawer wa-new-chat-drawer ${isPhoneNumberPanelOpen ? 'active' : ''}`}>
                 {/* 1st Pic: Header with Back Arrow and "Phone number" */}
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'transparent', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', boxSizing: 'border-box', width: '100%' }}>
+                <div className="wa-drawer-header" style={{ height: 60, display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 44px', alignItems: 'center', padding: '0', background: 'transparent', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', boxSizing: 'border-box', width: '100%' }}>
                     <button
                         onClick={() => { setIsPhoneNumberPanelOpen(false); setPhoneNumberInput(''); }}
-                        style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', marginRight: 10, display: 'flex', alignItems: 'center', width: 32, padding: 0, flexShrink: 0 }}
+                        style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 44, padding: 0, flexShrink: 0, gridColumn: 1 }}
                     >
                         <ArrowLeft size={24} />
                     </button>
-                    <span style={{ fontSize: 19, fontWeight: 600, color: '#f8fafc', whiteSpace: 'nowrap', flexShrink: 0 }}>Phone number</span>
+                    <span style={{ fontSize: 19, fontWeight: 600, color: '#f8fafc', whiteSpace: 'nowrap', textAlign: 'center', gridColumn: 2, minWidth: 0 }}>Phone number</span>
                 </div>
 
                 <div className="wa-drawer-content" style={{ background: 'transparent', display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -13268,17 +13597,18 @@ export default function Chat() {
 
         return (
             <div className={`wa-profile-drawer wa-new-chat-drawer ${isArchivedChatsOpen ? 'active' : ''}`}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'white', borderBottom: '1px solid #e9edef', boxSizing: 'border-box', width: '100%' }}>
+                <div className="wa-drawer-header" style={{ position: 'relative', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 58px', background: 'transparent', borderBottom: '1px solid rgba(148, 163, 184, 0.18)', boxSizing: 'border-box', width: '100%' }}>
                     <button
                         onClick={() => { setIsArchivedChatsOpen(false); }}
-                        style={{ background: 'none', border: 'none', color: '#54656f', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', width: 32, padding: 0, flexShrink: 0 }}
+                        aria-label="Back"
+                        style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#dff7ff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, padding: 0, flexShrink: 0 }}
                     >
                         <ArrowLeft size={24} />
                     </button>
-                    <span style={{ fontSize: 19, fontWeight: 500, color: '#3b4a54', whiteSpace: 'nowrap', flexShrink: 0 }}>{t('chat_list.archived')}</span>
+                    <span style={{ fontSize: 20, fontWeight: 700, color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'center' }}>{t('chat_list.archived')}</span>
                 </div>
 
-                <div className="wa-drawer-content wa-user-list" onScroll={() => setOpenDropdown(null)} style={{ background: 'white', display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
+                <div className="wa-drawer-content wa-user-list" onScroll={() => setOpenDropdown(null)} style={{ background: 'transparent', display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
                     {allArchived.length === 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#8696a0', padding: 40, textAlign: 'center' }}>
                             <Archive size={48} style={{ marginBottom: 20, opacity: 0.5 }} />
@@ -13415,13 +13745,13 @@ export default function Chat() {
                         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0' }}>
                             <CircleDashed size={24} className="wa-spinner" style={{ animation: 'waSpinner 1s linear infinite' }} />
                         </div>
-                    ) : globalStarredMessages.length === 0 ? (
+                    ) : globalStarredMessages.filter(m => !isDeletedForCurrentUser(m)).length === 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#8696a0', padding: 40, textAlign: 'center' }}>
                             <Star size={48} style={{ marginBottom: 20, opacity: 0.5 }} />
                             <div style={{ fontSize: 14 }}>{t('chat_list.no_starred_messages')}</div>
                         </div>
                     ) : (
-                        globalStarredMessages.map((msg, idx) => {
+                        globalStarredMessages.filter(m => !isDeletedForCurrentUser(m)).map((msg, idx) => {
                             const myId = userData._id || userData.id;
                             const senderObj = msg.isGroup ? msg.sender_id : msg.user_id;
                             const isMe = String(senderObj?._id || senderObj) === String(myId);
@@ -13866,14 +14196,13 @@ export default function Chat() {
 
         return (
             <div className={`${rootClass} wa-new-group-drawer ${isOpen ? 'active' : ''}`} style={extraStyle}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'white', borderBottom: 'none', gap: 0 }}>
-                    <button onClick={() => { if (isRightSide) { setIsCommunityNewGroupOpen(false); setIsManageGroupsOpen(true); } else { setIsNewGroupOpen(false); } setSelectedGroupMembers([]); setNewGroupStep(1); setGroupSubject(''); }} style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', display: 'flex', alignItems: 'center', fontSize: 16, fontWeight: 700, padding: 0 }}>
-                        Back
+                <div className="wa-drawer-header" style={{ position: 'relative', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 76px', background: 'transparent', borderBottom: '1px solid rgba(148, 163, 184, 0.18)', gap: 0 }}>
+                    <button onClick={() => { if (isRightSide) { setIsCommunityNewGroupOpen(false); setIsManageGroupsOpen(true); } else { setIsNewGroupOpen(false); } setSelectedGroupMembers([]); setNewGroupStep(1); setGroupSubject(''); }} style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', display: 'flex', alignItems: 'center', fontSize: 16, fontWeight: 700, padding: 0 }}>
+                        Close
                     </button>
-                    <div style={{ flex: 1, display: 'flex', justifyContent: 'center', marginRight: 40 }}>
-                        <span style={{ fontSize: 19, fontWeight: 700, color: '#f8fafc', whiteSpace: 'nowrap' }}>Add group members</span>
+                    <div style={{ minWidth: 0, display: 'flex', justifyContent: 'center' }}>
+                        <span style={{ fontSize: 19, fontWeight: 700, color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'center' }}>Add group members</span>
                     </div>
-                    <div style={{ width: 45 }}></div>
                 </div>
 
                 <div className="wa-drawer-content" style={{ background: 'white', overflowY: 'auto', flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>
@@ -15630,7 +15959,7 @@ export default function Chat() {
                                     <span>Retake</span>
                                 </button>
                             )}
-                            <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDownload(getFilePreviewUrl(file), file.name || 'download'); }} title="Download">
+                            <button type="button" style={{ width: 32, height: 32, border: 'none', background: 'transparent', color: '#c1d2e2', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); downloadPreviewFile(); }} title="Download">
                                 <Download size={22} strokeWidth={2.2} />
                             </button>
                         </div>
@@ -18174,7 +18503,7 @@ export default function Chat() {
                         }}>
                             <div className="wa-setting-icon"><Star size={20} color="#38bdf8" /></div>
                             <div className="wa-setting-text" style={{ color: '#f8fafc', flex: 1 }}>{t('contact_info.starred_messages')}</div>
-                            <span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 600 }}>{messages.filter(m => m.is_starred).length}</span>
+                            <span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 600 }}>{messages.filter(m => m.is_starred && !isDeletedForCurrentUser(m)).length}</span>
                             <ChevronRight size={20} color="#38bdf8" style={{ transform: 'none' }} />
                         </div>
                         <div className="wa-setting-item clickable" onClick={() => {
@@ -18625,7 +18954,7 @@ export default function Chat() {
 
         const isGroupOrCommunity = !!selectedGroup || !!selectedCommunity;
         const starredMsgs = (isGroupOrCommunity ? groupMessages : messages)
-            .filter(m => m.is_starred)
+            .filter(m => m.is_starred && !isDeletedForCurrentUser(m))
             .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
         return (
@@ -19918,7 +20247,7 @@ export default function Chat() {
                                 <button className="wa-viewer-btn" onClick={handleViewerForward} title="Forward">
                                     <Forward size={20} />
                                 </button>
-                                <button className="wa-viewer-btn" onClick={(e) => { e.stopPropagation(); handleDownload(viewingImage.file_path, viewingImage.fileName); }} title="Download">
+                                <button className="wa-viewer-btn" onClick={(e) => { e.stopPropagation(); handleDownload(viewingImage.file_path || getViewerMediaUrl(viewingImage), viewingImage.fileName || getDisplayFileName(viewingImage), viewingImage); }} title="Download">
                                     <Download size={20} />
                                 </button>
                                 <button className="wa-viewer-btn" onClick={() => setViewingImage(null)} title="Close">
@@ -23716,7 +24045,7 @@ export default function Chat() {
             {isArchivedChatsOpen && renderArchivedChatsDrawer()}
             {isGlobalStarredOpen && renderGlobalStarredDrawer()}
             {isRemindersModalOpen && (
-                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: '#111b32', zIndex: 500, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: '#111b32', zIndex: 70010, display: 'flex', flexDirection: 'column' }}>
                     <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)', background: '#111b32', padding: isMobile ? '12px 14px' : '14px 18px' }}>
                         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '74px 1fr 42px' : '86px 1fr 118px', alignItems: 'center', gap: 8, minHeight: 38 }}>
                             <button
@@ -24002,59 +24331,61 @@ export default function Chat() {
 
 
             {/* Chat List Header */}
-            <div className="wa-header" style={{ background: 'transparent' }}>
-                <span className="wa-header-title">{t('chat_list.title')}</span>
-                <div className="wa-header-icons">
-                    <div style={{ position: 'relative' }}>
-                        <button
-                            className={`wa-nav-icon-btn ${isRemindersModalOpen ? 'active' : ''}`}
-                            data-tooltip="Events"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                const uid = user?.id || user?._id;
-                                if (uid) {
-                                    localStorage.setItem(`lastRemindersChecked_${uid}`, Date.now().toString());
-                                    setUnreadRemindersCount(0);
-                                }
-                                fetchReminders();
-                                setIsRemindersModalOpen(true);
-                            }}
-                        >
-                            <Calendar size={20} />
-                            <span className="wa-bell-badge" style={{ right: '4px', top: '4px' }}>{scheduledEventsCount}</span>
-                        </button>
-                    </div>
-                    <div style={{ position: 'relative' }}>
-                        <button
-                            className={`wa-nav-icon-btn wa-notification-trigger ${showNotificationDetails ? 'active' : ''}`}
-                            data-tooltip="Notifications"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setShowNotificationDetails(!showNotificationDetails);
-                            }}
-                        >
-                            <Bell size={20} />
-                            {totalUnread > 0 && <span className="wa-bell-badge">{totalUnread}</span>}
-                        </button>
-                    </div>
-                    <button className="wa-nav-icon-btn" data-tooltip="New Chat" onClick={(e) => {
-                        e.stopPropagation();
-                        if (users.length === 0) fetchUsers();
-                        setIsNewChatOpen(true);
-                    }}><Plus size={20} /></button>
-                    <button
-                        className={`wa-nav-icon-btn ${(openDropdown?.type === 'sidebar_menu') ? 'active' : ''}`}
-                        data-tooltip="Menu"
-                        onClick={(e) => {
+            {!isRemindersModalOpen && (
+                <div className="wa-header" style={{ background: 'transparent' }}>
+                    <span className="wa-header-title">{t('chat_list.title')}</span>
+                    <div className="wa-header-icons">
+                        <div style={{ position: 'relative' }}>
+                            <button
+                                className={`wa-nav-icon-btn ${isRemindersModalOpen ? 'active' : ''}`}
+                                data-tooltip="Events"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    const uid = user?.id || user?._id;
+                                    if (uid) {
+                                        localStorage.setItem(`lastRemindersChecked_${uid}`, Date.now().toString());
+                                        setUnreadRemindersCount(0);
+                                    }
+                                    fetchReminders();
+                                    setIsRemindersModalOpen(true);
+                                }}
+                            >
+                                <Calendar size={20} />
+                                <span className="wa-bell-badge" style={{ right: '4px', top: '4px' }}>{scheduledEventsCount}</span>
+                            </button>
+                        </div>
+                        <div style={{ position: 'relative' }}>
+                            <button
+                                className={`wa-nav-icon-btn wa-notification-trigger ${showNotificationDetails ? 'active' : ''}`}
+                                data-tooltip="Notifications"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowNotificationDetails(!showNotificationDetails);
+                                }}
+                            >
+                                <Bell size={20} />
+                                {totalUnread > 0 && <span className="wa-bell-badge">{totalUnread}</span>}
+                            </button>
+                        </div>
+                        <button className="wa-nav-icon-btn" data-tooltip="New Chat" onClick={(e) => {
                             e.stopPropagation();
-                            setDropdownPos({ x: e.clientX, y: e.clientY });
-                            setOpenDropdown({ type: 'sidebar_menu', id: 'sidebar', data: { sidebar: true } });
-                        }}
-                    >
-                        <MoreVertical size={20} />
-                    </button>
+                            if (users.length === 0) fetchUsers();
+                            setIsNewChatOpen(true);
+                        }}><Plus size={20} /></button>
+                        <button
+                            className={`wa-nav-icon-btn ${(openDropdown?.type === 'sidebar_menu') ? 'active' : ''}`}
+                            data-tooltip="Menu"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setDropdownPos({ x: e.clientX, y: e.clientY });
+                                setOpenDropdown({ type: 'sidebar_menu', id: 'sidebar', data: { sidebar: true } });
+                            }}
+                        >
+                            <MoreVertical size={20} />
+                        </button>
+                    </div>
                 </div>
-            </div>
+            )}
 
 
             {/* Unread Messages Banner - Moved above Search Box */}
@@ -26126,7 +26457,7 @@ export default function Chat() {
                                                                 {replyingTo && (
                                                                     <div className="wa-reply-preview-header">
                                                                         <span className="wa-reply-preview-name">
-                                                                            {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || replyingTo.sender_name || replyingTo.senderName || 'Member')}
+                                                                            {getReplySenderName(replyingTo)}
                                                                         </span>
                                                                     </div>
                                                                 )}
@@ -26907,7 +27238,7 @@ export default function Chat() {
                                                                 {replyingTo && (
                                                                     <div className="wa-reply-preview-header">
                                                                         <span className="wa-reply-preview-name">
-                                                                            {isMeMsg(replyingTo) ? 'You' : (replyingTo.sender_id?.name || replyingTo.sender_name || replyingTo.senderName || 'Member')}
+                                                                            {getReplySenderName(replyingTo)}
                                                                         </span>
                                                                     </div>
                                                                 )}
@@ -28217,6 +28548,12 @@ export default function Chat() {
     const renderEditMessageOverlay = () => {
         if (!editingMessage) return null;
         const isMeEditing = isMeMsg(editingMessage);
+        const isEditSaveBlocked = !isLinkLikeText(editInput) && !!(
+            getInlineTextAiIssue(editInput.trim()) ||
+            isEditGarbageMessage ||
+            isEditGrammarLoading ||
+            ((showEditGrammarBar || editGrammarSuggestions) && !editSuggestionApplied)
+        );
 
         return (
             <div className="wa-edit-overlay" style={{
@@ -28272,11 +28609,22 @@ export default function Chat() {
                         borderRadius: '24px',
                         padding: '8px 12px',
                         display: 'flex',
-                        alignItems: 'center',
+                        flexDirection: 'column',
+                        alignItems: 'stretch',
                         gap: '12px',
                         boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
                         border: '1px solid #e2e8f0'
                     }}>
+                        {renderGrammarBar({
+                            show: showEditGrammarBar,
+                            garbage: isEditGarbageMessage,
+                            suggestions: editGrammarSuggestions,
+                            loading: isEditGrammarLoading,
+                            applied: editSuggestionApplied,
+                            onApply: applyEditGrammarSuggestion,
+                            onClose: () => setShowEditGrammarBar(false)
+                        })}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '100%' }}>
                         <button
                             type="button"
                             className="wa-inline-emoji-trigger"
@@ -28336,6 +28684,8 @@ export default function Chat() {
                             </button>
                             <button
                                 onClick={handleEditMessageSubmit}
+                                disabled={isEditSaveBlocked}
+                                title={isEditSaveBlocked ? (isEditGrammarLoading ? 'Please wait for Neural Chat AI' : 'Please select a grammar level') : 'Save edit'}
                                 style={{
                                     background: '#027EB5',
                                     border: 'none',
@@ -28345,7 +28695,8 @@ export default function Chat() {
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
-                                    cursor: 'pointer',
+                                    cursor: isEditSaveBlocked ? 'not-allowed' : 'pointer',
+                                    opacity: isEditSaveBlocked ? 0.55 : 1,
                                     color: 'white',
                                     boxShadow: '0 2px 8px rgba(2, 126, 181, 0.3)',
                                     transition: 'transform 0.2s'
@@ -28356,9 +28707,10 @@ export default function Chat() {
                                 <Check size={24} strokeWidth={2.5} />
                             </button>
                         </div>
+                        </div>
                     </div>
                     <div style={{ fontSize: '13px', color: '#667781', background: 'rgba(255,255,255,0.7)', padding: '4px 12px', borderRadius: '12px' }}>
-                        Press Esc to cancel â€¢ Enter to save
+                        Press Esc to cancel | Enter to save
                     </div>
                 </div>
             </div>
@@ -29526,7 +29878,7 @@ export default function Chat() {
                         className="wa-mute-modal"
                         onClick={(e) => e.stopPropagation()}
                         style={{
-                            maxWidth: '450px',
+                            maxWidth: '500px',
                             width: '90%',
                             background: 'linear-gradient(180deg, rgba(10, 28, 46, 0.98) 0%, rgba(5, 22, 38, 0.98) 100%)',
                             border: '1px solid rgba(14, 165, 190, 0.28)',
@@ -29536,14 +29888,60 @@ export default function Chat() {
                         }}
                     >
                         <div className="wa-mute-modal-content">
-                            <div className="wa-mute-header-centered" style={{ borderBottom: '1px solid rgba(14, 165, 190, 0.28)', paddingBottom: '15px' }}>
-                                <div className="wa-mute-icon-wrapper" style={{ background: 'rgba(14, 165, 190, 0.16)', border: '1px solid rgba(14, 165, 190, 0.34)' }}>
+                            <div
+                                className="wa-mute-header-centered"
+                                style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '44px minmax(0, 1fr) auto',
+                                    alignItems: 'center',
+                                    justifyContent: 'stretch',
+                                    columnGap: 18,
+                                    borderBottom: '1px solid rgba(14, 165, 190, 0.28)',
+                                    paddingBottom: '15px'
+                                }}
+                            >
+                                <div
+                                    className="wa-mute-icon-wrapper"
+                                    style={{
+                                        width: 44,
+                                        height: 44,
+                                        minWidth: 44,
+                                        borderRadius: '50%',
+                                        background: 'rgba(14, 165, 190, 0.16)',
+                                        border: '1px solid rgba(14, 165, 190, 0.34)'
+                                    }}
+                                >
                                     <MessageSquare size={28} color="#38d5ef" />
                                 </div>
-                                <h3 style={{ margin: '10px 0 5px 0', fontSize: '20px', color: '#f8fbff', fontWeight: 800 }}>Message Requests</h3>
-                                <p style={{ margin: 0, fontSize: '14px', color: 'rgba(234, 246, 255, 0.64)' }}>People you haven't chatted with before</p>
+                                <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, paddingRight: 12 }}>
+                                    <h3 style={{ margin: 0, fontSize: '20px', color: '#f8fbff', fontWeight: 800, textAlign: 'left', lineHeight: 1.26 }}>Message Requests</h3>
+                                    <p style={{ margin: 0, fontSize: '14px', color: 'rgba(234, 246, 255, 0.64)', lineHeight: 1.42, textAlign: 'left' }}>People you haven't chatted with before</p>
+                                </div>
+                                {messageRequests.length > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsRequestsModalOpen(false)}
+                                        style={{
+                                            marginTop: 0,
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            padding: '7px 16px',
+                                            borderRadius: 999,
+                                            border: '1px solid rgba(148, 163, 184, 0.34)',
+                                            background: 'rgba(255,255,255,0.08)',
+                                            color: '#eaf6ff',
+                                            fontSize: 12,
+                                            fontWeight: 900,
+                                            whiteSpace: 'nowrap',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        Close
+                                    </button>
+                                )}
                             </div>
-                            <div className="wa-mute-body" style={{ maxHeight: '400px', overflowY: 'auto', padding: '10px 0' }}>
+                            <div className="wa-mute-body" style={{ maxHeight: '400px', overflowY: 'auto', padding: '18px 14px 10px 0' }}>
                                 {messageRequests.length === 0 ? (
                                     <div style={{ textAlign: 'center', padding: '40px 0' }}>
                                         <MessageSquare size={48} color="rgba(56, 213, 239, 0.45)" style={{ marginBottom: 15 }} />
@@ -29559,12 +29957,13 @@ export default function Chat() {
                                                 alignItems: 'center',
                                                 justifyContent: 'space-between',
                                                 padding: '12px 15px',
-                                                marginBottom: 8,
+                                                margin: '10px 0 8px',
                                                 border: '1px solid rgba(14, 165, 190, 0.16)',
                                                 borderRadius: 14,
                                                 background: 'rgba(255,255,255,0.045)',
                                                 transition: 'background 0.2s, border-color 0.2s, transform 0.2s',
-                                                cursor: 'pointer'
+                                                cursor: 'pointer',
+                                                position: 'relative'
                                             }}
                                             onMouseEnter={(e) => {
                                                 e.currentTarget.style.background = 'rgba(14, 165, 190, 0.11)';
@@ -29588,7 +29987,7 @@ export default function Chat() {
                                                     <div style={{ fontSize: 12, color: 'rgba(234, 246, 255, 0.58)' }}>Wants to message you</div>
                                                 </div>
                                             </div>
-                                            <div style={{ display: 'flex', gap: 8, marginLeft: 10 }}>
+                                            <div style={{ display: 'flex', gap: 8, marginLeft: 10, alignItems: 'center', flexShrink: 0 }}>
                                                 <button
                                                     onClick={(e) => { e.stopPropagation(); handleAcceptRequest(req._id); setIsRequestsModalOpen(false); }}
                                                     style={{ padding: '8px 16px', borderRadius: '20px', border: 'none', background: 'linear-gradient(135deg, #0ea5be 0%, #1a9cff 100%)', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: 800, boxShadow: '0 10px 22px rgba(14, 165, 190, 0.22)' }}
@@ -31266,26 +31665,26 @@ export default function Chat() {
                 <div
                     className="wa-contact-detail-modal-overlay"
                     onClick={() => setIsScheduleSendOpen(false)}
-                    style={{ position: 'fixed', inset: 0, zIndex: 30000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+                    style={{ position: 'fixed', inset: 0, zIndex: 30000, background: 'rgba(2, 6, 23, 0.62)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}
-                        style={{ width: '100%', maxWidth: 380, background: '#ffffff', borderRadius: 8, boxShadow: '0 18px 45px rgba(0,0,0,0.25)', overflow: 'hidden' }}
+                        style={{ width: '100%', maxWidth: 380, background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(8, 19, 39, 0.98))', border: '1px solid rgba(56, 189, 248, 0.24)', borderRadius: 12, boxShadow: '0 24px 60px rgba(2, 6, 23, 0.55), 0 0 35px rgba(56, 189, 248, 0.16)', overflow: 'hidden' }}
                     >
-                        <div style={{ display: 'flex', alignItems: 'center', padding: '16px 18px', borderBottom: '1px solid #e5e7eb' }}>
-                            <div style={{ fontSize: 20, fontWeight: 600, color: '#111827', whiteSpace: 'nowrap' }}>Schedule send</div>
+                        <div style={{ display: 'flex', alignItems: 'center', padding: '16px 18px', borderBottom: '1px solid rgba(56, 189, 248, 0.18)' }}>
+                            <div style={{ fontSize: 20, fontWeight: 700, color: '#f8fafc', whiteSpace: 'nowrap' }}>Schedule send</div>
                         </div>
                         <div style={{ padding: 18 }}>
-                            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#4b5563', marginBottom: 8 }}>Date and time</label>
+                            <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#cbd5e1', marginBottom: 8 }}>Date and time</label>
                             <input
                                 type="datetime-local"
                                 value={scheduledSendAt}
                                 onChange={(e) => setScheduledSendAt(e.target.value)}
-                                style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', border: '1px solid #d1d5db', borderRadius: 6, color: '#111827', fontSize: 15 }}
+                                style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', border: '1px solid rgba(56, 189, 248, 0.28)', borderRadius: 8, background: 'rgba(15, 23, 42, 0.88)', color: '#f8fafc', fontSize: 15, colorScheme: 'dark', outline: 'none' }}
                             />
                             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
-                                <button type="button" onClick={() => { setIsScheduleSendOpen(false); setScheduledSendAt(''); }} style={{ border: '1px solid #d1d5db', background: '#fff', color: '#374151', borderRadius: 6, padding: '9px 14px' }}>Cancel</button>
-                                <button type="button" onClick={confirmScheduledSend} style={{ border: 'none', background: '#0EA5BE', color: '#fff', borderRadius: 6, padding: '9px 14px', fontWeight: 600 }}>Set time</button>
+                                <button type="button" onClick={() => { setIsScheduleSendOpen(false); setScheduledSendAt(''); }} style={{ border: '1px solid rgba(148, 163, 184, 0.28)', background: 'rgba(15, 23, 42, 0.72)', color: '#e2e8f0', borderRadius: 8, padding: '9px 14px', fontWeight: 700 }}>Cancel</button>
+                                <button type="button" onClick={confirmScheduledSend} style={{ border: 'none', background: 'linear-gradient(135deg, #0EA5BE, #38bdf8)', color: '#06111f', borderRadius: 8, padding: '9px 14px', fontWeight: 800, boxShadow: '0 10px 24px rgba(14, 165, 190, 0.28)' }}>Set time</button>
                             </div>
                         </div>
                     </div>
