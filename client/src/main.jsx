@@ -24,6 +24,14 @@ axios.interceptors.request.use((config) => {
   return config;
 });
 
+window.addEventListener('unhandledrejection', (event) => {
+  const message = String(event.reason?.message || event.reason || '');
+  if (message.includes('A listener indicated an asynchronous response by returning true') &&
+      message.includes('message channel closed before a response was received')) {
+    event.preventDefault();
+  }
+});
+
 const app = <App />;
 
 createRoot(document.getElementById('root')).render(
