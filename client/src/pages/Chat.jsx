@@ -3178,7 +3178,7 @@ export default function Chat() {
                 return;
             }
             const minWidth = 320;
-            const maxWidth = Math.max(minWidth, Math.min(Math.floor(window.innerWidth * 0.55), window.innerWidth - 360));
+            const maxWidth = Math.max(minWidth, Math.min(Math.floor(window.innerWidth * 0.5), window.innerWidth - 360));
             setLeftPanelWidth(prev => Math.max(minWidth, Math.min(maxWidth, prev || 450)));
         };
         window.addEventListener('resize', clampLeftPanelWidth);
@@ -5044,6 +5044,9 @@ export default function Chat() {
     const [isCommunityInfoOpen, setIsCommunityInfoOpen] = useState(false);
     const [isCommunityGroupsListOpen, setIsCommunityGroupsListOpen] = useState(false);
     const [isCommunitySettingsOpen, setIsCommunitySettingsOpen] = useState(false);
+    const [communitySettingsSurface, setCommunitySettingsSurface] = useState('right');
+    const [isCommunityMembersModalOpen, setIsCommunityMembersModalOpen] = useState(false);
+    const [isCommunityGroupsPopupClosing, setIsCommunityGroupsPopupClosing] = useState(false);
     const [isWhoCanAddGroupsModalOpen, setIsWhoCanAddGroupsModalOpen] = useState(false);
     const [communityInfoTab, setCommunityInfoTab] = useState('community'); // 'community' or 'announcements'
     const [pendingWhoCanAddGroups, setPendingWhoCanAddGroups] = useState('everyone');
@@ -5081,16 +5084,71 @@ export default function Chat() {
         setIsGroupAddMemberOpen(false);
         setIsConfirmGroupAddMembersOpen(false);
         setIsCommunitySettingsOpen(false);
+        setCommunitySettingsSurface('right');
         setIsNotificationSettingsOpen(false);
         setIsCommunityNewGroupOpen(false);
         setIsSharedMediaOpen(false);
         setIsStarredMessagesOpen(false);
     };
 
+    const resetRightPanelWidthForDrawer = () => {
+        if (window.innerWidth <= 768) return;
+        const maxWidth = Math.max(320, Math.floor(window.innerWidth / 2));
+        setRightPanelWidth(Math.max(320, Math.min(maxWidth, 450)));
+    };
+
     const openCommunityInfoSidePanel = (community = selectedCommunity) => {
         if (community) setSelectedCommunity(community);
         closeRightSidePanels();
+        resetRightPanelWidthForDrawer();
         setIsCommunityInfoOpen(true);
+    };
+
+    const openCommunitySettingsPanel = (surface = 'right', community = selectedCommunity) => {
+        if (community) setSelectedCommunity(community);
+        if (surface === 'right') {
+            closeRightSidePanels();
+            resetRightPanelWidthForDrawer();
+        }
+        setCommunitySettingsSurface(surface);
+        setIsCommunitySettingsOpen(true);
+    };
+
+    const selectCommunityAnnouncementGroup = (community) => {
+        if (!community?.announcements) return;
+        const annGroup = community.announcements;
+        const annId = (typeof annGroup === 'object') ? (annGroup._id || annGroup.id) : annGroup;
+        setSelectedCommunity(community);
+        setSelectedGroup({
+            ...(typeof annGroup === 'object' ? annGroup : {}),
+            _id: annId,
+            id: annId,
+            name: 'Announcements',
+            isCommunityAnnouncements: true,
+            community_id: community._id || community.id,
+            communityName: community.name,
+            communityIcon: community.icon,
+            communityDescription: community.description
+        });
+        setSelectedUser(null);
+        if (selectedUserRef) selectedUserRef.current = null;
+        fetchGroupMessages(annId);
+    };
+
+    const formatCommunityCreatedDate = (value) => {
+        if (!value) return '';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '';
+        return date.toLocaleDateString('en-GB');
+    };
+
+    const closeCommunityGroupsPopup = (afterClose) => {
+        setIsCommunityGroupsPopupClosing(true);
+        setIsCommunityGroupsListOpen(false);
+        window.setTimeout(() => {
+            setIsCommunityGroupsPopupClosing(false);
+            if (typeof afterClose === 'function') afterClose();
+        }, 220);
     };
 
     // --- Recording State ---
@@ -8060,7 +8118,7 @@ export default function Chat() {
                     isCommunityInfoOpen || isCommunityGroupsListOpen ||
                     isStarredMessagesOpen || isSharedMediaOpen ||
                     isEditContactOpen || isNotificationSettingsOpen ||
-                    isEventDetailsOpen;
+                    isEventDetailsOpen || (isCommunitySettingsOpen && communitySettingsSurface === 'right');
 
                 if (selectedUser || selectedGroup || selectedCommunity || isAnyRightPanelOpen) {
                     // Reset all panels and selection modes
@@ -13809,11 +13867,11 @@ export default function Chat() {
         return (
             <div className={`${rootClass} wa-new-group-drawer ${isOpen ? 'active' : ''}`} style={extraStyle}>
                 <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 16px', background: 'white', borderBottom: 'none', gap: 0 }}>
-                    <button onClick={() => { if (isRightSide) setIsCommunityNewGroupOpen(false); else setIsNewGroupOpen(false); setSelectedGroupMembers([]); setNewGroupStep(1); setGroupSubject(''); }} style={{ background: 'none', border: 'none', color: '#0EA5BE', cursor: 'pointer', display: 'flex', alignItems: 'center', fontSize: 16, fontWeight: 500, padding: 0 }}>
-                        Close
+                    <button onClick={() => { if (isRightSide) { setIsCommunityNewGroupOpen(false); setIsManageGroupsOpen(true); } else { setIsNewGroupOpen(false); } setSelectedGroupMembers([]); setNewGroupStep(1); setGroupSubject(''); }} style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', display: 'flex', alignItems: 'center', fontSize: 16, fontWeight: 700, padding: 0 }}>
+                        Back
                     </button>
                     <div style={{ flex: 1, display: 'flex', justifyContent: 'center', marginRight: 40 }}>
-                        <span style={{ fontSize: 19, fontWeight: 500, color: '#3b4a54', whiteSpace: 'nowrap' }}>Add group members</span>
+                        <span style={{ fontSize: 19, fontWeight: 700, color: '#f8fafc', whiteSpace: 'nowrap' }}>Add group members</span>
                     </div>
                     <div style={{ width: 45 }}></div>
                 </div>
@@ -20533,28 +20591,17 @@ export default function Chat() {
 
                         {type === 'community_home' && (
                             <>
-                                <div className="wa-dropdown-item" onClick={() => { setIsCommunityInfoOpen(true); setOpenDropdown(null); }}>
+                                <div className="wa-dropdown-item" onClick={() => { openCommunityInfoSidePanel(data || selectedCommunity); setOpenDropdown(null); }}>
                                     <Info size={18} style={{ marginRight: 12, color: '#54656f' }} /> Community info
                                 </div>
-                                <div className="wa-dropdown-item" onClick={() => { setOpenDropdown(null); }}>
+                                <div className="wa-dropdown-item" onClick={() => { setIsCommunityMembersModalOpen(true); setOpenDropdown(null); }}>
                                     <Users size={18} style={{ marginRight: 12, color: '#54656f' }} /> View members
                                 </div>
                                 <div className="wa-dropdown-item" onClick={() => {
-                                    closeRightSidePanels();
-                                    setIsCommunitySettingsOpen(true);
+                                    openCommunitySettingsPanel('left', data || selectedCommunity);
                                     setOpenDropdown(null);
                                 }}>
                                     <Settings size={18} style={{ marginRight: 12, color: '#54656f' }} /> Community settings
-                                </div>
-                                <div className="wa-dropdown-divider"></div>
-                                <div className="wa-dropdown-item danger-text" onClick={() => handleModerationAction('report', id, { ...data, is_community: true })}>
-                                    <ThumbsDown size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Report community
-                                </div>
-                                <div className="wa-dropdown-item danger-text" onClick={() => {
-                                    handleExitCommunity(selectedCommunity);
-                                    setOpenDropdown(null);
-                                }}>
-                                    <LogOut size={18} style={{ marginRight: 12, color: '#ea0038' }} /> Exit community
                                 </div>
                             </>
                         )}
@@ -20585,63 +20632,51 @@ export default function Chat() {
 
     const renderCommunityGroupsListPanel = () => {
         const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
-        if (!community) return null;
+        if (!community || (!isCommunityGroupsListOpen && !isCommunityGroupsPopupClosing)) return null;
         const textColor = '#f8fafc';
         const subTextColor = '#94a3b8';
 
         return (
-            <div className={`wa-contact-info-panel wa-manage-groups-drawer ${isCommunityGroupsListOpen ? 'active' : ''}`} style={{ background: '#0b141a', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', background: '#0b141a', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                    <button onClick={() => setIsCommunityGroupsListOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0, width: 24 }}>
-                        <X size={24} />
-                    </button>
-                    <span style={{ fontSize: 19, fontWeight: 500, color: '#f8fafc', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{community.name}</span>
-                    <div style={{ width: 24 }}></div>
-                </div>
+            <div className={`wa-community-groups-popup-overlay ${isCommunityGroupsListOpen ? 'active' : ''} ${isCommunityGroupsPopupClosing ? 'closing' : ''}`} onClick={() => closeCommunityGroupsPopup()}>
+                <div className="wa-community-groups-popup" onClick={(e) => e.stopPropagation()}>
+                    <div className="wa-community-groups-popup-header">
+                        <button onClick={() => closeCommunityGroupsPopup()} className="wa-community-groups-popup-close">
+                            <X size={24} />
+                        </button>
+                        <span>{community.name}</span>
+                    </div>
 
-                <div className="wa-drawer-content" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ background: 'transparent', marginBottom: 12 }}>
+                    <div className="wa-community-groups-popup-list custom-scrollbar">
                         {checkAddGroupPermission(community, false) && (
                             <div
-                                className="wa-manage-groups-item"
-                                style={{ padding: '15px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}
+                                className="wa-community-groups-popup-row"
                                 onClick={() => {
-                                    setIsCommunityGroupsListOpen(false);
-                                    closeRightSidePanels();
-                                    setIsManageGroupsOpen(true);
+                                    closeCommunityGroupsPopup(() => {
+                                        setIsCommunityInfoOpen(false);
+                                        resetRightPanelWidthForDrawer();
+                                        setIsManageGroupsOpen(true);
+                                    });
                                 }}
                             >
-                                <div style={{ width: 40, height: 40, background: '#38bdf8', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <Plus size={20} color="white" />
+                                <div className="wa-community-popup-avatar add"><UserPlus size={24} /></div>
+                                <div className="wa-community-popup-copy">
+                                    <div>Add group</div>
                                 </div>
-                                <span style={{ fontSize: 16, color: textColor }}>Add group</span>
                             </div>
                         )}
 
                         <div
-                            className="wa-manage-groups-item"
-                            style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}
+                            className="wa-community-groups-popup-row"
                             onClick={() => {
-                                setIsCommunityGroupsListOpen(false);
-                                setSelectedGroup({
-                                    ...community.announcements,
-                                    name: community.name,
-                                    isCommunityAnnouncements: true,
-                                    communityName: community.name,
-                                    communityIcon: community.icon,
-                                    communityDescription: community.description
-                                });
-                                setSelectedUser(null);
-                                setGroupMessages([...(community.announcements?.messages || [])]);
+                                closeCommunityGroupsPopup(() => selectCommunityAnnouncementGroup(community));
                             }}
                         >
-                            <div style={{ width: 44, height: 44, background: '#38bdf8', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                <Megaphone size={22} color="white" />
+                            <div className="wa-community-popup-avatar announcements"><Megaphone size={22} /></div>
+                            <div className="wa-community-popup-copy">
+                                <div>Announcements</div>
+                                <span>Community updates</span>
                             </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 16, color: '#f8fafc', fontWeight: 400 }}>Announcements</div>
-                                <div style={{ fontSize: 13, color: '#94a3b8' }}>Community updates</div>
-                            </div>
+                            <span className="wa-community-popup-date">{formatCommunityCreatedDate(community.created_at)}</span>
                         </div>
 
                         {(community.groups || []).map(gItem => {
@@ -20651,40 +20686,126 @@ export default function Chat() {
                             if (!g) return null;
                             return (
                                 <div key={String(gId)}
-                                    className="wa-manage-groups-item"
-                                    style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', background: 'transparent' }}
+                                    className="wa-community-groups-popup-row"
                                     onClick={() => {
-                                        setIsCommunityGroupsListOpen(false);
-                                        setSelectedGroup(g);
-                                        setSelectedUser(null);
-                                        fetchGroupMessages(g._id);
+                                        closeCommunityGroupsPopup(() => {
+                                            setSelectedCommunity(community);
+                                            setSelectedGroup(g);
+                                            setSelectedUser(null);
+                                            fetchGroupMessages(g._id);
+                                        });
                                     }}>
-                                    <div style={{ width: 44, height: 44, borderRadius: '12px', background: 'rgba(255, 255, 255, 0.05)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                        {g.icon ? <img src={g.icon} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Users size={22} color="#94a3b8" />}
+                                    <div className="wa-community-popup-avatar group">
+                                        {g.icon ? <img src={g.icon} alt="" /> : <Users size={22} />}
                                     </div>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontSize: 16, color: '#f8fafc', fontWeight: 400 }}>
-                                            {g.name || 'Group'}
-                                        </div>
+                                    <div className="wa-community-popup-copy">
+                                        <div>{g.name || 'Group'}</div>
+                                        <span>{g.lastMessage?.content || `Welcome to the group: ${g.name || 'Group'}`}</span>
                                     </div>
+                                    <span className="wa-community-popup-date">{formatCommunityCreatedDate(g.created_at || community.created_at)}</span>
                                 </div>
                             );
                         })}
-                    </div>
 
-                    <div style={{ padding: '0', background: 'transparent', flex: 1 }}>
                         <div
-                            className="wa-manage-groups-item"
-                            style={{ padding: '15px 20px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}
+                            className="wa-community-groups-popup-row view-community"
                             onClick={() => {
-                                setIsCommunityGroupsListOpen(false);
-                                if (!selectedCommunity && community) setSelectedCommunity(community);
-                                setIsCommunityHomeOpen(true);
+                                closeCommunityGroupsPopup(() => {
+                                    if (!selectedCommunity && community) setSelectedCommunity(community);
+                                    setIsCommunitySettingsOpen(false);
+                                    setIsCommunityHomeOpen(true);
+                                });
                             }}
                         >
-                            <ChevronRight size={20} color="#94a3b8" />
-                            <span style={{ fontSize: 16, color: textColor }}>View community</span>
+                            <ChevronRight size={24} />
+                            <div className="wa-community-popup-copy">
+                                <div>View community</div>
+                            </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderCommunityMembersModal = () => {
+        const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
+        if (!community || !isCommunityMembersModalOpen) return null;
+
+        const myId = String(user.id || user._id || '');
+        const ownerId = String(community.creator?._id || community.creator?.id || community.creator || '');
+        const membersById = new Map();
+        const addMember = (member, fallback = {}) => {
+            if (!member) return;
+            const id = String(member._id || member.id || member || '');
+            if (!id || membersById.has(id)) return;
+            const fromUsers = users.find(u => String(u._id || u.id) === id);
+            const source = typeof member === 'object' ? member : {};
+            membersById.set(id, { ...fallback, ...fromUsers, ...source, id });
+        };
+
+        addMember(community.creator, { name: ownerId === myId ? 'You' : 'Community owner' });
+        (community.members || []).forEach(member => addMember(member));
+        const members = Array.from(membersById.values());
+        const filteredMembers = members.filter(member => {
+            if (!communityMemberSearchQuery) return true;
+            const name = member.name || member.firstName || member.mobile || member.phone || '';
+            return String(name).toLowerCase().includes(communityMemberSearchQuery.toLowerCase());
+        });
+        const canIManage = ownerId === myId || (community.admins || []).some(a => String(a?._id || a?.id || a) === myId);
+
+        return (
+            <div className="wa-community-members-overlay" onClick={() => { setIsCommunityMembersModalOpen(false); setCommunityMemberSearchQuery(''); }}>
+                <div className="wa-community-members-modal" onClick={(e) => e.stopPropagation()}>
+                    <div className="wa-community-members-header">
+                        <button className="wa-community-members-icon-btn" onClick={() => { setIsCommunityMembersModalOpen(false); setCommunityMemberSearchQuery(''); }}>
+                            <X size={24} />
+                        </button>
+                        <span>Members ({members.length})</span>
+                    </div>
+                    <div className="wa-community-members-search">
+                        <Search size={20} />
+                        <input
+                            value={communityMemberSearchQuery}
+                            onChange={(e) => setCommunityMemberSearchQuery(e.target.value)}
+                            placeholder="Search members"
+                        />
+                    </div>
+                    <div className="wa-community-members-list">
+                        <div className="wa-community-members-row action">
+                            <div className="wa-community-members-action-avatar"><LinkIcon size={24} /></div>
+                            <span>Invite to community via link</span>
+                        </div>
+                        {canIManage && (
+                            <div
+                                className="wa-community-members-row action"
+                                onClick={() => {
+                                    setIsCommunityMembersModalOpen(false);
+                                    closeRightSidePanels();
+                                    setIsCommunityAddMemberOpen(true);
+                                }}
+                            >
+                                <div className="wa-community-members-action-avatar"><UserPlus size={24} /></div>
+                                <span>Add members</span>
+                            </div>
+                        )}
+                        {filteredMembers.map(member => {
+                            const memberId = String(member._id || member.id || '');
+                            const isOwner = memberId === ownerId;
+                            const isCurrentUser = memberId === myId;
+                            const displayName = isCurrentUser ? 'You' : (member.name || `${member.firstName || ''} ${member.lastName || ''}`.trim() || member.mobile || member.phone || 'Member');
+                            const avatar = member.profile_photo || member.profilePic || member.image || member.avatar;
+
+                            return (
+                                <div className="wa-community-members-row" key={memberId}>
+                                    <div className="wa-community-members-avatar">
+                                        {avatar ? <img src={avatar} alt="" /> : <span>{String(displayName || 'M').charAt(0).toUpperCase()}</span>}
+                                    </div>
+                                    <div className="wa-community-members-name">{displayName}</div>
+                                    {isOwner && <div className="wa-community-members-pill">Community owner</div>}
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             </div>
@@ -20700,7 +20821,7 @@ export default function Chat() {
         return (
             <div className={`wa-contact-info-panel wa-manage-groups-drawer ${isManageGroupsOpen ? 'active' : ''}`} style={{ background: '#0b141a', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
                 <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: '#0b141a', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
-                    <button onClick={() => { setIsManageGroupsOpen(false); if (!selectedCommunity && community) setSelectedCommunity(community); }} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
+                    <button onClick={() => { setIsManageGroupsOpen(false); if (!selectedCommunity && community) setSelectedCommunity(community); setIsCommunityInfoOpen(true); }} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
                         <ArrowLeft size={24} />
                     </button>
                     <div style={{ flex: 1, display: 'flex', justifyContent: 'center', paddingRight: '40px' }}>
@@ -20715,7 +20836,7 @@ export default function Chat() {
                             style={{ padding: '15px 20px', display: 'flex', alignItems: 'center', gap: 15, cursor: 'pointer', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}
                             onClick={() => {
                                 if (!selectedCommunity && community) setSelectedCommunity(community);
-                                closeRightSidePanels();
+                                setIsManageGroupsOpen(false);
                                 setIsCommunityNewGroupOpen(true);
                                 setNewGroupStep(1);
                             }}
@@ -20732,7 +20853,7 @@ export default function Chat() {
                                 if (!selectedCommunity && community) setSelectedCommunity(community);
                                 setAddGroupsSearchQuery('');
                                 setSelectedGroupsToAdd([]);
-                                closeRightSidePanels();
+                                setIsManageGroupsOpen(false);
                                 setIsAddExistingGroupsOpen(true);
                             }}
                         >
@@ -20833,7 +20954,7 @@ export default function Chat() {
         return (
             <div className={`wa-contact-info-panel wa-add-existing-groups-drawer ${isAddExistingGroupsOpen ? 'active' : ''}`} style={{ background: '#0b141a', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
                 <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: '#0b141a', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
-                    <button onClick={() => { if (showAddGroupsSearch) { setShowAddGroupsSearch(false); setAddGroupsSearchQuery(''); } else { setIsAddExistingGroupsOpen(false); setShowAddGroupsSearch(false); } }} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
+                    <button onClick={() => { if (showAddGroupsSearch) { setShowAddGroupsSearch(false); setAddGroupsSearchQuery(''); } else { setIsAddExistingGroupsOpen(false); setShowAddGroupsSearch(false); setIsManageGroupsOpen(true); } }} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
                         <ArrowLeft size={24} />
                     </button>
                     {!showAddGroupsSearch ? (
@@ -21451,6 +21572,7 @@ export default function Chat() {
                                     <div className="wa-community-info-action" onClick={() => {
                                         if (checkAddGroupPermission(community, true)) {
                                             closeRightSidePanels();
+                                            resetRightPanelWidthForDrawer();
                                             setIsManageGroupsOpen(true);
                                         }
                                     }}>
@@ -21579,10 +21701,10 @@ export default function Chat() {
                     <div style={{ borderBottom: thickDivider }}>
                         {[
                             ...(canIManage ? [
-                                { icon: <Users size={20} />, label: 'Manage groups', onClick: () => { if (checkAddGroupPermission(community, true)) { closeRightSidePanels(); setIsManageGroupsOpen(true); } } },
-                                { icon: <Settings size={20} />, label: 'Community settings', onClick: () => { closeRightSidePanels(); setIsCommunitySettingsOpen(true); } }
+                                { icon: <Users size={20} />, label: 'Manage groups', onClick: () => { if (checkAddGroupPermission(community, true)) { closeRightSidePanels(); resetRightPanelWidthForDrawer(); setIsManageGroupsOpen(true); } } },
+                                { icon: <Settings size={20} />, label: 'Community settings', onClick: () => openCommunitySettingsPanel('right', community) }
                             ] : []),
-                            { icon: <Users size={20} />, label: 'View groups (' + (community.groups?.length || 0) + ')', onClick: () => setIsCommunityGroupsListOpen(true) },
+                            { icon: <Users size={20} />, label: 'View groups (' + (community.groups?.length || 0) + ')', onClick: () => { setIsCommunityGroupsPopupClosing(false); setIsCommunityGroupsListOpen(true); } },
                             {
                                 icon: <Star size={20} />,
                                 label: 'Starred Messages',
@@ -22923,7 +23045,7 @@ export default function Chat() {
         const handleMouseMove = (moveEvent) => {
             const delta = moveEvent.clientX - startX;
             const minWidth = 320;
-            const maxWidth = Math.max(minWidth, Math.min(Math.floor(window.innerWidth * 0.55), window.innerWidth - 360));
+            const maxWidth = Math.max(minWidth, Math.min(Math.floor(window.innerWidth * 0.5), window.innerWidth - 360));
             setLeftPanelWidth(Math.max(minWidth, Math.min(maxWidth, startWidth + delta)));
         };
 
@@ -23579,7 +23701,7 @@ export default function Chat() {
     );
 
     const renderLeftPanel = () => (
-        <div className="wa-left-panel" style={{ width: isMobile ? '100%' : leftPanelWidth, minWidth: isMobile ? '100%' : 320, maxWidth: isMobile ? '100%' : '55vw', flex: 'none', position: 'relative', overflow: 'hidden' }}>
+        <div className="wa-left-panel" style={{ width: isMobile ? '100%' : leftPanelWidth, minWidth: isMobile ? '100%' : 320, maxWidth: isMobile ? '100%' : '50vw', flex: 'none', position: 'relative', overflow: 'hidden' }}>
             {/* Drawers */}
             {isCreateListOpen && renderCreateListDrawer()}
             {renderEditListDrawer()}
@@ -23590,6 +23712,7 @@ export default function Chat() {
             {isNewGroupOpen && renderNewGroupDrawer()}
             {isNewCommunityOpen && renderNewCommunityDrawer()}
             {isCommunityHomeOpen && renderCommunityHomeDrawer()}
+            {renderCommunitySettingsPanel('left')}
             {isArchivedChatsOpen && renderArchivedChatsDrawer()}
             {isGlobalStarredOpen && renderGlobalStarredDrawer()}
             {isRemindersModalOpen && (
@@ -25499,6 +25622,9 @@ export default function Chat() {
         );
     };
 
+    const isCommunitySettingsRightOpen = isCommunitySettingsOpen && communitySettingsSurface === 'right';
+    const isRightSidePanelOpen = !!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen || isCommunitySettingsRightOpen;
+
     const renderMainChat = () => (
         <div
             className="wa-main-chat-wrapper"
@@ -25512,12 +25638,12 @@ export default function Chat() {
             }}
         >
             <div
-                className={`wa-main-chat ${(!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? 'wa-main-chat-with-panel' : ''} ${privacySettings.addWatermark ? 'media-watermark-active' : ''} ${isViewOncePreviewOpen ? 'wa-view-once-chat-active' : ''}`}
+                className={`wa-main-chat ${isRightSidePanelOpen ? 'wa-main-chat-with-panel' : ''} ${privacySettings.addWatermark ? 'media-watermark-active' : ''} ${isViewOncePreviewOpen ? 'wa-view-once-chat-active' : ''}`}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 style={{
                     flex: 1,
-                    borderRight: (!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen) ? '1px solid #d1d7db' : 'none'
+                    borderRight: isRightSidePanelOpen ? '1px solid #d1d7db' : 'none'
                 }}
             >
 
@@ -26219,6 +26345,26 @@ export default function Chat() {
                                         <button className="wa-nav-icon-btn wa-header-call-icon" data-tooltip="Video call"><Video size={20} /></button>
                                         <button className="wa-nav-icon-btn wa-header-call-icon" data-tooltip="Voice call"><Phone size={20} /></button>
                                     </>
+                                )}
+                                {(selectedGroup.isCommunityAnnouncements || selectedGroup.isAnnouncementGroup) && (
+                                    <button
+                                        className="wa-nav-icon-btn wa-community-subgroup-switcher"
+                                        data-tooltip="Subgroup switcher"
+                                        aria-label="Subgroup switcher"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            const communityTarget = selectedCommunity || communities.find(c =>
+                                                String(c.announcements?._id || c.announcements?.id || c.announcements) === String(selectedGroup._id || selectedGroup.id) ||
+                                                String(c._id || c.id) === String(selectedGroup.community_id || selectedGroup.communityId)
+                                            );
+                                            if (communityTarget) setSelectedCommunity(communityTarget);
+                                            setIsCommunityGroupsPopupClosing(false);
+                                            setIsCommunityGroupsListOpen(true);
+                                        }}
+                                    >
+                                        <Users size={20} />
+                                        <ChevronDown size={14} />
+                                    </button>
                                 )}
                                 <button
                                     className={`wa-nav-icon-btn ${isMessageSearchOpen && messageSearchSource === 'group_header' ? 'active' : ''}`}
@@ -26981,7 +27127,7 @@ export default function Chat() {
                 )}
 
                 {/* Shared Scroll-to-bottom Button positioned in wa-main-chat parent */}
-                {showScrollBtn && !isViewOncePreviewOpen && cameraModal !== 'active' && (selectedUser || selectedGroup) && (window.innerWidth > 768 || !(isMessageSearchOpen || isContactInfoOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen)) && (
+                {showScrollBtn && !isViewOncePreviewOpen && cameraModal !== 'active' && (selectedUser || selectedGroup) && (window.innerWidth > 768 || !isRightSidePanelOpen) && (
                     <button
                         className="wa-scroll-to-bottom-btn"
                         onClick={() => {
@@ -27003,6 +27149,7 @@ export default function Chat() {
             {renderCommunityInfoPanel()}
             {renderSelectOwnerPanel()}
             {renderCommunityGroupsListPanel()}
+            {renderCommunityMembersModal()}
             {renderManageGroupsPanel()}
             {renderAddExistingGroupsPanel()}
             {renderConfirmAddGroupsPanel()}
@@ -27834,16 +27981,22 @@ export default function Chat() {
         return true;
     };
 
-    const renderCommunitySettingsPanel = () => {
+    const renderCommunitySettingsPanel = (surface = 'right') => {
         const community = selectedCommunity || communities.find(c => c.name === (selectedGroup?.communityName || selectedGroup?.name));
-        if (!community || !isCommunitySettingsOpen) return null;
+        if (!community || !isCommunitySettingsOpen || communitySettingsSurface !== surface) return null;
         const textColor = '#f8fafc';
         const thickDivider = '12px solid rgba(255, 255, 255, 0.06)';
+        const panelClassName = surface === 'left'
+            ? 'wa-profile-drawer wa-community-settings-drawer active'
+            : `wa-contact-info-panel wa-community-settings-drawer ${isCommunitySettingsOpen ? 'active' : ''}`;
 
         return (
-            <div className={`wa-contact-info-panel wa-community-settings-drawer ${isCommunitySettingsOpen ? 'active' : ''}`} style={{ background: 'rgba(15, 23, 42, 0.95)', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+            <div className={panelClassName} style={{ background: 'rgba(15, 23, 42, 0.95)', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
                 <div className="wa-drawer-header" style={{ height: 60, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'rgba(15, 23, 42, 0.95)', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
-                    <button onClick={() => setIsCommunitySettingsOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
+                    <button onClick={() => {
+                        setIsCommunitySettingsOpen(false);
+                        if (surface === 'left') setIsCommunityHomeOpen(true);
+                    }} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', marginRight: 15, display: 'flex', alignItems: 'center', padding: 0 }}>
                         <ArrowLeft size={24} />
                     </button>
                     <div style={{ flex: 1, display: 'flex', justifyContent: 'center', paddingRight: '40px' }}>
@@ -29312,7 +29465,7 @@ export default function Chat() {
                                     position: 'absolute',
                                     top: (selectedUser || selectedGroup) ? 56 : 0,
                                     left: 0,
-                                    right: (!isMobile && (!!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen))
+                                    right: (!isMobile && isRightSidePanelOpen)
                                         ? `${rightPanelWidth}px`
                                         : 0,
                                     bottom: 0,
