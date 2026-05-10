@@ -53,6 +53,16 @@ const isTransientDbError = (err) => {
     );
 };
 
+const isMongoObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
+
+const findP2PMessageByRouteId = async (rawId) => {
+    const id = String(rawId || '');
+    if (!isMongoObjectId(id)) return null;
+    const byId = await Message.findById(id);
+    if (byId) return byId;
+    return Message.findOne({ scheduled_message_id: id });
+};
+
 // --- Link Preview Helper ---
 const fetchLinkPreview = async (url) => {
     try {
@@ -2160,7 +2170,7 @@ router.post('/poll/:messageId/vote', authenticateToken, async (req, res) => {
         const userId = req.user.id;
         const userObjId = new mongoose.Types.ObjectId(userId);
 
-        const msg = await Message.findById(messageId) || await Message.findOne({ scheduled_message_id: messageId });
+        const msg = await findP2PMessageByRouteId(messageId);
         if (!msg || msg.type !== 'poll') return res.status(404).json({ error: 'Poll not found' });
 
         const allowMultiple = msg.poll.allowMultipleAnswers;
@@ -2219,7 +2229,7 @@ router.post('/event/:messageId/respond', authenticateToken, async (req, res) => 
             return res.status(400).json({ error: 'Invalid sort status' });
         }
 
-        const msg = await Message.findById(messageId);
+        const msg = await findP2PMessageByRouteId(messageId);
         if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event message not found' });
         const event = msg.event || {};
         const startDateValue = event.startDate ? String(event.startDate).split('T')[0] : '';
@@ -2265,7 +2275,7 @@ router.post('/event/:messageId/respond', authenticateToken, async (req, res) => 
         msg.markModified('event');
         await msg.save();
 
-        const updated = await Message.findById(messageId);
+        const updated = await Message.findById(msg._id);
         const msgObj = updated.toObject();
 
         if (req.io) {
@@ -3081,7 +3091,7 @@ router.post('/message/:id/edit', authenticateToken, async (req, res) => {
     if (!content) return res.status(400).json({ error: 'Content is required' });
 
     try {
-        const msg = await Message.findById(req.params.id);
+        const msg = await findP2PMessageByRouteId(req.params.id);
         if (!msg) return res.status(404).json({ error: 'Message not found' });
 
         // Permission check: only sender can edit
@@ -4018,7 +4028,7 @@ router.post('/event/send', authenticateToken, async (req, res) => {
 router.post('/event/:messageId/join', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     try {
-        const msg = await Message.findById(req.params.messageId) || await Message.findOne({ scheduled_message_id: req.params.messageId });
+        const msg = await findP2PMessageByRouteId(req.params.messageId);
         if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
 
         if (!msg.event.participants) msg.event.participants = [];
@@ -4053,7 +4063,7 @@ router.post('/event/:messageId/join', authenticateToken, async (req, res) => {
 router.post('/event/:messageId/edit', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     try {
-        const msg = await Message.findById(req.params.messageId) || await Message.findOne({ scheduled_message_id: req.params.messageId });
+        const msg = await findP2PMessageByRouteId(req.params.messageId);
         if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
 
         // Only creator can edit for now
@@ -4114,7 +4124,7 @@ router.post('/event/:messageId/edit', authenticateToken, async (req, res) => {
 router.post('/event/:messageId/cancel', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     try {
-        const msg = await Message.findById(req.params.messageId);
+        const msg = await findP2PMessageByRouteId(req.params.messageId);
         if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
 
         // Only creator can cancel for now

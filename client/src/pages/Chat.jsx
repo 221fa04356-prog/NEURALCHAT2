@@ -4763,6 +4763,36 @@ export default function Chat() {
         return targetUser.image || targetUser.profile_photo || targetUser.avatar || '';
     };
 
+    const isPersistedMongoId = (value) => /^[a-f\d]{24}$/i.test(String(value || ''));
+
+    const resolvePersistedMessageId = (message, sourceMessages = []) => {
+        const directId = message?._id || message?.id;
+        if (isPersistedMongoId(directId)) return String(directId);
+
+        const createdAt = message?.created_at ? new Date(message.created_at).getTime() : 0;
+        const match = (sourceMessages || []).find(candidate => {
+            const candidateId = candidate?._id || candidate?.id;
+            if (!isPersistedMongoId(candidateId)) return false;
+            if (message?.type && candidate?.type !== message.type) return false;
+            if ((message?.content || '') !== (candidate?.content || '')) return false;
+            if (message?.type === 'event' && (message?.event?.name || '') !== (candidate?.event?.name || '')) return false;
+            if (!createdAt || !candidate?.created_at) return true;
+            return Math.abs(new Date(candidate.created_at).getTime() - createdAt) < 120000;
+        });
+
+        return match ? String(match._id || match.id) : '';
+    };
+
+    const refreshMessagesForActiveTarget = () => {
+        if (selectedGroup?._id || selectedGroup?.id) {
+            fetchGroupMessages(selectedGroup._id || selectedGroup.id);
+            return;
+        }
+        if (selectedUser?._id || selectedUser?.id) {
+            fetchP2PRequest(selectedUser._id || selectedUser.id);
+        }
+    };
+
     const handleEditMessageSubmit = async () => {
         if (!editInput.trim() || !editingMessage) return;
         const editIssue = getInlineTextAiIssue(editInput.trim());
@@ -4778,7 +4808,13 @@ export default function Chat() {
             return;
         }
         try {
-            const id = editingMessage._id || editingMessage.id;
+            const sourceMessages = editingMessage.group_id ? groupMessages : messages;
+            const id = resolvePersistedMessageId(editingMessage, sourceMessages);
+            if (!id) {
+                refreshMessagesForActiveTarget();
+                setSnackbar({ message: 'Message is still syncing. Please try again in a moment.', type: 'info', variant: 'system' });
+                return;
+            }
             const endpoint = editingMessage.group_id
                 ? `/api/groups/message/${id}/edit`
                 : `/api/chat/message/${id}/edit`;
@@ -11797,7 +11833,12 @@ export default function Chat() {
             return;
         }
         const isGroup = !!eventEditTarget.group_id;
-        const msgId = eventEditTarget._id || eventEditTarget.id;
+        const msgId = resolvePersistedMessageId(eventEditTarget, isGroup ? groupMessages : messages);
+        if (!msgId) {
+            refreshMessagesForActiveTarget();
+            setSnackbar({ message: 'Event is still syncing. Please try again in a moment.', type: 'info', variant: 'system' });
+            return;
+        }
         const token = localStorage.getItem('token');
         const endpoint = isGroup ? `/api/groups/event/${msgId}/edit` : `/api/chat/event/${msgId}/edit`;
 
@@ -11860,7 +11901,12 @@ export default function Chat() {
         const msg = eventDetailsMsg || eventEditTarget;
         if (!msg) return;
         const isGroup = !!msg.group_id;
-        const msgId = msg._id || msg.id;
+        const msgId = resolvePersistedMessageId(msg, isGroup ? groupMessages : messages);
+        if (!msgId) {
+            refreshMessagesForActiveTarget();
+            setSnackbar({ message: 'Event is still syncing. Please try again in a moment.', type: 'info', variant: 'system' });
+            return;
+        }
         const token = localStorage.getItem('token');
         const endpoint = isGroup ? `/api/groups/event/${msgId}/cancel` : `/api/chat/event/${msgId}/cancel`;
 
