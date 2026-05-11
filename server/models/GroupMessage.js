@@ -14,6 +14,7 @@ const groupMessageSchema = new mongoose.Schema({
     fileSize: { type: Number },
     pageCount: { type: Number, default: 0 },
     thumbnail_path: { type: String },
+    reply_to: { type: mongoose.Schema.Types.ObjectId, ref: 'GroupMessage', default: null },
     is_view_once: { type: Boolean, default: false },
     is_viewed: { type: Boolean, default: false },
     is_opened: { type: Boolean, default: false },

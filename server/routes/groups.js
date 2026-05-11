@@ -44,6 +44,16 @@ const inferTypeFromUrl = (rawUrl = '') => {
     return 'file';
 };
 
+const isMongoObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
+
+const findGroupMessageByRouteId = async (rawId) => {
+    const id = String(rawId || '');
+    if (!isMongoObjectId(id)) return null;
+    const byId = await GroupMessage.findById(id);
+    if (byId) return byId;
+    return GroupMessage.findOne({ scheduled_message_id: id });
+};
+
 const checkUnethicalWithAI = async (text) => {
     if (!text) return { isUnethical: false };
     try {
@@ -537,7 +547,7 @@ router.post('/poll/:messageId/vote', authenticateToken, async (req, res) => {
         const userId = req.user.id;
         const userObjId = new mongoose.Types.ObjectId(userId);
 
-        const msg = await GroupMessage.findById(messageId) || await GroupMessage.findOne({ scheduled_message_id: messageId });
+        const msg = await findGroupMessageByRouteId(messageId);
         if (!msg || msg.type !== 'poll') return res.status(404).json({ error: 'Poll not found' });
 
         const group = await Group.findById(msg.group_id);
@@ -674,7 +684,7 @@ router.post('/event/:messageId/respond', authenticateToken, async (req, res) => 
             return res.status(400).json({ error: 'Invalid status' });
         }
 
-        const msg = await GroupMessage.findById(messageId) || await GroupMessage.findOne({ scheduled_message_id: messageId });
+        const msg = await findGroupMessageByRouteId(messageId);
         if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
         const event = msg.event || {};
         const startDateValue = event.startDate ? String(event.startDate).split('T')[0] : '';
@@ -755,7 +765,7 @@ router.post('/event/:messageId/edit', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
         const { messageId } = req.params;
-        const msg = await GroupMessage.findById(messageId);
+        const msg = await findGroupMessageByRouteId(messageId);
         if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
 
         // Only creator can edit for now
@@ -822,7 +832,7 @@ router.post('/event/:messageId/cancel', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
         const { messageId } = req.params;
-        const msg = await GroupMessage.findById(messageId);
+        const msg = await findGroupMessageByRouteId(messageId);
         if (!msg || msg.type !== 'event') return res.status(404).json({ error: 'Event not found' });
 
         // Only creator can cancel for now
@@ -895,7 +905,7 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
     });
 }, async (req, res) => {
     try {
-        let { content, type, file_path, fileName, fileSize, isForwarded, forward_count, is_view_once } = req.body;
+        let { content, type, file_path, fileName, fileSize, isForwarded, forward_count, is_view_once, reply_to } = req.body;
         const senderId = req.user.id;
         const groupId = req.params.groupId;
         const file = req.file;
@@ -1118,6 +1128,7 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             fileSize: fileSize || 0,
             pageCount: req.body.pageCount || 0,
             thumbnail_path: req.body.thumbnail_path || null,
+            reply_to: reply_to || null,
             link_preview: linkPreview,
             duration: Number(req.body.duration || 0),
             is_view_once: is_view_once === 'true' || is_view_once === true,
@@ -1272,7 +1283,7 @@ router.post('/message/:id/toggle', authenticateToken, async (req, res) => {
     const userId = req.user.id;
 
     try {
-        const msg = await GroupMessage.findById(req.params.id);
+        const msg = await findGroupMessageByRouteId(req.params.id);
         if (!msg) return res.status(404).json({ error: 'Group message not found' });
 
         if (action === 'star') {
@@ -1305,7 +1316,7 @@ router.post('/message/:id/edit', authenticateToken, async (req, res) => {
     if (!content) return res.status(400).json({ error: 'Content is required' });
 
     try {
-        const msg = await GroupMessage.findById(req.params.id);
+        const msg = await findGroupMessageByRouteId(req.params.id);
         if (!msg) return res.status(404).json({ error: 'Group message not found' });
 
         // Permission check: only sender can edit
