@@ -346,6 +346,7 @@ router.get('/users', async (req, res) => {
 router.post('/approve', async (req, res) => {
     const { userId, loginId, password } = req.body;
     if (!userId || !password || !loginId) return res.status(400).json({ error: 'Missing userId, loginId or password' });
+    if (!/^\d{6}$/.test(String(loginId))) return res.status(400).json({ error: 'Login ID must be exactly 6 digits' });
 
     try {
         // Check if loginId exists (excluding current user if needed, but here it's new assignment)
@@ -436,12 +437,12 @@ router.post('/admin-transfer/approve', async (req, res) => {
         const previousAdminSnapshots = previousAdmins
             .map(getDecryptedUserSnapshot)
             .filter(admin => admin?._id || admin?.id);
-        const previousAdminIds = previousAdmins.map(admin => admin._id);
+        const previousAdminIds = [...new Set(previousAdmins.map(admin => String(admin._id)).filter(Boolean))];
 
-        await User.updateMany(
-            { _id: { $in: previousAdminIds } },
-            { $set: { role: 'user' }, $inc: { token_version: 1 } }
-        );
+        await Promise.all([
+            User.deleteMany({ _id: { $in: previousAdminIds } }),
+            PasswordReset.deleteMany({ user_id: { $in: previousAdminIds } })
+        ]);
 
         requestedAdmin.status = 'approved';
         requestedAdmin.pending_admin_password = undefined;
@@ -452,9 +453,12 @@ router.post('/admin-transfer/approve', async (req, res) => {
         if (req.io) {
             req.io.to('admins').emit('admin_transfer_approved', {
                 newAdminId: requestedAdmin._id.toString(),
-                previousAdminIds: previousAdminIds.map(String)
+                previousAdminIds
             });
-            previousAdminIds.forEach(id => req.io.to(String(id)).emit('force_logout'));
+            previousAdminIds.forEach(id => {
+                req.io.to(id).emit('force_logout');
+                req.io.emit('user_deleted', { userId: id });
+            });
         }
 
         const subject = 'You have been approved and allotted as the new Admin';
@@ -480,12 +484,12 @@ router.post('/admin-transfer/approve', async (req, res) => {
             greeting: `Hi ${oldAdminName},`,
             intro: [
                 `Your admin ownership has been transferred to ${requestedAdminName}.`,
-                'You can no longer access the admin dashboard or use administrative privileges for this NeuralChat workspace.'
+                'Your previous admin account has been removed from this NeuralChat workspace.'
             ],
             details: [
                 { label: 'New Admin', value: requestedAdminName },
                 { label: 'Previous Admin', value: oldAdminName },
-                { label: 'Status', value: 'Admin access removed' }
+                { label: 'Status', value: 'Previous admin account removed' }
             ],
             note: 'If you believe this transfer was not expected, please contact the new admin directly.'
         });
@@ -498,6 +502,7 @@ router.post('/admin-transfer/approve', async (req, res) => {
 
         res.json({
             message: 'Admin accountship transferred successfully',
+            deletedPreviousAdminIds: previousAdminIds,
             mailSent: mailResults.every(result => result.ok),
             mailResults
         });
