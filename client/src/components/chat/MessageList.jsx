@@ -421,12 +421,15 @@ const MessageList = memo(({
     jumpToMessageTarget,
     isGroup,
     headerContent,
+    preMessageContent,
+    suppressInitialDateSeparator = false,
     onScroll,
     isMobile,
     openYouTubeChoice,
     openGenericLinkPreview,
     openLinkChoice,
-    onViewOncePreviewOpenChange
+    onViewOncePreviewOpenChange,
+    onCommunityUpdateClick
 }) => {
     const isDeletedForCurrentUser = useCallback((msg) => {
         if (!msg) return false;
@@ -913,12 +916,18 @@ const MessageList = memo(({
             return (msg.content || '').toLowerCase().includes(messageSearchQuery.toLowerCase());
         });
 
+        if (preMessageContent) {
+            items.push({ type: 'preMessageContent' });
+        }
+
         filteredMessages.forEach((msg) => {
             const messageDisplayTime = isMeMsg(msg) && msg.scheduled_created_at ? msg.scheduled_created_at : msg.created_at;
             const dateLabel = formatDateForSeparator(messageDisplayTime, t, getLangCode(selectedLanguage));
             if (currentGroupDate !== dateLabel) {
                 currentGroupDate = dateLabel;
-                items.push({ type: 'date', date: dateLabel });
+                if (!(suppressInitialDateSeparator && items.length === 0)) {
+                    items.push({ type: 'date', date: dateLabel });
+                }
             }
             items.push({ type: 'message', data: msg });
         });
@@ -927,7 +936,7 @@ const MessageList = memo(({
             items.push({ type: 'typing' });
         }
         return items;
-    }, [messages, messageSearchQuery, typingSet, formatDateForSeparator, t, getLangCode, selectedLanguage]);
+    }, [messages, messageSearchQuery, typingSet, formatDateForSeparator, t, getLangCode, selectedLanguage, suppressInitialDateSeparator, preMessageContent]);
 
     // Scroll to bottom effect
     useEffect(() => {
@@ -953,25 +962,20 @@ const MessageList = memo(({
             virtuosoRef.current.scrollToIndex({ index: targetIndex, align: 'center', behavior: 'auto' });
         }
 
-        const highlightMsg = (attempt = 0) => {
-            const el = document.getElementById(`msg-${targetId}`);
-            if (!el) {
-                if (attempt < 8) setTimeout(() => highlightMsg(attempt + 1), 70);
-                return;
-            }
-            el.classList.add('wa-msg-highlight-anim');
-            setTimeout(() => el.classList.remove('wa-msg-highlight-anim'), 2000);
-        };
-        setTimeout(() => highlightMsg(0), 80);
     }, [jumpToMessageTarget, flattenedItems]);
 
     const renderItem = (index, item) => {
         if (item.type === 'date') {
+            const isAfterPreMessageIntro = flattenedItems[index - 1]?.type === 'preMessageContent';
             return (
-                <div className="wa-date-separator">
+                <div className={`wa-date-separator ${isAfterPreMessageIntro ? 'after-pre-message-intro' : ''}`}>
                     <span>{item.date}</span>
                 </div>
             );
+        }
+
+        if (item.type === 'preMessageContent') {
+            return preMessageContent;
         }
 
         if (item.type === 'typing') {
@@ -1323,6 +1327,10 @@ const MessageList = memo(({
                 if (String(msg.sender_id?._id || msg.sender_id) === String(myId)) assigner = 'You';
                 if (target === myName) target = 'you';
                 displayContent = (assigner === 'You') ? `You assigned ${target} as the new owner` : `${target} is now a Community Owner`;
+            } else if (content.includes('changed the community name')) {
+                displayContent = `${isMe ? 'you' : senderName} changed the community name. click to view`;
+            } else if (content.includes('changed the community description')) {
+                displayContent = `${isMe ? 'you' : senderName} changed the community description. click to view`;
             } else if (content.includes('cancelled the event: ')) {
                 const eventName = content.split('cancelled the event: ')[1];
                 displayContent = `${isMe ? 'You' : senderName} cancelled the "${eventName}" event`;
@@ -1336,9 +1344,40 @@ const MessageList = memo(({
                 }
             }
 
+            const isCommunityDescriptionUpdate = content.includes('changed the community description');
+            const isCommunityNameUpdate = content.includes('changed the community name');
+            const isCommunityUpdate = isCommunityDescriptionUpdate || isCommunityNameUpdate;
+
             return (
-                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
-                    <div className="wa-system-message">
+                <div
+                    className={`wa-system-message-row ${isCommunityUpdate ? 'wa-system-message-row-community-update' : ''}`}
+                    style={{ display: 'flex', justifyContent: 'center' }}
+                    onContextMenu={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                    }}
+                >
+                    <div
+                        className={`wa-system-message ${isCommunityUpdate ? 'wa-system-message-clickable' : ''}`}
+                        role={isCommunityUpdate ? 'button' : undefined}
+                        tabIndex={isCommunityUpdate ? 0 : undefined}
+                        onClick={() => {
+                            if (isCommunityUpdate) {
+                                onCommunityUpdateClick?.(msg, isCommunityDescriptionUpdate ? 'description' : 'name');
+                            }
+                        }}
+                        onContextMenu={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }}
+                        onKeyDown={(event) => {
+                            if (!isCommunityUpdate) return;
+                            if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                onCommunityUpdateClick?.(msg, isCommunityDescriptionUpdate ? 'description' : 'name');
+                            }
+                        }}
+                    >
                         {displayContent}
                     </div>
                 </div>
