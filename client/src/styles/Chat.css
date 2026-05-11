@@ -12526,6 +12526,160 @@ html.wa-screenshot-protection-active .wa-app-container {
     color: #0f172a !important;
 }
 
+.wa-contact-detail-modal .wa-contact-detail-header {
+    background: linear-gradient(135deg, rgba(20, 38, 66, 0.98), rgba(10, 74, 104, 0.88)) !important;
+    border-bottom-color: rgba(56, 189, 248, 0.24) !important;
+}
+
+.wa-contact-detail-modal .wa-contact-detail-title {
+    color: #f8fafc !important;
+    -webkit-text-fill-color: #f8fafc !important;
+    text-shadow: 0 1px 12px rgba(2, 6, 23, 0.45);
+}
+
+.wa-contact-detail-modal {
+    background:
+        radial-gradient(circle at 88% 12%, rgba(56, 189, 248, 0.18), transparent 32%),
+        linear-gradient(160deg, rgba(9, 39, 65, 0.98), rgba(7, 30, 52, 0.98) 48%, rgba(12, 51, 77, 0.96)) !important;
+    border-color: rgba(56, 189, 248, 0.3) !important;
+}
+
+.wa-contact-detail-modal > div[style*="overflowY: auto"],
+.wa-contact-detail-modal > div[style*="overflow-y: auto"] {
+    background: linear-gradient(180deg, rgba(9, 44, 70, 0.56), rgba(7, 30, 52, 0.44)) !important;
+}
+
+.wa-contact-detail-modal > div[style*="overflowY: auto"] > div,
+.wa-contact-detail-modal > div[style*="overflow-y: auto"] > div {
+    background: rgba(18, 54, 82, 0.42) !important;
+}
+
+.wa-contact-detail-modal > div[style*="overflowY: auto"] > div + div,
+.wa-contact-detail-modal > div[style*="overflow-y: auto"] > div + div {
+    border-top: 1px solid rgba(56, 189, 248, 0.22) !important;
+}
+
+.wa-contact-detail-action-row {
+    justify-content: space-between !important;
+    gap: 28px !important;
+}
+
+.wa-contact-detail-phone-block {
+    flex: 0 0 108px !important;
+}
+
+.wa-contact-detail-message-btn {
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: max-content !important;
+    flex: 0 0 auto !important;
+    align-self: center !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border: 0 !important;
+    color: #38d5ef !important;
+    white-space: nowrap !important;
+}
+
+.wa-contact-detail-message-btn:hover {
+    background: transparent !important;
+    color: #67e8f9 !important;
+}
+
+@media (max-width: 640px) {
+    .wa-contact-detail-action-row {
+        gap: 24px !important;
+    }
+
+    .wa-contact-detail-phone-block {
+        flex-basis: 104px !important;
+    }
+
+    .wa-contact-detail-message-btn {
+        padding: 0 !important;
+        font-size: 14px !important;
+    }
+}
+
+.wa-inline-editor-toolbar {
+    box-sizing: border-box !important;
+}
+
+.wa-inline-editor-toolbar::-webkit-scrollbar {
+    display: none;
+}
+
+@media (max-width: 640px) {
+    .wa-inline-editor-toolbar {
+        left: 8px !important;
+        right: 8px !important;
+        top: 6px !important;
+        width: auto !important;
+        max-width: calc(100vw - 16px) !important;
+        transform: none !important;
+        justify-content: flex-start !important;
+        overflow-x: auto !important;
+        overflow-y: visible !important;
+        overscroll-behavior-x: contain;
+        scrollbar-width: none !important;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .wa-inline-paint-toolbar {
+        gap: 8px !important;
+        padding: 8px 10px !important;
+    }
+
+    .wa-inline-text-toolbar {
+        gap: 6px !important;
+        padding: 8px 10px !important;
+    }
+
+    .wa-inline-text-toolbar .wa-inline-font-control {
+        margin-left: 2px !important;
+        max-width: 138px !important;
+        flex: 0 0 auto !important;
+    }
+
+    .wa-inline-text-toolbar .wa-inline-font-control > button {
+        max-width: 104px !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: nowrap !important;
+    }
+
+    .wa-inline-text-toolbar button[title="Background"] {
+        flex: 0 0 auto !important;
+        width: auto !important;
+        min-width: 0 !important;
+        gap: 5px !important;
+        padding: 0 2px !important;
+        margin: 0 !important;
+    }
+
+    .wa-inline-text-toolbar button[title="Delete text"] {
+        flex: 0 0 auto !important;
+        width: 32px !important;
+        min-width: 32px !important;
+        padding: 0 !important;
+        margin-left: 0 !important;
+    }
+
+    .wa-inline-color-popover,
+    .wa-inline-font-popover {
+        position: fixed !important;
+        left: 12px !important;
+        right: 12px !important;
+        top: 126px !important;
+        bottom: auto !important;
+        width: auto !important;
+        min-width: 0 !important;
+        max-width: calc(100vw - 24px) !important;
+        transform: none !important;
+        z-index: 220 !important;
+    }
+}
+
 .wa-emoji-picker-backdrop {
     position: fixed;
     top: 0;
@@ -13758,6 +13912,37 @@ background: rgba(56, 189, 248, 0.2) !important;
     border: 1px solid rgba(56, 189, 248, 0.2) !important;
     color: #e5f4ff !important;
     box-shadow: 0 24px 60px rgba(2, 6, 23, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+.wa-contact-detail-modal [style*="background: #ffffff"],
+.wa-contact-detail-modal [style*="background: white"],
+.wa-contact-detail-modal [style*="background: #f3f4f6"] {
+    background: transparent !important;
+}
+
+.wa-contact-detail-modal [style*="borderBottom"],
+.wa-contact-detail-modal [style*="border-bottom"],
+.wa-contact-detail-modal [style*="borderTop"],
+.wa-contact-detail-modal [style*="border-top"] {
+    border-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+.wa-contact-detail-modal [style*="color: #111b21"],
+.wa-contact-detail-modal [style*="color: rgb(17, 27, 33)"] {
+    color: #eef8ff !important;
+}
+
+.wa-contact-detail-modal [style*="color: #54656f"],
+.wa-contact-detail-modal [style*="color: #8696a0"],
+.wa-contact-detail-modal [style*="color: rgb(84, 101, 111)"],
+.wa-contact-detail-modal [style*="color: rgb(134, 150, 160)"] {
+    color: #a9c2d8 !important;
+}
+
+.wa-contact-detail-modal button,
+.wa-contact-detail-modal [style*="color: #027EB5"],
+.wa-contact-detail-modal [style*="color: #00a884"] {
+    color: #38d5ef !important;
 }
 
 .wa-contact-info-panel .wa-contact-settings-list,
@@ -15647,14 +15832,27 @@ background: rgba(56, 189, 248, 0.2) !important;
 
 .wa-message-bubble .wa-event-card [style*="color: #111b21"],
 .wa-message-bubble .wa-contact-msg-card [style*="color: #111b21"],
-.wa-message-bubble .wa-contact-msg-card-multiple [style*="color: #111b21"] {
+.wa-message-bubble .wa-contact-msg-card-multiple [style*="color: #111b21"],
+.wa-message-bubble .wa-contact-msg-card [style*="color: rgb(17, 27, 33)"],
+.wa-message-bubble .wa-contact-msg-card-multiple [style*="color: rgb(17, 27, 33)"],
+.wa-message-bubble .wa-contact-msg-card > div,
+.wa-message-bubble .wa-contact-msg-card-multiple > div,
+.wa-message-bubble .wa-contact-msg-card > div > div,
+.wa-message-bubble .wa-contact-msg-card-multiple > div > div {
     color: #eef8ff !important;
 }
 
 .wa-message-bubble .wa-event-card [style*="color: #667781"],
 .wa-message-bubble .wa-contact-msg-card [style*="color: #5f6f79"],
-.wa-message-bubble .wa-contact-msg-card-multiple [style*="color: #5f6f79"] {
+.wa-message-bubble .wa-contact-msg-card-multiple [style*="color: #5f6f79"],
+.wa-message-bubble .wa-contact-msg-card [style*="color: rgb(95, 111, 121)"],
+.wa-message-bubble .wa-contact-msg-card-multiple [style*="color: rgb(95, 111, 121)"] {
     color: #a9c2d8 !important;
+}
+
+.wa-message-bubble .wa-contact-msg-card button,
+.wa-message-bubble .wa-contact-msg-card-multiple button {
+    color: #38d5ef !important;
 }
 
 .wa-message-bubble .wa-event-card .wa-event-card-title {
