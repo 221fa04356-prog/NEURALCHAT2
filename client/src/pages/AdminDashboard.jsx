@@ -3806,22 +3806,33 @@ export default function AdminDashboard() {
         );
 
         return (
-            <div data-scroll-section="resets" className="admin-data-panel" style={{ borderRadius: '1.25rem', overflowX: 'auto', scrollMarginTop: '110px' }}>
+            <div
+                data-scroll-section="resets"
+                className="admin-data-panel"
+                style={{
+                    borderRadius: '1.25rem',
+                    overflowX: 'auto',
+                    scrollMarginTop: '110px',
+                    background: filteredResets.length === 0
+                        ? OFFICIAL_PANEL_SURFACE
+                        : `linear-gradient(to bottom, rgba(255,255,255,0.03) 0 52px, rgba(148, 163, 184, 0.12) 52px 53px, rgba(10, 18, 36, 0.94) 53px, rgba(13, 23, 42, 0.9) 100%)`
+                }}
+            >
                 {filteredResets.length === 0 ? (
                     <div style={{ padding: '3rem', textAlign: 'center', color: OFFICIAL_TEXT_MUTED }}>
                         <Search size={40} style={{ marginBottom: '1rem', opacity: 0.3 }} />
                         <div>No password reset requests found{query ? ` for "${searchQuery}"` : ''}.</div>
                     </div>
                 ) : (
-                    <table style={{ minWidth: isMobile ? '900px' : '1120px', borderCollapse: 'collapse' }}>
+                    <table style={{ width: '100%', minWidth: isMobile ? '900px' : '100%', borderCollapse: 'collapse' }}>
                         <thead>
-                            <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(148, 163, 184, 0.12)' }}>
+                            <tr style={{ background: 'transparent', borderBottom: '1px solid rgba(148, 163, 184, 0.12)' }}>
                                 <th style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>Sl.No</th>
                                 <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>USER</th>
                                 <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600', whiteSpace: 'nowrap' }}>LOGIN ID</th>
                                 <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>NEW PASSWORD</th>
                                 <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600', whiteSpace: 'nowrap' }}>DATE & TIME</th>
-                                <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>MANAGE</th>
+                                <th style={{ padding: '1rem', paddingRight: '2rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>MANAGE</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -3947,8 +3958,8 @@ export default function AdminDashboard() {
                                             </div>
                                         ) : 'N/A'}
                                     </td>
-                                    <td style={{ padding: '1rem', textAlign: 'center' }}>
-                                        <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem' }}>
+                                    <td style={{ padding: '1rem', paddingRight: '2rem', textAlign: 'center' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem', whiteSpace: 'nowrap' }}>
                                             <button
                                                 onClick={() => handleReset(r.id, r.user_id)}
                                                 style={getActionButtonStyle('primary')}
