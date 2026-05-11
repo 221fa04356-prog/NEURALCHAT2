@@ -8,7 +8,7 @@ import {
     Users, UserCheck, Trash2, MessageSquare, Key, LogOut,
     Eye, EyeOff, Menu, AlertTriangle, ArrowLeft, Smile,
     User as UserIcon, Search, Bell, Settings, LayoutDashboard,
-    TrendingUp, Calendar, ChevronRight, X, Layers, Check, RefreshCw, Forward, ChevronDown, XCircle,
+    TrendingUp, Calendar, ChevronRight, X, Layers, Check, RefreshCw, Forward, ChevronDown, XCircle, Dices,
     Mic, Pause, Play, List, History, ShieldCheck, MapPin, Video, Phone, Ban, Clock, UserPlus
 } from 'lucide-react';
 import { io } from 'socket.io-client';
@@ -353,6 +353,35 @@ const applyActionButtonHover = (element, variant = 'primary', hovered = true) =>
     element.style.outlineOffset = '0';
 };
 
+const randomInt = (max) => {
+    if (window.crypto?.getRandomValues) {
+        const values = new Uint32Array(1);
+        window.crypto.getRandomValues(values);
+        return values[0] % max;
+    }
+    return Math.floor(Math.random() * max);
+};
+
+const randomFrom = (chars, length) => (
+    Array.from({ length }, () => chars[randomInt(chars.length)]).join('')
+);
+
+const generateApprovalCredentials = () => {
+    const loginId = `${randomInt(9) + 1}${randomFrom('0123456789', 5)}`;
+    const password = [
+        randomFrom('ABCDEFGHIJKLMNOPQRSTUVWXYZ', 1),
+        randomFrom('abcdefghijklmnopqrstuvwxyz', 6),
+        randomFrom('0123456789', 3),
+        randomFrom('@#$&*', 1)
+    ].join('');
+
+    return { loginId, password };
+};
+
+const filterObjectEntries = (source, shouldKeep) => (
+    Object.fromEntries(Object.entries(source).filter(([key]) => shouldKeep(key)))
+);
+
 export default function AdminDashboard() {
     const navigate = useNavigate();
     const hostname = window.location.hostname || '';
@@ -368,8 +397,10 @@ export default function AdminDashboard() {
         const savedTab = sessionStorage.getItem('adminActiveTab') || 'overview';
         if (savedTab === 'block-members') return 'block-actions';
         if (savedTab === 'report-members') return 'report-actions';
+        if (savedTab === 'reactions') return 'overview';
         return savedTab;
     });
+    const previousActiveTabRef = useRef(activeTab);
     const [stats, setStats] = useState(null);
     const [chartPeriod, setChartPeriod] = useState('day'); // 'day', 'month', 'year'
     const [users, setUsers] = useState([]);
@@ -1017,7 +1048,25 @@ export default function AdminDashboard() {
 
     // 2. Effects
     useEffect(() => {
+        const previousTab = previousActiveTabRef.current;
+
+        if (previousTab === 'pending' && activeTab !== 'pending') {
+            setLoginIds({});
+            setConfirmPass(prev => filterObjectEntries(prev, key => key.startsWith('reset-')));
+            setConfirmPassRe(prev => filterObjectEntries(prev, key => key.startsWith('reset-')));
+            setShowPass(prev => filterObjectEntries(prev, key => key.startsWith('reset-')));
+            setShowPassRe(prev => filterObjectEntries(prev, key => key.startsWith('reset-')));
+        }
+
+        if (previousTab === 'resets' && activeTab !== 'resets') {
+            setConfirmPass(prev => filterObjectEntries(prev, key => !key.startsWith('reset-')));
+            setConfirmPassRe(prev => filterObjectEntries(prev, key => !key.startsWith('reset-')));
+            setShowPass(prev => filterObjectEntries(prev, key => !key.startsWith('reset-')));
+            setShowPassRe(prev => filterObjectEntries(prev, key => !key.startsWith('reset-')));
+        }
+
         sessionStorage.setItem('adminActiveTab', activeTab);
+        previousActiveTabRef.current = activeTab;
     }, [activeTab]);
 
     useEffect(() => {
@@ -1183,13 +1232,17 @@ export default function AdminDashboard() {
             fetchStats();
         });
 
-        socket.on('admin_transfer_approved', ({ newAdminId }) => {
+        socket.on('admin_transfer_approved', ({ newAdminId, previousAdminIds = [] }) => {
             const currentId = String(adminUser?.id || adminUser?._id || '');
             if (currentId && String(newAdminId) !== currentId) {
                 localStorage.clear();
                 sessionStorage.clear();
                 setAccessDenied('You are not an admin. You do not have permission to access');
             } else {
+                const deletedAdminIds = new Set(previousAdminIds.map(id => String(id)));
+                if (deletedAdminIds.size) {
+                    setUsers(prev => prev.filter(u => !deletedAdminIds.has(String(u.id || u._id))));
+                }
                 fetchData();
                 fetchStats();
             }
@@ -1263,7 +1316,7 @@ export default function AdminDashboard() {
         });
 
         socket.on('user_deleted', ({ userId }) => {
-            setUsers(prev => prev.filter(u => u.id !== userId));
+            setUsers(prev => prev.filter(u => String(u.id || u._id) !== String(userId)));
             fetchStats();
         });
 
@@ -1537,7 +1590,8 @@ export default function AdminDashboard() {
         const loginId = loginIds[userId];
         const passwordRegex = /^[A-Z][a-z]*(?=.*\d)(?=.*[@#$&*])[a-z\d@#$&*]{7,19}$/;
 
-        if (!loginId) return showSnackbar('Please assign a numeric Login ID', 'warning');
+        if (!loginId) return showSnackbar('Please generate or enter a 6-digit Login ID', 'warning');
+        if (!/^\d{6}$/.test(loginId)) return showSnackbar('Login ID must be exactly 6 digits', 'warning');
         if (!password) return showSnackbar('Please enter a password', 'warning');
         if (password.length < 8) return showSnackbar('minimum 8 characters needed', 'warning');
         if (password !== confirmPassword) return showSnackbar('Passwords do not match', 'error');
@@ -1561,6 +1615,15 @@ export default function AdminDashboard() {
         }
     };
 
+    const handleGenerateApprovalCredentials = (userId) => {
+        const { loginId, password } = generateApprovalCredentials();
+        setLoginIds(prev => ({ ...prev, [userId]: loginId }));
+        setConfirmPass(prev => ({ ...prev, [userId]: password }));
+        setConfirmPassRe(prev => ({ ...prev, [userId]: password }));
+        setShowPass(prev => ({ ...prev, [userId]: true }));
+        setShowPassRe(prev => ({ ...prev, [userId]: true }));
+    };
+
     const handleApproveAdminTransfer = async (requestId) => {
         try {
             const res = await axios.post('/api/admin/admin-transfer/approve', { requestId });
@@ -1571,6 +1634,10 @@ export default function AdminDashboard() {
                     : `Admin accountship transferred to: ${requested?.name || 'new admin'}`,
                 res.data?.mailSent === false ? 'warning' : 'success'
             );
+            const deletedAdminIds = new Set((res.data?.deletedPreviousAdminIds || []).map(id => String(id)));
+            if (deletedAdminIds.size) {
+                setUsers(prev => prev.filter(u => !deletedAdminIds.has(String(u.id || u._id))));
+            }
             setAdminNotifications(prev => prev.filter(n => !(n.type === 'admin_request' && String(n.userId) === String(requestId))));
             fetchData();
             fetchStats();
@@ -1620,6 +1687,19 @@ export default function AdminDashboard() {
         } catch (err) {
             showSnackbar(err.response?.data?.error || 'Reset failed', 'error');
         }
+    };
+
+    const handleGenerateResetPassword = (requestId) => {
+        const { password } = generateApprovalCredentials();
+        const resetKey = `reset-${requestId}`;
+        const resetConfirmKey = `reset-confirm-${requestId}`;
+        setConfirmPass(prev => ({ ...prev, [resetKey]: password }));
+        setConfirmPassRe(prev => ({ ...prev, [resetKey]: password }));
+        setShowPass(prev => ({
+            ...prev,
+            [resetKey]: true,
+            [resetConfirmKey]: true
+        }));
     };
 
     const handleApproveUnblock = async (userId) => {
@@ -2973,7 +3053,7 @@ export default function AdminDashboard() {
                 className="admin-data-panel table-responsive"
                 style={{ borderRadius: '1.25rem', overflowX: 'auto', scrollMarginTop: '110px' }}
             >
-                <table style={{ minWidth: listType === 'pending' ? (isMobile ? '1120px' : '1280px') : (isMobile ? '800px' : '100%'), borderCollapse: 'collapse' }}>
+                <table style={{ minWidth: listType === 'pending' ? (isMobile ? '1160px' : '1360px') : (isMobile ? '800px' : '100%'), borderCollapse: 'collapse' }}>
                     <thead>
                         <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(148, 163, 184, 0.12)' }}>
                             <th style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>Sl.No</th>
@@ -2989,6 +3069,7 @@ export default function AdminDashboard() {
                     <tbody>
                         {filtered.map((u, i) => {
                             const rowId = String(u.id || u._id || '');
+                            const credentialKey = rowId;
                             const isHighlighted = Boolean(
                                 highlightedRedirectRow &&
                                 highlightedRedirectRow.kind === listType &&
@@ -3061,60 +3142,75 @@ export default function AdminDashboard() {
                                 {listType === 'management' && <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.95rem', color: OFFICIAL_TEXT_SECONDARY }}>{u.login_id}</td>}
                                 {listType === 'pending' && (
                                     <td style={{ padding: '1rem', textAlign: 'center' }}>
-                                        <input
-                                            type="text"
-                                            placeholder="Login ID"
-                                            value={loginIds[u.id] || ''}
-                                            onChange={e => {
-                                                const val = e.target.value.replace(/\D/g, '');
-                                                setLoginIds({ ...loginIds, [u.id]: val });
-                                            }}
-                                            style={{ width: '70px', padding: '8px 4px', fontSize: '0.85rem', borderRadius: '6px', border: '1px solid #dee2e6', textAlign: 'center' }}
-                                        />
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
+                                            <input
+                                                type="text"
+                                                inputMode="numeric"
+                                                maxLength={6}
+                                                placeholder="6-digit ID"
+                                                value={loginIds[credentialKey] || ''}
+                                                onChange={e => {
+                                                    const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                                                    setLoginIds({ ...loginIds, [credentialKey]: val });
+                                                }}
+                                                style={{ width: '112px', padding: '8px 6px', fontSize: '0.85rem', borderRadius: '6px', border: '1px solid #2f3c56', background: 'rgba(15, 23, 42, 0.64)', color: OFFICIAL_TEXT_PRIMARY, textAlign: 'center', outline: 'none' }}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => handleGenerateApprovalCredentials(credentialKey)}
+                                                title="Generate login ID and password"
+                                                aria-label={`Generate login ID and password for ${u.name || 'user'}`}
+                                                style={{ ...getActionButtonStyle('primary'), minWidth: isMobile ? '42px' : '112px', padding: isMobile ? '9px 10px' : '9px 12px', boxShadow: '0 8px 18px rgba(14, 165, 233, 0.24)' }}
+                                                onMouseOver={(e) => applyActionButtonHover(e.currentTarget, 'primary', true)}
+                                                onMouseOut={(e) => applyActionButtonHover(e.currentTarget, 'primary', false)}
+                                            >
+                                                <Dices size={15} /> {!isMobile && 'Generate'}
+                                            </button>
+                                        </div>
                                     </td>
                                 )}
                                 {listType === 'pending' && (
                                     <td style={{ padding: '1rem', textAlign: 'center' }}>
-                                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
                                             <div style={{ position: 'relative' }}>
                                                 <input
-                                                    type={showPass[u.id] ? "text" : "password"}
+                                                    type={showPass[credentialKey] ? "text" : "password"}
                                                     placeholder="Set Password"
-                                                    value={confirmPass[u.id] || ''}
-                                                    onChange={e => setConfirmPass({ ...confirmPass, [u.id]: e.target.value.replace(/\s/g, '') })}
+                                                    value={confirmPass[credentialKey] || ''}
+                                                    onChange={e => setConfirmPass({ ...confirmPass, [credentialKey]: e.target.value.replace(/\s/g, '') })}
                                                     onKeyDown={handlePasswordKeyDown}
                                                     onCopy={(e) => {
                                                         const selection = window.getSelection().toString();
                                                         if (selection) {
                                                             // If user selected dots, copy actual value
-                                                            e.clipboardData.setData('text/plain', confirmPass[u.id] || '');
+                                                            e.clipboardData.setData('text/plain', confirmPass[credentialKey] || '');
                                                             e.preventDefault();
                                                         }
                                                     }}
-                                                    style={{ width: '135px', padding: '8px 24px 8px 8px', fontSize: '0.88rem', borderRadius: '6px', border: '1px solid #dee2e6', textAlign: 'center', outline: 'none' }}
+                                                    style={{ width: isMobile ? '150px' : '150px', padding: '8px 24px 8px 8px', fontSize: '0.88rem', borderRadius: '6px', border: '1px solid #2f3c56', background: 'rgba(15, 23, 42, 0.64)', color: OFFICIAL_TEXT_PRIMARY, textAlign: 'center', outline: 'none' }}
                                                 />
-                                                <div onClick={() => setShowPass({ ...showPass, [u.id]: !showPass[u.id] })} style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: '#8898aa', display: 'flex', alignItems: 'center' }}>
-                                                    {showPass[u.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                                                <div onClick={() => setShowPass({ ...showPass, [credentialKey]: !showPass[credentialKey] })} style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: '#8898aa', display: 'flex', alignItems: 'center' }}>
+                                                    {showPass[credentialKey] ? <EyeOff size={14} /> : <Eye size={14} />}
                                                 </div>
                                             </div>
                                             <div style={{ position: 'relative' }}>
                                                 <input
-                                                    type={showPassRe[u.id] ? "text" : "password"}
+                                                    type={showPassRe[credentialKey] ? "text" : "password"}
                                                     placeholder="Confirm Password"
-                                                    value={confirmPassRe[u.id] || ''}
-                                                    onChange={e => setConfirmPassRe({ ...confirmPassRe, [u.id]: e.target.value.replace(/\s/g, '') })}
+                                                    value={confirmPassRe[credentialKey] || ''}
+                                                    onChange={e => setConfirmPassRe({ ...confirmPassRe, [credentialKey]: e.target.value.replace(/\s/g, '') })}
                                                     onKeyDown={handlePasswordKeyDown}
                                                     onCopy={(e) => {
                                                         const selection = window.getSelection().toString();
                                                         if (selection) {
-                                                            e.clipboardData.setData('text/plain', confirmPassRe[u.id] || '');
+                                                            e.clipboardData.setData('text/plain', confirmPassRe[credentialKey] || '');
                                                             e.preventDefault();
                                                         }
                                                     }}
-                                                    style={{ width: '170px', padding: '8px 24px 8px 8px', fontSize: '0.88rem', borderRadius: '6px', border: '1px solid #dee2e6', textAlign: 'center', outline: 'none' }}
+                                                    style={{ width: isMobile ? '150px' : '170px', padding: '8px 24px 8px 8px', fontSize: '0.88rem', borderRadius: '6px', border: '1px solid #2f3c56', background: 'rgba(15, 23, 42, 0.64)', color: OFFICIAL_TEXT_PRIMARY, textAlign: 'center', outline: 'none' }}
                                                 />
-                                                <div onClick={() => setShowPassRe({ ...showPassRe, [u.id]: !showPassRe[u.id] })} style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: '#8898aa', display: 'flex', alignItems: 'center' }}>
-                                                    {showPassRe[u.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                                                <div onClick={() => setShowPassRe({ ...showPassRe, [credentialKey]: !showPassRe[credentialKey] })} style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: '#8898aa', display: 'flex', alignItems: 'center' }}>
+                                                    {showPassRe[credentialKey] ? <EyeOff size={14} /> : <Eye size={14} />}
                                                 </div>
                                             </div>
                                         </div>
@@ -3136,11 +3232,11 @@ export default function AdminDashboard() {
                                             <>
                                                 <button
                                                     onClick={() => {
-                                                        if (confirmPass[u.id] !== confirmPassRe[u.id]) {
+                                                        if (confirmPass[credentialKey] !== confirmPassRe[credentialKey]) {
                                                             showSnackbar('Passwords do not match!', 'error');
                                                             return;
                                                         }
-                                                        handleApprove(u.id);
+                                                        handleApprove(credentialKey);
                                                     }}
                                                     style={getActionButtonStyle('primary')}
                                                     onMouseOver={(e) => applyActionButtonHover(e.currentTarget, 'primary', true)}
@@ -3717,7 +3813,7 @@ export default function AdminDashboard() {
                         <div>No password reset requests found{query ? ` for "${searchQuery}"` : ''}.</div>
                     </div>
                 ) : (
-                    <table style={{ minWidth: isMobile ? '800px' : '100%', borderCollapse: 'collapse' }}>
+                    <table style={{ minWidth: isMobile ? '900px' : '1120px', borderCollapse: 'collapse' }}>
                         <thead>
                             <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(148, 163, 184, 0.12)' }}>
                                 <th style={{ padding: '1rem', paddingLeft: '2.4rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '600' }}>Sl.No</th>
@@ -3767,7 +3863,7 @@ export default function AdminDashboard() {
                                     </td>
                                     <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.85rem', color: OFFICIAL_TEXT_SECONDARY }}>{r.login_id}</td>
                                     <td style={{ padding: '1rem' }}>
-                                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', alignItems: 'center', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
                                             <div style={{ position: 'relative' }}>
                                                 <input
                                                     type={showPass[`reset-${r.id}`] ? "text" : "password"}
@@ -3787,9 +3883,10 @@ export default function AdminDashboard() {
                                                         fontSize: '0.78rem',
                                                         width: '120px',
                                                         borderRadius: '6px',
-                                                        border: '1px solid #cbd5e1',
+                                                        border: '1px solid #2f3c56',
+                                                        background: 'rgba(15, 23, 42, 0.64)',
                                                         outline: 'none',
-                                                        color: OFFICIAL_TEXT_SECONDARY,
+                                                        color: OFFICIAL_TEXT_PRIMARY,
                                                         textAlign: 'center'
                                                     }}
                                                 />
@@ -3816,9 +3913,10 @@ export default function AdminDashboard() {
                                                         fontSize: '0.78rem',
                                                         width: '155px',
                                                         borderRadius: '6px',
-                                                        border: '1px solid #cbd5e1',
+                                                        border: '1px solid #2f3c56',
+                                                        background: 'rgba(15, 23, 42, 0.64)',
                                                         outline: 'none',
-                                                        color: OFFICIAL_TEXT_SECONDARY,
+                                                        color: OFFICIAL_TEXT_PRIMARY,
                                                         textAlign: 'center'
                                                     }}
                                                 />
@@ -3826,6 +3924,17 @@ export default function AdminDashboard() {
                                                     {showPass[`reset-confirm-${r.id}`] ? <EyeOff size={14} /> : <Eye size={14} />}
                                                 </div>
                                             </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleGenerateResetPassword(r.id)}
+                                                title="Generate new password"
+                                                aria-label={`Generate new password for ${r.name || 'user'}`}
+                                                style={{ ...getActionButtonStyle('primary'), minWidth: isMobile ? '42px' : '112px', padding: isMobile ? '9px 10px' : '9px 12px', boxShadow: '0 8px 18px rgba(14, 165, 233, 0.24)' }}
+                                                onMouseOver={(e) => applyActionButtonHover(e.currentTarget, 'primary', true)}
+                                                onMouseOut={(e) => applyActionButtonHover(e.currentTarget, 'primary', false)}
+                                            >
+                                                <Dices size={15} /> {!isMobile && 'Generate'}
+                                            </button>
                                         </div>
                                     </td>
                                     <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: OFFICIAL_TEXT_MUTED }}>
@@ -3869,96 +3978,6 @@ export default function AdminDashboard() {
                             })}
                         </tbody>
                     </table>
-                )}
-            </div>
-        );
-    };
-
-    const renderReactionLogs = () => {
-        return (
-            <div style={{ background: 'white', padding: '1.5rem', borderRadius: '1rem', boxShadow: '0 0 2rem rgba(0,0,0,0.05)', minWidth: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: isMobile ? 'wrap' : 'nowrap', gap: '1rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <Smile size={18} color="#0FB5D0" />
-                        <h4 style={{ margin: 0, fontWeight: '700', color: '#32325d' }}>Global Reaction Activity Audit</h4>
-                    </div>
-                    <button
-                        onClick={fetchReactionLogs}
-                        style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f6f9fc', border: '1px solid #e9ecef', padding: '6px 12px', borderRadius: '8px', fontSize: '0.75rem', fontWeight: '700', color: '#0FB5D0', cursor: 'pointer' }}
-                    >
-                        <RefreshCw size={14} /> Refresh Logs
-                    </button>
-                </div>
-
-                {!reactionLogs || reactionLogs.length === 0 ? (
-                    <div style={{ padding: '3rem', textAlign: 'center', color: '#8898aa', background: '#f8f9fe', borderRadius: '12px', border: '2px dashed #e9ecef' }}>
-                        No reaction activities found across the platform.
-                    </div>
-                ) : (
-                    <div className="table-responsive" style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0' }}>
-                            <thead>
-                                <tr style={{ background: '#f6f9fc' }}>
-                                    <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '700', color: '#8898aa', textTransform: 'uppercase', borderRadius: '8px 0 0 0' }}>Reactor</th>
-                                    <th style={{ padding: '12px 16px', textAlign: 'center', fontSize: '0.75rem', fontWeight: '700', color: '#8898aa', textTransform: 'uppercase' }}>Emoji</th>
-                                    <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '700', color: '#8898aa', textTransform: 'uppercase' }}>Action</th>
-                                    <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '700', color: '#8898aa', textTransform: 'uppercase' }}>Message Content</th>
-                                    <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '700', color: '#8898aa', textTransform: 'uppercase' }}>Context</th>
-                                    <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: '0.75rem', fontWeight: '700', color: '#8898aa', textTransform: 'uppercase', borderRadius: '0 8px 0 0' }}>Time</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {reactionLogs.map((log, idx) => (
-                                    <tr key={idx} style={{ borderBottom: '1px solid #f1f3f5' }} className="hover-row">
-                                        <td style={{ padding: '12px 16px' }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(87deg, #0A7C8F 0, #0FB5D0 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '0.7rem', fontWeight: 'bold' }}>
-                                                    {log.user_id?.name?.charAt(0) || '?'}
-                                                </div>
-                                                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                    <span style={{ fontWeight: '700', fontSize: '0.85rem', color: '#32325d' }}>{log.user_id?.name || 'Unknown'}</span>
-                                                    <span style={{ fontSize: '0.7rem', color: '#8898aa' }}>ID: {log.user_id?.login_id || 'N/A'}</span>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '1.2rem' }}>
-                                            {log.emoji}
-                                        </td>
-                                        <td style={{ padding: '12px 16px' }}>
-                                            <span style={{
-                                                padding: '2px 8px', borderRadius: '12px', fontSize: '0.7rem', fontWeight: '800',
-                                                background: log.action === 'added' ? '#e1f5fe' : '#fff1f2',
-                                                color: log.action === 'added' ? '#01579b' : '#be123c',
-                                                textTransform: 'capitalize',
-                                                display: 'inline-flex', alignItems: 'center', gap: '4px'
-                                            }}>
-                                                {log.action}
-                                            </span>
-                                        </td>
-                                        <td style={{ padding: '12px 16px' }}>
-                                            <div style={{ fontSize: '0.825rem', color: '#525f7f', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                {log.contentSnippet}
-                                            </div>
-                                        </td>
-                                        <td style={{ padding: '12px 16px' }}>
-                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                <span style={{ fontSize: '0.8rem', fontWeight: '600', color: '#32325d' }}>{log.context}</span>
-                                                <span style={{ fontSize: '0.65rem', color: '#8898aa' }}>{log.participants}</span>
-                                            </div>
-                                        </td>
-                                        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                                            <div style={{ fontSize: '0.8rem', color: '#525f7f' }}>
-                                                {new Date(log.timestamp).toLocaleDateString()}
-                                            </div>
-                                            <div style={{ fontSize: '0.7rem', color: '#adb5bd' }}>
-                                                {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
                 )}
             </div>
         );
@@ -4398,7 +4417,6 @@ export default function AdminDashboard() {
                                 {activeTab === 'unblock' && renderUnblockRequests()}
                                 {activeTab === 'block-actions' && renderActionTable('block')}
                                 {activeTab === 'report-actions' && renderActionTable('report')}
-                                {activeTab === 'reactions' && renderReactionLogs()}
                             </>
                         )}
                     </div>
@@ -4451,7 +4469,7 @@ export default function AdminDashboard() {
             {/* Chat Overlays & Modals (Overhauled for premium look) */}
             {pendingReviewUnlock && (
                 <div
-                    style={{ position: 'fixed', inset: 0, background: 'rgba(2, 6, 23, 0.62)', backdropFilter: 'blur(6px)', zIndex: 1001, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '1rem' }}
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(2, 6, 23, 0.62)', backdropFilter: 'blur(6px)', zIndex: 11000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '1rem' }}
                     onClick={closeReviewChat}
                 >
                     <form

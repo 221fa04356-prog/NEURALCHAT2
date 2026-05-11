@@ -149,9 +149,21 @@ export default function HumanVerification({ onVerified, context, identifier }) {
 
     const readAloudCaptcha = () => {
         if ('speechSynthesis' in window) {
-            // spell out letters slowly
-            const msg = new SpeechSynthesisUtterance(captchaText.split('').join('. '));
-            msg.rate = 0.8;
+            window.speechSynthesis.cancel();
+
+            const spokenCaptcha = captchaText.split('').join(', ');
+            const msg = new SpeechSynthesisUtterance(`Captcha code is, ${spokenCaptcha}`);
+            msg.lang = 'en-US';
+            msg.rate = 0.55;
+            msg.pitch = 0.95;
+            msg.volume = 1;
+
+            const englishVoice = window.speechSynthesis
+                .getVoices()
+                .find(voice => voice.lang?.toLowerCase().startsWith('en'));
+
+            if (englishVoice) msg.voice = englishVoice;
+
             window.speechSynthesis.speak(msg);
         } else {
             alert('Speech synthesis not supported in this browser.');
