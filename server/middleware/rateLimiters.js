@@ -109,7 +109,7 @@ const createFailedAuthLimiter = ({ maxFailures, blockMs, message }) => {
                         blockedUntil,
                         updatedAt: new Date(failureAt)
                     },
-                    { new: true, upsert: true, setDefaultsOnInsert: true }
+                    { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
                 );
             }
 

@@ -12,6 +12,18 @@ const normalizeModerationText = (value = '') => String(value || '')
     .replace(/\s+/g, ' ')
     .trim();
 
+const urlPattern = /https?:\/\/[^\s]+|www\.[^\s]+/gi;
+
+const stripUrlsForModeration = (value = '') => String(value || '')
+    .replace(urlPattern, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const isUrlOnlyContent = (value = '') => {
+    const original = String(value || '').trim();
+    return !!original && !stripUrlsForModeration(original);
+};
+
 const badWordPatterns = [
     /\bfuck(?:er|ing|ed)?\b/i,
     /\bmother\s*fucker\b/i,
@@ -151,6 +163,8 @@ const detectUnsafeText = (value = '') => {
 
 module.exports = {
     detectUnsafeText,
+    stripUrlsForModeration,
+    isUrlOnlyContent,
     normalizeModerationText,
     compactBadFragments
 };

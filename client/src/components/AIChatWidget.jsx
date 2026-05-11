@@ -100,7 +100,7 @@ export default function AIChatWidget() {
                 interval = setInterval(() => {
                     index = (index + 1) % texts.length;
                     setLoadingText(texts[index]);
-                }, 2000);
+                }, 3200);
             }
         } else {
             setLoadingText('');

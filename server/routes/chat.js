@@ -22,7 +22,7 @@ const axios = require('axios'); // For link preview
 const { uploadLocalFileToGridFS, streamGridFSFileWithRange } = require('../utils/gridfsMedia');
 const cloudinaryUpload = require('../middleware/multer');
 const { isCloudinaryConfigured } = require('../config/cloudinary');
-const { detectUnsafeText } = require('../utils/moderation');
+const { detectUnsafeText, stripUrlsForModeration, isUrlOnlyContent } = require('../utils/moderation');
 const { calculateMessageHash } = require('../utils/messageHash');
 const { countOfficeDocumentItems } = require('../utils/documentCount');
 const { scheduleMessage, notifyEventCreated, notifyEventChanged } = require('../utils/scheduledMessaging');
@@ -2417,18 +2417,22 @@ router.post('/send', authenticateToken, (req, res, next) => {
             }
         }
 
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        const urlMatch = content ? content.match(urlRegex) : null;
+        const moderationContent = stripUrlsForModeration(content);
+
         // === Global Safety & Ethics Check (AI-Driven) ===
         let isFlagged = false;
         let flagReason = "";
 
         // Analyze globally for any type of bad words or unethical behavior
-        if (content && content.length > 0) {
-            const directResult = detectUnsafeText(content);
+        if (moderationContent.length > 0) {
+            const directResult = detectUnsafeText(moderationContent);
             if (directResult.isUnsafe) {
                 isFlagged = true;
                 flagReason = directResult.reason;
             } else {
-                const aiResult = await checkUnethicalWithAI(content);
+                const aiResult = await checkUnethicalWithAI(moderationContent);
                 if (aiResult.isUnethical) {
                     isFlagged = true;
                     flagReason = aiResult.reason;
@@ -2448,7 +2452,7 @@ router.post('/send', authenticateToken, (req, res, next) => {
                 user_id: userId,
                 content: content || 'Forwarded Media/File',
                 reason: flagReason,
-                type: detectUnsafeText(content).type || (content && badWords.some(word => content.toLowerCase().includes(word)) ? 'direct' : 'indirect')
+                type: detectUnsafeText(moderationContent).type || (moderationContent && badWords.some(word => moderationContent.toLowerCase().includes(word)) ? 'direct' : 'indirect')
             });
 
             // Check if this violation pushes them over the limit
@@ -2583,8 +2587,6 @@ router.post('/send', authenticateToken, (req, res, next) => {
             }
 
             // Detect URL for preview
-            const urlRegex = /(https?:\/\/[^\s]+)/g;
-            const urlMatch = content ? content.match(urlRegex) : null;
             let linkPreview = null;
             if (urlMatch) {
                 linkPreview = await fetchLinkPreview(urlMatch[0]);
@@ -3568,11 +3570,18 @@ router.get('/admin/unethical-messages', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
 
     try {
-        // Fetch last 50 flagged messages
-        const messages = await Message.find({ is_flagged: true })
-            .sort({ created_at: -1 })
-
-            .populate('user_id', 'name email __enc_name __enc_email');
+        // Fetch recent flagged p2p and group/community messages.
+        const [messages, groupMessages] = await Promise.all([
+            Message.find({ is_flagged: true })
+                .sort({ created_at: -1 })
+                .limit(50)
+                .populate('user_id', 'name email __enc_name __enc_email'),
+            GroupMessage.find({ is_flagged: true })
+                .sort({ created_at: -1 })
+                .limit(50)
+                .populate('sender_id', 'name email __enc_name __enc_email')
+                .populate('group_id', 'name isAnnouncementGroup')
+        ]);
 
         const alerts = [];
         for (const msg of messages) {
@@ -3616,7 +3625,47 @@ router.get('/admin/unethical-messages', authenticateToken, async (req, res) => {
             });
         }
 
-        res.json(alerts);
+        for (const msg of groupMessages) {
+            if (isUrlOnlyContent(msg.content)) continue;
+
+            const senderDoc = msg.sender_id;
+            let name = 'Unknown';
+            if (senderDoc) {
+                if (typeof senderDoc.toObject === 'function') {
+                    const uObj = senderDoc.toObject({ virtuals: true });
+                    name = uObj.name || 'Unknown';
+                } else {
+                    const directUser = await User.findById(senderDoc);
+                    if (directUser) name = directUser.toObject({ virtuals: true }).name || 'Unknown';
+                }
+            }
+
+            const groupDoc = msg.group_id;
+            const groupId = groupDoc?._id || groupDoc;
+            const linkedCommunity = groupId
+                ? await Community.findOne({ announcements: groupId }).select('name').lean()
+                : null;
+
+            if (isUrlOnlyContent(msg.content)) continue;
+
+            alerts.push({
+                userId: senderDoc?._id || senderDoc,
+                userName: name,
+                messageId: msg._id,
+                content: msg.content,
+                reason: msg.flag_reason,
+                createdAt: msg.created_at,
+                receiverId: null,
+                groupId,
+                isGroup: true,
+                isCommunity: !!linkedCommunity,
+                partnerName: linkedCommunity ? linkedCommunity.name : (groupDoc?.name || 'Group Chat')
+            });
+        }
+
+        alerts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        res.json(alerts.slice(0, 50));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
