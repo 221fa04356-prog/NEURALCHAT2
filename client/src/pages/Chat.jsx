@@ -18351,6 +18351,7 @@ export default function Chat() {
             const activeTargetId = activeTarget._id || activeTarget.id;
             const currentGroup = groups.find(g => String(g._id || g.id) === String(activeTargetId)) || activeTarget;
             const isFavoriteGroup = !!currentGroup?.isFavorite;
+            const groupStarredCount = (groupMessages || []).filter(m => m.is_starred && !isDeletedForCurrentUser(m)).length;
 
             const bgColor = 'transparent';
             const itemBgColor = 'transparent';
@@ -18553,6 +18554,7 @@ export default function Chat() {
                                     <span style={{ color: textColor, fontSize: 16 }}>Starred messages</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 700 }}>{groupStarredCount}</span>
                                     <ChevronRight size={20} color="#38bdf8" />
                                 </div>
                             </div>
@@ -18922,7 +18924,7 @@ export default function Chat() {
                         }}>
                             <div className="wa-setting-icon"><Star size={20} color="#38bdf8" /></div>
                             <div className="wa-setting-text" style={{ color: '#f8fafc', flex: 1 }}>{t('contact_info.starred_messages')}</div>
-                            <span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 600 }}>{messages.filter(m => m.is_starred && !isDeletedForCurrentUser(m)).length}</span>
+                            <span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 600 }}>{(selectedGroup ? groupMessages : messages).filter(m => m.is_starred && !isDeletedForCurrentUser(m)).length}</span>
                             <ChevronRight size={20} color="#38bdf8" style={{ transform: 'none' }} />
                         </div>
                         <div className="wa-setting-item clickable" onClick={() => {
@@ -20076,7 +20078,7 @@ export default function Chat() {
         return <ImageViewer
             viewingImage={viewingImage}
             setViewingImage={setViewingImage}
-            messages={messages}
+            messages={(selectedGroup || selectedCommunity) ? groupMessages : messages}
             selectedUser={selectedUser}
             setMessages={setMessages}
             setForwardSelectedMsgs={setForwardSelectedMsgs}
@@ -20229,7 +20231,8 @@ export default function Chat() {
         }, [viewingImage?._id, viewingImage?.file_path, viewingImage?.fileName, viewingImage?.type]);
 
         const viewableMsgs = messages.filter(m => m.type === 'image' || m.type === 'video'); // Removed 'file' to prevent navigation to docs
-        const currentIndex = viewableMsgs.findIndex(m => m._id === viewingImage._id);
+        const currentViewingId = String(viewingImage?._id || viewingImage?.id || '');
+        const currentIndex = viewableMsgs.findIndex(m => String(m._id || m.id || '') === currentViewingId);
 
         const handleNext = (e) => {
             e.stopPropagation();
@@ -20703,8 +20706,8 @@ export default function Chat() {
                     <div className="wa-viewer-thumbnails" onClick={(e) => e.stopPropagation()}>
                         {viewableMsgs.filter(m => m.type === 'image' || m.type === 'video').map((msg) => (
                             <div
-                                key={msg._id}
-                                className={`wa-viewer-thumb ${msg._id === viewingImage._id ? 'active' : ''}`}
+                                key={msg._id || msg.id || `${msg.file_path}-${msg.created_at}`}
+                                className={`wa-viewer-thumb ${String(msg._id || msg.id || '') === currentViewingId ? 'active' : ''}`}
                                 onClick={() => setViewingImage(msg)}
                             >
                                 {msg.type === 'image' ? (
@@ -21192,7 +21195,10 @@ export default function Chat() {
                                 </div>
                                 <div className="wa-dropdown-item" onClick={() => { setIsGlobalStarredOpen(true); setOpenDropdown(null); }}>
                                     <Star size={18} style={{ marginRight: 12, color: '#38bdf8' }} />
-                            <span style={{ flex: 1 }}>Starred messages</span>
+                                    <span style={{ flex: 1 }}>Starred messages</span>
+                                    {globalStarredCount > 0 && (
+                                        <span className="wa-menu-count-badge">{globalStarredCount}</span>
+                                    )}
                                 </div>
                                 <div className="wa-dropdown-item" onClick={() => { setIsArchivedChatsOpen(true); setOpenDropdown(null); }}>
                                     <Archive size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> Archived
@@ -22241,6 +22247,7 @@ export default function Chat() {
         const canIManage = isMeOwner || isMeAdmin;
         const communityId = community.id || community._id;
         const isFavoriteCommunity = !!community.isFavorite;
+        const communityStarredCount = (groupMessages || []).filter(m => m.is_starred && !isDeletedForCurrentUser(m)).length;
 
         const onExitClick = () => {
             handleExitCommunity(community);
@@ -22458,6 +22465,7 @@ export default function Chat() {
                             {
                                 icon: <Star size={20} />,
                                 label: 'Starred Messages',
+                                count: communityStarredCount,
                                 onClick: () => {
                                     setIsStarredMessagesOpen(true);
                                     setIsCommunityInfoOpen(false);
@@ -22498,6 +22506,9 @@ export default function Chat() {
                             >
                                 <div style={{ color: '#38bdf8', marginRight: 20 }}>{item.icon}</div>
                                 <span style={{ flex: 1, color: textColor, fontSize: 15 }}>{item.label}</span>
+                                {typeof item.count === 'number' && (
+                                    <span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 700, marginRight: 8 }}>{item.count}</span>
+                                )}
                                 {item.chevron !== false && <ChevronRight size={20} color="#38bdf8" />}
                             </div>
                         ))}
