@@ -121,9 +121,9 @@ const translations = {
         },
         profile_drawer: {
             title: 'Profile',
-            name_label: 'Your name',
+            name_label: 'Name',
             about_label: 'About',
-            phone_label: 'Phone number',
+            phone_label: 'Phone',
             name_desc: 'This is not a username or PIN. This name will be visible to your WhatsApp contacts.',
         },
         new_chat: {

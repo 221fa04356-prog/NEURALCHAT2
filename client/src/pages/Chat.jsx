@@ -31,6 +31,19 @@ const debugLog = (...args) => {
     if (isChatDebugEnabled) console.info(...args);
 };
 
+const TwoPersonIcon = ({ size = 24, color = 'currentColor' }) => <Users size={size} color={color} />;
+
+const ThreePersonIcon = ({ size = 24, color = 'currentColor' }) => (
+    <span className="wa-three-person-icon" style={{ width: size, height: size, color }} aria-hidden="true">
+        <span className="wa-three-person-head main" />
+        <span className="wa-three-person-head side left" />
+        <span className="wa-three-person-head side right" />
+        <span className="wa-three-person-body main" />
+        <span className="wa-three-person-body side left" />
+        <span className="wa-three-person-body side right" />
+    </span>
+);
+
 const SCREENSHOT_PROTECTION_CLASS = 'wa-screenshot-protection-active';
 const SCREENSHOT_INLINE_APPLIED_ATTR = 'data-wa-screenshot-inline-applied';
 const SCREENSHOT_OVERLAY_ID = 'wa-dom-screenshot-mask';
@@ -343,7 +356,7 @@ const searchSlideStyles = `
 import io from 'socket.io-client';
 import '../styles/Chat.css';
 import '../styles/PrivacySettings.css';
-import { formatDateForSeparator } from '../utils/dateUtils';
+import { formatDateForSeparator, formatNumericChatDate } from '../utils/dateUtils';
 import Snackbar from '../components/Snackbar';
 import { getTranslator, getLangCode, LANGUAGE_CODE_MAP } from '../utils/translations';
 import { countryCodes } from '../utils/countryCodes';
@@ -1525,6 +1538,7 @@ export default function Chat() {
     const composerDraftsRef = useRef({});
     const isRestoringComposerDraftRef = useRef(false);
     const fileInputRef = useRef(null);
+    const iconUploadInputRef = useRef(null);
     const filePreviewUrlCacheRef = useRef(new Map());
     const MAX_UPLOAD_BYTES = 1073741824;
     const DOCUMENT_EXTENSIONS = ['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt', 'pdf', 'txt', 'csv', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'ods', 'ppt', 'pptx', 'pptm', 'pot', 'potx', 'pps', 'ppsx', 'odp'];
@@ -2097,6 +2111,23 @@ export default function Chat() {
             setSearchResults([]);
             setIsSearching(false);
         }
+        setInfoMessage(null);
+        setIsContactInfoOpen(false);
+        setIsCommunityInfoOpen(false);
+        setIsCommunityGroupsListOpen(false);
+        setIsManageGroupsOpen(false);
+        setIsAddExistingGroupsOpen(false);
+        setIsConfirmAddGroupsOpen(false);
+        setIsCommunityAddMemberOpen(false);
+        setIsConfirmCommunityAddMembersOpen(false);
+        setIsGroupAddMemberOpen(false);
+        setIsConfirmGroupAddMembersOpen(false);
+        setIsCommunitySettingsOpen(false);
+        setCommunitySettingsSurface('right');
+        setIsNotificationSettingsOpen(false);
+        setIsSharedMediaOpen(false);
+        setIsStarredMessagesOpen(false);
+        setIsEditContactOpen(false);
         searchSource.current = source;
         setMessageSearchSource(source);
         setIsMessageSearchOpen(true);
@@ -4370,6 +4401,71 @@ export default function Chat() {
         }
     };
 
+    const getMessageSenderDisplay = (msg) => {
+        if (!msg) return '';
+        const myId = String(user?.id || user?._id || userData?.id || userData?._id || '');
+        const sender = msg.sender_id || msg.user_id || msg.sender || msg.user;
+        const senderId = String(sender?._id || sender?.id || sender || '');
+        if (myId && senderId && senderId === myId) return 'You';
+        if (sender && typeof sender === 'object') {
+            return sender.displayName || sender.name || sender.username || sender.mobile || '';
+        }
+        const matchedUser = users.find(u => String(u._id || u.id) === senderId);
+        return matchedUser ? getContactDisplayName(matchedUser) : '';
+    };
+
+    const renderLinkedGroupLastMessagePreview = (group, fallbackText = 'No messages yet') => {
+        const msg = group?.lastMessage;
+        if (!msg) {
+            return <span className="wa-linked-group-preview-line muted">{fallbackText}</span>;
+        }
+
+        const senderName = getMessageSenderDisplay(msg);
+        const preview = renderLastMessagePreview(msg, true, fallbackText, group?._id || group?.id);
+
+        return (
+            <span className="wa-linked-group-preview">
+                {senderName && <span className="wa-linked-group-preview-sender">{senderName}</span>}
+                <span className="wa-linked-group-preview-line">
+                    {typeof preview === 'string' ? preview : preview}
+                </span>
+            </span>
+        );
+    };
+
+    const isLinkedCommunityGroup = (group) => !!(
+        group?.community_id ||
+        group?.communityId ||
+        group?.communityName ||
+        group?.communityIcon
+    );
+
+    const renderCommunityPlainAvatar = (item, displayName = 'Community') => {
+        if (item?.icon) {
+            return <img src={item.icon} alt={displayName} className="wa-community-list-avatar-img" />;
+        }
+        return (
+            <div className="wa-community-list-avatar-plain">
+                <ThreePersonIcon size={26} color="currentColor" />
+            </div>
+        );
+    };
+
+    const renderLinkedGroupAvatar = (group, displayName = 'Group') => (
+        <div className="wa-linked-group-avatar">
+            <div className="wa-linked-group-avatar-main">
+                {group?.icon ? (
+                    <img src={group.icon} alt={displayName} />
+                ) : (
+                    <TwoPersonIcon size={24} color="currentColor" />
+                )}
+            </div>
+            <div className="wa-linked-group-avatar-badge">
+                <ThreePersonIcon size={14} color="currentColor" />
+            </div>
+        </div>
+    );
+
 
 
     const getAppZoom = () => {
@@ -5040,6 +5136,8 @@ export default function Chat() {
     const [communityName, setCommunityName] = useState('');
     const [communityDescription, setCommunityDescription] = useState('');
     const [communityIcon, setCommunityIcon] = useState(null);
+    const [iconUploadTarget, setIconUploadTarget] = useState(null);
+    const [isProfilePhotoSourceOpen, setIsProfilePhotoSourceOpen] = useState(false);
     const [isCommunityIconMenuOpen, setIsCommunityIconMenuOpen] = useState(false);
     const communityIconMenuRef = useRef(null);
     const communityCreatorRef = useRef(null);
@@ -5205,6 +5303,20 @@ export default function Chat() {
         setIsStarredMessagesOpen(false);
     };
 
+    const closeGroupAddMemberPopup = () => {
+        setIsConfirmGroupAddMembersOpen(false);
+        setIsGroupAddMemberOpen(false);
+        setGroupAddMemberSearchQuery('');
+        setSelectedGroupMembersToAdd([]);
+    };
+
+    const closeCommunityAddMemberPopup = () => {
+        setIsConfirmCommunityAddMembersOpen(false);
+        setIsCommunityAddMemberOpen(false);
+        setCommunityAddMemberSearchQuery('');
+        setSelectedCommunityMembersToAdd([]);
+    };
+
     const resetRightPanelWidthForDrawer = () => {
         if (window.innerWidth <= 768) return;
         const maxWidth = Math.max(320, Math.floor(window.innerWidth / 2));
@@ -5254,6 +5366,98 @@ export default function Chat() {
         const date = new Date(value);
         if (Number.isNaN(date.getTime())) return '';
         return date.toLocaleDateString('en-GB');
+    };
+
+    const openIconUpload = (target) => {
+        setIconUploadTarget(target);
+        setIsProfilePhotoSourceOpen(false);
+        setIsGroupIconMenuOpen(false);
+        setIsCommunityIconMenuOpen(false);
+        window.setTimeout(() => iconUploadInputRef.current?.click(), 0);
+    };
+
+    const openProfilePhotoSourcePopup = () => {
+        setIconUploadTarget({ type: 'profile' });
+        setIsProfilePhotoSourceOpen(true);
+    };
+
+    const readImageAsDataUrl = (fileObj) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(fileObj);
+    });
+
+    const handleIconUploadChange = async (event) => {
+        const fileObj = event.target.files?.[0];
+        event.target.value = '';
+        if (!fileObj || !fileObj.type?.startsWith('image/')) {
+            setIconUploadTarget(null);
+            if (fileObj) setSnackbar({ message: 'Please choose an image file', type: 'error', variant: 'system' });
+            return;
+        }
+
+        try {
+            const dataUrl = await readImageAsDataUrl(fileObj);
+            const target = iconUploadTarget || {};
+            const token = localStorage.getItem('token');
+
+            if (target.type === 'newCommunity') {
+                setCommunityIcon(dataUrl);
+                setSnackbar({ message: 'Community picture selected', type: 'success', variant: 'system' });
+                return;
+            }
+
+            if (target.type === 'newGroup') {
+                setGroupIcon(dataUrl);
+                setSnackbar({ message: 'Group picture selected', type: 'success', variant: 'system' });
+                return;
+            }
+
+            if (target.type === 'profile') {
+                const res = await axios.put('/api/auth/update-profile', {
+                    userId: userData.id || userData._id || user.id || user._id,
+                    image: dataUrl
+                }, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                const updatedUser = { ...userData, ...(res.data?.user || {}), image: dataUrl };
+                setUserData(updatedUser);
+                localStorage.setItem('user', JSON.stringify(updatedUser));
+                setSnackbar({ message: 'Profile picture updated', type: 'success', variant: 'system' });
+                return;
+            }
+
+            if (target.type === 'group') {
+                const groupId = target.entity?._id || target.entity?.id || selectedGroup?._id || selectedGroup?.id;
+                if (!groupId) return;
+                const res = await axios.patch(`/api/groups/${groupId}/icon`, { icon: dataUrl }, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                const updatedGroup = { ...(res.data?.group || target.entity || {}), icon: dataUrl };
+                setGroups(prev => prev.map(g => String(g._id || g.id) === String(groupId) ? { ...g, ...updatedGroup } : g));
+                setSelectedGroup(prev => prev && String(prev._id || prev.id) === String(groupId) ? { ...prev, ...updatedGroup } : prev);
+                setSnackbar({ message: 'Group picture updated', type: 'success', variant: 'system' });
+                return;
+            }
+
+            if (target.type === 'community') {
+                const communityId = target.entity?._id || target.entity?.id || selectedCommunity?._id || selectedCommunity?.id;
+                if (!communityId) return;
+                const res = await axios.patch(`/api/communities/${communityId}`, { icon: dataUrl }, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                const updatedCommunity = { ...(res.data?.community || target.entity || {}), icon: dataUrl, id: res.data?.community?._id || communityId, is_community: true };
+                setCommunities(prev => prev.map(c => String(c._id || c.id) === String(communityId) ? { ...c, ...updatedCommunity } : c));
+                setSelectedCommunity(prev => prev && String(prev._id || prev.id) === String(communityId) ? { ...prev, ...updatedCommunity } : prev);
+                setSnackbar({ message: 'Community picture updated', type: 'success', variant: 'system' });
+            }
+        } catch (err) {
+            console.error('Icon upload failed:', err);
+            setSnackbar({ message: err.response?.data?.error || 'Failed to update picture', type: 'error', variant: 'system' });
+        } finally {
+            setIconUploadTarget(null);
+        }
     };
 
     const closeCommunityGroupsPopup = (afterClose) => {
@@ -7312,6 +7516,7 @@ export default function Chat() {
                         displayName: data.displayName || prev?.displayName || data.name || prev?.name,
                         mobile: data.mobile ?? prev?.mobile,
                         about: data.about ?? prev?.about,
+                        image: data.image ?? prev?.image,
                         privacySettings: data.privacySettings ?? prev?.privacySettings
                     };
                     localStorage.setItem('user', JSON.stringify(updatedUser));
@@ -7321,12 +7526,12 @@ export default function Chat() {
 
             setUsers(prev => prev.map(u =>
                 String(u._id) === String(data.userId)
-                    ? { ...u, name: data.name || u.name, mobile: data.mobile, about: data.about, privacySettings: data.privacySettings ?? u.privacySettings }
+                    ? { ...u, name: data.name || u.name, mobile: data.mobile, about: data.about, image: data.image ?? u.image, privacySettings: data.privacySettings ?? u.privacySettings }
                     : u
             ));
 
             if (selectedUserRef.current && String(selectedUserRef.current._id) === String(data.userId)) {
-                setSelectedUser(prev => ({ ...prev, name: data.name || prev?.name, mobile: data.mobile, about: data.about, privacySettings: data.privacySettings ?? prev?.privacySettings }));
+                setSelectedUser(prev => ({ ...prev, name: data.name || prev?.name, mobile: data.mobile, about: data.about, image: data.image ?? prev?.image, privacySettings: data.privacySettings ?? prev?.privacySettings }));
             }
 
             const patchMember = (member) => {
@@ -7337,6 +7542,7 @@ export default function Chat() {
                     name: data.name || member.name,
                     mobile: data.mobile ?? member.mobile,
                     about: data.about ?? member.about,
+                    image: data.image ?? member.image,
                     privacySettings: data.privacySettings ?? member.privacySettings
                 };
             };
@@ -7796,6 +8002,27 @@ export default function Chat() {
         };
         socket.on('community_updated', onCommunityUpdated);
 
+        const onGroupUpdated = (data) => {
+            const groupId = data.groupId || data.group?._id || data.group?.id;
+            if (!groupId) return;
+            const patchGroup = (group) => String(group?._id || group?.id) === String(groupId)
+                ? { ...group, ...(data.group || {}), name: data.name ?? group.name, description: data.description ?? group.description, icon: data.icon ?? group.icon }
+                : group;
+            setGroups(prev => prev.map(patchGroup));
+            setSelectedGroup(prev => prev ? patchGroup(prev) : prev);
+            setCommunities(prev => prev.map(community => ({
+                ...community,
+                announcements: community.announcements ? patchGroup(community.announcements) : community.announcements,
+                groups: Array.isArray(community.groups) ? community.groups.map(patchGroup) : community.groups
+            })));
+            setSelectedCommunity(prev => prev ? ({
+                ...prev,
+                announcements: prev.announcements ? patchGroup(prev.announcements) : prev.announcements,
+                groups: Array.isArray(prev.groups) ? prev.groups.map(patchGroup) : prev.groups
+            }) : prev);
+        };
+        socket.on('group_updated', onGroupUpdated);
+
         // Listen for new group messages
         const onGroupMessage = (data) => {
 
@@ -8226,6 +8453,7 @@ export default function Chat() {
             socket.off('group_created', onGroupCreated);
             socket.off('group_joined', onGroupJoined);
             socket.off('group_message', onGroupMessage);
+            socket.off('group_updated', onGroupUpdated);
             socket.off('group_messages_read', onGroupMessagesRead);
             socket.off('group_messages_all_read', onGroupMessagesAllRead);
             socket.off('group_message_partial_read', onGroupMessagePartialRead);
@@ -8287,6 +8515,34 @@ export default function Chat() {
 
         const handleGlobalKeyDown = (e) => {
             if (e.key === 'Escape') {
+                if (isConfirmGroupAddMembersOpen) {
+                    setIsConfirmGroupAddMembersOpen(false);
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                    return;
+                }
+
+                if (isGroupAddMemberOpen) {
+                    closeGroupAddMemberPopup();
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                    return;
+                }
+
+                if (isConfirmCommunityAddMembersOpen) {
+                    setIsConfirmCommunityAddMembersOpen(false);
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                    return;
+                }
+
+                if (isCommunityAddMemberOpen) {
+                    closeCommunityAddMemberPopup();
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                    return;
+                }
+
                 if (isEncryptionStrategyOpen) {
                     setIsEncryptionStrategyOpen(false);
                     setOpenEncryptionStrategyPoint(null);
@@ -8420,7 +8676,7 @@ export default function Chat() {
             window.removeEventListener('click', handleClickOutside);
             window.removeEventListener('keydown', handleGlobalKeyDown);
         };
-    }, [openDropdown, chatContextMenu, showMenu, isCountryDropdownOpen, selectedUser, selectedGroup, selectedCommunity, isNewChatOpen, isNewGroupOpen, showInputEmojiPicker, showUnblockModal, selectedFontSize, previewVideoUrl, genericLinkPreviewTarget, viewingImage, file, selectedFiles, isProfileOpen, isEditingProfileName, isEditingProfileAbout, isEditingProfilePhone, profileEditValue, userData, isEncryptionStrategyOpen]);
+    }, [openDropdown, chatContextMenu, showMenu, isCountryDropdownOpen, selectedUser, selectedGroup, selectedCommunity, isNewChatOpen, isNewGroupOpen, showInputEmojiPicker, showUnblockModal, selectedFontSize, previewVideoUrl, genericLinkPreviewTarget, viewingImage, file, selectedFiles, isProfileOpen, isEditingProfileName, isEditingProfileAbout, isEditingProfilePhone, profileEditValue, userData, isEncryptionStrategyOpen, isGroupAddMemberOpen, isConfirmGroupAddMembersOpen, isCommunityAddMemberOpen, isConfirmCommunityAddMembersOpen]);
 
     useEffect(() => {
         const handleClickOutside = (e) => {
@@ -10336,15 +10592,13 @@ export default function Chat() {
                 }
             }
 
-            // If the deleted chat was the currently open one, close it
+            // Keep the active conversation open after clearing/deleting history.
             const currentId = (selectedUser?._id || selectedUser?.id || selectedGroup?._id || selectedGroup?.id || selectedCommunity?.id);
             if (String(currentId) === String(targetId)) {
                 setMessages([]);
                 setGroupMessages([]);
                 setIsContactInfoOpen(false);
                 setIsCommunityHomeOpen(false);
-                setSelectedCommunity(null);
-                handleBackToChatList();
             }
 
             setIsDeleteChatConfirmOpen(false);
@@ -12885,6 +13139,7 @@ export default function Chat() {
 
     const handleCameraAction = async (purpose = 'profile') => {
         setCameraPurpose(typeof purpose === 'string' ? purpose : 'profile');
+        setIsProfilePhotoSourceOpen(false);
         setIsGroupIconMenuOpen(false);
         setIsCommunityIconMenuOpen(false);
 
@@ -13009,6 +13264,19 @@ export default function Chat() {
         });
     };
 
+    const saveProfilePhotoDataUrl = async (dataUrl) => {
+        const token = localStorage.getItem('token');
+        const res = await axios.put('/api/auth/update-profile', {
+            userId: userData.id || userData._id || user.id || user._id,
+            image: dataUrl
+        }, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        const updatedUser = { ...userData, ...(res.data?.user || {}), image: dataUrl };
+        setUserData(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+    };
+
     const handleConfirmPhoto = () => {
         try {
             // Create a canvas to perform the crop
@@ -13044,39 +13312,73 @@ export default function Chat() {
                     ctx.restore();
 
                     const croppedDataUrl = canvas.toDataURL('image/png');
-                    if (isNewCommunityOpen) {
+                    if (cameraPurpose === 'profile') {
+                        saveProfilePhotoDataUrl(croppedDataUrl)
+                            .then(() => setSnackbar({ message: "Profile picture updated", type: 'success', variant: 'system' }))
+                            .catch((err) => {
+                                console.error("Profile camera update failed:", err);
+                                setSnackbar({ message: err.response?.data?.error || "Failed to update profile picture", type: 'error', variant: 'system' });
+                            });
+                    } else if (isNewCommunityOpen) {
                         setCommunityIcon(croppedDataUrl);
                     } else {
                         setGroupIcon(croppedDataUrl);
                     }
                 } catch (innerErr) {
                     console.error("Cropping inner error:", innerErr);
-                    setGroupIcon(capturedImage); // Fallback to uncropped image
+                    if (cameraPurpose === 'profile') {
+                        saveProfilePhotoDataUrl(capturedImage).catch((err) => {
+                            console.error("Profile camera fallback failed:", err);
+                            setSnackbar({ message: err.response?.data?.error || "Failed to update profile picture", type: 'error', variant: 'system' });
+                        });
+                    } else {
+                        setGroupIcon(capturedImage); // Fallback to uncropped image
+                    }
                 } finally {
                     closeCamera();
-                    setSnackbar({ message: "Group icon updated!", type: 'success', variant: 'system' });
+                    if (cameraPurpose !== 'profile') {
+                        setSnackbar({ message: "Group icon updated!", type: 'success', variant: 'system' });
+                    }
                 }
             };
             img.onerror = () => {
                 console.error("Image load error");
-                if (isNewCommunityOpen) {
+                if (cameraPurpose === 'profile') {
+                    saveProfilePhotoDataUrl(capturedImage)
+                        .then(() => setSnackbar({ message: "Profile picture updated", type: 'success', variant: 'system' }))
+                        .catch((err) => {
+                            console.error("Profile camera fallback failed:", err);
+                            setSnackbar({ message: err.response?.data?.error || "Failed to update profile picture", type: 'error', variant: 'system' });
+                        });
+                } else if (isNewCommunityOpen) {
                     setCommunityIcon(capturedImage);
                 } else {
                     setGroupIcon(capturedImage);
                 }
                 closeCamera();
-                setSnackbar({ message: "Group icon updated!", type: 'success', variant: 'system' });
+                if (cameraPurpose !== 'profile') {
+                    setSnackbar({ message: "Group icon updated!", type: 'success', variant: 'system' });
+                }
             };
             img.src = capturedImage;
         } catch (err) {
             console.error("Cropping setup error:", err);
-            if (isNewCommunityOpen) {
+            if (cameraPurpose === 'profile') {
+                saveProfilePhotoDataUrl(capturedImage)
+                    .then(() => setSnackbar({ message: "Profile picture updated", type: 'success', variant: 'system' }))
+                    .catch((saveErr) => {
+                        console.error("Profile camera fallback failed:", saveErr);
+                        setSnackbar({ message: saveErr.response?.data?.error || "Failed to update profile picture", type: 'error', variant: 'system' });
+                    });
+            } else if (isNewCommunityOpen) {
                 setCommunityIcon(capturedImage);
             } else {
                 setGroupIcon(capturedImage);
             }
             closeCamera();
-            setSnackbar({ message: "Group icon updated!", type: 'success', variant: 'system' });
+            if (cameraPurpose !== 'profile') {
+                setSnackbar({ message: "Group icon updated!", type: 'success', variant: 'system' });
+            }
         }
     };
 
@@ -13159,14 +13461,20 @@ export default function Chat() {
                 <button
                     className={`wa-nav-icon-btn wa-profile-btn ${isProfileOpen ? 'active' : ''}`}
                     onClick={() => {
+                        setIsCommunitySettingsOpen(false);
+                        setIsNewCommunityOpen(false);
+                        setIsNewGroupOpen(false);
+                        setIsCommunityNewGroupOpen(false);
+                        setIsArchivedChatsOpen(false);
+                        setIsGlobalStarredOpen(false);
                         setIsProfileOpen(true);
                         closeSettingsPanel();
                     }}
                     data-tooltip={t('sidebar.profile')}
                 >
                     {/* User Profile Image as Icon */}
-                    {userData.image ? (
-                        <img src={userData.image} alt="Me" />
+                    {userData.image || userData.profile_photo ? (
+                        <img src={userData.image || userData.profile_photo} alt="Me" />
                     ) : (
                         <div className="wa-profile-initial">
                             {(userData.displayName || userData.name || user?.name || 'U').trim().charAt(0).toUpperCase()}
@@ -13217,15 +13525,40 @@ export default function Chat() {
 
                 {/* Profile Pic - Centered */}
                 <div className="wa-profile-pic-section" style={{ background: 'transparent', padding: '40px 0 30px', display: 'flex', justifyContent: 'center' }}>
-                    <div style={{ position: 'relative', width: 160, height: 160 }}>
-                        {userData.image ? (
-                            <img src={userData.image} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', border: '4px solid rgba(56, 189, 248, 0.3)' }} />
+                    <div
+                        className="wa-profile-photo-picker"
+                        role="button"
+                        tabIndex={0}
+                        aria-label="Change profile picture"
+                        onClick={openProfilePhotoSourcePopup}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                openProfilePhotoSourcePopup();
+                            }
+                        }}
+                        style={{ position: 'relative', width: 160, height: 160 }}
+                    >
+                        {userData.image || userData.profile_photo ? (
+                            <img src={userData.image || userData.profile_photo} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', border: '4px solid rgba(56, 189, 248, 0.3)' }} />
                         ) : (
                             <div className="wa-theme-initial-avatar wa-theme-initial-avatar-large">
                                 <span>{(userData.displayName || userData.name || user?.name || 'U').trim().charAt(0).toUpperCase()}</span>
                             </div>
                         )}
 
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                openProfilePhotoSourcePopup();
+                            }}
+                            title="Upload profile picture"
+                            aria-label="Upload profile picture"
+                            style={{ position: 'absolute', right: 4, bottom: 4, width: 42, height: 42, borderRadius: '50%', border: '3px solid rgba(15, 23, 42, 0.95)', background: '#0EA5BE', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 10px 24px rgba(14, 165, 190, 0.3)' }}
+                        >
+                            <Camera size={20} />
+                        </button>
                     </div>
                 </div>
 
@@ -14078,7 +14411,7 @@ export default function Chat() {
                                             <Camera size={20} color="#54656f" />
                                             <span>{t('new_chat.take_photo')}</span>
                                         </div>
-                                        <div className="wa-group-icon-menu-item">
+                                        <div className="wa-group-icon-menu-item" onClick={() => openIconUpload({ type: 'newGroup' })}>
                                             <ImageIcon size={20} color="#54656f" />
                                             <span>{t('new_chat.upload_photo')}</span>
                                         </div>
@@ -17575,7 +17908,7 @@ export default function Chat() {
                                 </div>
                             </div>
                             <div style={{ position: 'absolute', bottom: 35, right: 35, width: 64, height: 64, background: 'linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid rgba(15, 23, 42, 0.8)', boxShadow: '0 4px 15px rgba(14, 165, 233, 0.4)' }}>
-                                <Users size={32} color="white" />
+                                <ThreePersonIcon size={34} color="white" />
                             </div>
                         </div>
 
@@ -17650,7 +17983,7 @@ export default function Chat() {
                                 ) : (
                                     <>
                                         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.2 }}>
-                                            <Users size={80} />
+                                            <ThreePersonIcon size={82} />
                                         </div>
                                         <Camera size={28} style={{ marginBottom: 12, zIndex: 1, color: '#54656f' }} />
                                         <div style={{ fontSize: 12, textAlign: 'center', padding: '0 15px', zIndex: 1, color: '#54656f', fontWeight: 500 }}>Add community icon</div>
@@ -17668,7 +18001,7 @@ export default function Chat() {
                                         <Camera size={20} color="#54656f" />
                                         <span>Take photo</span>
                                     </div>
-                                    <div className="wa-group-icon-menu-item" onClick={() => { setIsCommunityIconMenuOpen(false); if (fileInputRef.current) fileInputRef.current.click(); }}>
+                                    <div className="wa-group-icon-menu-item" onClick={() => openIconUpload({ type: 'newCommunity' })}>
                                         <ImageIcon size={20} color="#54656f" />
                                         <span>Upload photo</span>
                                     </div>
@@ -17813,7 +18146,7 @@ export default function Chat() {
                             {selectedCommunity.icon ? (
                                 <img src={selectedCommunity.icon} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                             ) : (
-                                <Users size={24} color="#38bdf8" />
+                                <ThreePersonIcon size={26} color="#38bdf8" />
                             )}
                         </div>
                         <span style={{ fontSize: 19, fontWeight: 500, color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedCommunity.name}</span>
@@ -17935,8 +18268,8 @@ export default function Chat() {
                                 }}
                             >
                                 <div style={{ display: 'flex', gap: 15, alignItems: 'center' }}>
-                                    <div style={{ width: 48, height: 48, background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '14px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2)' }}>
-                                        {g.icon ? <img src={g.icon} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Users size={24} color="#38bdf8" />}
+                                    <div style={{ width: 48, height: 48, flexShrink: 0 }}>
+                                        {renderLinkedGroupAvatar(g, g.name || 'Group')}
                                     </div>
                                     <div style={{ flex: 1, overflow: 'hidden' }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -17948,8 +18281,8 @@ export default function Chat() {
                                             )}
                                         </div>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <div style={{ fontSize: 14, color: '#667781', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
-                                                {renderLastMessagePreview(g.lastMessage, true, `${(g.members?.length || 0)} members`)}
+                                            <div style={{ fontSize: 14, color: '#667781', overflow: 'hidden', flex: 1 }}>
+                                                {renderLinkedGroupLastMessagePreview(g, `${(g.members?.length || 0)} members`)}
                                             </div>
                                             {g.unreadCount > 0 && (
                                                 <div className="wa-unread-badge" style={{ position: 'static', marginLeft: 8 }}>{g.unreadCount}</div>
@@ -18038,13 +18371,19 @@ export default function Chat() {
 
                     <div className="wa-contact-info-content wa-group-info-content" style={{ flex: 1, overflowY: 'auto', background: bgColor, paddingBottom: 40, height: 'calc(100% - 60px)' }}>
                         <div style={{ background: itemBgColor, padding: '28px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-                            <div className="wa-contact-avatar-large" style={{ width: 200, height: 200, borderRadius: '50%', marginBottom: 20, overflow: 'hidden', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', display: 'flex', justifyContent: 'center', alignItems: 'center', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
+                            <div
+                                className="wa-contact-avatar-large"
+                                onClick={() => !activeTarget.isCommunityAnnouncements && openIconUpload({ type: 'group', entity: currentGroup })}
+                                title={activeTarget.isCommunityAnnouncements ? undefined : 'Upload group picture'}
+                                style={{ width: 200, height: 200, borderRadius: '50%', marginBottom: 20, overflow: 'hidden', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', display: 'flex', justifyContent: 'center', alignItems: 'center', boxShadow: '0 8px 32px rgba(0,0,0,0.4)', cursor: activeTarget.isCommunityAnnouncements ? 'default' : 'pointer', position: 'relative' }}
+                            >
                                 {displayPhoto ? (
                                     <img src={displayPhoto} alt={displayName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                 ) : (
-                                    <span style={{ fontSize: 80, color: '#54656f' }}>
-                                        {displayName.charAt(0).toUpperCase()}
-                                    </span>
+                                    <TwoPersonIcon size={82} color="#38bdf8" />
+                                )}
+                                {!activeTarget.isCommunityAnnouncements && (
+                                    <div className="wa-welcome-camera-badge"><Camera size={14} color="white" /></div>
                                 )}
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
@@ -18075,6 +18414,14 @@ export default function Chat() {
                             )}
                             <div style={{ fontSize: 16, color: subTextColor, marginTop: 8 }}>
                                 {activeTarget.isCommunityAnnouncements ? 'Announcements' : 'Group'} · <span style={{ color: '#0EA5BE' }}>{membersCount} members</span>
+                            </div>
+
+                            <div style={{ fontSize: 13, color: subTextColor, marginTop: 6, textAlign: 'center' }}>
+                                Created {formatDateForSeparator(createdAt)}
+                            </div>
+                            <div className="wa-panel-encryption-line">
+                                <Lock size={12} />
+                                <span>Messages and calls are end-to-end encrypted</span>
                             </div>
 
                             <div style={{ display: 'flex', gap: 12, marginTop: 24, width: '100%', justifyContent: 'center' }}>
@@ -18467,21 +18814,23 @@ export default function Chat() {
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                                         <span className="wa-info-item-text" style={{ color: '#f8fafc' }}>{t('contact_info.media_links_docs')}</span>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                            <span className="wa-info-item-count">
-                                                {totalCount}
-                                            </span>
+                                            {totalCount > 0 && (
+                                                <span className="wa-info-item-count">
+                                                    {totalCount}
+                                                </span>
+                                            )}
                                             <ChevronDown size={20} color="#38bdf8" style={{ transform: 'rotate(-90deg)' }} />
                                         </div>
                                     </div>
                                     <div style={{ display: 'flex', gap: 12, fontSize: 12, color: '#94a3b8' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                            <ImageIcon size={14} /> <span>{mediaMsgs.length} Media</span>
+                                            <ImageIcon size={14} /> <span>{mediaMsgs.length > 0 ? `${mediaMsgs.length} ` : ''}Media</span>
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                            <LinkIcon size={14} /> <span>{linkMsgs.length} Links</span>
+                                            <LinkIcon size={14} /> <span>{linkMsgs.length > 0 ? `${linkMsgs.length} ` : ''}Links</span>
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                            <FileText size={14} /> <span>{docMsgs.length} Docs</span>
+                                            <FileText size={14} /> <span>{docMsgs.length > 0 ? `${docMsgs.length} ` : ''}Docs</span>
                                         </div>
                                     </div>
                                 </div>
@@ -21035,13 +21384,13 @@ export default function Chat() {
         const subTextColor = '#94a3b8';
 
         return (
-            <div className={`wa-community-groups-popup-overlay ${isCommunityGroupsListOpen ? 'active' : ''} ${isCommunityGroupsPopupClosing ? 'closing' : ''}`} onClick={() => closeCommunityGroupsPopup()}>
+            <div className={`wa-community-groups-popup-overlay ${isCommunityGroupsListOpen ? 'active' : ''} ${isCommunityGroupsPopupClosing ? 'closing' : ''}`}>
                 <div className="wa-community-groups-popup" onClick={(e) => e.stopPropagation()}>
                     <div className="wa-community-groups-popup-header">
                         <button onClick={() => closeCommunityGroupsPopup()} className="wa-community-groups-popup-close">
                             <X size={24} />
                         </button>
-                        <span>{community.name}</span>
+                        <span className="wa-community-groups-popup-title">{community.name}</span>
                     </div>
 
                     <div className="wa-community-groups-popup-list custom-scrollbar">
@@ -21179,7 +21528,6 @@ export default function Chat() {
                                 className="wa-community-members-row action"
                                 onClick={() => {
                                     setIsCommunityMembersModalOpen(false);
-                                    closeRightSidePanels();
                                     setIsCommunityAddMemberOpen(true);
                                 }}
                             >
@@ -21538,8 +21886,8 @@ export default function Chat() {
         if (!community || !isConfirmCommunityAddMembersOpen) return null;
 
         return (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(10px)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ background: 'rgba(15, 23, 42, 0.95)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '16px', padding: '24px', width: '400px', maxWidth: '90%', color: '#f8fafc', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' }}>
+            <div className="wa-member-add-overlay wa-confirm-community-add-overlay" onClick={() => setIsConfirmCommunityAddMembersOpen(false)}>
+                <div className="wa-member-add-confirm-modal" onClick={(e) => e.stopPropagation()}>
                     <div style={{ fontSize: '16px', color: '#e9edef', marginBottom: '32px' }}>
                         Add {selectedCommunityMembersToAdd.map(m => m.name).join(', ')} to "{community.name}" community?
                     </div>
@@ -21632,10 +21980,10 @@ export default function Chat() {
         );
 
         return (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(2, 6, 23, 0.08)', backdropFilter: 'blur(14px) saturate(145%)', WebkitBackdropFilter: 'blur(14px) saturate(145%)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ background: '#111b32', border: '1px solid rgba(56, 189, 248, 0.22)', borderRadius: '24px', width: isMobile ? '100%' : '380px', height: isMobile ? '100%' : 'auto', maxHeight: isMobile ? '100%' : '80vh', display: 'flex', flexDirection: 'column', color: '#f8fafc', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' }}>
+            <div className="wa-member-add-overlay wa-group-add-member-overlay" onClick={closeGroupAddMemberPopup}>
+                <div className="wa-member-add-modal" onClick={(e) => e.stopPropagation()}>
                     <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16, borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                        <X size={24} color="#38bdf8" style={{ cursor: 'pointer' }} onClick={() => { setIsGroupAddMemberOpen(false); setGroupAddMemberSearchQuery(''); setSelectedGroupMembersToAdd([]); }} />
+                        <X size={24} color="#38bdf8" style={{ cursor: 'pointer' }} onClick={closeGroupAddMemberPopup} />
                         <span style={{ fontSize: 16, fontWeight: 600 }}>Add member</span>
                     </div>
 
@@ -21722,8 +22070,8 @@ export default function Chat() {
         if (!isConfirmGroupAddMembersOpen || !selectedGroup) return null;
 
         return (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(10px)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ background: 'rgba(15, 23, 42, 0.95)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '16px', padding: '24px', width: '400px', maxWidth: '90%', color: '#f8fafc', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' }}>
+            <div className="wa-member-add-overlay wa-confirm-group-add-overlay" onClick={() => setIsConfirmGroupAddMembersOpen(false)}>
+                <div className="wa-member-add-confirm-modal" onClick={(e) => e.stopPropagation()}>
                     <div style={{ fontSize: '16px', color: '#e9edef', marginBottom: '32px' }}>
                         Add {selectedGroupMembersToAdd.map(m => m.name).join(', ')} to "{selectedGroup.name}" group?
                     </div>
@@ -21787,10 +22135,10 @@ export default function Chat() {
         );
 
         return (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(10px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ background: 'rgba(15, 23, 42, 0.95)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '24px', width: '380px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', color: '#f8fafc', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' }}>
+            <div className="wa-member-add-overlay wa-community-add-member-overlay" onClick={closeCommunityAddMemberPopup}>
+                <div className="wa-member-add-modal" onClick={(e) => e.stopPropagation()}>
                     <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16, borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                        <X size={24} color="#38bdf8" style={{ cursor: 'pointer' }} onClick={() => { setIsCommunityAddMemberOpen(false); setCommunityAddMemberSearchQuery(''); setSelectedCommunityMembersToAdd([]); }} />
+                        <X size={24} color="#38bdf8" style={{ cursor: 'pointer' }} onClick={closeCommunityAddMemberPopup} />
                         <span style={{ fontSize: 16, fontWeight: 600 }}>Add member</span>
                     </div>
 
@@ -21924,15 +22272,19 @@ export default function Chat() {
 
                 <div className="wa-contact-info-content" style={{ flex: 1, overflowY: 'auto', background: bgColor }}>
                     <div style={{ padding: '28px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-                        <div style={{ width: 140, height: 140, borderRadius: '24px', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
+                        <div
+                            onClick={() => openIconUpload({ type: 'community', entity: community })}
+                            title="Upload community picture"
+                            style={{ width: 140, height: 140, borderRadius: '24px', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 20, cursor: 'pointer' }}
+                        >
                             {community.icon ? (
                                 <img src={community.icon} alt="community" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                             ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                                    <Users size={60} color="#38bdf8" />
-                                    <span style={{ fontSize: 12, color: '#38bdf8', marginTop: 4 }}>Add community icon</span>
+                                <div className="wa-community-reference-icon" style={{ width: 118, height: 118, borderRadius: 24 }}>
+                                    <ThreePersonIcon size={64} color="currentColor" />
                                 </div>
                             )}
+                            <div className="wa-community-camera-badge"><Camera size={14} color="white" /></div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                             <span style={{ fontSize: 24, fontWeight: 500, color: textColor }}>{community.name}</span>
@@ -21958,12 +22310,11 @@ export default function Chat() {
                                 </div>
                             );
                         })()}
-
                         <div style={{ display: 'flex', gap: 12, marginTop: 24, width: '100%', justifyContent: 'center' }}>
                             {canIManage && (
                                 <>
 
-                                    <div className="wa-community-info-action" onClick={() => { closeRightSidePanels(); setIsCommunityAddMemberOpen(true); }}>
+                                    <div className="wa-community-info-action" onClick={() => { setIsCommunityAddMemberOpen(true); }}>
                                         <div className="wa-action-icon-box" style={{ background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.2)' }}><UserPlus size={24} color="#38bdf8" /></div>
                                         <span style={{ fontSize: 14, color: textColor, fontWeight: 500 }}>Add members</span>
                                     </div>
@@ -22235,17 +22586,17 @@ export default function Chat() {
                                                         flexShrink: 0,
                                                         padding: 0
                                                     }}
-                                                >
-                                                    <X size={10} color="#54656f" strokeWidth={4} />
-                                                </button>
-                                            </div>
-                                        )}
+                                            >
+                                                <X size={10} color="#54656f" strokeWidth={4} />
+                                            </button>
+                                        </div>
+                                    )}
                                     </div>
                                 </div>
                             );
                         })()}
                         {canIManage && (
-                            <div onClick={() => { closeRightSidePanels(); setIsCommunityAddMemberOpen(true); }} style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 20, cursor: 'pointer' }}>
+                            <div onClick={() => { setIsCommunityAddMemberOpen(true); }} style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 20, cursor: 'pointer' }}>
                                 <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(56, 189, 248, 0.1)', display: 'flex', justifyContent: 'center', alignItems: 'center', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
                                     <UserPlus size={20} color="#38bdf8" />
                                 </div>
@@ -22894,7 +23245,7 @@ export default function Chat() {
                                 onClick={() => setSharedMediaTab(tab)}
                             >
                                 <div>{t(`shared_media.tabs.${tab}`)}</div>
-                                <div className="wa-tab-count">{count}</div>
+                                {count > 0 && <div className="wa-tab-count">{count}</div>}
                             </div>
                         );
                     })}
@@ -23419,7 +23770,7 @@ export default function Chat() {
                         >
                             <div className="wa-notification-item-main">
                                 <span className="wa-notification-name">{chat.name || (chat.firstName ? `${chat.firstName} ${chat.lastName || ''}` : 'User')}</span>
-                                <span className="wa-notification-count">{chat.unreadCount}</span>
+                                {chat.unreadCount > 0 && <span className="wa-notification-count">{chat.unreadCount}</span>}
                             </div>
                             <div className="wa-notification-msg">
                                 {renderLastMessagePreview(chat.lastMessage, chat.is_group || chat.is_community, 'New message', chat._id || chat.id)}
@@ -24104,13 +24455,38 @@ export default function Chat() {
             {isCreateListOpen && renderCreateListDrawer()}
             {renderEditListDrawer()}
             {renderReorderListsDrawer()}
-            {isProfileOpen && renderProfileDrawer()}
             {isNewChatOpen && renderNewChatDrawer()}
             {isPhoneNumberPanelOpen && renderPhoneNumberPanel()}
             {isNewGroupOpen && renderNewGroupDrawer()}
             {isNewCommunityOpen && renderNewCommunityDrawer()}
             {isCommunityHomeOpen && renderCommunityHomeDrawer()}
             {renderCommunitySettingsPanel('left')}
+            {isProfileOpen && renderProfileDrawer()}
+            {isProfilePhotoSourceOpen && (
+                <div className="wa-profile-photo-source-overlay" onClick={() => setIsProfilePhotoSourceOpen(false)}>
+                    <div className="wa-profile-photo-source-modal" onClick={(e) => e.stopPropagation()}>
+                        <button className="wa-profile-photo-source-close" onClick={() => setIsProfilePhotoSourceOpen(false)} aria-label="Close">
+                            <X size={20} />
+                        </button>
+                        <div className="wa-profile-photo-source-title">Profile photo</div>
+                        <button className="wa-profile-photo-source-option" onClick={() => handleCameraAction('profile')}>
+                            <Camera size={22} />
+                            <span>Camera</span>
+                        </button>
+                        <button className="wa-profile-photo-source-option" onClick={() => openIconUpload({ type: 'profile' })}>
+                            <ImageIcon size={22} />
+                            <span>System files</span>
+                        </button>
+                    </div>
+                </div>
+            )}
+            <input
+                type="file"
+                ref={iconUploadInputRef}
+                accept="image/*"
+                onChange={handleIconUploadChange}
+                style={{ display: 'none' }}
+            />
             {isArchivedChatsOpen && renderArchivedChatsDrawer()}
             {isGlobalStarredOpen && renderGlobalStarredDrawer()}
             {isRemindersModalOpen && (
@@ -24400,61 +24776,59 @@ export default function Chat() {
 
 
             {/* Chat List Header */}
-            {!isRemindersModalOpen && (
-                <div className="wa-header" style={{ background: 'transparent' }}>
-                    <span className="wa-header-title">{t('chat_list.title')}</span>
-                    <div className="wa-header-icons">
-                        <div style={{ position: 'relative' }}>
-                            <button
-                                className={`wa-nav-icon-btn ${isRemindersModalOpen ? 'active' : ''}`}
-                                data-tooltip="Events"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    const uid = user?.id || user?._id;
-                                    if (uid) {
-                                        localStorage.setItem(`lastRemindersChecked_${uid}`, Date.now().toString());
-                                        setUnreadRemindersCount(0);
-                                    }
-                                    fetchReminders();
-                                    setIsRemindersModalOpen(true);
-                                }}
-                            >
-                                <Calendar size={20} />
-                                <span className="wa-bell-badge" style={{ right: '4px', top: '4px' }}>{scheduledEventsCount}</span>
-                            </button>
-                        </div>
-                        <div style={{ position: 'relative' }}>
-                            <button
-                                className={`wa-nav-icon-btn wa-notification-trigger ${showNotificationDetails ? 'active' : ''}`}
-                                data-tooltip="Notifications"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    setShowNotificationDetails(!showNotificationDetails);
-                                }}
-                            >
-                                <Bell size={20} />
-                                {totalUnread > 0 && <span className="wa-bell-badge">{totalUnread}</span>}
-                            </button>
-                        </div>
-                        <button className="wa-nav-icon-btn" data-tooltip="New Chat" onClick={(e) => {
-                            e.stopPropagation();
-                            if (users.length === 0) fetchUsers();
-                            setIsNewChatOpen(true);
-                        }}><Plus size={20} /></button>
+            <div className="wa-header" style={{ background: 'transparent' }}>
+                <span className="wa-header-title">{t('chat_list.title')}</span>
+                <div className="wa-header-icons">
+                    <div style={{ position: 'relative' }}>
                         <button
-                            className={`wa-nav-icon-btn ${(openDropdown?.type === 'sidebar_menu') ? 'active' : ''}`}
-                            data-tooltip="Menu"
+                            className={`wa-nav-icon-btn ${isRemindersModalOpen ? 'active' : ''}`}
+                            data-tooltip="Events"
                             onClick={(e) => {
                                 e.stopPropagation();
-                                setDropdownPos({ x: e.clientX, y: e.clientY });
-                                setOpenDropdown({ type: 'sidebar_menu', id: 'sidebar', data: { sidebar: true } });
+                                const uid = user?.id || user?._id;
+                                if (uid) {
+                                    localStorage.setItem(`lastRemindersChecked_${uid}`, Date.now().toString());
+                                    setUnreadRemindersCount(0);
+                                }
+                                fetchReminders();
+                                setIsRemindersModalOpen(true);
                             }}
                         >
-                            <MoreVertical size={20} />
+                            <Calendar size={20} />
+                            {scheduledEventsCount > 0 && <span className="wa-bell-badge" style={{ right: '4px', top: '4px' }}>{scheduledEventsCount}</span>}
                         </button>
                     </div>
+                    <div style={{ position: 'relative' }}>
+                        <button
+                            className={`wa-nav-icon-btn wa-notification-trigger ${showNotificationDetails ? 'active' : ''}`}
+                            data-tooltip="Notifications"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowNotificationDetails(!showNotificationDetails);
+                            }}
+                        >
+                            <Bell size={20} />
+                            {totalUnread > 0 && <span className="wa-bell-badge">{totalUnread}</span>}
+                        </button>
+                    </div>
+                    <button className="wa-nav-icon-btn" data-tooltip="New Chat" onClick={(e) => {
+                        e.stopPropagation();
+                        if (users.length === 0) fetchUsers();
+                        setIsNewChatOpen(true);
+                    }}><Plus size={20} /></button>
+                    <button
+                        className={`wa-nav-icon-btn ${(openDropdown?.type === 'sidebar_menu') ? 'active' : ''}`}
+                        data-tooltip="Menu"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setDropdownPos({ x: e.clientX, y: e.clientY });
+                            setOpenDropdown({ type: 'sidebar_menu', id: 'sidebar', data: { sidebar: true } });
+                        }}
+                    >
+                        <MoreVertical size={20} />
+                    </button>
                 </div>
-            )}
+            </div>
 
 
             {/* Unread Messages Banner - Moved above Search Box */}
@@ -24568,7 +24942,7 @@ export default function Chat() {
                                             </span>
                                             {chat.name || (chat.firstName ? `${chat.firstName} ${chat.lastName || ''}` : 'User')}
                                         </span>
-                                        <span className="wa-unread-item-count">{chat.unreadCount}</span>
+                                        {chat.unreadCount > 0 && <span className="wa-unread-item-count">{chat.unreadCount}</span>}
                                     </div>
                                 </div>
                             )))}
@@ -24896,25 +25270,13 @@ export default function Chat() {
                                         );
                                     };
 
-                                    const renderCommunityAvatar = () => {
-                                        if (item.icon) {
-                                            return <img src={item.icon} alt={displayName} style={{ width: '100%', height: '100%', borderRadius: '12px', objectFit: 'cover' }} />;
-                                        }
-                                        return (
-                                            <div style={{ position: 'relative', width: '100%', height: '100%', background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.2) 0%, rgba(79, 70, 229, 0.2) 100%)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'inset 0 0 15px rgba(56, 189, 248, 0.1)' }}>
-                                                <div style={{ position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, background: 'linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%)', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid rgba(15, 23, 42, 0.8)', boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>
-                                                    <Users size={12} />
-                                                </div>
-                                                <Users size={24} color="#38bdf8" style={{ filter: 'drop-shadow(0 0 8px rgba(56, 189, 248, 0.4))' }} />
-                                            </div>
-                                        );
-                                    };
                                     const chatHoverPreview = getChatHoverPreview(item, isGroup || item.is_community);
+                                    const isLinkedGroup = isGroup && !item.is_community && isLinkedCommunityGroup(item);
 
                                     return (
                                         <div
                                             key={chatListKey}
-                                            className={`wa-user-item ${((item.is_community && !selectedGroup && !selectedUser && selectedCommunity?.id === item.id) || (isGroup && !item.is_community && selectedGroup?._id === item._id) || (!isGroup && !item.is_community && selectedUser?._id === item._id)) ? 'active' : ''}`}
+                                            className={`wa-user-item ${((item.is_community && !selectedUser && String(selectedCommunity?.id || selectedCommunity?._id || '') === String(item.id || item._id || '')) || (isGroup && !item.is_community && selectedGroup?._id === item._id) || (!isGroup && !item.is_community && selectedUser?._id === item._id)) ? 'active' : ''}`}
                                             data-chat-preview={chatHoverPreview || undefined}
                                             onClick={() => {
                                                 setIsContactInfoOpen(false);
@@ -24927,13 +25289,33 @@ export default function Chat() {
 
                                                 if (item.is_community) {
                                                     setSelectedCommunity(item);
-                                                    setIsCommunityHomeOpen(true);
-                                                    setSelectedGroup(null);
+                                                    setIsCommunityHomeOpen(false);
                                                     setSelectedUser(null);
                                                     setCommunities(prev => prev.map(c => String(c.id) === String(item.id) ? { ...c, unreadCount: 0 } : c));
-                                                    // Fetch announcements messages
                                                     const annId = item.announcements?._id || item.announcements?.id || item.announcements;
-                                                    if (annId) fetchGroupMessages(annId);
+                                                    const annGroup = (item.announcements && typeof item.announcements === 'object')
+                                                        ? item.announcements
+                                                        : { _id: annId, id: annId, name: item.name, communityName: item.name };
+                                                    if (annId) {
+                                                        const normalizedAnnouncements = {
+                                                            ...annGroup,
+                                                            _id: annGroup._id || annId,
+                                                            id: annGroup.id || annId,
+                                                            is_group: true,
+                                                            isCommunityAnnouncements: true,
+                                                            isAnnouncementGroup: true,
+                                                            community_id: item._id || item.id,
+                                                            communityId: item._id || item.id,
+                                                            communityName: item.name,
+                                                            communityIcon: item.icon
+                                                        };
+                                                        setSelectedGroup(normalizedAnnouncements);
+                                                        if (selectedGroupRef) selectedGroupRef.current = normalizedAnnouncements;
+                                                        if (selectedUserRef) selectedUserRef.current = null;
+                                                        fetchGroupMessages(annId);
+                                                    } else {
+                                                        setSelectedGroup(null);
+                                                    }
                                                     return;
                                                 }
                                                 if (isGroup) {
@@ -24960,14 +25342,16 @@ export default function Chat() {
                                             onTouchEnd={cancelStableLongPress}
                                             onTouchMove={maybeCancelStableLongPress}
                                         >
-                                            <div className="wa-avatar" style={(isGroup || item.is_community) ? { background: 'rgba(56, 189, 248, 0.1)', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: item.is_community ? '12px' : '50%', border: '1px solid rgba(56, 189, 248, 0.2)' } : {}}>
+                                            <div className="wa-avatar" style={(isGroup || item.is_community) ? { background: 'rgba(56, 189, 248, 0.1)', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: item.is_community || isLinkedGroup ? '12px' : '50%', border: '1px solid rgba(56, 189, 248, 0.2)', overflow: isLinkedGroup ? 'visible' : 'hidden' } : {}}>
                                                 {item.is_community ? (
-                                                    renderCommunityAvatar()
+                                                    renderCommunityPlainAvatar(item, displayName)
+                                                ) : isLinkedGroup ? (
+                                                    renderLinkedGroupAvatar(item, displayName)
                                                 ) : isGroup ? (
                                                     item.icon ? (
                                                         <img src={item.icon} alt={displayName} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
                                                     ) : (
-                                                        <Users size={22} color="#38bdf8" />
+                                                        <TwoPersonIcon size={24} color="#38bdf8" />
                                                     )
                                                 ) : (
                                                     getVisibleUserAvatar(item) ? (
@@ -25001,6 +25385,9 @@ export default function Chat() {
                                                             const isRestricted = (item.requestStatus === 'rejected' && item.requestUpdatedAt && (new Date() - new Date(item.requestUpdatedAt)) < 24 * 60 * 60 * 1000);
                                                             if (isRestricted) {
                                                                 return <span style={{ color: '#ef4444', fontStyle: 'italic' }}>Messaging restricted</span>;
+                                                            }
+                                                            if (isLinkedGroup) {
+                                                                return renderLinkedGroupLastMessagePreview(item, `${(item.members?.length || 0)} members`);
                                                             }
                                                             const preview = renderLastMessagePreview(item.lastMessage, isGroup || item.is_community, '', item._id || item.id);
                                                             return typeof preview === 'string' ? renderHighlightedContent(preview) : preview;
@@ -26023,7 +26410,7 @@ export default function Chat() {
     };
 
     const isCommunitySettingsRightOpen = isCommunitySettingsOpen && communitySettingsSurface === 'right';
-    const isRightSidePanelOpen = !!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isCommunityGroupsListOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen || isCommunitySettingsRightOpen;
+    const isRightSidePanelOpen = !!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen || isCommunitySettingsRightOpen;
 
     const renderMainChat = () => (
         <div
@@ -26043,7 +26430,7 @@ export default function Chat() {
                 onDrop={handleDrop}
                 style={{
                     flex: 1,
-                    borderRight: isRightSidePanelOpen ? '1px solid #d1d7db' : 'none'
+                    borderRight: 'none'
                 }}
             >
 
@@ -26084,11 +26471,7 @@ export default function Chat() {
                                 <button
                                     className={`wa-nav-icon-btn ${isMessageSearchOpen && messageSearchSource === 'chat_header' ? 'active' : ''}`}
                                     onClick={() => {
-                                        if (isMessageSearchOpen && messageSearchSource === 'chat_header') {
-                                            closeMessageSearchPanel();
-                                        } else {
-                                            openMessageSearchPanel('chat_header');
-                                        }
+                                        openMessageSearchPanel('chat_header');
                                     }}
                                 >
                                     <Search size={20} />
@@ -26298,6 +26681,33 @@ export default function Chat() {
                             <MessageList
                                 messages={messages}
                                 messageSearchQuery=""
+                                headerContent={
+                                    <div className="wa-chat-intro-system">
+                                        <div className="wa-community-welcome-created">
+                                            {(() => {
+                                                const firstMessageDate = (messages || [])
+                                                    .map(msg => msg?.created_at || msg?.createdAt)
+                                                    .filter(Boolean)
+                                                    .sort((a, b) => new Date(a) - new Date(b))[0];
+                                                const createdAt = firstMessageDate ||
+                                                    selectedUser.chatCreatedAt ||
+                                                    selectedUser.requestCreatedAt ||
+                                                    selectedUser.created_at ||
+                                                    selectedUser.createdAt ||
+                                                    new Date().toISOString();
+                                                return formatNumericChatDate(createdAt) || formatDateForSeparator(createdAt);
+                                            })()}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            className="wa-community-welcome-encryption wa-chat-intro-encryption"
+                                            onClick={() => setIsEncryptionInfoOpen(true)}
+                                        >
+                                            <Lock size={12} />
+                                            <span>Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them. Click to learn more</span>
+                                        </button>
+                                    </div>
+                                }
                                 formatDateForSeparator={formatDateForSeparator}
                                 t={t}
                                 getLangCode={getLangCode}
@@ -26696,7 +27106,7 @@ export default function Chat() {
                     </>
                 ) : selectedGroup ? (
                     <>
-                        <div className="wa-chat-header" style={{ background: 'white' }}>
+                        <div className={`wa-chat-header ${selectedGroup.isCommunityAnnouncements ? 'wa-chat-header-community' : ''}`} style={{ background: 'white' }}>
                             <div className="wa-chat-header-user">
                                 {/* Mobile Back Button */}
                                 <button
@@ -26721,17 +27131,19 @@ export default function Chat() {
                                     }}
                                     style={{ cursor: 'pointer' }}
                                 >
-                                    <div className="wa-avatar" style={{ width: 40, height: 40, marginRight: 10, background: '#dfe5e7', borderRadius: '8px', overflow: 'hidden' }}>
+                                    <div className={`wa-avatar ${selectedGroup.isCommunityAnnouncements ? 'wa-header-community-avatar' : ''} ${selectedGroup.isCommunityAnnouncements && !selectedGroup.communityIcon ? 'wa-community-reference-icon' : ''}`} style={{ width: 40, height: 40, marginRight: 10, background: '#dfe5e7', borderRadius: '8px', overflow: isLinkedCommunityGroup(selectedGroup) && !selectedGroup.isCommunityAnnouncements ? 'visible' : 'hidden' }}>
                                         {selectedGroup.isCommunityAnnouncements ? (
                                             selectedGroup.communityIcon ? (
                                                 <img src={selectedGroup.communityIcon} alt="community" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                             ) : (
-                                                <Users size={22} color="#8696a0" />
+                                                <ThreePersonIcon size={24} color="currentColor" />
                                             )
+                                        ) : isLinkedCommunityGroup(selectedGroup) ? (
+                                            renderLinkedGroupAvatar(selectedGroup, selectedGroup.name || 'Group')
                                         ) : selectedGroup.icon ? (
                                             <img src={selectedGroup.icon} alt="group" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
                                         ) : (
-                                            <Camera size={22} color="#8696a0" />
+                                            <TwoPersonIcon size={24} color="#8696a0" />
                                         )}
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
@@ -26774,11 +27186,7 @@ export default function Chat() {
                                 <button
                                     className={`wa-nav-icon-btn ${isMessageSearchOpen && messageSearchSource === 'group_header' ? 'active' : ''}`}
                                     onClick={() => {
-                                        if (isMessageSearchOpen && messageSearchSource === 'group_header') {
-                                            closeMessageSearchPanel();
-                                        } else {
-                                            openMessageSearchPanel('group_header');
-                                        }
+                                        openMessageSearchPanel('group_header');
                                     }}
                                 >
                                     <Search size={20} />
@@ -26923,13 +27331,24 @@ export default function Chat() {
                                 headerContent={
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', paddingTop: '20px' }}>
                                         {selectedGroup.isCommunityAnnouncements ? (
-                                            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-                                                <div className="wa-group-welcome-card wa-community-welcome-card" style={{ padding: '24px', maxWidth: '360px', textAlign: 'center' }}>
-                                                    <div className="wa-group-welcome-avatar" style={{ width: 60, height: 60, borderRadius: 16, margin: '0 auto 16px' }}>
-                                                        <Users size={24} color="#38bdf8" />
+                                            <>
+                                                <div className="wa-community-welcome-created">
+                                                    {(() => {
+                                                        const createdAt = selectedCommunity?.created_at || selectedGroup.created_at;
+                                                        return formatNumericChatDate(createdAt) || formatDateForSeparator(createdAt);
+                                                    })()}
+                                                </div>
+                                                <div className="wa-community-welcome-encryption">
+                                                    <Lock size={12} />
+                                                    <span>Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them. Click to learn more</span>
+                                                </div>
+                                                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20, width: '100%' }}>
+                                                <div className="wa-group-welcome-card wa-community-welcome-card" style={{ padding: '20px 0 0', maxWidth: '420px', width: '72%', textAlign: 'center' }}>
+                                                    <div className="wa-community-reference-icon" style={{ width: 60, height: 60, margin: '0 auto 14px' }}>
+                                                        <ThreePersonIcon size={34} color="currentColor" />
                                                     </div>
                                                     <div className="wa-group-welcome-title" style={{ fontSize: 18, marginBottom: 8 }}>Welcome to your community!</div>
-                                                    <div className="wa-group-welcome-subtitle" style={{ fontSize: 14, lineHeight: '1.5', marginBottom: 16 }}>Send important admin updates to all your members at once.</div>
+                                                    <div className="wa-group-welcome-subtitle" style={{ fontSize: 14, lineHeight: '1.5', marginBottom: 18 }}>Send important admin updates to all your members at once.</div>
                                                     <div
                                                         className="wa-group-welcome-action"
                                                         onClick={() => {
@@ -26945,25 +27364,38 @@ export default function Chat() {
                                                     </div>
                                                 </div>
                                             </div>
+                                            </>
                                         ) : (
-                                            <div className="wa-group-welcome-card" style={{ marginBottom: 20 }}>
-                                                <div className="wa-group-welcome-avatar">
+                                            <>
+                                            <div className="wa-community-welcome-created">
+                                                {formatNumericChatDate(selectedGroup.created_at) || formatDateForSeparator(selectedGroup.created_at)}
+                                            </div>
+                                            <div className="wa-community-welcome-encryption">
+                                                <Lock size={12} />
+                                                <span>Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them. Click to learn more</span>
+                                            </div>
+                                            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20, width: '100%' }}>
+                                            <div className="wa-group-welcome-card wa-community-welcome-card wa-group-chat-welcome-card" style={{ padding: '20px 0 0', maxWidth: '420px', width: '72%', textAlign: 'center' }}>
+                                                <div
+                                                    className="wa-community-reference-icon wa-group-reference-icon"
+                                                    onClick={() => openIconUpload({ type: 'group', entity: selectedGroup })}
+                                                    title="Upload group picture"
+                                                    style={{ width: 60, height: 60, margin: '0 auto 14px', cursor: 'pointer' }}
+                                                >
                                                     {selectedGroup.icon ? (
-                                                        <img src={selectedGroup.icon} alt="group" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                                                        <img src={selectedGroup.icon} alt="group" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                     ) : (
-                                                        <Users size={44} color="#9a6b11" />
+                                                        <TwoPersonIcon size={34} color="currentColor" />
                                                     )}
-                                                    {String(selectedGroup.admin?._id || selectedGroup.admin) === String(user.id || user._id) && (
-                                                        <div className="wa-welcome-camera-badge"><Camera size={14} color="white" /></div>
-                                                    )}
+                                                    <div className="wa-welcome-camera-badge"><Camera size={14} color="white" /></div>
                                                 </div>
                                                 <div className="wa-group-welcome-title">
                                                     {getGroupWelcomeTitle(selectedGroup)}
                                                 </div>
                                                 <div className="wa-group-welcome-subtitle">
-                                                    {selectedGroup.members?.length || 0} members • Created {formatDateForSeparator(selectedGroup.created_at)}
+                                                    {selectedGroup.members?.length || 0} members{selectedGroup.description ? ` • ${selectedGroup.description}` : ''}
                                                 </div>
-                                                <div className="wa-group-welcome-buttons">
+                                                <div className="wa-group-welcome-buttons wa-group-welcome-action-row">
                                                     {!selectedGroup.name && (
                                                         <button className="wa-welcome-btn" onClick={() => openGroupEditPanel('name')}><Pencil size={14} style={{ marginRight: 8 }} /> Name this group</button>
                                                     )}
@@ -26973,12 +27405,9 @@ export default function Chat() {
                                                     <button className="wa-welcome-btn" onClick={() => { closeRightSidePanels(); setIsGroupAddMemberOpen(true); }}><UserPlus size={14} style={{ marginRight: 8 }} /> Add members</button>
                                                 </div>
                                             </div>
+                                            </div>
+                                            </>
                                         )}
-
-                                        <div className="wa-group-welcome-info" style={{ margin: '10px auto 20px', maxWidth: '85%' }}>
-                                            <Lock size={12} style={{ marginRight: 6 }} />
-                                            Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them. Click to learn more
-                                        </div>
                                     </div>
                                 }
                                 messages={groupMessages}

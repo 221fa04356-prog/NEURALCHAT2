@@ -860,7 +860,7 @@ router.post('/verify-call-otp', async (req, res) => {
 });
 
 router.put('/update-profile', async (req, res) => {
-    const { userId, name, about, mobile, countryCode, privacySettings } = req.body;
+    const { userId, name, about, mobile, countryCode, privacySettings, image, profile_photo } = req.body;
     console.log('[PROFILE UPDATE] Request received for userId:', userId);
 
     if (!userId) {
@@ -883,6 +883,7 @@ router.put('/update-profile', async (req, res) => {
         }
         if (about !== undefined) updateData.about = about;
         if (countryCode !== undefined) updateData.countryCode = countryCode;
+        if (image !== undefined || profile_photo !== undefined) updateData.image = image || profile_photo || '';
         if (mobile !== undefined) {
             // Basic mobile validation match register logic: strictly 10 digits
             const cleanMobile = normalizeMobile(mobile);

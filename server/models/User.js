@@ -22,6 +22,7 @@ const userSchema = new mongoose.Schema({
     mobile_signature: { type: String, unique: true, sparse: true, select: true },
     countryCode: { type: String, required: true, default: '+91' },
     designation: { type: String },
+    image: { type: String, default: '' },
     about: { type: String, default: 'Available' },
     login_id: { type: String, unique: true, sparse: true }, // sparse allows null/undefined to not clash
     password: { type: String },
