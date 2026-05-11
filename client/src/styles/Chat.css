@@ -16144,6 +16144,23 @@ background: rgba(56, 189, 248, 0.2) !important;
     color: #e5f4ff !important;
 }
 
+.wa-menu-count-badge {
+    min-width: 22px;
+    height: 22px;
+    padding: 0 7px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(56, 189, 248, 0.18);
+    border: 1px solid rgba(56, 189, 248, 0.32);
+    color: #7ddfff;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1;
+    flex: 0 0 auto;
+}
+
 .wa-dropdown-item:hover,
 .wa-menu-item:hover,
 .wa-starred-menu-item:hover {
