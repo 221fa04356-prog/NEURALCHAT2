@@ -9,6 +9,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const UnethicalLog = require('../models/UnethicalLog');
+const Community = require('../models/Community');
 
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -18,7 +19,7 @@ const axios = require('axios');
 const { uploadLocalFileToGridFS } = require('../utils/gridfsMedia');
 const Groq = require('groq-sdk');
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const { detectUnsafeText } = require('../utils/moderation');
+const { detectUnsafeText, stripUrlsForModeration } = require('../utils/moderation');
 const { calculateMessageHash } = require('../utils/messageHash');
 const { countOfficeDocumentItems } = require('../utils/documentCount');
 const { scheduleMessage, notifyEventCreated, notifyEventChanged } = require('../utils/scheduledMessaging');
@@ -1018,17 +1019,22 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             });
         }
 
+        // Detect URL for preview before moderation so URLs are not mistaken for random text.
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        const urlMatch = content ? content.match(urlRegex) : null;
+        const moderationContent = stripUrlsForModeration(content);
+
         // === Global Safety & Ethics Check (AI-Driven) ===
         let isFlagged = false;
         let flagReason = "";
 
-        if (content && content.length > 0) {
-            const directResult = detectUnsafeText(content);
+        if (moderationContent.length > 0) {
+            const directResult = detectUnsafeText(moderationContent);
             if (directResult.isUnsafe) {
                 isFlagged = true;
                 flagReason = directResult.reason;
             } else {
-                const aiResult = await checkUnethicalWithAI(content);
+                const aiResult = await checkUnethicalWithAI(moderationContent);
                 if (aiResult.isUnethical) {
                     isFlagged = true;
                     flagReason = aiResult.reason;
@@ -1047,7 +1053,7 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
                 user_id: senderId,
                 content: content || 'Group Media/File',
                 reason: flagReason,
-                type: detectUnsafeText(content).type || (content && badWords.some(word => content.toLowerCase().includes(word)) ? 'direct' : 'indirect')
+                type: detectUnsafeText(moderationContent).type || (moderationContent && badWords.some(word => moderationContent.toLowerCase().includes(word)) ? 'direct' : 'indirect')
             });
 
             // Check if this violation pushes them over the limit
@@ -1061,9 +1067,6 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             }
         }
 
-        // Detect URL for preview
-        const urlRegex = /(https?:\/\/[^\s]+)/g;
-        const urlMatch = content ? content.match(urlRegex) : null;
         let linkPreview = null;
         if (urlMatch && type !== 'image' && type !== 'video') {
             linkPreview = await fetchLinkPreview(urlMatch[0]);
@@ -1134,6 +1137,8 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
             is_view_once: is_view_once === 'true' || is_view_once === true,
             is_forwarded: isForwarded === true || isForwarded === 'true',
             forward_count: forward_count || 0,
+            is_flagged: !!isFlagged,
+            flag_reason: flagReason,
             
             // E2EE fields
             ciphertext: req.body.ciphertext,
@@ -1166,6 +1171,25 @@ router.post('/:groupId/send', authenticateToken, (req, res, next) => {
                     message: decryptedPopulated.toObject()
                 });
             });
+
+            if (isFlagged) {
+                const linkedCommunity = await Community.findOne({ announcements: group._id }).select('name').lean();
+                req.io.to('admins').emit('unethical_message_detected', {
+                    userId: senderId,
+                    userName: req.user.name || "Unknown",
+                    messageId: msg._id,
+                    content: content || '',
+                    type: type || 'text',
+                    duration: msg.duration,
+                    reason: flagReason,
+                    createdAt: msg.created_at,
+                    receiverId: null,
+                    groupId,
+                    isGroup: true,
+                    isCommunity: !!linkedCommunity,
+                    partnerName: linkedCommunity ? linkedCommunity.name : (group.name || 'Group Chat')
+                });
+            }
         }
         if ((type || 'text') === 'event' && eventData) {
             notifyEventCreated({

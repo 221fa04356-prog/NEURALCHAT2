@@ -124,6 +124,18 @@
     -webkit-user-select: none;
 }
 
+.admin-scroll-main,
+.admin-review-scroll-pane {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.admin-scroll-main::-webkit-scrollbar,
+.admin-review-scroll-pane::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
 .admin-scheduled-activity {
     position: relative;
     display: flex;

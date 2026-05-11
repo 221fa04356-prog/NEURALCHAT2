@@ -9,7 +9,7 @@ import {
     Eye, EyeOff, Menu, AlertTriangle, ArrowLeft, Smile,
     User as UserIcon, Search, Bell, Settings, LayoutDashboard,
     TrendingUp, Calendar, ChevronRight, X, Layers, Check, RefreshCw, Forward, ChevronDown, XCircle,
-    Mic, Pause, Play, List, History, ShieldCheck, MapPin, Video, Phone, Ban, Clock, UserPlus
+    Mic, Pause, Play, List, History, ShieldCheck, MapPin, Video, Phone, Ban, Clock, UserPlus, FileText
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import {
@@ -62,6 +62,46 @@ const OFFICIAL_TEXT_SECONDARY = '#cbd5e1';
 const OFFICIAL_TEXT_MUTED = '#94a3b8';
 const ADMIN_ACTION_SURFACE = 'linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%)';
 const ADMIN_ACTION_BORDER = 'none';
+
+const formatAdminVoiceDuration = (seconds) => {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const minutes = Math.floor(total / 60);
+    const secs = String(total % 60).padStart(2, '0');
+    return `${minutes}:${secs}`;
+};
+
+const formatAdminAlertContent = (alert = {}) => {
+    if (alert.type === 'audio') return `Voice Message${alert.duration ? ` (${formatAdminVoiceDuration(alert.duration)})` : ''}`;
+    const raw = String(alert.contentSnippet || alert.content || '').trim();
+    if (!raw) return 'No content';
+
+    try {
+        const parsed = JSON.parse(raw);
+        const contacts = Array.isArray(parsed) ? parsed : [parsed];
+        const validContacts = contacts.filter(item => item && typeof item === 'object' && (item.name || item.mobile || item.phone));
+        if (validContacts.length === 1) {
+            return `Contact card: ${validContacts[0].name || validContacts[0].mobile || validContacts[0].phone}`;
+        }
+        if (validContacts.length > 1) {
+            const first = validContacts[0].name || validContacts[0].mobile || validContacts[0].phone || 'Contact';
+            return `Contact cards: ${first} and ${validContacts.length - 1} more`;
+        }
+    } catch (_) {
+        // Keep non-JSON message content as-is.
+    }
+
+    return raw.length > 80 ? `${raw.substring(0, 80)}...` : raw;
+};
+
+const getAdminAlertChatLabel = (alert = {}, users = []) => {
+    if (alert.isCommunity) return alert.partnerName || 'Community';
+    if (alert.isGroup) return alert.partnerName || 'Group Chat';
+    if (alert.receiverId) {
+        const receiver = users.find(u => u.id === alert.receiverId || u._id === alert.receiverId);
+        return receiver?.name || alert.partnerName || 'Unknown User';
+    }
+    return alert.partnerName || 'AI Assistant';
+};
 
 const appendMediaToken = (url) => {
     if (!url) return '';
@@ -485,6 +525,10 @@ export default function AdminDashboard() {
     const [highlightedRedirectRow, setHighlightedRedirectRow] = useState(null);
     const [actionAuditView, setActionAuditView] = useState(null);
     const scrollHideTimerRef = useRef(null);
+    const isDraggingScrollControlRef = useRef(false);
+    const isDraggingReviewScrollControlRef = useRef(false);
+    const scrollControlDragRef = useRef({ startY: 0, moved: false });
+    const reviewScrollControlDragRef = useRef({ startY: 0, moved: false });
 
     const isBlockReportRestorationRequest = (user) => {
         const reason = String(user?.unblockRequestReason || '').toLowerCase();
@@ -610,7 +654,10 @@ export default function AdminDashboard() {
     ), [users]);
 
     const handleFloatingScroll = () => {
-        if (isDraggingScrollControl) return;
+        if (isDraggingScrollControlRef.current || scrollControlDragRef.current.moved) {
+            scrollControlDragRef.current.moved = false;
+            return;
+        }
         const root = mainScrollRef.current;
         if (!root) return;
 
@@ -620,7 +667,10 @@ export default function AdminDashboard() {
     };
 
     const handleReviewFloatingScroll = () => {
-        if (isDraggingReviewScrollControl) return;
+        if (isDraggingReviewScrollControlRef.current || reviewScrollControlDragRef.current.moved) {
+            reviewScrollControlDragRef.current.moved = false;
+            return;
+        }
         const root = reviewScrollRef.current;
         if (!root) return;
 
@@ -628,6 +678,14 @@ export default function AdminDashboard() {
         const direction = reviewCanScrollDown ? 1 : -1;
         root.scrollBy({ top: step * direction, behavior: 'smooth' });
     };
+
+    useEffect(() => {
+        isDraggingScrollControlRef.current = isDraggingScrollControl;
+    }, [isDraggingScrollControl]);
+
+    useEffect(() => {
+        isDraggingReviewScrollControlRef.current = isDraggingReviewScrollControl;
+    }, [isDraggingReviewScrollControl]);
 
     useEffect(() => {
         const handleResize = () => {
@@ -651,6 +709,13 @@ export default function AdminDashboard() {
             setCanScrollUp(root.scrollTop > 24);
             setCanScrollDown(root.scrollTop < maxScrollTop - 24);
             setShowScrollControl(true);
+            if (!isDraggingScrollControlRef.current && maxScrollTop > 0) {
+                const controlSize = isMobile ? 42 : 48;
+                const minTrackTop = 12;
+                const maxTrackTop = Math.max(minTrackTop, window.innerHeight - (controlSize + 12));
+                const nextTop = minTrackTop + ((root.scrollTop / maxScrollTop) * (maxTrackTop - minTrackTop));
+                setScrollControlTop((nextTop / window.innerHeight) * 100);
+            }
 
             if (scrollHideTimerRef.current) clearTimeout(scrollHideTimerRef.current);
             scrollHideTimerRef.current = setTimeout(() => {
@@ -676,6 +741,9 @@ export default function AdminDashboard() {
             const root = mainScrollRef.current;
             const viewportHeight = window.innerHeight;
             const controlSize = isMobile ? 42 : 48;
+            if (Math.abs(event.clientY - scrollControlDragRef.current.startY) > 4) {
+                scrollControlDragRef.current.moved = true;
+            }
             const nextTop = Math.max(12, Math.min(viewportHeight - (controlSize + 12), event.clientY - (controlSize / 2)));
             setScrollControlTop((nextTop / viewportHeight) * 100);
 
@@ -687,7 +755,10 @@ export default function AdminDashboard() {
             root.scrollTop = maxScrollTop * ratio;
         };
 
-        const handlePointerUp = () => setIsDraggingScrollControl(false);
+        const handlePointerUp = () => {
+            isDraggingScrollControlRef.current = false;
+            setIsDraggingScrollControl(false);
+        };
 
         window.addEventListener('pointermove', handlePointerMove);
         window.addEventListener('pointerup', handlePointerUp);
@@ -711,6 +782,14 @@ export default function AdminDashboard() {
             const maxScrollTop = Math.max(0, root.scrollHeight - root.clientHeight);
             setReviewCanScrollUp(root.scrollTop > 16);
             setReviewCanScrollDown(root.scrollTop < maxScrollTop - 16);
+            if (!isDraggingReviewScrollControlRef.current && maxScrollTop > 0) {
+                const controlSize = isMobile ? 38 : 44;
+                const rect = root.getBoundingClientRect();
+                const minTrackTop = 12;
+                const maxTrackTop = Math.max(minTrackTop, rect.height - (controlSize + 12));
+                const nextTop = minTrackTop + ((root.scrollTop / maxScrollTop) * (maxTrackTop - minTrackTop));
+                setReviewScrollControlTop((nextTop / rect.height) * 100);
+            }
         };
 
         updateReviewScrollState();
@@ -737,6 +816,9 @@ export default function AdminDashboard() {
 
             const rect = root.getBoundingClientRect();
             const controlSize = isMobile ? 38 : 44;
+            if (Math.abs(event.clientY - reviewScrollControlDragRef.current.startY) > 4) {
+                reviewScrollControlDragRef.current.moved = true;
+            }
             const minTrackTop = 12;
             const maxTrackTop = Math.max(minTrackTop, rect.height - (controlSize + 12));
             const nextTop = Math.max(minTrackTop, Math.min(maxTrackTop, event.clientY - rect.top - (controlSize / 2)));
@@ -747,7 +829,10 @@ export default function AdminDashboard() {
             root.scrollTop = maxScrollTop * ratio;
         };
 
-        const handlePointerUp = () => setIsDraggingReviewScrollControl(false);
+        const handlePointerUp = () => {
+            isDraggingReviewScrollControlRef.current = false;
+            setIsDraggingReviewScrollControl(false);
+        };
 
         window.addEventListener('pointermove', handlePointerMove);
         window.addEventListener('pointerup', handlePointerUp);
@@ -2521,7 +2606,7 @@ export default function AdminDashboard() {
                                         {(alert.type === 'unethical' || alert.type === 'deletion') && (
                                             <>
                                                 <span style={{ color: OFFICIAL_TEXT_MUTED }}>in</span>
-                                                <span style={{ fontWeight: '600', color: '#73a8ff' }}>{alert.partnerName || 'Unknown Chat'}</span>
+                                                <span style={{ fontWeight: '600', color: '#73a8ff' }}>{getAdminAlertChatLabel(alert, users)}</span>
                                             </>
                                         )}
                                     </div>
@@ -2536,7 +2621,7 @@ export default function AdminDashboard() {
                                                     <Mic size={12} /> Voice Message ({formatVoiceTime(alert.duration)})
                                                 </>
                                             ) : (
-                                                `"${alert.contentSnippet || alert.content || 'No content'}"`
+                                                `"${formatAdminAlertContent(alert)}"`
                                             )
                                         ) : alert.type === 'unblock_request' ? (
                                             `Reason: "${alert.reason || 'No reason provided'}"`
@@ -4435,6 +4520,8 @@ export default function AdminDashboard() {
                             onPointerDown={(event) => {
                                 event.preventDefault();
                                 event.currentTarget.setPointerCapture?.(event.pointerId);
+                                scrollControlDragRef.current = { startY: event.clientY, moved: false };
+                                isDraggingScrollControlRef.current = true;
                                 setIsDraggingScrollControl(true);
                                 setShowScrollControl(true);
                             }}
@@ -4570,6 +4657,7 @@ export default function AdminDashboard() {
 
                         <div
                             ref={reviewScrollRef}
+                            className="admin-review-scroll-pane"
                             style={{ flex: 1, padding: isMobile ? '1rem 0.75rem 1rem 1rem' : '1.5rem', overflowY: 'auto', background: '#111827', position: 'relative' }}
                         >
                             {loadingChat ? (
@@ -4648,6 +4736,7 @@ export default function AdminDashboard() {
                                                 const hasScheduledActivity = Boolean(msg.scheduled_message_id || msg.scheduled_at || msg.scheduled?.scheduled_at || msg.is_scheduled_delivery);
                                                 const isScheduledInfoOpen = openScheduledInfoId === msgId;
                                                 const scheduledActivityLines = hasScheduledActivity ? getScheduledActivityLines(msg, isMe) : [];
+                                                const isRichReviewCard = ['audio', 'contact', 'event', 'poll'].includes(msg.type);
 
                                                 return (
                                                     <div
@@ -4734,11 +4823,11 @@ export default function AdminDashboard() {
                                                                     <div
                                                                         className="wa-message-bubble"
                                                                         style={{
-                                                                            padding: '0.8rem 1.1rem', borderRadius: '1.25rem',
-                                                                            background: msg.type === 'audio' ? 'transparent' : (isMe ? 'linear-gradient(135deg, #1498ff 0%, #0FB5D0 100%)' : '#172033'),
+                                                                            padding: isRichReviewCard ? 0 : '0.8rem 1.1rem', borderRadius: '1.25rem',
+                                                                            background: isRichReviewCard ? 'transparent' : (isMe ? 'linear-gradient(135deg, #1498ff 0%, #0FB5D0 100%)' : '#172033'),
                                                                             color: isMe ? '#ffffff' : '#e2e8f0',
-                                                                            boxShadow: isSelected ? '0 0 0 3px rgba(15, 181, 208, 0.35)' : (isMe ? '0 4px 15px rgba(10, 124, 143, 0.2)' : '0 2px 8px rgba(0,0,0,0.06)'),
-                                                                            border: isMe ? 'none' : '1px solid rgba(148, 163, 184, 0.16)',
+                                                                            boxShadow: isRichReviewCard ? 'none' : (isSelected ? '0 0 0 3px rgba(15, 181, 208, 0.35)' : (isMe ? '0 4px 15px rgba(10, 124, 143, 0.2)' : '0 2px 8px rgba(0,0,0,0.06)')),
+                                                                            border: isRichReviewCard ? 'none' : (isMe ? 'none' : '1px solid rgba(148, 163, 184, 0.16)'),
                                                                             borderBottomRightRadius: isMe ? '0' : '1.2rem',
                                                                             borderBottomLeftRadius: isMe ? '1.2rem' : '0',
                                                                             position: 'relative',
@@ -4803,8 +4892,8 @@ export default function AdminDashboard() {
                                                                         )}
 
                                                                         {msg.type === 'file' && msg.file_path && (
-                                                                            <div style={{ marginTop: '8px', background: 'rgba(0,0,0,0.05)', padding: '8px 12px', borderRadius: '8px' }}>
-                                                                                <a href={getAdminMediaUrl(msg.file_path)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#0A7C8F', textDecoration: 'none', fontWeight: 'bold' }}>📄 {msg.fileName || 'Download File'}</a>
+                                                                            <div style={{ marginTop: '8px', background: 'rgba(8, 28, 46, 0.92)', padding: '12px 16px', borderRadius: '10px', border: '1px solid rgba(56, 189, 248, 0.22)', minWidth: '260px', boxShadow: '0 10px 24px rgba(2, 6, 23, 0.2)' }}>
+                                                                                <a href={getAdminMediaUrl(msg.file_path)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#d8f4ff', textDecoration: 'none', fontWeight: '800', display: 'flex', alignItems: 'center', gap: 8 }}><FileText size={16} color="#38d5ef" /> {msg.fileName || 'Download File'}</a>
                                                                             </div>
                                                                         )}
 
@@ -4814,11 +4903,12 @@ export default function AdminDashboard() {
                                                                                     display: 'flex',
                                                                                     alignItems: 'center',
                                                                                     gap: '12px',
-                                                                                    background: isMe ? 'rgba(13, 159, 183, 0.12)' : 'rgba(13, 159, 183, 0.05)',
+                                                                                    background: 'rgba(8, 28, 46, 0.94)',
                                                                                     padding: '12px 16px',
                                                                                     borderRadius: '16px',
                                                                                     minWidth: '220px',
-                                                                                    boxShadow: isMe ? 'none' : 'inset 0 1px 3px rgba(0,0,0,0.05)'
+                                                                                    border: '1px solid rgba(56, 189, 248, 0.2)',
+                                                                                    boxShadow: '0 10px 24px rgba(2, 6, 23, 0.24)'
                                                                                 }}>
                                                                                     <div
                                                                                         onClick={() => handlePlayAudio(msgId, getAdminMediaUrl(msg.file_path))}
@@ -4845,7 +4935,7 @@ export default function AdminDashboard() {
                                                                                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                                                                                             <Mic size={14} color={isMe ? '#0d9fb7' : '#57b1be'} />
-                                                                                            <span style={{ fontSize: '12px', fontWeight: '600', color: '#525f7f' }}>
+                                                                                            <span style={{ fontSize: '12px', fontWeight: '700', color: '#c7d7e8' }}>
                                                                                                 Voice Message
                                                                                             </span>
                                                                                         </div>
@@ -4861,12 +4951,12 @@ export default function AdminDashboard() {
                                                                         )}
 
                                                                         {msg.type === 'poll' && msg.poll && (
-                                                                            <div className="wa-poll-card" style={{ background: '#ffffff', borderRadius: '12px', padding: '15px', minWidth: '280px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginTop: '8px', marginBottom: '4px', cursor: 'default' }}>
-                                                                                <div style={{ paddingBottom: '10px', fontWeight: 'bold', color: '#111b21', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                            <div className="wa-poll-card" style={{ background: 'rgba(8, 28, 46, 0.94)', borderRadius: '12px', padding: '15px', minWidth: '280px', border: '1px solid rgba(56, 189, 248, 0.22)', boxShadow: '0 10px 24px rgba(2, 6, 23, 0.24)', marginTop: '8px', marginBottom: '4px', cursor: 'default' }}>
+                                                                                <div style={{ paddingBottom: '10px', fontWeight: 'bold', color: '#eaf8ff', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                                                     <List size={20} color="#0EA5BE" />
                                                                                     {msg.poll.question}
                                                                                 </div>
-                                                                                <div style={{ color: '#8696a0', fontSize: '13px', marginBottom: '12px' }}>
+                                                                                <div style={{ color: '#a9c2d8', fontSize: '13px', marginBottom: '12px' }}>
                                                                                     {msg.poll.allowMultipleAnswers ? 'Select one or more' : 'Select one'}
                                                                                 </div>
                                                                                 <div className="wa-poll-options" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -4877,12 +4967,12 @@ export default function AdminDashboard() {
                                                                                         const hasAnyVote = totalVotes > 0;
 
                                                                                         return (
-                                                                                            <div key={idx} style={{ position: 'relative', overflow: 'hidden', padding: '10px', borderRadius: '8px', border: '1px solid #e9edef', background: '#ffffff' }}>
+                                                                                            <div key={idx} style={{ position: 'relative', overflow: 'hidden', padding: '10px', borderRadius: '8px', border: '1px solid rgba(56, 189, 248, 0.18)', background: 'rgba(15, 45, 70, 0.58)' }}>
                                                                                                 {hasAnyVote && (
                                                                                                     <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${percentage}%`, background: 'rgba(14, 165, 190, 0.15)', zIndex: 1 }} />
                                                                                                 )}
                                                                                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
-                                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px', color: '#111b21' }}>
+                                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px', color: '#eaf8ff' }}>
                                                                                                         <div style={{ width: '18px', height: '18px', borderRadius: msg.poll.allowMultipleAnswers ? '4px' : '50%', border: '2px solid #8696a0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}></div>
                                                                                                         {opt.text}
                                                                                                     </div>
@@ -4909,9 +4999,9 @@ export default function AdminDashboard() {
                                                                                     <div
                                                                                         className="wa-contact-msg-card-multiple"
                                                                                         onClick={(e) => { e.stopPropagation(); setViewingContact(cDataArray); }}
-                                                                                        style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '260px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginTop: '8px' }}
+                                                                                        style={{ background: 'rgba(8, 28, 46, 0.94)', borderRadius: '12px', padding: '12px', minWidth: '260px', cursor: 'pointer', border: '1px solid rgba(56, 189, 248, 0.22)', boxShadow: '0 10px 24px rgba(2, 6, 23, 0.24)', marginTop: '8px' }}
                                                                                     >
-                                                                                        <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                                        <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid rgba(56, 189, 248, 0.14)' }}>
                                                                                             <div style={{ position: 'relative', width: 66, height: 44, marginRight: 12, flexShrink: 0 }}>
                                                                                                 <div className="wa-avatar" style={{ position: 'absolute', right: 0, zIndex: 1, width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #ffffff' }}>
                                                                                                     {cDataArray[1].image ? <img src={cDataArray[1].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
@@ -4920,12 +5010,12 @@ export default function AdminDashboard() {
                                                                                                     {cDataArray[0].image ? <img src={cDataArray[0].image} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
                                                                                                 </div>
                                                                                             </div>
-                                                                                            <div style={{ color: '#111b21', fontSize: '15px', fontWeight: 600, lineHeight: '1.3' }}>
+                                                                                            <div style={{ color: '#eaf8ff', fontSize: '15px', fontWeight: 700, lineHeight: '1.3' }}>
                                                                                                 {cDataArray[0].name || cDataArray[0].mobile} and {cDataArray.length - 1} other contact{cDataArray.length > 2 ? 's' : ''}
                                                                                             </div>
                                                                                         </div>
                                                                                         <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
-                                                                                            <button style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>
+                                                                                            <button style={{ background: 'none', border: 'none', color: '#38d5ef', padding: '10px 0', fontSize: '14px', fontWeight: '700', cursor: 'pointer' }}>
                                                                                                 View all
                                                                                             </button>
                                                                                         </div>
@@ -4938,20 +5028,20 @@ export default function AdminDashboard() {
                                                                                 <div
                                                                                     className="wa-contact-msg-card"
                                                                                     onClick={(e) => { e.stopPropagation(); setViewingContact(cData); }}
-                                                                                    style={{ background: '#ffffff', borderRadius: '12px', padding: '12px', minWidth: '240px', cursor: 'pointer', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', marginTop: '8px' }}
+                                                                                    style={{ background: 'rgba(8, 28, 46, 0.94)', borderRadius: '12px', padding: '12px', minWidth: '240px', cursor: 'pointer', border: '1px solid rgba(56, 189, 248, 0.22)', boxShadow: '0 10px 24px rgba(2, 6, 23, 0.24)', marginTop: '8px' }}
                                                                                 >
-                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 12, borderBottom: '1px solid rgba(56, 189, 248, 0.14)' }}>
                                                                                         <div className="wa-avatar" style={{ width: 44, height: 44, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%' }}>
                                                                                             {cData.image ? <img src={cData.image} alt={cData.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
                                                                                         </div>
-                                                                                        <div style={{ color: '#111b21', fontSize: '16px', fontWeight: 600 }}>
+                                                                                        <div style={{ color: '#eaf8ff', fontSize: '16px', fontWeight: 700 }}>
                                                                                             {cData.name || 'Contact'}
                                                                                         </div>
                                                                                     </div>
                                                                                     <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
                                                                                         <button
                                                                                             className="wa-contact-card-action"
-                                                                                            style={{ background: 'none', border: 'none', color: '#027EB5', padding: '10px 0', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+                                                                                            style={{ background: 'none', border: 'none', color: '#38d5ef', padding: '10px 0', fontSize: '14px', fontWeight: '700', cursor: 'pointer' }}
                                                                                         >
                                                                                             View Info
                                                                                         </button>
@@ -4961,15 +5051,15 @@ export default function AdminDashboard() {
                                                                         })()}
 
                                                                         {msg.type === 'event' && msg.event && (
-                                                                            <div className="wa-event-card" style={{ background: '#ffffff', borderRadius: '12px', overflow: 'visible', width: '280px', maxWidth: '100%', cursor: 'default', opacity: msg.event.cancelled ? 0.7 : 1, marginTop: '8px', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
-                                                                                <div style={{ background: 'rgba(14, 165, 190, 0.05)', padding: '14px 16px', color: '#111b21', position: 'relative', borderRadius: '12px' }}>
+                                                                            <div className="wa-event-card" style={{ background: 'rgba(8, 28, 46, 0.94)', borderRadius: '12px', overflow: 'visible', width: '280px', maxWidth: '100%', cursor: 'default', opacity: msg.event.cancelled ? 0.7 : 1, marginTop: '8px', border: '1px solid rgba(56, 189, 248, 0.22)', boxShadow: '0 10px 24px rgba(2, 6, 23, 0.24)' }}>
+                                                                                <div style={{ background: 'rgba(14, 165, 190, 0.08)', padding: '14px 16px', color: '#eaf8ff', position: 'relative', borderRadius: '12px' }}>
                                                                                     <div style={{ display: 'flex', gap: '14px' }}>
-                                                                                        <div style={{ background: 'white', border: '1px solid #e9edef', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                                        <div style={{ background: 'rgba(15, 45, 70, 0.72)', border: '1px solid rgba(56, 189, 248, 0.22)', width: '48px', height: '48px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                                                                             <Calendar size={24} color="#0EA5BE" />
                                                                                         </div>
                                                                                         <div style={{ flex: 1, minWidth: 0 }}>
-                                                                                            <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#111b21' }}>{msg.event.name}</div>
-                                                                                            <div style={{ fontSize: '14px', color: '#667781' }}>
+                                                                                            <div style={{ fontSize: '17px', fontWeight: 'bold', marginBottom: '4px', textDecoration: msg.event.cancelled ? 'line-through' : 'none', wordBreak: 'break-word', color: '#eaf8ff' }}>{msg.event.name}</div>
+                                                                                            <div style={{ fontSize: '14px', color: '#a9c2d8' }}>
                                                                                                 {formatEventTimeString(msg.event.startDate, msg.event.startTime, msg.event.endDate, msg.event.endTime)}
                                                                                             </div>
                                                                                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
@@ -4983,7 +5073,7 @@ export default function AdminDashboard() {
                                                                                         </div>
                                                                                     </div>
                                                                                 </div>
-                                                                                <div style={{ padding: '12px 0', margin: '0 16px', borderTop: '1px solid #f0f2f5', textAlign: 'center' }}>
+                                                                                <div style={{ padding: '12px 0', margin: '0 16px', borderTop: '1px solid rgba(56, 189, 248, 0.14)', textAlign: 'center' }}>
                                                                                     <span style={{ color: msg.event.cancelled ? '#667781' : '#0EA5BE', fontWeight: '600', fontSize: '15px' }}>
                                                                                         {msg.event.cancelled ? 'Event cancelled' : ''}
                                                                                     </span>
@@ -4991,9 +5081,9 @@ export default function AdminDashboard() {
                                                                                         <button
                                                                                             onClick={(e) => { e.stopPropagation(); setSelectedEventMsg(msg); }}
                                                                                             style={{
-                                                                                                cursor: 'pointer', padding: '6px 12px', borderRadius: '12px', background: 'rgba(15, 181, 208, 0.1)',
+                                                                                                cursor: 'pointer', padding: '6px 12px', borderRadius: '12px', background: 'rgba(15, 181, 208, 0.16)',
                                                                                                 display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0FB5D0',
-                                                                                                transition: 'all 0.2s', border: '1px solid rgba(0,0,0,0.05)',
+                                                                                                transition: 'all 0.2s', border: '1px solid rgba(56, 189, 248, 0.16)',
                                                                                                 gap: '6px', fontSize: '12px', fontWeight: 'bold', marginLeft: '12px'
                                                                                             }}
                                                                                         >
@@ -5175,6 +5265,8 @@ export default function AdminDashboard() {
                                 onPointerDown={(event) => {
                                     event.preventDefault();
                                     event.currentTarget.setPointerCapture?.(event.pointerId);
+                                    reviewScrollControlDragRef.current = { startY: event.clientY, moved: false };
+                                    isDraggingReviewScrollControlRef.current = true;
                                     setIsDraggingReviewScrollControl(true);
                                 }}
                             >
@@ -5365,7 +5457,8 @@ export default function AdminDashboard() {
                                     </div>
                                     <div style={{ padding: '14px 16px' }}>
                                         {unethicalModalUser.alerts.map((alert, idx) => {
-                                            const receiver = alert.receiverId ? (users.find(u => (u.id === alert.receiverId || u._id === alert.receiverId)) || { name: 'Unknown User' }) : { name: 'AI Assistant' };
+                                            const chatLabel = getAdminAlertChatLabel(alert, users);
+                                            const previewContent = formatAdminAlertContent(alert);
                                             return (
                                                 <div
                                                     key={idx}
@@ -5383,25 +5476,25 @@ export default function AdminDashboard() {
                                                     onMouseOver={e => e.currentTarget.style.transform = 'translateY(-2px)'}
                                                     onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}
                                                 >
-                                                    <div style={{ fontSize: '0.92rem', color: OFFICIAL_TEXT_PRIMARY, marginBottom: '10px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                    <div style={{ fontSize: '0.92rem', color: '#26323f', marginBottom: '10px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                                         {alert.type === 'audio' ? (
                                                             <>
                                                                 <Mic size={14} color="#0A7C8F" />
                                                                 Voice Message ({formatVoiceTime(alert.duration)})
                                                             </>
                                                         ) : (
-                                                            alert.content && (alert.content.length > 60 ? alert.content.substring(0, 60) + '...' : alert.content)
+                                                            previewContent
                                                         )}
                                                     </div>
                                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                                        <div style={{ fontSize: '0.76rem', color: OFFICIAL_TEXT_MUTED, fontWeight: '700' }}>
-                                                            Chatted with: <span style={{ color: '#2bc9e4' }}>{receiver.name}</span>
+                                                        <div style={{ fontSize: '0.76rem', color: '#374151', fontWeight: '700' }}>
+                                                            Chatted with: <span style={{ color: '#1f2937' }}>{chatLabel}</span>
                                                         </div>
                                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                                            <div style={{ fontSize: '0.76rem', fontWeight: '800', color: '#ff7a8f', lineHeight: 1.45, paddingRight: 12 }}>
+                                                            <div style={{ fontSize: '0.76rem', fontWeight: '800', color: '#334155', lineHeight: 1.45, paddingRight: 12 }}>
                                                                 Reason: {alert.reason || 'Unethical Content Detected'}
                                                             </div>
-                                                            <div style={{ fontSize: '0.7rem', color: OFFICIAL_TEXT_MUTED }}>
+                                                            <div style={{ fontSize: '0.7rem', color: '#475569' }}>
                                                                 {new Date(alert.createdAt).toLocaleDateString()}
                                                             </div>
                                                         </div>

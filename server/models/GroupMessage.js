@@ -35,6 +35,8 @@ const groupMessageSchema = new mongoose.Schema({
     is_forwarded: { type: Boolean, default: false },
     forward_count: { type: Number, default: 0 },
     is_read: { type: Boolean, default: false },
+    is_flagged: { type: Boolean, default: false },
+    flag_reason: { type: String, default: '' },
     
     // E2EE specific fields
     ciphertext: { type: String }, // Encrypted with Sender Key

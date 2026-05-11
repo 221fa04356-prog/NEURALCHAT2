@@ -302,7 +302,7 @@ const DelayedMessageImage = memo(({ messageKey, src, msg, retryUrl, onLoaded, on
     useEffect(() => {
         setShowLoading(false);
         setIsLoaded(false);
-        const timer = setTimeout(() => setShowLoading(true), 360);
+        const timer = setTimeout(() => setShowLoading(true), 650);
         return () => clearTimeout(timer);
     }, [src]);
 
@@ -910,13 +910,34 @@ const MessageList = memo(({
         const items = [];
         let currentGroupDate = null;
 
+        const visibleMessageKeys = new Set();
         const filteredMessages = (messages || []).filter(msg => {
             if (!msg) return false;
             if (!messageSearchQuery) return true;
             return (msg.content || '').toLowerCase().includes(messageSearchQuery.toLowerCase());
+        }).filter((msg) => {
+            const content = String(msg?.content || '').trim().toLowerCase();
+            const kind = msg?.metadata?.kind ||
+                (content.includes('changed the community description') ? 'community_description_update' : '') ||
+                (content.includes('changed the community name') ? 'community_name_update' : '');
+            if (kind !== 'community_description_update' && kind !== 'community_name_update') return true;
+            const communityId = String(msg?.metadata?.communityId || msg?.metadata?.community_id || '');
+            const senderId = String(msg?.sender_id?._id || msg?.sender_id?.id || msg?.sender_id || '');
+            const minuteBucket = Math.floor(new Date(msg?.created_at || msg?.createdAt || Date.now()).getTime() / 60000);
+            const keys = [
+                [kind, communityId, senderId, content, minuteBucket].join(':'),
+                [kind, communityId || 'active-community', content, minuteBucket].join(':'),
+                [kind, content, minuteBucket].join(':'),
+                [kind, communityId || 'active-community', content].join(':'),
+                [kind, content].join(':')
+            ];
+            if (keys.some(key => visibleMessageKeys.has(key))) return false;
+            keys.forEach(key => visibleMessageKeys.add(key));
+            return true;
         });
 
         if (preMessageContent) {
+            items.push({ type: 'topSpacer' });
             items.push({ type: 'preMessageContent' });
         }
 
@@ -976,6 +997,10 @@ const MessageList = memo(({
 
         if (item.type === 'preMessageContent') {
             return preMessageContent;
+        }
+
+        if (item.type === 'topSpacer') {
+            return <div className="wa-message-list-top-spacer" aria-hidden="true" />;
         }
 
         if (item.type === 'typing') {
