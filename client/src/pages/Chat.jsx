@@ -13163,18 +13163,18 @@ export default function Chat() {
                         onClick={(e) => e.stopPropagation()}
                         style={{ background: '#ffffff', width: '100%', maxWidth: '360px', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 8px 30px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', maxHeight: '80vh' }}
                     >
-                        <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(0,0,0,0.08)', background: '#f3f4f6', display: 'flex', alignItems: 'center', boxSizing: 'border-box', position: 'relative', justifyContent: 'center' }}>
-                            <button onClick={() => setViewingContact(null)} style={{ background: 'none', border: 'none', display: 'flex', alignItems: 'center', cursor: 'pointer', color: '#54656f', padding: 0, position: 'absolute', left: 20 }}>
+                        <div className="wa-contact-detail-header" style={{ padding: '16px 20px', borderBottom: '1px solid rgba(148, 163, 184, 0.18)', background: 'rgba(15, 23, 42, 0.92)', display: 'flex', alignItems: 'center', boxSizing: 'border-box', position: 'relative', justifyContent: 'center' }}>
+                            <button onClick={() => setViewingContact(null)} style={{ background: 'none', border: 'none', display: 'flex', alignItems: 'center', cursor: 'pointer', color: '#a9c2d8', padding: 0, position: 'absolute', left: 20 }}>
                                 <ArrowLeft size={24} />
                             </button>
-                            <span style={{ fontSize: 18, color: '#111b21', fontWeight: 500, whiteSpace: 'nowrap' }}>{viewingContact.length} Contacts</span>
+                            <span className="wa-contact-detail-title" style={{ fontSize: 18, color: '#f8fafc', fontWeight: 700, whiteSpace: 'nowrap' }}>{viewingContact.length} Contacts</span>
                         </div>
                         <div style={{ overflowY: 'auto', flex: 1 }}>
                             {viewingContact.map((c, i) => (
                                 <div key={i} style={{ padding: '16px 20px', borderBottom: i < viewingContact.length - 1 ? '6px solid #f3f4f6' : 'none' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-                                        <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 15, overflow: 'hidden', flexShrink: 0 }}>
-                                            {c.image || c.profile_photo ? <img src={c.image || c.profile_photo} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <UserIcon size={24} color="#8696a0" />}
+                                        <div className="wa-contact-detail-initial-avatar" style={{ width: 44, height: 44, borderRadius: '50%', background: 'linear-gradient(145deg, rgba(15, 42, 67, 0.98), rgba(20, 36, 61, 0.98))', border: '1px solid rgba(56, 189, 248, 0.28)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 15, overflow: 'hidden', flexShrink: 0 }}>
+                                            {c.image || c.profile_photo ? <img src={c.image || c.profile_photo} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ color: '#38bdf8', fontSize: 21, fontWeight: 800, lineHeight: 1 }}>{String(c.name || c.mobile || 'C').trim().charAt(0).toUpperCase()}</span>}
                                         </div>
                                         <div style={{ flex: 1, minWidth: 0 }}>
                                             <div style={{ fontSize: 16, color: '#111b21', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -13182,8 +13182,8 @@ export default function Chat() {
                                             </div>
                                         </div>
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                                        <div style={{ display: 'flex', flexDirection: 'column', marginRight: 15 }}>
+                                    <div className="wa-contact-detail-action-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 28, width: '100%' }}>
+                                        <div className="wa-contact-detail-phone-block" style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: '0 0 108px' }}>
                                             <div style={{ fontSize: 15, color: '#111b21', fontWeight: 500 }}>
                                                 {c.mobile || '+91 00000 00000'}
                                             </div>
@@ -13193,7 +13193,8 @@ export default function Chat() {
                                         </div>
                                         <button
                                             onClick={() => { handleUserSelect({ ...c, id: c._id }); setViewingContact(null); }}
-                                            style={{ background: 'none', border: 'none', color: '#027EB5', fontSize: '15px', fontWeight: 'bold', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}
+                                            className="wa-contact-detail-message-btn"
+                                            style={{ background: 'transparent', border: 'none', borderRadius: 0, color: '#027EB5', fontSize: '15px', fontWeight: 'bold', cursor: 'pointer', padding: 0, display: 'inline-flex', alignItems: 'center', gap: 7, flex: '0 0 auto', width: 'auto' }}
                                         >
                                             <MessageSquare size={16} />
                                             Message
@@ -16565,7 +16566,7 @@ export default function Chat() {
                 zIndex: 1000
             }}>
                 {isImagePreview && (
-                    <div className={`wa-edit-preview-bubble ${isMeEditing ? 'outgoing' : 'incoming'}`} style={{
+                    <div className="wa-edit-preview-bubble" style={{
                         height: 56,
                         padding: '0 18px',
                         background: 'transparent',
@@ -17525,7 +17526,7 @@ export default function Chat() {
                                     </div>
                                 )}
                             </div>
-                            <div style={{
+                            <div className="wa-inline-editor-toolbar wa-inline-paint-toolbar" style={{
                                 display: inlineImageEditMode && inlinePaintActive ? 'flex' : 'none',
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -17645,7 +17646,7 @@ export default function Chat() {
                                     </button>
                                 ))}
                                 {inlinePaintPaletteOpen && (
-                                    <div style={{
+                                    <div className="wa-inline-color-popover" style={{
                                         position: 'absolute',
                                         top: 'calc(100% + 10px)',
                                         left: '50%',
@@ -17686,7 +17687,7 @@ export default function Chat() {
                                     </div>
                                 )}
                             </div>
-                            <div style={{
+                            <div className="wa-inline-editor-toolbar wa-inline-text-toolbar" style={{
                                 display: inlineImageEditMode && inlineTextActive ? 'flex' : 'none',
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -17763,7 +17764,7 @@ export default function Chat() {
                                         <ChevronUp size={22} strokeWidth={2.4} />
                                     </button>
                                     {inlineTextFontOpen && (
-                                        <div style={{ position: 'absolute', top: 'calc(100% + 10px)', left: '50%', transform: 'translateX(-50%)', minWidth: 322, background: '#ffffff', color: '#0f172a', borderRadius: 18, boxShadow: '0 16px 36px rgba(2, 6, 23, 0.28)', overflow: 'hidden', zIndex: 20, padding: '14px 14px 12px' }}>
+                                        <div className="wa-inline-font-popover" style={{ position: 'absolute', top: 'calc(100% + 10px)', left: '50%', transform: 'translateX(-50%)', minWidth: 322, background: '#ffffff', color: '#0f172a', borderRadius: 18, boxShadow: '0 16px 36px rgba(2, 6, 23, 0.28)', overflow: 'hidden', zIndex: 20, padding: '14px 14px 12px' }}>
                                             {[
                                                 { name: 'Sans Serif', family: 'Arial, sans-serif', weight: 400 },
                                                 { name: 'Serif', family: 'Georgia, serif', weight: 400 },
@@ -17819,7 +17820,7 @@ export default function Chat() {
                                     <Trash2 size={24} />
                                 </button>
                                 {inlineTextPaletteOpen && (
-                                    <div style={{ position: 'absolute', top: 'calc(100% + 10px)', left: '50%', transform: 'translateX(-50%)', width: 'min(420px, calc(100vw - 48px))', padding: 0, borderRadius: 14, background: '#ffffff', boxShadow: '0 18px 40px rgba(2, 6, 23, 0.28)', overflow: 'hidden', zIndex: 20, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+                                    <div className="wa-inline-color-popover" style={{ position: 'absolute', top: 'calc(100% + 10px)', left: '50%', transform: 'translateX(-50%)', width: 'min(420px, calc(100vw - 48px))', padding: 0, borderRadius: 14, background: '#ffffff', boxShadow: '0 18px 40px rgba(2, 6, 23, 0.28)', overflow: 'hidden', zIndex: 20, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
                                         <div title="Rainbow color picker" role="slider" tabIndex={0} onPointerDown={handleInlineRainbowPointer} onPointerMove={(event) => { if (event.buttons === 1) handleInlineRainbowPointer(event); }} style={{ display: 'block', position: 'relative', height: 136, width: '100%', cursor: 'crosshair', background: 'linear-gradient(90deg, #ff4d4f 0%, #ffec3d 16%, #52d23d 32%, #33ceff 48%, #3b82f6 64%, #a855f7 80%, #ff2d8d 100%)' }}>
                                             <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.92) 100%)', pointerEvents: 'none' }} />
                                             <span style={{ position: 'absolute', left: `${inlineRainbowPoint.x * 100}%`, top: `${inlineRainbowPoint.y * 100}%`, width: 22, height: 22, borderRadius: '50%', transform: 'translate(-50%, -50%)', background: inlinePaintColor, border: '3px solid #ffffff', boxShadow: '0 0 0 2px rgba(15, 23, 42, 0.72), 0 6px 14px rgba(2, 6, 23, 0.34)', pointerEvents: 'none' }} />
@@ -18712,6 +18713,7 @@ export default function Chat() {
             const activeTargetId = activeTarget._id || activeTarget.id;
             const currentGroup = groups.find(g => String(g._id || g.id) === String(activeTargetId)) || activeTarget;
             const isFavoriteGroup = !!currentGroup?.isFavorite;
+            const groupStarredCount = (groupMessages || []).filter(m => m.is_starred && !isDeletedForCurrentUser(m)).length;
 
             const bgColor = 'transparent';
             const itemBgColor = 'transparent';
@@ -18914,6 +18916,7 @@ export default function Chat() {
                                     <span style={{ color: textColor, fontSize: 16 }}>Starred messages</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 700 }}>{groupStarredCount}</span>
                                     <ChevronRight size={20} color="#38bdf8" />
                                 </div>
                             </div>
@@ -19283,7 +19286,7 @@ export default function Chat() {
                         }}>
                             <div className="wa-setting-icon"><Star size={20} color="#38bdf8" /></div>
                             <div className="wa-setting-text" style={{ color: '#f8fafc', flex: 1 }}>{t('contact_info.starred_messages')}</div>
-                            <span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 600 }}>{messages.filter(m => m.is_starred && !isDeletedForCurrentUser(m)).length}</span>
+                            <span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 600 }}>{(selectedGroup ? groupMessages : messages).filter(m => m.is_starred && !isDeletedForCurrentUser(m)).length}</span>
                             <ChevronRight size={20} color="#38bdf8" style={{ transform: 'none' }} />
                         </div>
                         <div className="wa-setting-item clickable" onClick={() => {
@@ -20443,7 +20446,7 @@ export default function Chat() {
         return <ImageViewer
             viewingImage={viewingImage}
             setViewingImage={setViewingImage}
-            messages={messages}
+            messages={(selectedGroup || selectedCommunity) ? groupMessages : messages}
             selectedUser={selectedUser}
             setMessages={setMessages}
             setForwardSelectedMsgs={setForwardSelectedMsgs}
@@ -20596,7 +20599,8 @@ export default function Chat() {
         }, [viewingImage?._id, viewingImage?.file_path, viewingImage?.fileName, viewingImage?.type]);
 
         const viewableMsgs = messages.filter(m => m.type === 'image' || m.type === 'video'); // Removed 'file' to prevent navigation to docs
-        const currentIndex = viewableMsgs.findIndex(m => m._id === viewingImage._id);
+        const currentViewingId = String(viewingImage?._id || viewingImage?.id || '');
+        const currentIndex = viewableMsgs.findIndex(m => String(m._id || m.id || '') === currentViewingId);
 
         const handleNext = (e) => {
             e.stopPropagation();
@@ -21070,8 +21074,8 @@ export default function Chat() {
                     <div className="wa-viewer-thumbnails" onClick={(e) => e.stopPropagation()}>
                         {viewableMsgs.filter(m => m.type === 'image' || m.type === 'video').map((msg) => (
                             <div
-                                key={msg._id}
-                                className={`wa-viewer-thumb ${msg._id === viewingImage._id ? 'active' : ''}`}
+                                key={msg._id || msg.id || `${msg.file_path}-${msg.created_at}`}
+                                className={`wa-viewer-thumb ${String(msg._id || msg.id || '') === currentViewingId ? 'active' : ''}`}
                                 onClick={() => setViewingImage(msg)}
                             >
                                 {msg.type === 'image' ? (
@@ -21559,7 +21563,10 @@ export default function Chat() {
                                 </div>
                                 <div className="wa-dropdown-item" onClick={() => { setIsGlobalStarredOpen(true); setOpenDropdown(null); }}>
                                     <Star size={18} style={{ marginRight: 12, color: '#38bdf8' }} />
-                            <span style={{ flex: 1 }}>Starred messages</span>
+                                    <span style={{ flex: 1 }}>Starred messages</span>
+                                    {globalStarredCount > 0 && (
+                                        <span className="wa-menu-count-badge">{globalStarredCount}</span>
+                                    )}
                                 </div>
                                 <div className="wa-dropdown-item" onClick={() => { setIsArchivedChatsOpen(true); setOpenDropdown(null); }}>
                                     <Archive size={18} style={{ marginRight: 12, color: '#38bdf8' }} /> Archived
@@ -22974,6 +22981,7 @@ export default function Chat() {
                             {
                                 icon: <Star size={20} />,
                                 label: 'Starred Messages',
+                                count: communityStarredCount,
                                 onClick: () => {
                                     setIsStarredMessagesOpen(true);
                                     setIsCommunityInfoOpen(false);
@@ -23014,6 +23022,9 @@ export default function Chat() {
                             >
                                 <div style={{ color: '#38bdf8', marginRight: 20 }}>{item.icon}</div>
                                 <span style={{ flex: 1, color: textColor, fontSize: 15 }}>{item.label}</span>
+                                {typeof item.count === 'number' && (
+                                    <span style={{ color: '#94a3b8', fontSize: 14, fontWeight: 700, marginRight: 8 }}>{item.count}</span>
+                                )}
                                 {item.chevron !== false && <ChevronRight size={20} color="#38bdf8" />}
                             </div>
                         ))}
@@ -26260,8 +26271,27 @@ export default function Chat() {
         return true;
     };
 
+    const getClipboardFiles = (clipboardData) => {
+        const directFiles = Array.from(clipboardData?.files || []);
+        const itemFiles = Array.from(clipboardData?.items || [])
+            .filter((item) => item.kind === 'file')
+            .map((item) => item.getAsFile())
+            .filter(Boolean);
+
+        if (!itemFiles.length) return directFiles;
+        if (!directFiles.length) return itemFiles;
+
+        const seen = new Set();
+        return [...directFiles, ...itemFiles].filter((candidate) => {
+            const sig = `${candidate.name}|${candidate.size}|${candidate.lastModified}|${candidate.type}`;
+            if (seen.has(sig)) return false;
+            seen.add(sig);
+            return true;
+        });
+    };
+
     const handlePaste = async (e) => {
-        const clipboardFiles = Array.from(e.clipboardData?.files || []);
+        const clipboardFiles = getClipboardFiles(e.clipboardData);
         if (!clipboardFiles.length) {
             const clipboardText = e.clipboardData?.getData('text/plain') || '';
             const payload = decodeClipboardPayloadText(clipboardText);
@@ -26308,7 +26338,7 @@ export default function Chat() {
 
         const onWindowPaste = async (event) => {
             if (event.defaultPrevented) return;
-            const files = Array.from(event.clipboardData?.files || []);
+            const files = getClipboardFiles(event.clipboardData);
             if (!files.length) {
                 const clipboardText = event.clipboardData?.getData('text/plain') || '';
                 const payload = decodeClipboardPayloadText(clipboardText);
