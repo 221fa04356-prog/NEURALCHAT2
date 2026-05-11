@@ -1717,6 +1717,177 @@ html {
     display: none;
 }
 
+.wa-three-person-icon {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+}
+
+.wa-three-person-icon span {
+    position: absolute;
+    display: block;
+    background: currentColor;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.wa-three-person-head {
+    border-radius: 50%;
+}
+
+.wa-three-person-head.main {
+    width: 25%;
+    height: 25%;
+    left: 50%;
+    top: 12%;
+    transform: translateX(-50%);
+    z-index: 3;
+}
+
+.wa-three-person-head.side {
+    width: 22%;
+    height: 22%;
+    top: 23%;
+    opacity: 0.9;
+}
+
+.wa-three-person-head.side.left {
+    left: 16%;
+}
+
+.wa-three-person-head.side.right {
+    right: 16%;
+}
+
+.wa-three-person-body {
+    border-radius: 999px 999px 8px 8px;
+}
+
+.wa-three-person-body.main {
+    width: 40%;
+    height: 28%;
+    left: 50%;
+    bottom: 13%;
+    transform: translateX(-50%);
+    z-index: 4;
+}
+
+.wa-three-person-body.side {
+    width: 34%;
+    height: 23%;
+    bottom: 13%;
+    z-index: 1;
+    opacity: 0.9;
+}
+
+.wa-three-person-body.side.left {
+    left: 9%;
+}
+
+.wa-three-person-body.side.right {
+    right: 9%;
+}
+
+.wa-three-person-body.side.left::after,
+.wa-three-person-body.side.right::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: currentColor;
+    border-radius: inherit;
+}
+
+.wa-community-icon-plate {
+    color: #38bdf8 !important;
+    background:
+        linear-gradient(145deg, rgba(56, 189, 248, 0.18), rgba(14, 165, 190, 0.08)),
+        rgba(15, 23, 42, 0.72) !important;
+    border: 1px solid rgba(56, 189, 248, 0.28) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 10px 24px rgba(2, 6, 23, 0.22) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.wa-community-icon-plate .wa-three-person-icon {
+    color: inherit !important;
+}
+
+.wa-community-icon-plate-large {
+    width: 118px;
+    height: 118px;
+    border-radius: 24px;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.wa-community-reference-icon {
+    color: #7dd3fc !important;
+    background:
+        radial-gradient(circle at 34% 24%, rgba(255, 255, 255, 0.18), transparent 34%),
+        linear-gradient(145deg, rgba(56, 189, 248, 0.26), rgba(37, 99, 235, 0.18)),
+        rgba(15, 23, 42, 0.8) !important;
+    border: 1px solid rgba(125, 211, 252, 0.34) !important;
+    border-radius: 16px !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 12px 28px rgba(2, 6, 23, 0.28) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+}
+
+.wa-community-reference-icon .wa-three-person-icon {
+    color: inherit !important;
+}
+
+.wa-group-reference-icon {
+    color: #7dd3fc !important;
+    border-radius: 16px !important;
+}
+
+.wa-group-reference-icon .wa-welcome-camera-badge {
+    right: -2px !important;
+    bottom: -2px !important;
+}
+
+.wa-panel-encryption-line {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    max-width: min(100%, 320px);
+    margin-top: 8px;
+    color: #cbd5e1;
+    font-size: 12px;
+    line-height: 1.4;
+    text-align: center;
+}
+
+.wa-panel-encryption-line svg {
+    flex: 0 0 auto;
+    color: #38bdf8;
+}
+
+.wa-community-camera-badge {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0EA5BE;
+    border: 3px solid rgba(15, 23, 42, 0.95);
+    box-shadow: 0 10px 24px rgba(14, 165, 190, 0.3);
+}
+
 .wa-chat-list-end-note-encryption {
     width: 100%;
     display: inline-flex;
@@ -13696,6 +13867,117 @@ background: rgba(56, 189, 248, 0.2) !important;
     background: rgba(15, 23, 42, 0.72) !important;
     border: 1px solid rgba(56, 189, 248, 0.16) !important;
     color: #cbd5e1 !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+}
+
+.wa-group-welcome-info-inline {
+    display: inline-flex !important;
+    gap: 6px !important;
+    width: auto !important;
+    max-width: 100% !important;
+    margin: 0 auto 14px !important;
+    padding: 8px 12px !important;
+    line-height: 1.35 !important;
+}
+
+.wa-group-welcome-info-inline svg {
+    flex: 0 0 auto !important;
+    margin: 2px 0 0 !important;
+}
+
+.wa-community-welcome-created {
+    width: fit-content;
+    min-width: 108px;
+    padding: 5px 14px;
+    color: #e2e8f0;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.25;
+    margin: 0 auto 14px;
+    text-align: center;
+    background: rgba(15, 23, 42, 0.9);
+    border: 1px solid rgba(56, 189, 248, 0.18);
+    border-radius: 8px;
+    box-shadow: 0 10px 24px rgba(2, 6, 23, 0.28);
+    backdrop-filter: blur(12px) saturate(135%);
+    -webkit-backdrop-filter: blur(12px) saturate(135%);
+}
+
+.wa-community-welcome-encryption {
+    width: min(580px, calc(100% - 48px));
+    margin: 0 auto 18px;
+    padding: 10px 18px;
+    border-radius: 8px;
+    background:
+        linear-gradient(180deg, rgba(56, 189, 248, 0.12), rgba(14, 165, 190, 0.06)),
+        rgba(15, 23, 42, 0.86);
+    border: 1px solid rgba(56, 189, 248, 0.18);
+    color: #d7dee8;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 8px;
+    text-align: center;
+    line-height: 1.45;
+    font-size: 16px;
+    box-shadow: 0 16px 32px rgba(2, 6, 23, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(12px) saturate(135%);
+    -webkit-backdrop-filter: blur(12px) saturate(135%);
+}
+
+.wa-community-welcome-encryption svg {
+    flex: 0 0 auto;
+    margin-top: 4px;
+    color: #38bdf8;
+}
+
+.wa-community-welcome-card {
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(8, 28, 46, 0.86)) !important;
+    border: 1px solid rgba(56, 189, 248, 0.18) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 20px 46px rgba(2, 6, 23, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+    color: #f8fafc !important;
+    overflow: hidden !important;
+    backdrop-filter: blur(12px) saturate(135%) !important;
+    -webkit-backdrop-filter: blur(12px) saturate(135%) !important;
+}
+
+.wa-community-welcome-card .wa-group-welcome-title {
+    color: #f8fafc !important;
+    font-weight: 700 !important;
+}
+
+.wa-community-welcome-card .wa-group-welcome-subtitle {
+    color: #cbd5e1 !important;
+}
+
+.wa-community-welcome-card .wa-group-welcome-action {
+    display: block !important;
+    width: 100% !important;
+    margin-top: 0 !important;
+    padding: 16px 12px !important;
+    border-top: 1px solid rgba(56, 189, 248, 0.14) !important;
+    color: #38bdf8 !important;
+    background: rgba(15, 23, 42, 0.34) !important;
+}
+
+.wa-group-chat-welcome-card .wa-group-welcome-action-row {
+    width: 100% !important;
+    margin-top: 0 !important;
+    padding: 12px !important;
+    border-top: 1px solid rgba(56, 189, 248, 0.14) !important;
+    background: rgba(15, 23, 42, 0.34) !important;
+    box-sizing: border-box;
+    gap: 8px !important;
+}
+
+.wa-group-chat-welcome-card .wa-welcome-btn {
+    flex: 1 1 auto;
+    min-width: min(100%, 122px);
+    justify-content: center;
+    margin: 0 !important;
 }
 
 .wa-typing-link-preview-full {
@@ -15017,6 +15299,29 @@ background: rgba(56, 189, 248, 0.2) !important;
     cursor: default !important;
 }
 
+.wa-profile-photo-picker,
+.wa-profile-photo-picker img,
+.wa-profile-photo-picker .wa-theme-initial-avatar,
+.wa-profile-photo-picker .wa-theme-initial-avatar span {
+    cursor: pointer !important;
+}
+
+.wa-profile-photo-picker {
+    border-radius: 50%;
+    outline: none;
+    transition: transform 0.18s ease, filter 0.18s ease;
+}
+
+.wa-profile-photo-picker:hover,
+.wa-profile-photo-picker:focus-visible {
+    transform: translateY(-1px);
+    filter: drop-shadow(0 14px 28px rgba(56, 189, 248, 0.18));
+}
+
+.wa-profile-photo-picker:focus-visible {
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.32);
+}
+
 .wa-contact-info-panel:not(.wa-new-group-drawer) .wa-info-danger-action,
 .wa-contact-info-panel:not(.wa-new-group-drawer) .wa-info-danger-action:hover {
     background: transparent !important;
@@ -15024,7 +15329,7 @@ background: rgba(56, 189, 248, 0.2) !important;
     box-shadow: none !important;
 }
 
-/* Instant right/left drawer navigation. Back should feel immediate everywhere. */
+/* Soft panel navigation: short fade/slide so drawers and side panels do not pop in abruptly. */
 .wa-search-sidebar,
 .wa-info-panel,
 .wa-contact-info-panel,
@@ -15032,7 +15337,90 @@ background: rgba(56, 189, 248, 0.2) !important;
 .wa-starred-messages-panel,
 .wa-main-chat,
 .wa-main-chat-with-panel {
-    transition-duration: 0s !important;
+    transition-duration: 0.24s !important;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+
+.wa-search-sidebar,
+.wa-info-panel,
+.wa-contact-info-panel,
+.wa-starred-messages-panel {
+    opacity: 0;
+    transform: translateX(14px);
+    pointer-events: none;
+    transition-property: right, opacity, transform, margin-right !important;
+}
+
+.wa-search-sidebar.active,
+.wa-info-panel.active,
+.wa-contact-info-panel.active,
+.wa-starred-messages-panel.active {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+}
+
+.wa-profile-drawer {
+    opacity: 0;
+    transform: translateX(-14px);
+    pointer-events: none;
+    transition-property: left, opacity, transform !important;
+}
+
+.wa-profile-drawer.active,
+.wa-profile-drawer.open {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+}
+
+.wa-mute-modal-overlay,
+.wa-forward-modal-overlay,
+.wa-encryption-modal-overlay,
+.wa-contact-detail-modal-overlay,
+.wa-view-once-modal-overlay,
+.wa-clear-chat-modal-overlay,
+.wa-privacy-modal-backdrop,
+.wa-settings-overlay,
+.wa-member-add-overlay,
+.wa-profile-photo-source-overlay,
+.wa-community-groups-popup-overlay.active {
+    animation: wa-fade-in 0.18s ease-out both;
+}
+
+.wa-mute-modal,
+.wa-forward-modal,
+.wa-encryption-modal,
+.wa-contact-detail-modal,
+.wa-view-once-modal-content,
+.wa-clear-chat-modal,
+.wa-privacy-modal,
+.wa-lang-confirm-modal,
+.wa-member-add-modal,
+.wa-member-add-confirm-modal,
+.wa-profile-photo-source-modal,
+.wa-community-groups-popup {
+    animation: wa-pop-fade-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes wa-fade-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes wa-pop-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.985);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 /* Dark glass message cards for rich chat objects. */
@@ -15182,6 +15570,207 @@ background: rgba(56, 189, 248, 0.2) !important;
 .wa-community-info-action:hover {
     background: rgba(56, 189, 248, 0.12) !important;
     border-color: rgba(56, 189, 248, 0.36) !important;
+}
+
+/* Chat polish: calmer panels, clearer dropdowns, persistent intro chips. */
+.wa-chat-intro-system {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    padding: 20px 0 2px;
+}
+
+.wa-chat-intro-encryption {
+    appearance: none;
+    cursor: pointer;
+}
+
+.wa-community-welcome-encryption,
+.wa-chat-intro-encryption {
+    font-size: 13px !important;
+    line-height: 1.38 !important;
+    padding: 9px 16px !important;
+    gap: 10px !important;
+}
+
+.wa-community-welcome-encryption svg,
+.wa-chat-intro-encryption svg {
+    margin-top: 2px !important;
+}
+
+.wa-chat-header-community {
+    background: rgba(11, 20, 36, 0.94) !important;
+    border-bottom-color: rgba(56, 189, 248, 0.16) !important;
+}
+
+.wa-chat-header-community .wa-chat-header-user {
+    align-items: center !important;
+}
+
+.wa-header-community-avatar {
+    width: 44px !important;
+    height: 44px !important;
+    margin-right: 12px !important;
+    border-radius: 16px !important;
+    background:
+        radial-gradient(circle at 34% 24%, rgba(255, 255, 255, 0.16), transparent 36%),
+        linear-gradient(145deg, rgba(56, 189, 248, 0.22), rgba(37, 99, 235, 0.16)),
+        rgba(15, 23, 42, 0.76) !important;
+    border: 1px solid rgba(125, 211, 252, 0.34) !important;
+    box-shadow: 0 10px 24px rgba(2, 6, 23, 0.26), 0 0 20px rgba(56, 189, 248, 0.16) !important;
+}
+
+.wa-header-community-avatar img {
+    border-radius: 15px !important;
+}
+
+.wa-header-icons .wa-nav-icon-btn,
+.wa-nav-sidebar .wa-nav-icon-btn {
+    transition: color 0.22s ease, background 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease !important;
+}
+
+.wa-header-icons .wa-nav-icon-btn:hover,
+.wa-nav-sidebar .wa-nav-icon-btn:hover,
+.wa-header-call-icon:hover {
+    background: rgba(56, 189, 248, 0.12) !important;
+    color: #7ddfff !important;
+    box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.18), 0 0 24px rgba(56, 189, 248, 0.24) !important;
+}
+
+.wa-contact-info-panel:not(.wa-new-group-drawer) .wa-contact-action-btn:hover {
+    background: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+}
+
+.wa-contact-info-panel:not(.wa-new-group-drawer) .wa-contact-action-btn:hover .wa-action-icon-box {
+    background: rgba(56, 189, 248, 0.16) !important;
+    border-color: rgba(56, 189, 248, 0.42) !important;
+    box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.16), 0 0 26px rgba(56, 189, 248, 0.28) !important;
+}
+
+.wa-dropdown-menu,
+.wa-menu-dropdown,
+.wa-custom-list-context-menu,
+.wa-starred-menu-dropdown {
+    background:
+        linear-gradient(180deg, rgba(15, 30, 52, 0.98), rgba(8, 20, 38, 0.98)) !important;
+    border: 1px solid rgba(125, 211, 252, 0.24) !important;
+    box-shadow: 0 22px 52px rgba(2, 6, 23, 0.52), 0 0 24px rgba(56, 189, 248, 0.08) !important;
+    backdrop-filter: blur(18px) saturate(135%) !important;
+    -webkit-backdrop-filter: blur(18px) saturate(135%) !important;
+}
+
+.wa-dropdown-item,
+.wa-menu-item,
+.wa-starred-menu-item {
+    color: #e5f4ff !important;
+}
+
+.wa-dropdown-item:hover,
+.wa-menu-item:hover,
+.wa-starred-menu-item:hover {
+    background: rgba(56, 189, 248, 0.13) !important;
+}
+
+.wa-dropdown-divider {
+    background: rgba(148, 163, 184, 0.18) !important;
+}
+
+.wa-search-sidebar,
+.wa-info-panel,
+.wa-contact-info-panel,
+.wa-profile-drawer,
+.wa-starred-messages-panel,
+.wa-main-chat,
+.wa-main-chat-with-panel {
+    transition-duration: 0.42s !important;
+    transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+}
+
+.wa-mute-modal-overlay,
+.wa-forward-modal-overlay,
+.wa-encryption-modal-overlay,
+.wa-contact-detail-modal-overlay,
+.wa-view-once-modal-overlay,
+.wa-clear-chat-modal-overlay,
+.wa-privacy-modal-backdrop,
+.wa-settings-overlay,
+.wa-member-add-overlay,
+.wa-profile-photo-source-overlay,
+.wa-community-groups-popup-overlay.active {
+    animation-duration: 0.34s !important;
+}
+
+.wa-mute-modal,
+.wa-forward-modal,
+.wa-encryption-modal,
+.wa-contact-detail-modal,
+.wa-view-once-modal-content,
+.wa-clear-chat-modal,
+.wa-privacy-modal,
+.wa-lang-confirm-modal,
+.wa-member-add-modal,
+.wa-member-add-confirm-modal,
+.wa-profile-photo-source-modal,
+.wa-community-groups-popup {
+    animation-duration: 0.42s !important;
+}
+
+/* Follow-up polish: remove violet/white panel edges and keep empty media tiles visible. */
+.wa-search-sidebar,
+.wa-info-panel,
+.wa-contact-info-panel,
+.wa-community-info,
+.wa-community-home-drawer,
+.wa-manage-groups-drawer,
+.wa-add-existing-groups-drawer,
+.wa-confirm-add-groups-drawer,
+.wa-community-settings-drawer,
+.wa-community-add-member-drawer,
+.wa-starred-messages-panel,
+.wa-edit-contact-panel,
+.wa-notification-settings-panel,
+.wa-event-details-panel,
+.wa-shared-media-panel {
+    border-left-color: rgba(56, 189, 248, 0.1) !important;
+}
+
+.wa-community-welcome-encryption,
+.wa-chat-intro-encryption,
+.wa-community-welcome-card,
+.wa-header-community-avatar,
+.wa-community-reference-icon,
+.wa-action-icon-box,
+.wa-media-thumb {
+    border-color: rgba(56, 189, 248, 0.2) !important;
+    outline: none !important;
+}
+
+.wa-community-welcome-encryption,
+.wa-chat-intro-encryption {
+    background:
+        linear-gradient(180deg, rgba(56, 189, 248, 0.11), rgba(14, 165, 190, 0.05)),
+        rgba(15, 23, 42, 0.86) !important;
+    box-shadow: 0 14px 30px rgba(2, 6, 23, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+.wa-community-welcome-encryption:focus,
+.wa-community-welcome-encryption:focus-visible,
+.wa-chat-intro-encryption:focus,
+.wa-chat-intro-encryption:focus-visible {
+    outline: none !important;
+    border-color: rgba(56, 189, 248, 0.28) !important;
+    box-shadow: 0 14px 30px rgba(2, 6, 23, 0.24), 0 0 0 1px rgba(56, 189, 248, 0.16) !important;
+}
+
+.wa-media-preview-row .wa-media-thumb:empty {
+    min-width: 54px;
+    min-height: 54px;
+    background:
+        linear-gradient(145deg, rgba(56, 189, 248, 0.08), rgba(15, 23, 42, 0.28)) !important;
+    border: 1px solid rgba(56, 189, 248, 0.12) !important;
 }
 
 .wa-community-home-drawer {
@@ -15731,6 +16320,111 @@ background: rgba(56, 189, 248, 0.2) !important;
     border: 1px solid rgba(134, 239, 172, 0.24) !important;
 }
 
+.wa-member-add-overlay,
+.wa-profile-photo-source-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(8, 19, 39, 0.28);
+    backdrop-filter: blur(12px) saturate(135%);
+    -webkit-backdrop-filter: blur(12px) saturate(135%);
+}
+
+.wa-confirm-community-add-overlay {
+    z-index: 10000;
+}
+
+.wa-member-add-modal,
+.wa-member-add-confirm-modal,
+.wa-profile-photo-source-modal {
+    background:
+        radial-gradient(circle at top left, rgba(56, 189, 248, 0.18), transparent 36%),
+        linear-gradient(180deg, rgba(17, 31, 55, 0.97), rgba(7, 16, 31, 0.98));
+    border: 1px solid rgba(56, 189, 248, 0.26);
+    color: #f8fafc;
+    box-shadow: 0 28px 70px rgba(2, 6, 23, 0.5), 0 0 34px rgba(56, 189, 248, 0.12);
+}
+
+.wa-member-add-modal {
+    width: min(380px, calc(100vw - 28px));
+    max-height: 80vh;
+    border-radius: 24px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.wa-member-add-confirm-modal {
+    width: 400px;
+    max-width: 90%;
+    border-radius: 16px;
+    padding: 24px;
+}
+
+.wa-profile-photo-source-overlay {
+    position: absolute;
+    z-index: 1600;
+}
+
+.wa-profile-photo-source-modal {
+    position: relative;
+    width: min(280px, calc(100% - 36px));
+    border-radius: 18px;
+    padding: 18px;
+}
+
+.wa-profile-photo-source-title {
+    color: #f8fafc;
+    font-size: 17px;
+    font-weight: 700;
+    margin: 2px 36px 14px 2px;
+}
+
+.wa-profile-photo-source-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #94a3b8;
+    background: rgba(148, 163, 184, 0.1);
+    cursor: pointer;
+}
+
+.wa-profile-photo-source-option {
+    width: 100%;
+    height: 48px;
+    border: 1px solid rgba(56, 189, 248, 0.18);
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.52);
+    color: #e2e8f0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 14px;
+    margin-top: 10px;
+    cursor: pointer;
+    font-size: 15px;
+}
+
+.wa-profile-photo-source-option svg {
+    color: #38bdf8;
+}
+
+.wa-profile-photo-source-option:hover,
+.wa-profile-photo-source-close:hover {
+    background: rgba(56, 189, 248, 0.14);
+    border-color: rgba(56, 189, 248, 0.34);
+}
+
 .wa-community-home-drawer {
     left: auto !important;
     right: -100% !important;
@@ -15782,5 +16476,273 @@ background: rgba(56, 189, 248, 0.2) !important;
     to {
         opacity: 0;
         transform: translateY(-10px) scale(0.982);
+    }
+}
+
+/* Final panel edge/responsive fix: no fade ghosting, no bright divider, no squeezed chat. */
+.wa-main-chat-with-panel {
+    border-right: 0 !important;
+}
+
+.wa-search-sidebar,
+.wa-info-panel,
+.wa-contact-info-panel,
+.wa-community-info,
+.wa-manage-groups-drawer,
+.wa-add-existing-groups-drawer,
+.wa-confirm-add-groups-drawer,
+.wa-community-settings-drawer,
+.wa-community-add-member-drawer,
+.wa-starred-messages-panel,
+.wa-edit-contact-panel,
+.wa-notification-settings-panel,
+.wa-event-details-panel,
+.wa-shared-media-panel {
+    opacity: 1 !important;
+    transform: translateX(0) !important;
+    transition-property: right, left, margin-right !important;
+    border-left: 0 !important;
+    box-shadow: none !important;
+}
+
+.wa-search-sidebar.active,
+.wa-info-panel.active,
+.wa-contact-info-panel.active,
+.wa-community-info.active,
+.wa-manage-groups-drawer.active,
+.wa-add-existing-groups-drawer.active,
+.wa-confirm-add-groups-drawer.active,
+.wa-community-settings-drawer.active,
+.wa-community-add-member-drawer.active,
+.wa-starred-messages-panel.active,
+.wa-edit-contact-panel.active,
+.wa-notification-settings-panel.active,
+.wa-event-details-panel.active,
+.wa-shared-media-panel.active {
+    opacity: 1 !important;
+    transform: translateX(0) !important;
+}
+
+@media (min-width: 769px) and (max-width: 1280px) {
+    .wa-main-chat-with-panel {
+        margin-right: 0 !important;
+    }
+
+    .wa-chat-right-panel-resize-handle {
+        display: none !important;
+    }
+
+    .wa-contact-info-panel,
+    .wa-community-info,
+    .wa-manage-groups-drawer,
+    .wa-add-existing-groups-drawer,
+    .wa-confirm-add-groups-drawer,
+    .wa-community-settings-drawer,
+    .wa-community-add-member-drawer,
+    .wa-starred-messages-panel,
+    .wa-edit-contact-panel,
+    .wa-notification-settings-panel,
+    .wa-event-details-panel,
+    .wa-shared-media-panel {
+        width: min(420px, 100%) !important;
+        min-width: min(420px, 100%) !important;
+        max-width: 100% !important;
+        z-index: 1500 !important;
+    }
+}
+
+.wa-community-list-avatar-plain,
+.wa-community-list-avatar-img {
+    width: 100%;
+    height: 100%;
+    border-radius: 12px;
+}
+
+.wa-community-list-avatar-plain {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #7dd3fc;
+    background:
+        radial-gradient(circle at 34% 24%, rgba(255, 255, 255, 0.18), transparent 34%),
+        linear-gradient(145deg, rgba(56, 189, 248, 0.26), rgba(37, 99, 235, 0.18)),
+        rgba(15, 23, 42, 0.8);
+}
+
+.wa-community-list-avatar-img {
+    object-fit: cover;
+}
+
+.wa-linked-group-avatar {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+.wa-linked-group-avatar-main {
+    width: 100%;
+    height: 100%;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #7dd3fc;
+    background:
+        radial-gradient(circle at 34% 24%, rgba(255, 255, 255, 0.16), transparent 34%),
+        linear-gradient(145deg, rgba(56, 189, 248, 0.22), rgba(37, 99, 235, 0.16)),
+        rgba(15, 23, 42, 0.78);
+    border: 1px solid rgba(125, 211, 252, 0.32);
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.wa-linked-group-avatar-main img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.wa-linked-group-avatar-badge {
+    position: absolute;
+    right: -4px;
+    bottom: -4px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    background: linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%);
+    border: 2px solid rgba(15, 23, 42, 0.94);
+    box-shadow: 0 5px 12px rgba(2, 6, 23, 0.34);
+}
+
+.wa-linked-group-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    max-width: 100%;
+    line-height: 1.18;
+}
+
+.wa-linked-group-preview-sender {
+    color: #27d463;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wa-linked-group-preview-line {
+    color: #a8b6c8;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wa-linked-group-preview-line.muted {
+    color: #94a3b8;
+}
+
+/* Subgroup manager: modal glass, not a mobile-style panel and not a black blackout. */
+.wa-community-groups-popup-overlay,
+.wa-community-groups-popup-overlay.active,
+.wa-community-groups-popup-overlay.closing {
+    position: fixed !important;
+    inset: 0 !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    padding: clamp(26px, 7vh, 72px) 18px 24px !important;
+    background: rgba(2, 8, 20, 0.22) !important;
+    backdrop-filter: blur(8px) saturate(125%) !important;
+    -webkit-backdrop-filter: blur(8px) saturate(125%) !important;
+}
+
+.wa-community-groups-popup {
+    width: min(520px, calc(100vw - 40px)) !important;
+    max-width: 520px !important;
+    max-height: min(560px, calc(100vh - 76px)) !important;
+    border-radius: 18px !important;
+    background:
+        radial-gradient(circle at 18% 0%, rgba(56, 189, 248, 0.16), transparent 32%),
+        linear-gradient(180deg, rgba(12, 25, 45, 0.98), rgba(6, 16, 31, 0.98)) !important;
+    border: 1px solid rgba(56, 189, 248, 0.34) !important;
+    box-shadow:
+        0 26px 70px rgba(2, 6, 23, 0.34),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+    backdrop-filter: blur(22px) saturate(145%) !important;
+    -webkit-backdrop-filter: blur(22px) saturate(145%) !important;
+}
+
+.wa-community-groups-popup-header {
+    justify-content: flex-start !important;
+    gap: 10px !important;
+    padding: 0 22px !important;
+}
+
+.wa-community-groups-popup-title {
+    display: block !important;
+    margin-left: 0 !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    color: #f8fafc !important;
+    font-size: 18px !important;
+    font-weight: 700 !important;
+    line-height: 1.2 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+.wa-community-groups-popup-close {
+    flex: 0 0 32px !important;
+    width: 32px !important;
+    height: 32px !important;
+    padding: 0 !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.wa-community-groups-popup-list {
+    max-height: min(440px, calc(100vh - 190px)) !important;
+    padding-left: 22px !important;
+    padding-right: 22px !important;
+}
+
+@media (max-width: 700px) {
+    .wa-community-groups-popup-overlay,
+    .wa-community-groups-popup-overlay.active,
+    .wa-community-groups-popup-overlay.closing {
+        align-items: stretch !important;
+        padding: 16px 12px !important;
+    }
+
+    .wa-community-groups-popup {
+        width: 100% !important;
+        max-width: none !important;
+        max-height: calc(100vh - 32px) !important;
+    }
+}
+
+@media (max-width: 900px) {
+    .wa-contact-info-panel,
+    .wa-community-info,
+    .wa-manage-groups-drawer,
+    .wa-add-existing-groups-drawer,
+    .wa-confirm-add-groups-drawer,
+    .wa-community-settings-drawer,
+    .wa-community-add-member-drawer,
+    .wa-starred-messages-panel,
+    .wa-edit-contact-panel,
+    .wa-notification-settings-panel,
+    .wa-event-details-panel,
+    .wa-shared-media-panel {
+        width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
     }
 }

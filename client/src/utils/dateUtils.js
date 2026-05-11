@@ -19,14 +19,25 @@ export const formatDateForSeparator = (dateString, t, locale = 'en-US', currentD
         return t ? t('chat_window.yesterday') : 'Yesterday';
     }
 
-    // Check if within the last 7 days for "Day of week"
+    // Older chat dates use a compact numeric badge instead of weekday names.
     const diffTime = Math.abs(today - date);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
     if (diffDays < 7) {
-        return date.toLocaleDateString(locale, { weekday: 'long' });
+        return formatNumericChatDate(date, locale);
     }
 
-    // Older dates: Day, Date Month (e.g., Monday, 12 June)
-    return date.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'long' });
+    return formatNumericChatDate(date, locale);
+};
+
+export const formatNumericChatDate = (dateString, locale = 'en-US') => {
+    if (!dateString) return '';
+    const date = dateString instanceof Date ? dateString : new Date(dateString);
+    if (Number.isNaN(date.getTime())) return '';
+
+    return date.toLocaleDateString(locale, {
+        month: '2-digit',
+        day: '2-digit',
+        year: 'numeric'
+    });
 };

@@ -1543,6 +1543,7 @@ router.post('/user/update', authenticateToken, async (req, res) => {
             if (countryCode !== undefined) updateData.countryCode = countryCode;
             if (req.body.designation !== undefined) updateData.designation = req.body.designation;
             if (req.body.about !== undefined) updateData.about = req.body.about;
+            if (req.body.image !== undefined || req.body.profile_photo !== undefined) updateData.image = req.body.image || req.body.profile_photo || '';
 
             if (Object.keys(updateData).length > 0) {
                 updatedUser = await User.findByIdAndUpdate(
@@ -1556,7 +1557,8 @@ router.post('/user/update', authenticateToken, async (req, res) => {
                         userId: updatedUser._id,
                         name: updatedUser.name, // Global name stays the same
                         mobile: updatedUser.mobile,
-                        about: updatedUser.about
+                        about: updatedUser.about,
+                        image: updatedUser.image
                     });
                 }
             }

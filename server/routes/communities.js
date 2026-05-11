@@ -990,21 +990,24 @@ router.post('/:communityId/transfer-ownership', authenticateToken, async (req, r
 router.patch('/:communityId', authenticateToken, async (req, res) => {
     try {
         const { communityId } = req.params;
-        const { name, description, whoCanAddGroups } = req.body;
+        const { name, description, whoCanAddGroups, icon } = req.body;
         const userId = req.user.id;
 
         const community = await Community.findById(communityId);
         if (!community) return res.status(404).json({ error: 'Community not found' });
 
-        // Only owner or admin can update settings
+        // Settings stay admin-only, but members can update the community picture.
         const isCommAdmin = (community.admins || []).some(id => String(id) === String(userId));
-        if (String(community.creator) !== String(userId) && !isCommAdmin) {
+        const isCommMember = (community.members || []).some(id => String(id) === String(userId));
+        const isIconOnlyUpdate = icon !== undefined && name === undefined && description === undefined && whoCanAddGroups === undefined;
+        if (String(community.creator) !== String(userId) && !isCommAdmin && !(isIconOnlyUpdate && isCommMember)) {
             return res.status(403).json({ error: 'Only community owner and admins can update settings' });
         }
 
         if (name !== undefined) community.name = name;
         if (description !== undefined) community.description = description;
         if (whoCanAddGroups !== undefined) community.whoCanAddGroups = whoCanAddGroups;
+        if (icon !== undefined) community.icon = icon || null;
 
         await community.save();
 

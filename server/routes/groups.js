@@ -1190,7 +1190,40 @@ router.patch('/:groupId/name', authenticateToken, async (req, res) => {
         // Emit update to all members
         if (req.io) {
             group.members.forEach(memberId => {
-                req.io.to(memberId.toString()).emit('group_updated', { groupId, name: group.name, description: group.description });
+                req.io.to(memberId.toString()).emit('group_updated', { groupId, name: group.name, description: group.description, icon: group.icon });
+            });
+        }
+
+        res.json({ status: 'updated', group });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PATCH /api/groups/:groupId/icon - Update group profile picture
+router.patch('/:groupId/icon', authenticateToken, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const { icon } = req.body;
+        const userId = req.user.id;
+
+        const group = await Group.findById(groupId);
+        if (!group) return res.status(404).json({ error: 'Group not found' });
+        if (!(group.members || []).some(m => String(m) === String(userId))) {
+            return res.status(403).json({ error: 'Not a group member' });
+        }
+
+        group.icon = icon || null;
+        await group.save();
+
+        if (req.io) {
+            group.members.forEach(memberId => {
+                req.io.to(memberId.toString()).emit('group_updated', {
+                    groupId,
+                    name: group.name,
+                    description: group.description,
+                    icon: group.icon
+                });
             });
         }
 
@@ -1221,7 +1254,8 @@ router.patch('/:groupId/description', authenticateToken, async (req, res) => {
                 req.io.to(memberId.toString()).emit('group_updated', {
                     groupId,
                     name: group.name,
-                    description: group.description
+                    description: group.description,
+                    icon: group.icon
                 });
             });
         }
