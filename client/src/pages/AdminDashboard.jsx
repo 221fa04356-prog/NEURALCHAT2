@@ -9,7 +9,7 @@ import {
     Eye, EyeOff, Menu, AlertTriangle, ArrowLeft, Smile,
     User as UserIcon, Search, Bell, Settings, LayoutDashboard,
     TrendingUp, Calendar, ChevronRight, X, Layers, Check, RefreshCw, Forward, ChevronDown, XCircle,
-    Mic, Pause, Play, List, History, ShieldCheck, MapPin, Video, Phone, Ban, Clock, UserPlus, FileText
+    Mic, Pause, Play, List, History, ShieldCheck, MapPin, Video, Phone, Ban, Clock, UserPlus, FileText, Dices
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import {
