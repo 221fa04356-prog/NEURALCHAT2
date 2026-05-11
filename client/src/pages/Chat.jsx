@@ -2006,12 +2006,23 @@ export default function Chat() {
 
         return false;
     };
-    const showIncomingNotification = ({ senderName, senderAvatar, message, type = 'info', duration = 6000, onReply, isGroup = false }) => {
+    const showIncomingNotification = ({ senderName, senderAvatar, message, type = 'info', duration = 6000, onReply, isGroup = false, desktop = true, variant = 'default', forceShow = false }) => {
         const settings = notificationSettingsRef.current;
-        if (!settings.masterEnabled || isQuietHoursActive(settings)) return;
+        const rawSenderName = String(senderName || '');
+        const rawMessage = String(message || '');
+        const rawNotificationText = `${rawSenderName} ${rawMessage}`.toLowerCase();
+        const isDescriptionSystemNotice = /^(?:group|community) description\b/i.test(rawSenderName.trim()) ||
+            /\b(?:group|community) description\b/i.test(rawNotificationText) ||
+            /changed the (?:community|group) (?:description|name)/i.test(rawNotificationText);
+        if (isDescriptionSystemNotice) return;
+        if (!forceShow && (!settings.masterEnabled || isQuietHoursActive(settings))) return;
         if (isGroup && !settings.groupNotifications) return;
 
         const displayMessage = settings.messagePreviews ? message : 'New message';
+        const notificationText = `${rawSenderName} ${displayMessage || ''}`.toLowerCase();
+        if (/changed the (?:community|group) (?:description|name)|(?:community|group) description/.test(notificationText)) {
+            return;
+        }
 
         setSnackbar({
             senderName,
@@ -2019,7 +2030,9 @@ export default function Chat() {
             message: displayMessage,
             type,
             duration,
-            onReply
+            onReply,
+            variant,
+            forceShow
         });
 
         if (settings.notificationSound) {
@@ -2030,7 +2043,7 @@ export default function Chat() {
             } catch { }
         }
 
-        if (settings.desktopNotifications && 'Notification' in window && Notification.permission === 'granted') {
+        if (desktop && settings.desktopNotifications && 'Notification' in window && Notification.permission === 'granted') {
             try {
                 new Notification(senderName || 'Neural Chat', {
                     body: displayMessage,
@@ -3963,6 +3976,8 @@ export default function Chat() {
             }
             if (/cancelled the event:/i.test(content)) return `${actor} ${content.replace(/cancelled the event:/i, 'cancelled event:')}`;
             if (/deleted the event:/i.test(content)) return `${actor} ${content.replace(/deleted the event:/i, 'deleted event:')}`;
+            if (/changed the community name/i.test(content)) return `${isMe ? 'you' : senderName} changed the community name. click to view`;
+            if (/changed the community description/i.test(content)) return `${isMe ? 'you' : senderName} changed the community description. click to view`;
             return content || 'System update';
         }
 
@@ -3983,6 +3998,17 @@ export default function Chat() {
         if (!content && msg.poll) return `Poll: ${msg.poll?.question || 'Question'}`;
 
         return content || 'New message';
+    };
+
+    const getChatNameHoverPreview = (item, displayName = '') => {
+        const name = String(
+            displayName ||
+            (item?.is_community ? item?.name : '') ||
+            (item?.is_group ? item?.name : '') ||
+            getContactDisplayName(item || {})
+        ).replace(/\s+/g, ' ').trim();
+
+        return name;
     };
 
     const getDocIcon = (fileName) => {
@@ -4371,6 +4397,16 @@ export default function Chat() {
                             </span>
                         );
                     }
+                    if (content.includes('changed the community name')) {
+                        return isMe
+                            ? 'you changed the community name. click to view'
+                            : `${msg.sender_id?.name || 'Someone'} changed the community name. click to view`;
+                    }
+                    if (content.includes('changed the community description')) {
+                        return isMe
+                            ? 'you changed the community description. click to view'
+                            : `${msg.sender_id?.name || 'Someone'} changed the community description. click to view`;
+                    }
                     if (content.includes(' removed ')) {
                         const parts = content.split(' removed ');
                         const remover = isMe ? 'You' : (parts[0] || msg.sender_id?.name || 'Someone');
@@ -4488,6 +4524,7 @@ export default function Chat() {
     const [isEditGarbageMessage, setIsEditGarbageMessage] = useState(false);
     const lastGrammarAlertRef = useRef('');
     const lastEditGrammarAlertRef = useRef('');
+    const lastCommunityDescriptionGrammarAlertRef = useRef('');
     const isApplyingEditSuggestionRef = useRef(false);
 
     const [isEditingProfileName, setIsEditingProfileName] = useState(false);
@@ -5261,6 +5298,14 @@ export default function Chat() {
     const [isCommunityGroupsPopupClosing, setIsCommunityGroupsPopupClosing] = useState(false);
     const [isWhoCanAddGroupsModalOpen, setIsWhoCanAddGroupsModalOpen] = useState(false);
     const [communityInfoTab, setCommunityInfoTab] = useState('community'); // 'community' or 'announcements'
+    const [communityEditMode, setCommunityEditMode] = useState(null); // 'name' | 'description'
+    const [communityEditDraft, setCommunityEditDraft] = useState('');
+    const [isCommunityDescriptionExpanded, setIsCommunityDescriptionExpanded] = useState(false);
+    const [communityDescriptionGrammarSuggestions, setCommunityDescriptionGrammarSuggestions] = useState(null);
+    const [isCommunityDescriptionGrammarLoading, setIsCommunityDescriptionGrammarLoading] = useState(false);
+    const [showCommunityDescriptionGrammarBar, setShowCommunityDescriptionGrammarBar] = useState(false);
+    const [communityDescriptionSuggestionApplied, setCommunityDescriptionSuggestionApplied] = useState(true);
+    const [isCommunityDescriptionGarbage, setIsCommunityDescriptionGarbage] = useState(false);
     const [pendingWhoCanAddGroups, setPendingWhoCanAddGroups] = useState('everyone');
     const [activeViewOnceMsg, setActiveViewOnceMsg] = useState(null);
     const [viewOnceElapsed, setViewOnceElapsed] = useState(0);
@@ -5274,6 +5319,16 @@ export default function Chat() {
     }, [activeViewOnceMsg]);
     useEffect(() => { selectedCommunityRef.current = selectedCommunity; }, [selectedCommunity]);
     const [isCommunityDescDismissed, setIsCommunityDescDismissed] = useState(false);
+    useEffect(() => {
+        setCommunityEditMode(null);
+        setCommunityEditDraft('');
+        setIsCommunityDescriptionExpanded(false);
+        setCommunityDescriptionGrammarSuggestions(null);
+        setShowCommunityDescriptionGrammarBar(false);
+        setIsCommunityDescriptionGrammarLoading(false);
+        setCommunityDescriptionSuggestionApplied(true);
+        setIsCommunityDescriptionGarbage(false);
+    }, [selectedCommunity?._id, selectedCommunity?.id]);
     const [adminContextMenu, setAdminContextMenu] = useState(null); // { member, x, y, communityId, isAdmin }
     const [isAssignOwnerModalOpen, setIsAssignOwnerModalOpen] = useState(false);
     const [assignOwnerTarget, setAssignOwnerTarget] = useState(null); // { member, communityId }
@@ -5330,6 +5385,36 @@ export default function Chat() {
         setIsCommunityInfoOpen(true);
     };
 
+    const isCommunityUpdateMessage = (msg) => {
+        const content = String(msg?.content || '').toLowerCase();
+        return content.includes('changed the community description') || content.includes('changed the community name');
+    };
+
+    const scrollCommunityInfoToSection = (section = 'description') => {
+        window.setTimeout(() => {
+            const targetId = section === 'name' ? 'wa-community-name-section' : 'wa-community-description-section';
+            document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 120);
+    };
+
+    const openCommunityUpdateTarget = (message, section = 'description', fallbackCommunity = null) => {
+        const metadata = message?.metadata || {};
+        const communityId = metadata.communityId || metadata.community_id || fallbackCommunity?._id || fallbackCommunity?.id || selectedCommunity?._id || selectedCommunity?.id;
+        const communityTarget = fallbackCommunity || communities.find(c => String(c._id || c.id) === String(communityId)) || selectedCommunity;
+        if (communityTarget) {
+            setOpenDropdown(null);
+            setChatContextMenu(null);
+            setIsMessageSearchOpen(false);
+            setIsStarredMessagesOpen(false);
+            setIsSharedMediaOpen(false);
+            setIsEditContactOpen(false);
+            setIsNotificationSettingsOpen(false);
+            setIsEventDetailsOpen(false);
+            openCommunityInfoSidePanel(communityTarget);
+            scrollCommunityInfoToSection(section);
+        }
+    };
+
     const openCommunitySettingsPanel = (surface = 'right', community = selectedCommunity) => {
         if (community) setSelectedCommunity(community);
         if (surface === 'right') {
@@ -5340,10 +5425,24 @@ export default function Chat() {
         setIsCommunitySettingsOpen(true);
     };
 
+    const getCommunityAnnouncementTarget = (community) => {
+        if (!community) return { annGroup: null, annId: '' };
+        const annGroup = community.announcements || null;
+        const annId = (typeof annGroup === 'object' ? (annGroup?._id || annGroup?.id) : annGroup)
+            || community.announcements_id
+            || community.announcementGroupId
+            || community.announcement_group_id
+            || community.lastMessage?.group_id
+            || community.lastMessage?.groupId
+            || community.announcements?.lastMessage?.group_id
+            || community.announcements?.lastMessage?.groupId
+            || '';
+        return { annGroup, annId };
+    };
+
     const selectCommunityAnnouncementGroup = (community) => {
-        if (!community?.announcements) return;
-        const annGroup = community.announcements;
-        const annId = (typeof annGroup === 'object') ? (annGroup._id || annGroup.id) : annGroup;
+        const { annGroup, annId } = getCommunityAnnouncementTarget(community);
+        if (!community || !annId) return false;
         setSelectedCommunity(community);
         setSelectedGroup({
             ...(typeof annGroup === 'object' ? annGroup : {}),
@@ -5359,6 +5458,7 @@ export default function Chat() {
         setSelectedUser(null);
         if (selectedUserRef) selectedUserRef.current = null;
         fetchGroupMessages(annId);
+        return true;
     };
 
     const formatCommunityCreatedDate = (value) => {
@@ -6116,11 +6216,6 @@ export default function Chat() {
         const element = document.getElementById(`msg-${targetId}`);
         if (element) {
             element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            // Add temporary highlight class
-            element.classList.add('wa-msg-highlight-anim');
-            setTimeout(() => {
-                element.classList.remove('wa-msg-highlight-anim');
-            }, 2000);
         }
         // consume jump target so it doesn't retrigger when leaving shared panel
         setTimeout(() => {
@@ -6359,9 +6454,10 @@ export default function Chat() {
 
         const trimmedInput = input.trim();
         const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(input);
+        const hasTextOrNumber = /[a-zA-Z0-9]/.test(trimmedInput);
         const containsUrl = isLinkLikeText(input);
 
-        if (!trimmedInput || typingLinkPreview || containsUrl || isEmojiPresent) {
+        if (!trimmedInput || typingLinkPreview || containsUrl || (isEmojiPresent && !hasTextOrNumber)) {
             if (grammarSuggestions !== null) setGrammarSuggestions(null);
             if (showGrammarBar !== false) setShowGrammarBar(false);
             if (isGrammarLoading !== false) setIsGrammarLoading(false);
@@ -6402,9 +6498,9 @@ export default function Chat() {
             const hasNumbers = /[0-9]/.test(trimmedInput);
             const isMeaningful = trimmedInput.length >= 1 && (/[a-zA-Z0-9]/.test(trimmedInput) || isEmojiPresent);
 
-            const isProbablyGarbage = (trimmedInput.length >= 3 && !hasVowels && !hasNumbers && !isEmojiPresent) ||
+            const isProbablyGarbage = (hasTextOrNumber && trimmedInput.length >= 3 && !hasVowels && !hasNumbers) ||
                 /([^aeiouy0-9\s])\1{2,}/i.test(trimmedInput) ||
-                (trimmedInput.length >= 4 && !hasVowels && !hasNumbers && !isEmojiPresent);
+                (hasTextOrNumber && trimmedInput.length >= 4 && !hasVowels && !hasNumbers);
 
             if (isProbablyGarbage || (!isMeaningful && !isEmojiPresent)) {
                 setIsGarbageMessage(true);
@@ -6496,9 +6592,10 @@ export default function Chat() {
 
         const trimmedInput = editInput.trim();
         const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(editInput);
+        const hasTextOrNumber = /[a-zA-Z0-9]/.test(trimmedInput);
         const containsUrl = isLinkLikeText(editInput);
 
-        if (!trimmedInput || containsUrl || isEmojiPresent) {
+        if (!trimmedInput || containsUrl || (isEmojiPresent && !hasTextOrNumber)) {
             setEditGrammarSuggestions(null);
             setShowEditGrammarBar(false);
             setIsEditGrammarLoading(false);
@@ -6533,9 +6630,9 @@ export default function Chat() {
             const hasVowels = /[aeiouy]/i.test(trimmedInput);
             const hasNumbers = /[0-9]/.test(trimmedInput);
             const isMeaningful = trimmedInput.length >= 1 && (/[a-zA-Z0-9]/.test(trimmedInput) || isEmojiPresent);
-            const isProbablyGarbage = (trimmedInput.length >= 3 && !hasVowels && !hasNumbers && !isEmojiPresent) ||
+            const isProbablyGarbage = (hasTextOrNumber && trimmedInput.length >= 3 && !hasVowels && !hasNumbers) ||
                 /([^aeiouy0-9\s])\1{2,}/i.test(trimmedInput) ||
-                (trimmedInput.length >= 4 && !hasVowels && !hasNumbers && !isEmojiPresent);
+                (hasTextOrNumber && trimmedInput.length >= 4 && !hasVowels && !hasNumbers);
 
             if (isProbablyGarbage || (!isMeaningful && !isEmojiPresent)) {
                 setIsEditGarbageMessage(true);
@@ -6618,6 +6715,123 @@ export default function Chat() {
         setEditGrammarSuggestions(null);
         setEditSuggestionApplied(true);
     };
+
+    useEffect(() => {
+        const isInlineCommunityEdit = communityEditMode === 'description' || communityEditMode === 'name';
+        const isNewCommunityDescriptionEdit = isNewCommunityOpen && communityStep === 1;
+
+        if (!isInlineCommunityEdit && !isNewCommunityDescriptionEdit) {
+            setCommunityDescriptionGrammarSuggestions(null);
+            setShowCommunityDescriptionGrammarBar(false);
+            setIsCommunityDescriptionGrammarLoading(false);
+            setIsCommunityDescriptionGarbage(false);
+            setCommunityDescriptionSuggestionApplied(true);
+            return;
+        }
+
+        const sourceText = isInlineCommunityEdit ? communityEditDraft : communityDescription;
+        const trimmedInput = sourceText.trim();
+        const isEmojiPresent = /[\u00a9\u00ae\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]/.test(sourceText);
+        const hasTextOrNumber = /[a-zA-Z0-9]/.test(trimmedInput);
+        const containsUrl = isLinkLikeText(sourceText);
+
+        if (!trimmedInput || containsUrl || (isEmojiPresent && !hasTextOrNumber)) {
+            setCommunityDescriptionGrammarSuggestions(null);
+            setShowCommunityDescriptionGrammarBar(false);
+            setIsCommunityDescriptionGrammarLoading(false);
+            setIsCommunityDescriptionGarbage(false);
+            setCommunityDescriptionSuggestionApplied(true);
+            return;
+        }
+
+        setCommunityDescriptionSuggestionApplied(false);
+        setShowCommunityDescriptionGrammarBar(true);
+        setIsCommunityDescriptionGrammarLoading(true);
+
+        const syncIssue = getInlineTextAiIssue(trimmedInput);
+        if (syncIssue) {
+            setIsCommunityDescriptionGarbage(true);
+            setCommunityDescriptionGrammarSuggestions(null);
+            setIsCommunityDescriptionGrammarLoading(false);
+            return;
+        }
+        setIsCommunityDescriptionGarbage(false);
+
+        const timer = setTimeout(async () => {
+            const immediateIssue = getInlineTextAiIssue(trimmedInput);
+            if (immediateIssue) {
+                setIsCommunityDescriptionGarbage(true);
+                setCommunityDescriptionGrammarSuggestions(null);
+                setCommunityDescriptionSuggestionApplied(false);
+                setIsCommunityDescriptionGrammarLoading(false);
+                return;
+            }
+
+            try {
+                const token = localStorage.getItem('token');
+                const res = await axios.post('/api/chat/grammar-check', { text: trimmedInput }, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                const suggestions = res.data;
+                setCommunityDescriptionGrammarSuggestions(suggestions);
+
+                const sFluent = (suggestions.fluent || '').trim().toLowerCase();
+                const sBasic = (suggestions.basic || '').trim().toLowerCase();
+                const tInput = trimmedInput.toLowerCase();
+                if (tInput === sFluent || tInput === sBasic) {
+                    setCommunityDescriptionSuggestionApplied(true);
+                    setCommunityDescriptionGrammarSuggestions(null);
+                } else {
+                    setCommunityDescriptionSuggestionApplied(false);
+                }
+            } catch (err) {
+                console.error('Community description grammar check failed', err);
+                setCommunityDescriptionSuggestionApplied(true);
+            } finally {
+                setIsCommunityDescriptionGrammarLoading(false);
+            }
+        }, 800);
+
+        return () => clearTimeout(timer);
+    }, [communityDescription, communityEditDraft, communityEditMode, communityStep, isNewCommunityOpen]);
+
+    const applyCommunityDescriptionGrammarSuggestion = (text) => {
+        if (communityEditMode === 'description' || communityEditMode === 'name') {
+            setCommunityEditDraft(text);
+        } else {
+            setCommunityDescription(text);
+        }
+        setShowCommunityDescriptionGrammarBar(false);
+        setCommunityDescriptionGrammarSuggestions(null);
+        setCommunityDescriptionSuggestionApplied(true);
+    };
+
+    useEffect(() => {
+        const isCommunityDescriptionAiActive = (
+            communityEditMode === 'description' ||
+            communityEditMode === 'name' ||
+            (isNewCommunityOpen && communityStep === 1)
+        );
+        if (!isCommunityDescriptionGarbage || !isCommunityDescriptionAiActive) {
+            lastCommunityDescriptionGrammarAlertRef.current = '';
+            return;
+        }
+
+        const sourceText = (communityEditMode === 'description' || communityEditMode === 'name')
+            ? communityEditDraft
+            : communityDescription;
+        const issue = getInlineTextAiIssue(sourceText) || 'Please write a meaningful word or sentence.';
+        if (!issue || issue === lastCommunityDescriptionGrammarAlertRef.current) return;
+
+        lastCommunityDescriptionGrammarAlertRef.current = issue;
+        setSnackbar({
+            message: issue,
+            type: 'error',
+            variant: 'system',
+            duration: 4500,
+            forceShow: true
+        });
+    }, [communityDescription, communityEditDraft, communityEditMode, communityStep, isCommunityDescriptionGarbage, isNewCommunityOpen, setSnackbar]);
 
     const renderGrammarBar = (options = {}) => {
         const {
@@ -7979,11 +8193,37 @@ export default function Chat() {
 
             if (data.community) {
                 const updatedComm = { ...data.community, id: data.community._id || data.community.id, is_community: true };
-                setCommunities(prev => prev.map(c => String(c._id || c.id) === String(commId) ? updatedComm : c));
+                const keepNewestLastMessage = (current, incoming) => {
+                    const currentLast = current?.announcements?.lastMessage || current?.lastMessage;
+                    const incomingLast = incoming?.announcements?.lastMessage || incoming?.lastMessage;
+                    if (!currentLast) return incoming;
+                    if (!incomingLast) {
+                        return {
+                            ...incoming,
+                            announcements: incoming.announcements
+                                ? { ...incoming.announcements, lastMessage: currentLast }
+                                : incoming.announcements,
+                            lastMessage: currentLast
+                        };
+                    }
+                    const currentTime = new Date(currentLast.created_at || currentLast.createdAt || 0).getTime();
+                    const incomingTime = new Date(incomingLast.created_at || incomingLast.createdAt || 0).getTime();
+                    if (Number.isFinite(currentTime) && (!Number.isFinite(incomingTime) || currentTime > incomingTime)) {
+                        return {
+                            ...incoming,
+                            announcements: incoming.announcements
+                                ? { ...incoming.announcements, lastMessage: currentLast }
+                                : incoming.announcements,
+                            lastMessage: currentLast
+                        };
+                    }
+                    return incoming;
+                };
+                setCommunities(prev => prev.map(c => String(c._id || c.id) === String(commId) ? keepNewestLastMessage(c, updatedComm) : c));
 
                 const currentSelected = selectedCommunityRef.current;
                 if (currentSelected && String(currentSelected._id || currentSelected.id) === String(commId)) {
-                    setSelectedCommunity(updatedComm);
+                    setSelectedCommunity(keepNewestLastMessage(currentSelected, updatedComm));
                 }
             }
 
@@ -8114,22 +8354,33 @@ export default function Chat() {
                     const groupInfo = (groupsRef.current || []).find(g => String(g._id) === String(data.groupId));
                     const groupName = groupInfo?.name || 'Group';
 
-                    let previewText = data.message.content || 'Sent a message';
+                    const rawGroupContent = String(data.message?.content || '');
+                    const isGroupSystemUpdate = !!(
+                        data.message?.is_system ||
+                        data.message?.type === 'system' ||
+                        data.message?.kind ||
+                        /changed the (?:community|group) (?:description|name)/i.test(rawGroupContent)
+                    );
+                    let previewText = rawGroupContent || 'Sent a message';
                     const incomingGroupFileName = getDisplayFileName(data.message || {});
                     if (data.message.type === 'image') previewText = 'Photo';
                     else if (data.message.type === 'video') previewText = 'Video';
                     else if (data.message.type === 'file') previewText = incomingGroupFileName ? truncateFileName(incomingGroupFileName) : 'File';
                     else if (data.message.type === 'contact') previewText = summarizeSharedContacts(data.message.content);
 
-                    showIncomingNotification({
-                        senderName: `${senderName} @ ${groupName}`,
-                        message: previewText,
-                        senderAvatar: groupInfo?.icon || null, // Added icon to snackbar
-                        type: 'info',
-                        duration: 5000,
-                        onReply: (text) => handleGroupNotificationReply(text, data.groupId),
-                        isGroup: true
-                    });
+                    if (!isGroupSystemUpdate) {
+                        showIncomingNotification({
+                            senderName: `${senderName} @ ${groupName}`,
+                            message: previewText,
+                            senderAvatar: groupInfo?.icon || null, // Added icon to snackbar
+                            type: 'info',
+                            duration: 5000,
+                            onReply: (text) => handleGroupNotificationReply(text, data.groupId),
+                            isGroup: true,
+                            desktop: true,
+                            variant: 'default'
+                        });
+                    }
                 }
             }
 
@@ -8515,6 +8766,73 @@ export default function Chat() {
 
         const handleGlobalKeyDown = (e) => {
             if (e.key === 'Escape') {
+                const closeOnEsc = (close) => {
+                    close();
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                    return true;
+                };
+
+                if (isAppAsleep) return closeOnEsc(() => setIsAppAsleep(false));
+                if (isDiscardPreviewConfirmOpen) return closeOnEsc(() => setIsDiscardPreviewConfirmOpen(false));
+                if (isDiscardProfileEditConfirmOpen) return closeOnEsc(() => setIsDiscardProfileEditConfirmOpen(false));
+                if (isClearRemindersConfirmOpen) return closeOnEsc(() => setIsClearRemindersConfirmOpen(false));
+                if (blockConfirmTarget) return closeOnEsc(() => setBlockConfirmTarget(null));
+                if (reportConfirmTarget) return closeOnEsc(() => setReportConfirmTarget(null));
+                if (commonGroupRedirectTarget) return closeOnEsc(() => setCommonGroupRedirectTarget(null));
+                if (pendingListRemoval) return closeOnEsc(() => setPendingListRemoval(null));
+                if (isDeleteChatConfirmOpen) return closeOnEsc(() => setIsDeleteChatConfirmOpen(false));
+                if (isClearChatConfirmOpen) return closeOnEsc(() => setIsClearChatConfirmOpen(false));
+                if (isDeleteModalOpen) return closeOnEsc(() => setIsDeleteModalOpen(false));
+                if (isClearChatDataModalOpen) return closeOnEsc(() => setIsClearChatDataModalOpen(false));
+                if (isMuteModalOpen) return closeOnEsc(() => setIsMuteModalOpen(false));
+                if (isListMuteModalOpen) return closeOnEsc(() => setIsListMuteModalOpen(false));
+                if (pinReplaceModal) return closeOnEsc(() => setPinReplaceModal(null));
+                if (pinMessageModal) return closeOnEsc(() => setPinMessageModal(null));
+                if (isForwardModalOpen) {
+                    return closeOnEsc(() => {
+                        setIsForwardModalOpen(false);
+                        setSelectedForwardContacts([]);
+                        setShowForwardLimitWarning(false);
+                    });
+                }
+                if (isRequestsModalOpen) return closeOnEsc(() => setIsRequestsModalOpen(false));
+                if (isLangConfirmOpen) return closeOnEsc(() => { setIsLangConfirmOpen(false); setPendingLanguage(null); });
+                if (privacyDialog) return closeOnEsc(() => setPrivacyDialog(null));
+                if (linkActionTarget) return closeOnEsc(() => setLinkActionTarget(null));
+                if (appNotFoundInfo) return closeOnEsc(() => setAppNotFoundInfo(null));
+                if (fileToOpenConfirm) return closeOnEsc(() => setFileToOpenConfirm(null));
+                if (isPollDetailsOpen) return closeOnEsc(() => { setIsPollDetailsOpen(false); setPollDetails(null); });
+                if (isPollModalOpen) return closeOnEsc(() => setIsPollModalOpen(false));
+                if (isEventModalOpen) return closeOnEsc(() => setIsEventModalOpen(false));
+                if (isEventEditOpen) return closeOnEsc(() => { setIsEventEditOpen(false); setEventEditTarget(null); });
+                if (isCancelEventConfirmOpen) return closeOnEsc(() => setIsCancelEventConfirmOpen(false));
+                if (viewingContact) return closeOnEsc(() => setViewingContact(null));
+                if (isContactSelectionOpen) return closeOnEsc(() => setIsContactSelectionOpen(false));
+                if (isConfirmContactSendOpen) return closeOnEsc(() => setIsConfirmContactSendOpen(false));
+                if (isScheduleSendOpen) return closeOnEsc(() => setIsScheduleSendOpen(false));
+                if (cameraModal !== 'none') return closeOnEsc(() => setCameraModal('none'));
+                if (isWhoCanAddGroupsModalOpen) return closeOnEsc(() => setIsWhoCanAddGroupsModalOpen(false));
+                if (isAssignOwnerModalOpen) return closeOnEsc(() => { setIsAssignOwnerModalOpen(false); setAssignOwnerTarget(null); });
+                if (adminConfirmModal) return closeOnEsc(() => setAdminConfirmModal(null));
+                if (groupMemberActionModal) return closeOnEsc(() => setGroupMemberActionModal(null));
+                if (pinMessageModal) return closeOnEsc(() => setPinMessageModal(null));
+                if (adminContextMenu) return closeOnEsc(() => setAdminContextMenu(null));
+                if (isExitGroupConfirmOpen) return closeOnEsc(() => setIsExitGroupConfirmOpen(false));
+                if (isRemoveGroupConfirmOpen) return closeOnEsc(() => setIsRemoveGroupConfirmOpen(false));
+                if (isExitCommunityModalOpen) return closeOnEsc(() => setIsExitCommunityModalOpen(false));
+                if (isOwnerExitCommunityModalOpen) return closeOnEsc(() => setIsOwnerExitCommunityModalOpen(false));
+                if (isTransferOwnershipConfirmOpen) return closeOnEsc(() => setIsTransferOwnershipConfirmOpen(false));
+                if (isCommunityMembersModalOpen) return closeOnEsc(() => setIsCommunityMembersModalOpen(false));
+                if (isDeactivateCommunityConfirmOpen) return closeOnEsc(() => setIsDeactivateCommunityConfirmOpen(false));
+                if (isProfilePhotoSourceOpen) return closeOnEsc(() => setIsProfilePhotoSourceOpen(false));
+                if (isGroupIconMenuOpen) return closeOnEsc(() => setIsGroupIconMenuOpen(false));
+                if (isCommunityIconMenuOpen) return closeOnEsc(() => setIsCommunityIconMenuOpen(false));
+                if (showNotificationDetails) return closeOnEsc(() => setShowNotificationDetails(false));
+                if (isAttachmentMenuOpen) return closeOnEsc(() => setIsAttachmentMenuOpen(false));
+                if (showInputEmojiPicker) return closeOnEsc(() => setShowInputEmojiPicker(false));
+                if (openEventRespondId) return closeOnEsc(() => setOpenEventRespondId(null));
+
                 if (isConfirmGroupAddMembersOpen) {
                     setIsConfirmGroupAddMembersOpen(false);
                     e.stopImmediatePropagation();
@@ -8538,6 +8856,20 @@ export default function Chat() {
 
                 if (isCommunityAddMemberOpen) {
                     closeCommunityAddMemberPopup();
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                    return;
+                }
+
+                if (isCommunityGroupsListOpen || isCommunityGroupsPopupClosing) {
+                    closeCommunityGroupsPopup();
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                    return;
+                }
+
+                if (isEncryptionInfoOpen) {
+                    setIsEncryptionInfoOpen(false);
                     e.stopImmediatePropagation();
                     e.preventDefault();
                     return;
@@ -8676,7 +9008,25 @@ export default function Chat() {
             window.removeEventListener('click', handleClickOutside);
             window.removeEventListener('keydown', handleGlobalKeyDown);
         };
-    }, [openDropdown, chatContextMenu, showMenu, isCountryDropdownOpen, selectedUser, selectedGroup, selectedCommunity, isNewChatOpen, isNewGroupOpen, showInputEmojiPicker, showUnblockModal, selectedFontSize, previewVideoUrl, genericLinkPreviewTarget, viewingImage, file, selectedFiles, isProfileOpen, isEditingProfileName, isEditingProfileAbout, isEditingProfilePhone, profileEditValue, userData, isEncryptionStrategyOpen, isGroupAddMemberOpen, isConfirmGroupAddMembersOpen, isCommunityAddMemberOpen, isConfirmCommunityAddMembersOpen]);
+    }, [
+        openDropdown, chatContextMenu, showMenu, isCountryDropdownOpen, selectedUser, selectedGroup, selectedCommunity,
+        isNewChatOpen, isNewGroupOpen, showInputEmojiPicker, showUnblockModal, selectedFontSize, previewVideoUrl,
+        genericLinkPreviewTarget, viewingImage, file, selectedFiles, isProfileOpen, isEditingProfileName,
+        isEditingProfileAbout, isEditingProfilePhone, profileEditValue, userData, isEncryptionInfoOpen, isEncryptionStrategyOpen,
+        isGroupAddMemberOpen, isConfirmGroupAddMembersOpen, isCommunityAddMemberOpen, isConfirmCommunityAddMembersOpen,
+        isCommunityGroupsListOpen, isCommunityGroupsPopupClosing, isAppAsleep, isDiscardPreviewConfirmOpen,
+        isDiscardProfileEditConfirmOpen, isClearRemindersConfirmOpen, blockConfirmTarget, reportConfirmTarget,
+        commonGroupRedirectTarget, pendingListRemoval, isDeleteChatConfirmOpen, isClearChatConfirmOpen, isDeleteModalOpen,
+        isClearChatDataModalOpen, isMuteModalOpen, isListMuteModalOpen, pinReplaceModal, pinMessageModal,
+        isForwardModalOpen, isRequestsModalOpen, isLangConfirmOpen, privacyDialog, linkActionTarget, appNotFoundInfo,
+        fileToOpenConfirm, isPollDetailsOpen, isPollModalOpen, isEventModalOpen, isEventEditOpen,
+        isCancelEventConfirmOpen, viewingContact, isContactSelectionOpen, isConfirmContactSendOpen, isScheduleSendOpen,
+        cameraModal, isWhoCanAddGroupsModalOpen, isAssignOwnerModalOpen, adminConfirmModal, groupMemberActionModal,
+        adminContextMenu, isExitGroupConfirmOpen, isRemoveGroupConfirmOpen, isExitCommunityModalOpen,
+        isOwnerExitCommunityModalOpen, isTransferOwnershipConfirmOpen, isCommunityMembersModalOpen,
+        isDeactivateCommunityConfirmOpen, isProfilePhotoSourceOpen, isGroupIconMenuOpen, isCommunityIconMenuOpen,
+        showNotificationDetails, isAttachmentMenuOpen, openEventRespondId
+    ]);
 
     useEffect(() => {
         const handleClickOutside = (e) => {
@@ -10017,6 +10367,8 @@ export default function Chat() {
             setUsers(prev => prev.map(u => u._id === targetId ? { ...u, isFavorite: !isFav } : u));
             setGroups(prev => prev.map(g => g._id === targetId ? { ...g, isFavorite: !isFav } : g));
             setCommunities(prev => prev.map(c => String(c.id) === String(targetId) ? { ...c, isFavorite: !isFav } : c));
+            setSelectedCommunity(prev => prev && String(prev.id || prev._id) === String(targetId) ? { ...prev, isFavorite: !isFav } : prev);
+            setSelectedGroup(prev => prev && String(prev._id || prev.id) === String(targetId) ? { ...prev, isFavorite: !isFav } : prev);
 
             // Note: communityObj/groupObj here might reflect OLD state if read immediately after setComm
             // But we have isComm and displayName logic below
@@ -16093,6 +16445,7 @@ export default function Chat() {
         const hasVowels = /[aeiouy]/i.test(text);
         const hasNumbers = /[0-9]/.test(text);
         const hasLettersOrNumbers = /[a-zA-Z0-9]/.test(text);
+        if (isEmojiPresent && !hasLettersOrNumbers) return '';
         const words = text.toLowerCase().split(/\s+/).filter(Boolean);
         const repetitiveWord = words.length >= 3 && words.every((word) => word === words[0]);
         const repetitiveChars = /(.)\1{4,}/i.test(text);
@@ -16105,7 +16458,7 @@ export default function Chat() {
         const consonantHeavyNonsense = lettersOnly.length >= 5 && consonantRuns.some((run) => run.length >= 4) && !/(th|sh|ch|ph|wh|ck)/i.test(lettersOnly);
         const alphabetRuns = ['abcdefghijklmnopqrstuvwxyz', 'zyxwvutsrqponmlkjihgfedcba', 'qwertyuiop', 'poiuytrewq', 'asdfghjkl', 'lkjhgfdsa', 'zxcvbnm', 'mnbvcxz'];
         const alphabetSpam = lettersOnly.length >= 3 && alphabetRuns.some((run) => run.includes(lettersOnly));
-        const probablyGarbage = !isEmojiPresent && !hasSentenceLikeText && (
+        const probablyGarbage = !hasSentenceLikeText && (
             (text.length >= 3 && !hasVowels && !hasNumbers) ||
             repetitiveChars ||
             repetitiveWord ||
@@ -18036,6 +18389,15 @@ export default function Chat() {
 
                         <div style={{ width: '100%', background: 'rgba(15, 23, 42, 0.78)', borderRadius: '10px', padding: '16px', position: 'relative', border: '1px solid rgba(255, 255, 255, 0.12)' }}>
                             <div style={{ color: '#0EA5BE', fontSize: 13, marginBottom: 8 }}>Community description</div>
+                            {renderGrammarBar({
+                                show: showCommunityDescriptionGrammarBar,
+                                garbage: isCommunityDescriptionGarbage,
+                                suggestions: communityDescriptionGrammarSuggestions,
+                                loading: isCommunityDescriptionGrammarLoading,
+                                applied: communityDescriptionSuggestionApplied,
+                                onApply: applyCommunityDescriptionGrammarSuggestion,
+                                onClose: () => setShowCommunityDescriptionGrammarBar(false)
+                            })}
                             <textarea
                                 placeholder="Hi everyone! This community is for members to chat in topic-based groups and get important announcements."
                                 value={communityDescription}
@@ -19267,28 +19629,34 @@ export default function Chat() {
         if (!isEncryptionStrategyOpen) return null;
         const strategyItems = [
             {
-                id: 'ai',
+                id: 'ai-assist',
                 icon: MessageSquare,
-                title: 'AI helps polish messages before sending.',
-                detail: 'Neural Chat can check grammar, tone, and meaningfulness so users can send clearer messages without leaving the chat.'
+                title: 'AI helps users write clearer messages.',
+                detail: 'Grammar rewrites, basic/fluent/formal tones, file-aware AI assistance, and conversation history make everyday chat smarter without leaving the app.'
             },
             {
-                id: 'events',
-                icon: Calendar,
-                title: 'Chat events turn into reminders.',
-                detail: 'Plans discussed in chat can become event reminders, keeping meetings, calls, and important moments visible inside the app.'
-            },
-            {
-                id: 'communities',
-                icon: Users,
-                title: 'Communities keep related groups together.',
-                detail: 'Users can organize multiple groups under one community, making class, team, project, or family spaces easier to manage.'
+                id: 'moderation',
+                icon: ShieldAlert,
+                title: 'AI moderation helps keep chats safer.',
+                detail: 'Neural Chat checks harmful or meaningless content and can pause messaging after repeated violations, with a request flow to restore access.'
             },
             {
                 id: 'privacy',
                 icon: ShieldCheck,
-                title: 'Privacy controls are built into everyday chat.',
-                detail: 'Read receipts, typing status, screenshot protection, watermarks, and clear-chat controls can be adjusted from settings.'
+                title: 'Privacy controls are built into chat.',
+                detail: 'Screenshot protection, view-once media and voice, visibility exceptions, read receipts, and file-open risk warnings are part of daily use.'
+            },
+            {
+                id: 'events',
+                icon: Calendar,
+                title: 'Scheduling and events go beyond messages.',
+                detail: 'Users can schedule messages, polls, and events, create reminders, collect responses, reschedule, cancel, and keep event audit history.'
+            },
+            {
+                id: 'communities',
+                icon: Users,
+                title: 'Communities add governance to groups.',
+                detail: 'Announcements, member management, ownership transfer, group attachment/removal, exit controls, and community deactivation support managed spaces.'
             }
         ];
 
@@ -21384,7 +21752,10 @@ export default function Chat() {
         const subTextColor = '#94a3b8';
 
         return (
-            <div className={`wa-community-groups-popup-overlay ${isCommunityGroupsListOpen ? 'active' : ''} ${isCommunityGroupsPopupClosing ? 'closing' : ''}`}>
+            <div
+                className={`wa-community-groups-popup-overlay ${isCommunityGroupsListOpen ? 'active' : ''} ${isCommunityGroupsPopupClosing ? 'closing' : ''}`}
+                onClick={() => closeCommunityGroupsPopup()}
+            >
                 <div className="wa-community-groups-popup" onClick={(e) => e.stopPropagation()}>
                     <div className="wa-community-groups-popup-header">
                         <button onClick={() => closeCommunityGroupsPopup()} className="wa-community-groups-popup-close">
@@ -22240,6 +22611,20 @@ export default function Chat() {
         const canIManage = isMeOwner || isMeAdmin;
         const communityId = community.id || community._id;
         const isFavoriteCommunity = !!community.isFavorite;
+        const communityEditOriginalValue = String(communityEditMode === 'name' ? (community.name || '') : (community.description || '')).trim();
+        const communityEditCurrentValue = communityEditDraft.trim();
+        const hasCommunityEditChanges = communityEditMode && communityEditCurrentValue !== communityEditOriginalValue;
+        const isCommunityEditSaveBlocked = !!(
+            hasCommunityEditChanges &&
+            communityEditCurrentValue &&
+            !isLinkLikeText(communityEditCurrentValue) &&
+            (
+                getInlineTextAiIssue(communityEditCurrentValue) ||
+                isCommunityDescriptionGarbage ||
+                isCommunityDescriptionGrammarLoading ||
+                ((showCommunityDescriptionGrammarBar || communityDescriptionGrammarSuggestions) && !communityDescriptionSuggestionApplied)
+            )
+        );
 
         const onExitClick = () => {
             handleExitCommunity(community);
@@ -22286,10 +22671,64 @@ export default function Chat() {
                             )}
                             <div className="wa-community-camera-badge"><Camera size={14} color="white" /></div>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <span style={{ fontSize: 24, fontWeight: 500, color: textColor }}>{community.name}</span>
-                            {canIManage && <Pencil size={20} color="#38bdf8" style={{ cursor: 'pointer' }} onClick={() => { /* name/description edit handler */ }} />}
-                        </div>
+                        {communityEditMode === 'name' ? (
+                            <div className="wa-community-name-inline-edit">
+                                <input
+                                    autoFocus
+                                    value={communityEditDraft}
+                                    onChange={(e) => setCommunityEditDraft(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') saveCommunityEdit(community);
+                                        if (e.key === 'Escape') {
+                                            setCommunityEditMode(null);
+                                            setCommunityEditDraft('');
+                                        }
+                                    }}
+                                    aria-label="Community name"
+                                    maxLength={80}
+                                />
+                                <button
+                                    type="button"
+                                    className="wa-community-description-inline-action"
+                                    onClick={(event) => openEmojiPickerForTarget(event, 'communityEditDescription')}
+                                    aria-label="Add emoji"
+                                >
+                                    <Smile size={20} />
+                                </button>
+                                <button
+                                    type="button"
+                                    className="wa-community-description-inline-action save"
+                                    onClick={() => saveCommunityEdit(community)}
+                                    disabled={isCommunityEditSaveBlocked}
+                                    aria-label="Save community name"
+                                >
+                                    <Check size={20} />
+                                </button>
+                                {renderGrammarBar({
+                                    show: showCommunityDescriptionGrammarBar,
+                                    garbage: isCommunityDescriptionGarbage,
+                                    suggestions: communityDescriptionGrammarSuggestions,
+                                    loading: isCommunityDescriptionGrammarLoading,
+                                    applied: communityDescriptionSuggestionApplied,
+                                    onApply: applyCommunityDescriptionGrammarSuggestion,
+                                    onClose: () => setShowCommunityDescriptionGrammarBar(false)
+                                })}
+                            </div>
+                        ) : (
+                            <div id="wa-community-name-section" style={{ display: 'flex', alignItems: 'center', gap: 10, maxWidth: '100%', justifyContent: 'center' }}>
+                                <span style={{ fontSize: 24, fontWeight: 500, color: textColor, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{community.name}</span>
+                                {canIManage && (
+                                    <button
+                                        type="button"
+                                        className="wa-community-edit-icon-btn"
+                                        onClick={() => openCommunityEdit('name', community)}
+                                        aria-label="Edit community name"
+                                    >
+                                        <Pencil size={18} />
+                                    </button>
+                                )}
+                            </div>
+                        )}
                         {(() => {
                             const allIds = new Set();
                             const communityOwner = community.creator;
@@ -22347,6 +22786,8 @@ export default function Chat() {
                                 textAlign: 'center',
                                 color: '#38bdf8',
                                 borderBottom: '3px solid #38bdf8',
+                                textDecoration: 'underline',
+                                textUnderlineOffset: 6,
                                 fontWeight: 500,
                                 cursor: 'default'
                             }}
@@ -22355,14 +22796,93 @@ export default function Chat() {
                         </div>
                     </div>
 
-                    <div style={{ padding: '20px', borderBottom: thickDivider }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <div style={{ flex: 1, color: textColor, fontSize: 14, lineHeight: '1.4' }}>
-                                {community.description || 'Welcome to our community!'}
-                                <span style={{ color: '#38bdf8', cursor: 'pointer', marginLeft: 4 }}>Read more</span>
-                            </div>
-                            <div style={{ width: 20 }}></div>
-                        </div>
+                    <div id="wa-community-description-section" style={{ padding: '20px', borderBottom: thickDivider }}>
+                        {(() => {
+                            const descriptionText = community.description || 'Welcome to our community!';
+                            const hasExcessDescription = descriptionText.length > 92;
+                            const visibleDescription = hasExcessDescription && !isCommunityDescriptionExpanded
+                                ? `${descriptionText.slice(0, 92).trim()}...`
+                                : descriptionText;
+
+                            if (communityEditMode === 'description') {
+                                return (
+                                    <div className="wa-community-description-inline-edit">
+                                        {renderGrammarBar({
+                                            show: showCommunityDescriptionGrammarBar,
+                                            garbage: isCommunityDescriptionGarbage,
+                                            suggestions: communityDescriptionGrammarSuggestions,
+                                            loading: isCommunityDescriptionGrammarLoading,
+                                            applied: communityDescriptionSuggestionApplied,
+                                            onApply: applyCommunityDescriptionGrammarSuggestion,
+                                            onClose: () => setShowCommunityDescriptionGrammarBar(false)
+                                        })}
+                                        <div className="wa-community-description-edit-row">
+                                            <textarea
+                                                autoFocus
+                                                value={communityEditDraft}
+                                                onChange={(e) => setCommunityEditDraft(e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Escape') {
+                                                        setCommunityEditMode(null);
+                                                        setCommunityEditDraft('');
+                                                    }
+                                                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                                        saveCommunityEdit(community);
+                                                    }
+                                                }}
+                                                aria-label="Community description"
+                                                rows={3}
+                                                maxLength={512}
+                                            />
+                                            <button
+                                                type="button"
+                                                className="wa-community-description-inline-action"
+                                                onClick={(event) => openEmojiPickerForTarget(event, 'communityEditDescription')}
+                                                aria-label="Add emoji"
+                                            >
+                                                <Smile size={24} />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="wa-community-description-inline-action save"
+                                                onClick={() => saveCommunityEdit(community)}
+                                                disabled={isCommunityEditSaveBlocked}
+                                                aria-label="Save community description"
+                                            >
+                                                <Check size={26} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            }
+
+                            return (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                                    <div style={{ flex: 1, color: textColor, fontSize: 14, lineHeight: '1.4', minWidth: 0 }}>
+                                        {visibleDescription}
+                                        {hasExcessDescription && (
+                                            <button
+                                                type="button"
+                                                className="wa-community-read-more-btn"
+                                                onClick={() => setIsCommunityDescriptionExpanded(prev => !prev)}
+                                            >
+                                                {isCommunityDescriptionExpanded ? 'Show less' : 'Read more'}
+                                            </button>
+                                        )}
+                                    </div>
+                                    {canIManage && (
+                                        <button
+                                            type="button"
+                                            className="wa-community-edit-icon-btn"
+                                            onClick={() => openCommunityEdit('description', community)}
+                                            aria-label="Edit community description"
+                                        >
+                                            <Pencil size={16} />
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })()}
                         <div style={{ fontSize: 13, color: subTextColor, marginTop: 12 }}>
                             Created by {community.creator && (String(community.creator._id || community.creator) === String(user.id || user._id)) ? 'you' : (community.creator?.name || 'Unknown')}, on {new Date(community.created_at || Date.now()).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
                         </div>
@@ -22382,34 +22902,31 @@ export default function Chat() {
 
                             return (
                                 <>
-                                    <div className="clickable" onClick={() => { setSharedMediaTab('media'); setIsSharedMediaOpen(true); setIsCommunityInfoOpen(false); }} style={{ padding: '14px 30px', display: 'flex', flexDirection: 'column', cursor: 'pointer' }}>
+                                    <div className="clickable wa-community-media-summary" onClick={() => { setSharedMediaTab('media'); setIsSharedMediaOpen(true); setIsCommunityInfoOpen(false); }} style={{ padding: '14px 30px', display: 'flex', flexDirection: 'column', cursor: 'pointer' }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <span style={{ color: textColor, fontSize: 16 }}>Media, links and docs</span>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                <span style={{ color: subTextColor, fontSize: 15 }}>{cImages.length + cLinks.length + cDocs.length}</span>
-                                                <ChevronRight size={20} color="#38bdf8" />
-                                            </div>
+                                            <span style={{ color: textColor, fontSize: 16, fontWeight: 700 }}>Media, links and docs</span>
+                                            <ChevronRight size={20} color="#38bdf8" />
                                         </div>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12, color: subTextColor, fontSize: 14 }}>
-                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><ImageIcon size={16} color="#38bdf8" /> {cImages.length} Media</span>
-                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><LinkIcon size={16} color="#38bdf8" /> {cLinks.length} Links</span>
-                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><FileText size={16} color="#38bdf8" /> {cDocs.length} Docs</span>
+                                        <div className="wa-community-media-counts">
+                                            <span><ImageIcon size={16} /> {cImages.length} Media</span>
+                                            <span><LinkIcon size={16} /> {cLinks.length} Links</span>
+                                            <span><FileText size={16} /> {cDocs.length} Docs</span>
                                         </div>
                                     </div>
 
-                                    <div style={{ padding: '0 30px 14px 30px', display: 'flex', gap: 6, overflowX: 'auto' }}>
+                                    <div className="wa-community-media-preview-row">
                                         {cPreviewItems.map((m, i) => {
                                             if (m.type === 'image' || m.type === 'video') {
                                                 return (
-                                                    <div key={i} className="wa-media-thumb" onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }} style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: '#f0f2f5' }}>
+                                                    <div key={i} className="wa-media-thumb wa-community-media-thumb" onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }}>
                                                         <img src={getMediaUrl(m.file_path)} alt="media" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                     </div>
                                                 );
                                             }
                                             if (m.type === 'file') {
                                                 return (
-                                                    <div key={i} className="wa-media-thumb" style={{ width: 72, height: 72, borderRadius: 8, background: '#f0f2f5', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px', overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }}>
-                                                        <FileText size={24} color="#8696a0" />
+                                                    <div key={i} className="wa-media-thumb wa-community-media-thumb wa-community-media-doc-thumb" onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }}>
+                                                        <FileText size={24} color="#38bdf8" />
                                                         <div style={{ fontSize: 10, color: '#667781', textAlign: 'center', marginTop: 4, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                             {m.fileName || 'Doc'}
                                                         </div>
@@ -22423,7 +22940,7 @@ export default function Chat() {
                                             }
                                             if (m.link_preview && m.link_preview.image) {
                                                 return (
-                                                    <div key={i} className="wa-media-thumb" style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', position: 'relative' }} onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }}>
+                                                    <div key={i} className="wa-media-thumb wa-community-media-thumb" onClick={(e) => { e.stopPropagation(); handleSearchClick(m._id || m.id); }}>
                                                         <img src={m.link_preview.image} alt="link" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                         {getYouTubeVideoId(m.link_preview.url || m.content) && (
                                                             <span className="wa-mini-youtube-play"><Play size={18} color="#fff" fill="#fff" /></span>
@@ -22433,13 +22950,13 @@ export default function Chat() {
                                             }
                                             const fallbackLink = m.link_preview?.url || m.content?.match(/(https?:\/\/[^\s]+)/)?.[0];
                                             return (
-                                                <div key={i} className="wa-media-thumb" style={{ width: 72, height: 72, borderRadius: 8, background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); if (fallbackLink) window.open(fallbackLink, '_blank'); }}>
+                                                <div key={i} className="wa-media-thumb wa-community-media-thumb wa-community-media-link-thumb" onClick={(e) => { e.stopPropagation(); if (fallbackLink) window.open(fallbackLink, '_blank'); }}>
                                                     <LinkIcon size={24} color="#38bdf8" />
                                                 </div>
                                             );
                                         })}
                                         {[...Array(Math.max(0, 4 - cPreviewItems.length))].map((_, i) => (
-                                            <div key={`empty-${i}`} className="wa-media-thumb" style={{ width: 72, height: 72, borderRadius: 8, background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.05)', flexShrink: 0 }}></div>
+                                            <div key={`empty-${i}`} className="wa-community-empty-media-card" aria-hidden="true"></div>
                                         ))}
                                     </div>
                                 </>
@@ -22453,7 +22970,7 @@ export default function Chat() {
                                 { icon: <Users size={20} />, label: 'Manage groups', onClick: () => { if (checkAddGroupPermission(community, true)) { closeRightSidePanels(); resetRightPanelWidthForDrawer(); setIsManageGroupsOpen(true); } } },
                                 { icon: <Settings size={20} />, label: 'Community settings', onClick: () => openCommunitySettingsPanel('right', community) }
                             ] : []),
-                            { icon: <Users size={20} />, label: 'View groups (' + (community.groups?.length || 0) + ')', onClick: () => { setIsCommunityGroupsPopupClosing(false); setIsCommunityGroupsListOpen(true); } },
+                            { icon: <Users size={20} />, label: `View groups${(community.groups?.length || 0) > 0 ? ` (${community.groups.length})` : ''}`, onClick: () => { setIsCommunityGroupsPopupClosing(false); setIsCommunityGroupsListOpen(true); } },
                             {
                                 icon: <Star size={20} />,
                                 label: 'Starred Messages',
@@ -22472,7 +22989,7 @@ export default function Chat() {
                             },
                             {
                                 icon: isFavoriteCommunity ? <HeartOff size={20} /> : <Heart size={20} />,
-                                label: isFavoriteCommunity ? 'Remove from favourites' : 'Add to favourites',
+                                label: isFavoriteCommunity ? 'Remove from favorites' : 'Add to favorites',
                                 chevron: false,
                                 onClick: () => handleToggleFavorite(communityId, isFavoriteCommunity)
                             },
@@ -25271,6 +25788,7 @@ export default function Chat() {
                                     };
 
                                     const chatHoverPreview = getChatHoverPreview(item, isGroup || item.is_community);
+                                    const chatNameHoverPreview = getChatNameHoverPreview(item, displayName);
                                     const isLinkedGroup = isGroup && !item.is_community && isLinkedCommunityGroup(item);
 
                                     return (
@@ -25278,6 +25796,7 @@ export default function Chat() {
                                             key={chatListKey}
                                             className={`wa-user-item ${((item.is_community && !selectedUser && String(selectedCommunity?.id || selectedCommunity?._id || '') === String(item.id || item._id || '')) || (isGroup && !item.is_community && selectedGroup?._id === item._id) || (!isGroup && !item.is_community && selectedUser?._id === item._id)) ? 'active' : ''}`}
                                             data-chat-preview={chatHoverPreview || undefined}
+                                            data-chat-name-preview={chatNameHoverPreview || undefined}
                                             onClick={() => {
                                                 setIsContactInfoOpen(false);
                                                 setIsCommunityInfoOpen(false);
@@ -25286,15 +25805,15 @@ export default function Chat() {
                                                 setIsSharedMediaOpen(false);
                                                 setIsEditContactOpen(false);
                                                 setIsCommunitySettingsOpen(false);
+                                                setIsCommunityHomeOpen(false);
 
                                                 if (item.is_community) {
                                                     setSelectedCommunity(item);
-                                                    setIsCommunityHomeOpen(false);
                                                     setSelectedUser(null);
                                                     setCommunities(prev => prev.map(c => String(c.id) === String(item.id) ? { ...c, unreadCount: 0 } : c));
-                                                    const annId = item.announcements?._id || item.announcements?.id || item.announcements;
-                                                    const annGroup = (item.announcements && typeof item.announcements === 'object')
-                                                        ? item.announcements
+                                                    const { annGroup: rawAnnGroup, annId } = getCommunityAnnouncementTarget(item);
+                                                    const annGroup = (rawAnnGroup && typeof rawAnnGroup === 'object')
+                                                        ? rawAnnGroup
                                                         : { _id: annId, id: annId, name: item.name, communityName: item.name };
                                                     if (annId) {
                                                         const normalizedAnnouncements = {
@@ -25307,7 +25826,8 @@ export default function Chat() {
                                                             community_id: item._id || item.id,
                                                             communityId: item._id || item.id,
                                                             communityName: item.name,
-                                                            communityIcon: item.icon
+                                                            communityIcon: item.icon,
+                                                            communityDescription: item.description
                                                         };
                                                         setSelectedGroup(normalizedAnnouncements);
                                                         if (selectedGroupRef) selectedGroupRef.current = normalizedAnnouncements;
@@ -25315,7 +25835,9 @@ export default function Chat() {
                                                         fetchGroupMessages(annId);
                                                     } else {
                                                         setSelectedGroup(null);
+                                                        if (selectedGroupRef) selectedGroupRef.current = null;
                                                     }
+                                                    window.setTimeout(() => setIsCommunityInfoOpen(false), 0);
                                                     return;
                                                 }
                                                 if (isGroup) {
@@ -25389,7 +25911,10 @@ export default function Chat() {
                                                             if (isLinkedGroup) {
                                                                 return renderLinkedGroupLastMessagePreview(item, `${(item.members?.length || 0)} members`);
                                                             }
-                                                            const preview = renderLastMessagePreview(item.lastMessage, isGroup || item.is_community, '', item._id || item.id);
+                                                            const messageForPreview = item.is_community
+                                                                ? (item.announcements?.lastMessage || item.lastMessage)
+                                                                : item.lastMessage;
+                                                            const preview = renderLastMessagePreview(messageForPreview, isGroup || item.is_community, '', item._id || item.id);
                                                             return typeof preview === 'string' ? renderHighlightedContent(preview) : preview;
                                                         })()}
                                                     </span>
@@ -25863,6 +26388,9 @@ export default function Chat() {
         setIsContactInfoOpen(false);
         setGroupEditMode(null);
         setGroupEditDraft('');
+        setCommunityEditMode(null);
+        setCommunityEditDraft('');
+        setIsCommunityDescriptionExpanded(false);
     };
 
     const openGroupEditPanel = (mode) => {
@@ -25872,6 +26400,119 @@ export default function Chat() {
         setIsContactInfoOpen(true);
         setIsCommunityInfoOpen(false);
         setIsMessageSearchOpen(false);
+    };
+
+    const openCommunityEdit = (mode, community) => {
+        if (!community) return;
+        setCommunityEditMode(mode);
+        setCommunityEditDraft(mode === 'name' ? (community.name || '') : (community.description || ''));
+    };
+
+    const saveCommunityEdit = async (community) => {
+        if (!community || !communityEditMode) return;
+        const value = communityEditDraft.trim();
+        if (communityEditMode === 'name' && !value) {
+            setSnackbar({ message: 'Please enter a community name', type: 'info', variant: 'system' });
+            return;
+        }
+        const originalValue = String(communityEditMode === 'name' ? (community.name || '') : (community.description || '')).trim();
+        if (value === originalValue) {
+            setCommunityEditMode(null);
+            setCommunityEditDraft('');
+            setCommunityDescriptionGrammarSuggestions(null);
+            setShowCommunityDescriptionGrammarBar(false);
+            setIsCommunityDescriptionGrammarLoading(false);
+            setCommunityDescriptionSuggestionApplied(true);
+            setIsCommunityDescriptionGarbage(false);
+            return;
+        }
+        if (
+            (communityEditMode === 'description' || communityEditMode === 'name') &&
+            value &&
+            !isLinkLikeText(value) &&
+            (getInlineTextAiIssue(value) || isCommunityDescriptionGarbage || isCommunityDescriptionGrammarLoading || ((showCommunityDescriptionGrammarBar || communityDescriptionGrammarSuggestions) && !communityDescriptionSuggestionApplied))
+        ) {
+            setShowCommunityDescriptionGrammarBar(true);
+            setSnackbar({
+                message: getInlineTextAiIssue(value) || (isCommunityDescriptionGrammarLoading ? 'Please wait for Neural Chat AI' : 'Please select a grammar level before saving'),
+                type: 'info',
+                variant: 'system',
+                forceShow: true
+            });
+            return;
+        }
+
+        try {
+            const token = localStorage.getItem('token');
+            const communityId = community._id || community.id;
+            const payload = communityEditMode === 'name' ? { name: value } : { description: value };
+            const res = await axios.patch(`/api/communities/${communityId}`, payload, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            const updatedCommunity = { ...(res.data?.community || community), ...payload, id: communityId, is_community: true };
+            const communityUpdatePreview = communityEditMode === 'description' || communityEditMode === 'name'
+                ? {
+                    _id: `community-${communityEditMode}-${communityId}-${Date.now()}`,
+                    id: `community-${communityEditMode}-${communityId}-${Date.now()}`,
+                    type: 'system',
+                    is_system: true,
+                    content: communityEditMode === 'name'
+                        ? 'changed the community name. click to view'
+                        : 'changed the community description. click to view',
+                    sender_id: {
+                        _id: user?.id || user?._id,
+                        id: user?.id || user?._id,
+                        name: user?.name || userData?.name || 'You'
+                    },
+                    metadata: {
+                        kind: communityEditMode === 'name' ? 'community_name_update' : 'community_description_update',
+                        communityId
+                    },
+                    created_at: new Date().toISOString()
+                }
+                : null;
+            const withCommunityPreview = (communityItem) => {
+                if (!communityUpdatePreview) return communityItem;
+                return {
+                    ...communityItem,
+                    announcements: communityItem.announcements
+                        ? { ...communityItem.announcements, lastMessage: communityUpdatePreview }
+                        : communityItem.announcements,
+                    lastMessage: communityUpdatePreview
+                };
+            };
+
+            setCommunities(prev => prev.map(c =>
+                String(c._id || c.id) === String(communityId) ? withCommunityPreview({ ...c, ...updatedCommunity }) : c
+            ));
+            setSelectedCommunity(prev =>
+                prev && String(prev._id || prev.id) === String(communityId) ? withCommunityPreview({ ...prev, ...updatedCommunity }) : prev
+            );
+            setSelectedGroup(prev => {
+                if (!prev) return prev;
+                const groupCommunityId = prev.community_id || prev.communityId;
+                const isSameCommunity = String(groupCommunityId || '') === String(communityId) ||
+                    String(prev.communityName || '') === String(community.name || '');
+                if (!isSameCommunity) return prev;
+                return {
+                    ...prev,
+                    communityName: updatedCommunity.name,
+                    communityDescription: updatedCommunity.description
+                };
+            });
+            const activeAnnouncementId = selectedGroup?._id || selectedGroup?.id;
+            const updatedAnnouncementId = updatedCommunity.announcements?._id || updatedCommunity.announcements?.id || updatedCommunity.announcements;
+            if (communityUpdatePreview && activeAnnouncementId && String(activeAnnouncementId) === String(updatedAnnouncementId)) {
+                setGroupMessages(prev => [...prev, communityUpdatePreview]);
+            }
+
+            setCommunityEditMode(null);
+            setCommunityEditDraft('');
+            setSnackbar({ message: communityEditMode === 'name' ? 'Community name updated' : 'Community description updated', type: 'success', variant: 'system' });
+        } catch (err) {
+            console.error('Update community failed:', err);
+            setSnackbar({ message: err.response?.data?.error || 'Failed to update community', type: 'error', variant: 'system' });
+        }
     };
 
     const saveGroupEdit = async () => {
@@ -26412,7 +27053,14 @@ export default function Chat() {
     const isCommunitySettingsRightOpen = isCommunitySettingsOpen && communitySettingsSurface === 'right';
     const isRightSidePanelOpen = !!infoMessage || isMessageSearchOpen || isContactInfoOpen || isCommunityInfoOpen || isManageGroupsOpen || isAddExistingGroupsOpen || isConfirmAddGroupsOpen || isCommunityAddMemberOpen || isConfirmCommunityAddMembersOpen || isStarredMessagesOpen || isSharedMediaOpen || isEditContactOpen || isNotificationSettingsOpen || isEventDetailsOpen || isCommunitySettingsRightOpen;
 
-    const renderMainChat = () => (
+    const renderMainChat = () => {
+        const activeChatAnimationKey = selectedUser
+            ? `user-${selectedUser._id || selectedUser.id}`
+            : selectedGroup
+                ? `group-${selectedGroup._id || selectedGroup.id}`
+                : 'empty';
+
+        return (
         <div
             className="wa-main-chat-wrapper"
             style={{
@@ -26425,7 +27073,8 @@ export default function Chat() {
             }}
         >
             <div
-                className={`wa-main-chat ${isRightSidePanelOpen ? 'wa-main-chat-with-panel' : ''} ${privacySettings.addWatermark ? 'media-watermark-active' : ''} ${isViewOncePreviewOpen ? 'wa-view-once-chat-active' : ''}`}
+                key={activeChatAnimationKey}
+                className={`wa-main-chat ${(selectedUser || selectedGroup) ? 'wa-main-chat-active' : ''} ${isRightSidePanelOpen ? 'wa-main-chat-with-panel' : ''} ${privacySettings.addWatermark ? 'media-watermark-active' : ''} ${isViewOncePreviewOpen ? 'wa-view-once-chat-active' : ''}`}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 style={{
@@ -26681,8 +27330,8 @@ export default function Chat() {
                             <MessageList
                                 messages={messages}
                                 messageSearchQuery=""
-                                headerContent={
-                                    <div className="wa-chat-intro-system">
+                                preMessageContent={
+                                    <div className="wa-chat-intro-system wa-pre-message-intro">
                                         <div className="wa-community-welcome-created">
                                             {(() => {
                                                 const firstMessageDate = (messages || [])
@@ -26773,6 +27422,7 @@ export default function Chat() {
                                 openGenericLinkPreview={openGenericLinkPreview}
                                 openLinkChoice={openLinkChoice}
                                 onViewOncePreviewOpenChange={setIsViewOncePreviewOpen}
+                                onCommunityUpdateClick={openCommunityUpdateTarget}
                             />
                         </div>
 
@@ -27179,7 +27829,7 @@ export default function Chat() {
                                             setIsCommunityGroupsListOpen(true);
                                         }}
                                     >
-                                        <Users size={20} />
+                                        <ThreePersonIcon size={20} color="currentColor" />
                                         <ChevronDown size={14} />
                                     </button>
                                 )}
@@ -27203,21 +27853,6 @@ export default function Chat() {
                                 </button>
                             </div>
 
-                            {/* Community Description Banner */}
-                            {selectedGroup.isCommunityAnnouncements && selectedGroup.communityDescription && !isCommunityDescDismissed && (
-                                <div style={{ background: '#f8f9fa', padding: '12px 16px', borderBottom: '1px solid #e9edef', display: 'flex', gap: 12, position: 'relative' }}>
-                                    <div style={{ flex: 1 }}>
-                                        <div style={{ fontSize: 13, fontWeight: 600, color: '#0EA5BE', marginBottom: 4 }}>Group description</div>
-                                        <div style={{ fontSize: 14, color: '#54656f', lineHeight: '1.4' }}>{selectedGroup.communityDescription}</div>
-                                    </div>
-                                    <X
-                                        size={18}
-                                        color="#54656f"
-                                        style={{ cursor: 'pointer', flexShrink: 0 }}
-                                        onClick={() => setIsCommunityDescDismissed(true)}
-                                    />
-                                </div>
-                            )}
                         </div>
 
                         {/* Group Messages Area */}
@@ -27328,8 +27963,8 @@ export default function Chat() {
                                         }
                                     }
                                 }}
-                                headerContent={
-                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', paddingTop: '20px' }}>
+                                preMessageContent={
+                                    <div className="wa-chat-intro-system wa-pre-message-intro wa-group-pre-message-intro" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', paddingTop: '20px' }}>
                                         {selectedGroup.isCommunityAnnouncements ? (
                                             <>
                                                 <div className="wa-community-welcome-created">
@@ -27338,10 +27973,17 @@ export default function Chat() {
                                                         return formatNumericChatDate(createdAt) || formatDateForSeparator(createdAt);
                                                     })()}
                                                 </div>
-                                                <div className="wa-community-welcome-encryption">
+                                                <button
+                                                    type="button"
+                                                    className="wa-community-welcome-encryption wa-chat-intro-encryption"
+                                                    onClick={() => {
+                                                        setOpenEncryptionStrategyPoint(null);
+                                                        setIsEncryptionStrategyOpen(true);
+                                                    }}
+                                                >
                                                     <Lock size={12} />
                                                     <span>Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them. Click to learn more</span>
-                                                </div>
+                                                </button>
                                                 <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20, width: '100%' }}>
                                                 <div className="wa-group-welcome-card wa-community-welcome-card" style={{ padding: '20px 0 0', maxWidth: '420px', width: '72%', textAlign: 'center' }}>
                                                     <div className="wa-community-reference-icon" style={{ width: 60, height: 60, margin: '0 auto 14px' }}>
@@ -27370,10 +28012,17 @@ export default function Chat() {
                                             <div className="wa-community-welcome-created">
                                                 {formatNumericChatDate(selectedGroup.created_at) || formatDateForSeparator(selectedGroup.created_at)}
                                             </div>
-                                            <div className="wa-community-welcome-encryption">
+                                            <button
+                                                type="button"
+                                                className="wa-community-welcome-encryption wa-chat-intro-encryption"
+                                                onClick={() => {
+                                                    setOpenEncryptionStrategyPoint(null);
+                                                    setIsEncryptionStrategyOpen(true);
+                                                }}
+                                            >
                                                 <Lock size={12} />
                                                 <span>Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them. Click to learn more</span>
-                                            </div>
+                                            </button>
                                             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20, width: '100%' }}>
                                             <div className="wa-group-welcome-card wa-community-welcome-card wa-group-chat-welcome-card" style={{ padding: '20px 0 0', maxWidth: '420px', width: '72%', textAlign: 'center' }}>
                                                 <div
@@ -27410,8 +28059,13 @@ export default function Chat() {
                                         )}
                                     </div>
                                 }
-                                messages={groupMessages}
+                                messages={
+                                    selectedGroup.isCommunityAnnouncements
+                                        ? groupMessages.filter(msg => !(msg?.type === 'system' && String(msg?.content || '').trim() === 'Welcome to your community!'))
+                                        : groupMessages
+                                }
                                 messageSearchQuery=""
+                                suppressInitialDateSeparator={selectedGroup.isCommunityAnnouncements}
                                 formatDateForSeparator={formatDateForSeparator}
                                 t={t}
                                 getLangCode={getLangCode}
@@ -27474,6 +28128,7 @@ export default function Chat() {
                                 openGenericLinkPreview={openGenericLinkPreview}
                                 openLinkChoice={openLinkChoice}
                                 onViewOncePreviewOpenChange={setIsViewOncePreviewOpen}
+                                onCommunityUpdateClick={openCommunityUpdateTarget}
                             />
 
                             {/* Aligned Typing Indicator Bubble - Enhanced for visibility */}
@@ -27933,11 +28588,11 @@ export default function Chat() {
                                                                 <button
                                                                     onClick={handleSend}
                                                                     className="wa-send-btn-inner"
-                                                                    data-tooltip={(!file && !isLinkLikeText(input) && (getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied))) ? (getInlineTextAiIssue(input) || (isGrammarLoading ? "Please wait for Neural Chat AI" : isGarbageMessage ? "Please write a meaningful message" : "Please select a grammar level")) : "Send"}
-                                                                    disabled={!file && !isLinkLikeText(input) && !!(getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied))}
+                                                                    data-tooltip={(!file && !isLinkLikeText(input) && (getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied) || (input.length >= 1 && !suggestionApplied))) ? (getInlineTextAiIssue(input) || (isGrammarLoading ? "Please wait for Neural Chat AI" : isGarbageMessage ? "Please write a meaningful message" : "Please select a grammar level")) : "Send"}
+                                                                    disabled={!file && !isLinkLikeText(input) && !!(getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied) || (input.length >= 1 && !suggestionApplied))}
                                                                     style={{
-                                                                        opacity: (!file && !isLinkLikeText(input) && (getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied))) ? 0.5 : 1,
-                                                                        cursor: (!file && !isLinkLikeText(input) && (getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied))) ? 'not-allowed' : 'pointer'
+                                                                        opacity: (!file && !isLinkLikeText(input) && (getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied) || (input.length >= 1 && !suggestionApplied))) ? 0.5 : 1,
+                                                                        cursor: (!file && !isLinkLikeText(input) && (getInlineTextAiIssue(input) || (showGrammarBar && !suggestionApplied) || (input.length >= 1 && !suggestionApplied))) ? 'not-allowed' : 'pointer'
                                                                     }}
                                                                 >
                                                                     <Send size={30} color="white" strokeWidth={2.5} />
@@ -28013,7 +28668,8 @@ export default function Chat() {
             {renderEncryptionInfoModal()}
             {renderEncryptionStrategyModal()}
         </div >
-    );
+        );
+    };
 
     const handleRequestUnblock = async () => {
         try {
@@ -30284,17 +30940,33 @@ export default function Chat() {
                                         {/* Avatar / Icon */}
                                         {(selectedUser || selectedGroup) && (
                                             <div style={{ marginBottom: '24px', textAlign: 'center' }}>
-                                                {selectedUser ? (
-                                                    <img
-                                                        src={selectedUser.avatar || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png'}
-                                                        alt="User"
-                                                        style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid #1e293b', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.24)', margin: '0 auto', display: 'block' }}
-                                                    />
-                                                ) : (
-                                                    <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#0EA5BE', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #1e293b', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.24)', margin: '0 auto' }}>
-                                                        <Users size={50} color="white" />
-                                                    </div>
-                                                )}
+                                                {(() => {
+                                                    const displayName = selectedUser
+                                                        ? (getContactDisplayName(selectedUser) || selectedUser.name || 'User')
+                                                        : (() => {
+                                                            if (selectedGroup?.name === 'Announcements' && selectedGroup?.community_id) {
+                                                                const comm = communities.find(c => String(c._id || c.id) === String(selectedGroup.community_id));
+                                                                if (comm) return `${comm.name} Announcements`;
+                                                            }
+                                                            return selectedGroup?.name || 'Group';
+                                                        })();
+                                                    const imageSrc = selectedUser?.avatar || selectedUser?.image || selectedUser?.profile_photo || selectedGroup?.icon;
+                                                    const initial = String(displayName || 'U').trim().charAt(0).toUpperCase() || 'U';
+                                                    return imageSrc ? (
+                                                        <img
+                                                            src={imageSrc}
+                                                            alt={displayName}
+                                                            style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid #1e293b', boxShadow: '0 12px 30px rgba(2, 126, 181, 0.24)', margin: '0 auto', display: 'block', objectFit: 'cover' }}
+                                                        />
+                                                    ) : (
+                                                        <div
+                                                            className="wa-theme-initial-avatar wa-sleep-initial-avatar"
+                                                            style={{ width: '100px', height: '100px', margin: '0 auto' }}
+                                                        >
+                                                            <span>{initial}</span>
+                                                        </div>
+                                                    );
+                                                })()}
                                                 <h2 style={{ color: '#f8fafc', marginTop: '16px', fontSize: '22px', fontWeight: '700' }}>
                                                     {selectedUser ? selectedUser.name : (() => {
                                                         if (selectedGroup?.name === 'Announcements' && selectedGroup?.community_id) {
@@ -32237,6 +32909,9 @@ export default function Chat() {
                                 break;
                             case 'communityDescription':
                                 setCommunityDescription(prev => prev + emoji);
+                                break;
+                            case 'communityEditDescription':
+                                setCommunityEditDraft(prev => prev + emoji);
                                 break;
                             case 'newListName':
                                 setNewListName(prev => prev + emoji);

@@ -995,6 +995,8 @@ router.patch('/:communityId', authenticateToken, async (req, res) => {
 
         const community = await Community.findById(communityId);
         if (!community) return res.status(404).json({ error: 'Community not found' });
+        const previousName = community.name || '';
+        const previousDescription = community.description || '';
 
         // Settings stay admin-only, but members can update the community picture.
         const isCommAdmin = (community.admins || []).some(id => String(id) === String(userId));
@@ -1011,6 +1013,36 @@ router.patch('/:communityId', authenticateToken, async (req, res) => {
 
         await community.save();
 
+        if (name !== undefined && String(name || '') !== String(previousName || '') && community.announcements) {
+            await GroupMessage.create({
+                group_id: community.announcements,
+                sender_id: userId,
+                content: 'changed the community name. click to view',
+                type: 'system',
+                is_system: true,
+                metadata: {
+                    kind: 'community_name_update',
+                    communityId: community._id,
+                    communityName: community.name
+                }
+            });
+        }
+
+        if (description !== undefined && String(description || '') !== String(previousDescription || '') && community.announcements) {
+            await GroupMessage.create({
+                group_id: community.announcements,
+                sender_id: userId,
+                content: 'changed the community description. click to view',
+                type: 'system',
+                is_system: true,
+                metadata: {
+                    kind: 'community_description_update',
+                    communityId: community._id,
+                    communityName: community.name
+                }
+            });
+        }
+
         const updated = await Community.findById(communityId)
             .populate('creator', 'name mobile countryCode _id __enc_name __enc_mobile')
             .populate('members', 'name mobile countryCode _id about __enc_name __enc_mobile __enc_about')
@@ -1018,6 +1050,14 @@ router.patch('/:communityId', authenticateToken, async (req, res) => {
             .populate('announcements', 'name icon _id members admin removedMembers')
             .populate('groups')
             .then(r => Array.isArray(r) ? r.map(d => d.toObject()) : (r ? r.toObject() : null));
+
+        if (updated?.announcements?._id || updated?.announcements) {
+            const annId = updated.announcements._id || updated.announcements;
+            const lastMsg = await GroupMessage.findOne({ group_id: annId })
+                .sort({ created_at: -1 })
+                .populate('sender_id', 'name _id __enc_name');
+            updated.announcements = { ...updated.announcements, lastMessage: lastMsg };
+        }
 
         if (req.io) {
             const allMembers = [
