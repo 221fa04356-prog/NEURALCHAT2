@@ -49,6 +49,7 @@ export default function Home() {
     const [isExpired, setIsExpired] = useState(false);
     const [loginBlockedUntil, setLoginBlockedUntil] = useState(() => readStoredLoginBlocks());
     const [nowMs, setNowMs] = useState(() => Date.now());
+    const [loginAttemptFeedback, setLoginAttemptFeedback] = useState({ message: '', tone: 'neutral' });
 
     const navigate = useNavigate();
     const location = useLocation();
@@ -144,6 +145,40 @@ export default function Home() {
         });
     };
 
+    const clearLoginAttemptFeedback = () => {
+        setLoginAttemptFeedback({ message: '', tone: 'neutral' });
+    };
+
+    const buildAttemptFeedback = ({ reason, remainingAttempts, blocked, adminMode }) => {
+        if (blocked) {
+            return {
+                message: 'Too many failed attempts. Login is locked temporarily.',
+                tone: 'error'
+            };
+        }
+
+        if (reason === 'invalid_password') {
+            return {
+                message: remainingAttempts === 1
+                    ? 'Wrong Password. This is your last chance to login.'
+                    : 'Wrong Password. Please try again.',
+                tone: remainingAttempts === 1 ? 'warning' : 'error'
+            };
+        }
+
+        if (reason === 'invalid_login_id') {
+            const identifierLabel = adminMode ? 'Email' : 'LoginID';
+            return {
+                message: remainingAttempts === 1
+                    ? `You have entered incorrect ${identifierLabel}. This is your final chance.`
+                    : `You have entered incorrect ${identifierLabel}. Please verify your details again.`,
+                tone: remainingAttempts === 1 ? 'warning' : 'error'
+            };
+        }
+
+        return { message: '', tone: 'neutral' };
+    };
+
     const resetLoginInputs = () => {
         setAdminEmail('');
         setAdminPassword('');
@@ -152,6 +187,7 @@ export default function Home() {
         setShowPassword(false);
         setIsHumanVerified(false);
         setShowForceLogout(false);
+        clearLoginAttemptFeedback();
     };
 
     const openLoginPortal = (adminMode) => {
@@ -191,6 +227,7 @@ export default function Home() {
             const user = res.data.user;
             const token = res.data.token;
             clearLoginBlock(loginRole);
+            clearLoginAttemptFeedback();
             const normalizedUser = user ? {
                 ...user,
                 loginId: user.loginId || user.login_id,
@@ -219,6 +256,15 @@ export default function Home() {
                 if (err.response?.data?.rateLimited && blockedUntil) {
                     rememberLoginBlock(loginRole, blockedUntil);
                 }
+
+                const remainingAttempts = Number(err.response?.data?.remainingAttempts);
+                const feedback = buildAttemptFeedback({
+                    reason: err.response?.data?.reason,
+                    remainingAttempts: Number.isFinite(remainingAttempts) ? remainingAttempts : null,
+                    blocked: Boolean(err.response?.data?.rateLimited && blockedUntil),
+                    adminMode: isAdmin
+                });
+                setLoginAttemptFeedback(feedback);
 
                 setSnackbar({
                     open: true,
@@ -466,6 +512,7 @@ export default function Home() {
                                             type={isAdmin ? "email" : "text"}
                                             value={isAdmin ? adminEmail : userLoginId}
                                             onChange={(e) => {
+                                                clearLoginAttemptFeedback();
                                                 if (isAdmin) {
                                                     setAdminEmail(e.target.value.replace(/\s/g, ''));
                                                 } else {
@@ -490,7 +537,11 @@ export default function Home() {
                                             <input
                                                 type={showPassword ? "text" : "password"}
                                                 value={isAdmin ? adminPassword : userPassword}
-                                                onChange={(e) => isAdmin ? setAdminPassword(e.target.value.replace(/\s/g, '')) : setUserPassword(e.target.value.replace(/\s/g, ''))}
+                                                onChange={(e) => {
+                                                    clearLoginAttemptFeedback();
+                                                    if (isAdmin) setAdminPassword(e.target.value.replace(/\s/g, ''));
+                                                    else setUserPassword(e.target.value.replace(/\s/g, ''));
+                                                }}
                                                 onKeyDown={handlePasswordKeyDown}
                                                 placeholder="Enter Password"
                                                 required
@@ -508,11 +559,13 @@ export default function Home() {
                                     </div>
                                 </div>
 
-                                <div style={{ marginTop: '1.5rem' }}>
+                                <div className="login-verification-block" style={{ marginTop: '1.5rem' }}>
                                     <HumanVerification
                                         onVerified={(status) => setIsHumanVerified(status)}
                                         context={isAdmin ? 'admin_login' : 'user_login'}
                                         identifier={isAdmin ? adminEmail : userLoginId}
+                                        helperMessage={loginAttemptFeedback.message}
+                                        helperTone={loginAttemptFeedback.tone}
                                     />
                                 </div>
 
@@ -520,7 +573,7 @@ export default function Home() {
                                     type="submit"
                                     className={`btn-primary-neural login-submit-btn ${isLoginBlocked ? 'is-locked' : ''}`}
                                     disabled={isLoginBlocked}
-                                    style={{ width: '100%', padding: '1.2rem', borderRadius: '1rem', border: 'none', fontWeight: '800', fontSize: '1.1rem', cursor: isLoginBlocked ? 'not-allowed' : 'pointer', marginTop: '0.5rem' }}
+                                    style={{ width: '100%', padding: '1.2rem', borderRadius: '1rem', border: 'none', fontWeight: '800', fontSize: '1.1rem', cursor: isLoginBlocked ? 'not-allowed' : 'pointer', marginTop: 0 }}
                                 >
                                     {isLoginBlocked ? 'Login locked' : 'Log In Now'}
                                 </button>

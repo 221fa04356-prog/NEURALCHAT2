@@ -275,24 +275,32 @@ router.post('/register', async (req, res) => {
 router.post('/login', loginRequestLimiter, loginFailureLimiter, async (req, res) => {
     const { email, loginId, password, force, adminLogin } = req.body;
 
-    if (!email && !loginId) return res.status(400).json({ error: 'Missing Login ID or Email' });
+    if (!email && !loginId) return res.status(400).json({ error: 'Missing Login ID or Email', reason: 'missing_identifier' });
 
     try {
         const user = email
             ? await findUserByEmail(email)
             : await User.findOne({ login_id: loginId });
-        if (!user) return res.status(400).json({ error: 'User not found' });
+        if (!user) {
+            return res.status(400).json({
+                error: adminLogin ? 'Incorrect email' : 'Incorrect Login ID',
+                reason: adminLogin ? 'invalid_login_id' : 'invalid_login_id'
+            });
+        }
 
         if (adminLogin && user.role !== 'admin') {
-            return res.status(403).json({ error: 'You are not an admin. You do not have permission to access' });
+            return res.status(403).json({
+                error: 'You are not an admin. You do not have permission to access',
+                reason: 'invalid_login_id'
+            });
         }
 
         if (user.status !== 'approved') {
-            return res.status(403).json({ error: 'Account not approved yet' });
+            return res.status(403).json({ error: 'Account not approved yet', reason: 'account_not_approved' });
         }
 
         const match = await bcrypt.compare(password, user.password);
-        if (!match) return res.status(400).json({ error: 'Invalid credentials' });
+        if (!match) return res.status(400).json({ error: 'Invalid credentials', reason: 'invalid_password' });
 
         // Check for active sessions using socket rooms
         const activeSockets = req.io ? req.io.sockets.adapter.rooms.get(user.id.toString())?.size || 0 : 0;
