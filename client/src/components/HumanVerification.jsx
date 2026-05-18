@@ -11,7 +11,7 @@ const PUZZLE_IMAGES = [
     "/puzzle/nature.png"
 ];
 
-export default function HumanVerification({ onVerified, context, identifier }) {
+export default function HumanVerification({ onVerified, context, identifier, helperMessage = '', helperTone = 'neutral' }) {
     const [isVerified, setIsVerified] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [activeMethod, setActiveMethod] = useState(null); // 'captcha', 'call', 'puzzle'
@@ -261,10 +261,17 @@ export default function HumanVerification({ onVerified, context, identifier }) {
                 <div className={`hv-checkbox ${isVerified ? 'checked' : ''}`}>
                     {isVerified && <Check strokeWidth={3} size={16} className="hv-check-icon rotate-in" />}
                 </div>
-                <span className="hv-checkbox-label">
-                    {isVerified ? 'Verified' : 'Verify whether you are a human'}
-                </span>
+                <div className="hv-checkbox-copy">
+                    <span className="hv-checkbox-label">
+                        {isVerified ? 'Verified' : 'Verify whether you are a human'}
+                    </span>
+                </div>
             </div>
+            {isVerified && helperMessage ? (
+                <div className={`hv-helper-row ${helperTone}`}>
+                    {helperMessage}
+                </div>
+            ) : null}
 
             {isModalOpen && createPortal(
                 <div className="hv-modal-overlay fade-in">

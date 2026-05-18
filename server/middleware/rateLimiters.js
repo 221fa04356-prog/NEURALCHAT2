@@ -140,9 +140,21 @@ const createFailedAuthLimiter = ({ maxFailures, blockMs, message }) => {
                             error: message,
                             retryAfterSeconds,
                             blockedUntil: blockedUntilMs,
-                            rateLimited: true
+                            rateLimited: true,
+                            maxFailures,
+                            attemptsUsed: nextFailure?.count || maxFailures,
+                            remainingAttempts: 0
                         });
                     }
+
+                    const attemptsUsed = Number(nextFailure?.count) || 0;
+                    const remainingAttempts = Math.max(0, maxFailures - attemptsUsed);
+                    return originalJson({
+                        ...(body || {}),
+                        maxFailures,
+                        attemptsUsed,
+                        remainingAttempts
+                    });
                 } catch (err) {
                     console.error('Login limiter update failed:', err);
                     res.status(500);

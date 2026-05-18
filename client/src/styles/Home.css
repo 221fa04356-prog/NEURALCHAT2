@@ -335,6 +335,20 @@
     gap: 1.25rem;
 }
 
+.login-verification-block .hv-container {
+    margin-bottom: 4px;
+}
+
+.login-verification-block .hv-helper-row {
+    margin-top: 18px;
+    padding-left: 30px;
+    line-height: 1.35;
+}
+
+.login-submit-btn {
+    margin-top: 0 !important;
+}
+
 .form-group-custom {
     position: relative;
 }
@@ -555,6 +569,17 @@
         padding: 2rem 1.5rem;
         width: 100%;
         margin: 1rem 0;
+    }
+
+    .login-footer {
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        justify-content: space-between;
+    }
+
+    .login-footer a,
+    .login-footer button {
+        font-size: 0.9rem;
     }
 
     .login-lock-countdown {
